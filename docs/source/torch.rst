@@ -114,23 +114,16 @@ Generators
 
     Generator
 
-:data:`torch.default_generator` returns the default CPU :class:`Generator`
+:data:`torch.default_generator` returns the default CPU :class:`Generator`.
+:data:`torch.cuda.default_generators` returns a tuple of default CUDA :class:`Generator`-s if cuda is available. 
+The number of CUDA :class:`Generator`-s returned is equal to the number of GPUs available in the system.
 
 Example::
 
-    >>> g_cpu = torch.default_generator
-    >>> g_cpu.device
+    >>> torch.default_generator.device
     device(type='cpu')
-
-:data:`torch.cuda.default_generators` returns a tuple of default CUDA :class:`Generator`-s if cuda is available.
-                The number of CUDA :class:`Generator`-s returned is equal to the number of
-                GPUs available in the system.
-
-Example::
-
     >>> torch.cuda.init()
-    >>> g_cuda = torch.cuda.default_generators
-    >>> g_cuda[0].device
+    >>> torch.cuda.default_generators[0].device
     device(type='cuda', index=0)
 
 Random seeds
