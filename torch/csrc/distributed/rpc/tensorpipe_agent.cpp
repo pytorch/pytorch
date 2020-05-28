@@ -385,16 +385,19 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                 const tensorpipe::Error& error, Message&& responseMessage) {
               if (error) {
                 LOG(WARNING) << "Read response error: " << error.what();
-                std::lock_guard<std::mutex> lock(mutex_);
                 // We may get garbage content in responseMessage upon error.
                 // Flushing all future messages belonging to this pipe due to
                 // error state.
-                for (auto& p : clientPipe.pendingResponseMessage_) {
+                decltype(clientPipe.pendingResponseMessage_) pendingMsgs;
+                {
+                  std::lock_guard<std::mutex> lock(mutex_);
+                  std::swap(clientPipe.pendingResponseMessage_, pendingMsgs);
+                  clientPipe.readError_ = true;
+                }
+                for (auto& p : pendingMsgs) {
                   std::shared_ptr<FutureMessage>& futureMessage = p.second;
                   futureMessage->setError(error.what());
                 }
-                clientPipe.pendingResponseMessage_.clear();
-                clientPipe.readError_ = true;
                 return;
               }
 
