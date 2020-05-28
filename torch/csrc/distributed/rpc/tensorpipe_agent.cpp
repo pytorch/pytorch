@@ -91,7 +91,8 @@ TensorPipeAgent::TensorPipeAgent(
           std::make_unique<RequestCallbackImpl>(),
           std::chrono::milliseconds(
               (long)(opts.rpcTimeoutSeconds * kToMilliseconds))),
-      context_(std::make_shared<tensorpipe::Context>()),
+      context_(std::make_shared<tensorpipe::Context>(
+          tensorpipe::ContextOptions().name(workerInfo_.name_))),
       addressStore_(std::move(addressStore)),
       worldSize_(worldSize),
       opts_(std::move(opts)) {
@@ -330,7 +331,9 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   auto it = connectedPipes_.find(toWorkerInfo.id_);
   if (it == connectedPipes_.end()) {
     std::tie(it, std::ignore) = connectedPipes_.emplace(
-        toWorkerInfo.id_, ClientPipe(context_->connect(url)));
+        toWorkerInfo.id_,
+        ClientPipe(context_->connect(
+            url, tensorpipe::PipeOptions().name(toWorkerInfo.name_))));
   }
   ClientPipe& clientPipe = it->second;
   auto& pendingResponseMessage = clientPipe.pendingResponseMessage_;
