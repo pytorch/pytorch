@@ -12829,14 +12829,9 @@ class TestTorchDeviceType(TestCase):
         for item in fns_to_test:
             name, fn, identity = item
             if identity is None:
-                output = fn(x, dim=2)
-                output = output[0] if isinstance(output, tuple) else output
-                self.assertEqual(output.nelement(), 0)
-                output = fn(x, dim=2, keepdim=True)
-                output = output[0] if isinstance(output, tuple) else output
-                self.assertEqual(output.nelement(), 0)
-                ident_err = '.*does not have an identity.*'
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x))
+                ident_err = 'does not have an identity'
+                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2))
+                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2, keepdim=True))
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
             else:
