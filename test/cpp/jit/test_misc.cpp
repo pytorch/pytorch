@@ -755,7 +755,6 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
-
 void checkScopeCallbacks() {
   bool found_function_scope = false;
   bool found_method_scope = false;
@@ -1312,10 +1311,8 @@ graph(%a):
   }
 }
 
-static void checkShape(
-    Node* n,
-    std::vector<int64_t> expected,
-    bool prev = true) {
+static void
+checkShape(Node* n, std::vector<int64_t> expected, bool prev = true) {
   auto profile = (prev) ? n->inputs().at(0)->node() : n;
   auto tp = profile->output()->type();
   auto ptp = tp->expect<TensorType>();
@@ -1649,14 +1646,14 @@ void testFutures() {
     ASSERT_TRUE(f1->hasError());
     try {
       (void)f1->value();
-      ASSERT_TRUE(false);  // Supposed to throw.
+      ASSERT_TRUE(false); // Supposed to throw.
     } catch (const std::exception& e) {
       ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
     }
     try {
       (void)f1->constValue();
     } catch (const std::exception& e) {
-      ASSERT_TRUE(false);  // Not supposed to throw.
+      ASSERT_TRUE(false); // Not supposed to throw.
     }
     f1->addCallback([&]() { ++sat2; });
     ASSERT_EQ(sat1, 1);
@@ -1670,17 +1667,17 @@ void testFutures() {
   // then
   {
     auto f1 = c10::make_intrusive<Future>(IntType::get());
-    auto f2 = f1->then([f1]() -> IValue {
-                         return f1->constValue().toInt() + 1;
-                       }, IntType::get());
-    auto f3 = f2->then([f2]() -> IValue {
-                         return f2->constValue().toInt() * 3;
-                       }, IntType::get());
+    auto f2 = f1->then(
+        [f1]() -> IValue { return f1->constValue().toInt() + 1; },
+        IntType::get());
+    auto f3 = f2->then(
+        [f2]() -> IValue { return f2->constValue().toInt() * 3; },
+        IntType::get());
     bool done = false;
     f3->addCallback([f3, &done]() {
-                      ASSERT_EQ(f3->constValue().toInt(), (42 + 1) * 3);
-                      done = true;
-                    });
+      ASSERT_EQ(f3->constValue().toInt(), (42 + 1) * 3);
+      done = true;
+    });
     ASSERT_FALSE(done);
     f1->markCompleted(42);
     ASSERT_TRUE(done);
@@ -1738,7 +1735,7 @@ void testFutures() {
     try {
       (void)c5->value().toList().get(3).toFuture()->value();
       ASSERT_TRUE(false); // supposed to throw
-    } catch (const std::exception&e) {
+    } catch (const std::exception& e) {
       ASSERT_EQ(std::string(e.what()), "Failed");
     }
   }
