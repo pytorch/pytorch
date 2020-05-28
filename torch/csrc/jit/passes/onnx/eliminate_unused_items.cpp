@@ -11,18 +11,6 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-namespace {
-
-void eraseUnusedBlockInputs(Block* b) {
-  for (size_t i_1 = b->inputs().size(); i_1 > 0; --i_1) {
-    size_t i = i_1 - 1;
-    if (!b->inputs().at(i)->hasUses()) {
-      b->eraseInput(i);
-    }
-  }
-}
-} // namespace
-
 void EliminateUnusedItemsONNX(Block* b, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   eraseUnusedValuesFromMap(valsToParamsMap);

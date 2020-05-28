@@ -12,6 +12,7 @@ using ValueToParamPairMap = std::map<Value*, std::pair<std::string, IValue>>;
 using ParamMap = std::map<std::string, IValue>;
 
 ValueToParamPairMap buildValueToParamsMap(Block* b, const ParamMap& paramsDict);
+void eraseUnusedBlockInputs(Block* b)
 void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap);
 void buildParamsMapFromValueToParamsMap(
     const ValueToParamPairMap& valsToParamsMap,

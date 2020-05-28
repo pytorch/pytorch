@@ -435,6 +435,8 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
     }
     it.destroyCurrent();
   }
+  eraseUnusedValuesFromMap(valsToParamsMap);
+  eraseUnusedBlockInputs(b);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
   return;
 }

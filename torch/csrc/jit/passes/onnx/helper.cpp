@@ -20,6 +20,15 @@ ValueToParamPairMap buildValueToParamsMap(
   return valsToParamsMap;
 }
 
+void eraseUnusedBlockInputs(Block* b) {
+  for (size_t i_1 = b->inputs().size(); i_1 > 0; --i_1) {
+    size_t i = i_1 - 1;
+    if (!b->inputs().at(i)->hasUses()) {
+      b->eraseInput(i);
+    }
+  }
+}
+
 void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap) {
   auto it = valsToParamsMap.begin();
   while (it != valsToParamsMap.end()) {
