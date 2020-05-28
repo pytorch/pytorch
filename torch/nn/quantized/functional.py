@@ -379,9 +379,9 @@ def celu(input, alpha=1., inplace=False):
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.celu' must be quantized!")
     if inplace:
-        return torch._C.celu_(input, alpha)
+        return torch.celu_(input, alpha)
     else:
-        return torch._C.celu(input, alpha)
+        return torch.celu(input, alpha)
 
 def relu(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
