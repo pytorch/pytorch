@@ -203,7 +203,7 @@ def get_timeout_error_regex(rpc_backend_name):
         return "(Timed out)|(Task expired)"
 
 
-def wait_until_pending_users_flushed():
+def wait_until_pending_futures_and_users_flushed():
     '''
     The RRef protocol holds forkIds of rrefs in a map until those forks are
     confirmed by the owner. The message confirming the fork may arrive after
@@ -214,11 +214,13 @@ def wait_until_pending_users_flushed():
     as processed. Call this function before asserting the map returned by
     _get_debug_info is empty.
     '''
-    num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
-    while num_pending_users != 0:
+    while True:
+        debug_info = _rref_context_get_debug_info()
+        num_pending_futures = int(debug_info["num_pending_futures"])
+        num_pending_users = int(debug_info["num_pending_users"])
+        if num_pending_futures == 0 and num_pending_users == 0:
+            break
         time.sleep(0.1)
-        num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
-    return
 
 def initialize_pg(init_method, rank, world_size):
     # This is for tests using `dist.barrier`.
