@@ -337,8 +337,10 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
 
   std::shared_ptr<FutureMessage> futureResponseMessage =
       std::make_shared<FutureMessage>();
+
   requestMessage.setId(nextMessageID_++);
-  pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
+  auto requestMessageId = requestMessage.id();
+  pendingResponseMessage[requestMessageId] = futureResponseMessage;
 
   ++clientActiveCalls_;
   // Use the default RPC timeout if no timeout is specified for this send call
@@ -373,11 +375,16 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
-      [this, &clientPipe, futureResponseMessage](
-          const tensorpipe::Error& error) {
+      [this, &clientPipe, requestMessageId](const tensorpipe::Error& error) {
         if (error) {
           LOG(WARNING) << "client write error: " << error.what();
-          futureResponseMessage->setError(error.what());
+          auto it = clientPipe.pendingResponseMessage_.find(requestMessageId);
+          TORCH_INTERNAL_ASSERT(
+              it != clientPipe.pendingResponseMessage_.end(),
+              "message ID ",
+              requestMessageId,
+              " is not recognized");
+          it->second->setError(error.what());
           return;
         }
 
