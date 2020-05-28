@@ -625,15 +625,9 @@ class CudaMemoryLeakCheck():
         afters = self.get_cuda_memory_usage()
 
         for i, (before, after) in enumerate(zip(self.befores, afters)):
-            if not TEST_WITH_ROCM:
-                self.testcase.assertEqual(
-                    before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
-                        self.name, after - before, i))
-            else:
-                # TODO: Investigate ROCm memory leaking.
-                if before != after:
-                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
-                        self.name, after - before, i), RuntimeWarning)
+            self.testcase.assertEqual(
+                before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
+                    self.name, after - before, i))
 
 #  "min_satisfying_examples" setting has been deprecated in hypythesis
 #  3.56.0 and removed in hypothesis 4.x
@@ -893,8 +887,7 @@ class TestCase(expecttest.TestCase):
     # in https://github.com/pytorch/pytorch/pull/32538.
     # dtype name : (rtol, atol)
     dtype_precisions = {
-
-        torch.float16    : (0.005, 1e-4),
+        torch.float16    : (0.001, 1e-5),
         torch.bfloat16   : (0.016, 1e-5),
         torch.float32    : (1.3e-6, 1e-5),
         torch.float64    : (1e-7, 1e-7),
