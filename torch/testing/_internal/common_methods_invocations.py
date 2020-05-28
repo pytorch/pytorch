@@ -564,6 +564,8 @@ def method_tests():
         ('addcdiv', (), ((S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs', (), (), (), ident, {'value': 0.5}),
         ('zero_', (S, S, S), NO_ARGS),
         ('zero_', (), NO_ARGS, 'scalar'),
+        ('logaddexp', (S, S), ((S, S),)),
+        ('logaddexp2', (S, S), ((S, S),)),
         ('logsumexp', (S, S), (1,), '', (True,)),
         ('logsumexp', (), (0,), 'scalar', (True,)),
         ('norm', (S, S), (), 'default'),

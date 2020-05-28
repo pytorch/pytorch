@@ -3006,6 +3006,55 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.logaddexp,
+           r"""
+logaddexp(input, other, out=None) -> Tensor
+
+Logarithm of the sum of exponentiations of the inputs.
+
+Calculates pointwise :math:`\log\left(e^x + e^y\right)`. This function is useful
+in statistics where the calculated probabilities of events may be so small as to
+exceed the range of normal floating point numbers. In such cases the logarithm
+of the calculated probability is stored. This function allows adding
+probabilities stored in such a fashion.
+
+This op should be disambiguated with :func:`torch.logsumexp` which performs a
+reduction on a single tensor.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> torch.logaddexp(torch.tensor([-1.0]), torch.tensor([-1.0, -2, -3]))
+    tensor([-0.3069, -0.6867, -0.8731])
+    >>> torch.logaddexp(torch.tensor([-100.0, -200, -300]), torch.tensor([-1.0, -2, -3]))
+    tensor([-1., -2., -3.])
+    >>> torch.logaddexp(torch.tensor([1.0, 2000, 30000]), torch.tensor([-1.0, -2, -3]))
+    tensor([1.1269e+00, 2.0000e+03, 3.0000e+04])
+""".format(**common_args))
+
+add_docstr(torch.logaddexp2,
+           r"""
+logaddexp2(input, other, out=None) -> Tensor
+
+Logarithm of the sum of exponentiations of the inputs in base-2.
+
+Calculates pointwise :math:`\log_2\left(2^x + 2^y\right)`. See
+:func:`torch.logaddexp` for more details.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword arguments:
+    {out}
+""".format(**common_args))
+
 add_docstr(torch.logical_and,
            r"""
 logical_and(input, other, out=None) -> Tensor

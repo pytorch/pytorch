@@ -512,7 +512,7 @@ graph(%input, %weight):
                 return x + y
 
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig}, False)
+        m = prepare_script(m, {'': default_qconfig})
         # 3 for x, y, weight, one for output of each F.conv2d and one for output of add
         assert len(attrs_with_prefix(m, '_observer')) == 6
 
@@ -661,7 +661,7 @@ graph(%input, %weight):
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig}, inplace=False)
+        m = prepare_script(m, {'': default_qconfig})
         # we want to test that channel_shuffle is going to pass
         # the observed property from the output of conv1 to input of conv2
         # so that we don't insert observers for input of conv2
@@ -693,7 +693,7 @@ graph(%input, %weight):
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig}, inplace=False)
+        m = prepare_script(m, {'': default_qconfig})
         assert len(attrs_with_prefix(m, '_observer_',)) == 3
 
     def test_insert_quant_dequant(self):
@@ -958,7 +958,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         m = torch.jit.script(M()).eval()
-        m = quantize_script(m, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        m = quantize_script(m, qconfig_dict, _test_only_eval_fn, [data])
         # make sure patterns in both branches are fused
         FileCheck().check_count("quantized::conv2d(", 4, exactly=True) \
                    .run(m.graph)
@@ -975,7 +975,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
         # make sure there is only one quantize_per_tensor for input
         # and linear_prepack is folded
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
@@ -998,7 +998,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=True)
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], debug=True)
         FileCheck().check_not("quantized::conv2d") \
                    .check("aten::conv2d") \
                    .check("aten::avg_pool2d") \
@@ -1117,7 +1117,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     def _test_op_impl(self, module, data, quantized_op, debug=False):
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model = torch.jit.script(module).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
         if debug:
             print(model.graph)
         FileCheck().check(quantized_op) \
@@ -1585,14 +1585,14 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         # quantized cat
         m = torch.jit.script(QuantizedCat()).eval()
-        m = prepare_script(m, {'': default_qconfig}, True)
+        m = prepare_script(m, {'': default_qconfig})
         # four for input and output of conv and one for output of cat
         # this also tests the ListConstruct can preserve the observed property so that
         # torch.cat knows that inputs are observed
         assert len(attrs_with_prefix(m, '_observer_')) == 5
         data = torch.randn(1, 1, 10, 10, dtype=torch.float)
         m(data, data)
-        m = convert_script(m, True)
+        m = convert_script(m)
 
         FileCheck().check_not("aten::cat") \
                    .check("quantized::cat") \
@@ -1600,11 +1600,11 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         # non quantized cat
         m = torch.jit.script(NonQuantizedCat()).eval()
-        m = prepare_script(m, {'': default_qconfig}, True)
+        m = prepare_script(m, {'': default_qconfig})
         assert len(attrs_with_prefix(m, '_observer_')) == 0
         data = torch.randn(1, 1, 10, 10, dtype=torch.float)
         m(data, data)
-        m = convert_script(m, True)
+        m = convert_script(m)
 
         FileCheck().check_not("quantized::cat") \
                    .check("aten::cat") \
@@ -2011,7 +2011,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
             m._c, 'forward', {'': qconfig}, inplace=False))
-        m = convert_script(m, True)
+        m = convert_script(m)
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
         # observers and also successfully fused two quantized::conv2d
