@@ -13,6 +13,7 @@ namespace {
 
 #define MAX_THREADS 512
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest1d_out_frame(
@@ -43,6 +44,7 @@ __global__ void upsample_nearest1d_out_frame(
   }
 }
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 // Backward operation
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
