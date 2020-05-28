@@ -1747,6 +1747,9 @@ if _enabled:
             """
             return self._c._save_for_mobile(*args, **kwargs)
 
+        def _save_to_buffer_for_lite_interpreter(self, *args, **kwargs):
+            return self._c._save_to_buffer_for_mobile(*args, **kwargs)
+
         def save_to_buffer(self, *args, **kwargs):
             return self._c.save_to_buffer(*args, **kwargs)
 
