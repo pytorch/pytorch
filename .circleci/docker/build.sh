@@ -192,6 +192,14 @@ case "$image" in
     # newer cmake version required
     CMAKE_VERSION=3.6.3
     ;;
+  pytorch-linux-bionic-rocm-py3.6-clang7)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM=yes
+    ;;
 esac
 
 # Set Jenkins UID and GID if running Jenkins

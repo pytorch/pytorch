@@ -95,11 +95,6 @@ class ProcessGroupAgent : public RpcAgent {
   virtual void enqueueSend(SendWork work);
 
  private:
-  using steady_clock_time_point =
-      std::chrono::time_point<std::chrono::steady_clock>;
-
-  static const steady_clock_time_point kInfiniteTimeoutTimePoint;
-
   class MessageCounter {
    public:
     explicit MessageCounter(int worldSize);
