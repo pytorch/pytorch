@@ -221,7 +221,7 @@ def replace(Klass):
                 anchor = ref_anchor[1]
                 txt = node.parent.astext()
                 if txt == anchor or txt == anchor.split('.')[-1]: 
-                    self.body.append('<p id="{}"/p>'.format(ref_anchor[1]))
+                    self.body.append('<p id="{}"/>'.format(ref_anchor[1]))
         return old_call(self, node)
     Klass.visit_reference = visit_reference
 
