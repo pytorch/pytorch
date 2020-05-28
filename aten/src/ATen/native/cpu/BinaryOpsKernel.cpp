@@ -1,4 +1,5 @@
 #include <cmath>
+#include <type_traits>
 #include <iostream>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -78,6 +79,19 @@ void div_kernel(TensorIterator& iter) {
     });
   } else {
     _AT_DISPATCH_FLOATING_AND_C10_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
+#ifdef __APPLE__
+      // TODO: Vec256 for c10::complex<float> is causing illegal instruction error on the MacOS CI,
+      // skipping vectorization for it.
+      // See https://github.com/pytorch/pytorch/issues/39123
+      if (std::is_same<scalar_t, c10::complex<float>>::value) {
+        cpu_kernel(iter,
+          [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+            return a / b;
+          }
+        );
+        return;
+      }
+#endif
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
            return a / b;
