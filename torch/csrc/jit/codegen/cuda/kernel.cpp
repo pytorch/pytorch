@@ -300,8 +300,16 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
   }
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleGetFunction(
       &(entry->function_), entry->module_, lowered_kernel_name));
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION < 305
+  // HIP function signature is not compatible yet
+  uint32_t max_blocks;
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &max_blocks, entry->function_, 128, 0));
+  entry->max_blocks_ = max_blocks;
+#else
   AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &entry->max_blocks_, entry->function_, 128, 0));
+#endif
   entry->max_blocks_ *= prop->multiProcessorCount;
 }
 

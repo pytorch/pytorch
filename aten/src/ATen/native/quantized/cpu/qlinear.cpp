@@ -341,8 +341,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       packB->getPackedWeights(),
       (uint8_t*)output.data_ptr<c10::quint8>(),
       rows_w /* output_stride */,
+      // TODO (Ashkan): Disabling temporarily.
+      // Throws a floating point exception with OSS pthreadpool.
       nullptr);
-      // caffe2::pthreadpool_() /* threadpool */);
 
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,
