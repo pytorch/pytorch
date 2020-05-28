@@ -72,7 +72,7 @@ class CudaFusionManager {
       graph_cache_[repr] = kernel_id;
 
       // create entry for cached kernel;
-      kernel_cache_.insert({kernel_id, CudaKernelCache()});
+      kernel_cache_.insert(std::make_pair(std::move(kernel_id), CudaKernelCache()));
 
       // TODO: we should compile here using profiled information:
       //       size (range) / stride (contiguity)
