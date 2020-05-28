@@ -104,7 +104,8 @@ struct TopKTypeConfig<long> {
   typedef unsigned long long int RadixType;
 
   static inline __device__ RadixType convert(long v) {
-    static_assert(sizeof(long) == 8, "");
+    //static_assert fails on windows, so leave it as CUDA_KERNEL_ASSERT
+    CUDA_KERNEL_ASSERT(sizeof(long) == 8);
     return 9223372036854775808ull + v;
   }
 
