@@ -60,7 +60,10 @@ TORCH_CUDA_API TensorView* broadcast(
     TensorView* inp,
     const std::vector<bool>& is_broadcast_dim);
 
-// BINARY OPAERATIONS
+// UNARY OPERATIONS
+TORCH_CUDA_API Val* neg(Val* v);
+
+// BINARY OPERATIONS
 TORCH_CUDA_API Val* add(Val* v1, Val* v2);
 TORCH_CUDA_API TensorView* add(TensorView* v1, Val* v2);
 TORCH_CUDA_API TensorView* add(Val* v1, TensorView* v2);
