@@ -9384,7 +9384,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(xs2[j].item(), size[1] - i)
 
 
-    @slowTest
+    # @slowTest
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
         # Requires > 8 GB of memory. So, if allocation fails just skip it.
