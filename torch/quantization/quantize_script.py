@@ -47,7 +47,7 @@ def _convert_script(model, inplace=False, debug=False, is_dynamic=False):
     model.eval()
     model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', is_dynamic))
     if not debug:
-        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, inplace, is_dynamic))
+        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, is_dynamic))
     return model
 
 def convert_script(model, inplace=False, debug=False):
@@ -57,6 +57,7 @@ def convert_dynamic_script(model, inplace=False, debug=False):
     return _convert_script(model, inplace, debug, True)
 
 def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=False, debug=False, is_dynamic=False):
+    assert not inplace, "We don't support inplace right now"
     # Always do inplace convert because the Tensor is already
     # copied in prepare_script when inplace is False
     if is_dynamic:
@@ -65,6 +66,8 @@ def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=Fa
         # TODO: change inplace to True
         model = convert_dynamic_script(model, False, debug)
     else:
+        assert run_fn, "Must provide calibration function for post training static quantization"
+        assert run_args, "Must provide calibration dataset for post training static quantization"
         model = prepare_script(model, qconfig_dict, inplace)
         run_fn(model, *run_args)
         # TODO: change inplace to True
@@ -73,7 +76,6 @@ def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=Fa
     return model
 
 def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
-    assert not inplace, "We don't support inplace right now"
     return _quantize_script(model, qconfig_dict, run_fn, run_args, inplace, debug, False)
 
 def quantize_dynamic_script(model, qconfig_dict, sample_model_inputs, inplace=False, debug=False):

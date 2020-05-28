@@ -359,7 +359,6 @@ graph(%input, %weight):
                 return self.conv(x)
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(default_observer())
         qconfig_dict = {'': default_qconfig}
         m = prepare_script(m, qconfig_dict)
         # for input and output of conv

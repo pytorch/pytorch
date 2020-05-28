@@ -1692,9 +1692,9 @@ if _enabled:
 
             # Finalize the ScriptModule: replace the nn.Module state with our
             # custom implementations and flip the _initializing bit.
-            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(script_module._c))
-            self._buffers = OrderedDictWrapper(torch._C.BufferDict(script_module._c))
-            self._modules = OrderedModuleDict(script_module._c, script_module._modules)
+            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(self._c))
+            self._buffers = OrderedDictWrapper(torch._C.BufferDict(self._c))
+            self._modules = OrderedModuleDict(self._c, self._modules)
             self._initializing = False
             return self
 
