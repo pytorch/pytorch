@@ -888,7 +888,7 @@ class TestCase(expecttest.TestCase):
     #   tensor (array). If the torch and/or NumPy function require additional
     #   arguments then wrap the function in a lambda or pass a partial function.
     # TODO: support bfloat16 comparisons
-    # TODO: adds args/kwargs for passing to assertEqual (e.g. rtol, atol)
+    # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
     def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device, dtype):
         assert TEST_NUMPY
         assert dtype is not torch.bfloat16
