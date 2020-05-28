@@ -239,10 +239,11 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   // Otherwise, do a pass of shape inference to get the real shapes of the
   // outputs.
   const auto& t = Input(nominal_batch_idx_);
-  const auto dims = t.sizes();
-  const int current_batch_size = dims[0];
   CAFFE_ENFORCE(
       !t.sizes().empty(), input_names_[nominal_batch_idx_], " cannot be empty");
+  const auto dims = t.sizes();
+  const int current_batch_size = dims[0];
+
   if (current_batch_size == max_batch_size_) {
     return max_batch_size_;
   }
@@ -274,7 +275,7 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     input_shape_info_[input_names_[i]] = ShapeInfo(dim_type, std::move(shape));
   }
   bound_shape_inferencer->InferBoundShapeAndType(
-      netdef_, input_shape_info_, nullptr);
+      netdef_, input_shape_info_, nullptr, false);
   const auto& shape_info = bound_shape_inferencer->shape_info();
   for (int i = 0; i < OutputSize(); ++i) {
     const auto it = shape_info.find(output_names_[i]);
@@ -318,7 +319,13 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
 
 template <>
 void OnnxifiOp<CPUContext>::adjustOutputBatchSizes(int current_batch_size) {
-  const auto& output_reshape_info = output_reshape_info_.at(current_batch_size);
+  auto it = output_reshape_info_.find(current_batch_size);
+  CAFFE_ENFORCE(
+      it != output_reshape_info_.end(),
+      "Cannot find current_batch_size ",
+      current_batch_size,
+      " in output_reshape_info_");
+  const auto& output_reshape_info = it->second;
   CPUContext context;
   Tensor tmp(CPU);
   for (int i = 0; i < OutputSize(); ++i) {

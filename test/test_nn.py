@@ -7269,7 +7269,7 @@ class TestNN(NNTestCase):
             for r in range(affine_tensor.size(1)):
                 for c in range(affine_tensor.size(2)):
                     grid_out = np.dot(grid_ary, [r, c, 1])
-                    assert np.allclose(affine_tensor[0, r, c], grid_out[:2], atol=1e-5)
+                    self.assertEqual(affine_tensor[0, r, c], grid_out[:2])
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
@@ -7323,7 +7323,7 @@ class TestNN(NNTestCase):
                 for r in range(affine_tensor.size(2)):
                     for c in range(affine_tensor.size(3)):
                         grid_out = np.dot(grid_ary, [i, r, c, 1])
-                        assert np.allclose(affine_tensor[0, i, r, c], grid_out[:3], atol=1e-5)
+                        self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3])
 
             assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
@@ -10729,7 +10729,6 @@ class TestNNDeviceType(NNTestCase):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
         inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardsigmoid, (inputs,)))
-
 
     # currently fails on XLA
     @onlyOnCPUAndCUDA
