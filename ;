@@ -379,9 +379,9 @@ def celu(input, alpha=1., inplace=False):
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.celu' must be quantized!")
     if inplace:
-        return torch.celu_(input, alpha)
+        return torch._C.celu_(input, alpha)
     else:
-        return torch.celu(input, alpha)
+        return torch._C.celu(input, alpha)
 
 def relu(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
@@ -499,9 +499,9 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
         torch._C._nn.elu(input, alpha, out=output)
         return output
     elif inplace:
-        return torch._C._nn.elu_(input, alpha, 1., 1.)
+        return torch._C._nn.elu_(input, alpha)
     else:
-        return torch._C._nn.elu(input, alpha, 1., 1.)
+        return torch._C._nn.elu(input, alpha)
 
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor
