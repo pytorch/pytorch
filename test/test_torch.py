@@ -52,7 +52,6 @@ if TEST_LIBROSA:
 
 SIZE = 100
 
-<<<<<<< HEAD
 # Wrap base test class into a class to hide it from testing
 # See https://stackoverflow.com/a/25695512
 class AbstractTestCases:
@@ -143,112 +142,6 @@ class AbstractTestCases:
             def test_namespace(ns, *skips):
                 if isinstance(ns, object):
                     ns_name = ns.__class__.__name__
-=======
-# This is intentionally prefixed by an underscore. Otherwise pytest will try to
-# run its methods as test cases.
-class _TestTorchMixin(object):
-    def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True, use_complex=False):
-        float_types = [torch.double,
-                       torch.float]
-        int_types = [torch.int64,
-                     torch.int32,
-                     torch.int16]
-
-        complex_types = [torch.complex64,
-                         torch.complex128]
-
-        def make_contiguous(shape, dtype):
-            if dtype in float_types:
-                val = torch.randn(shape, dtype=dtype)
-                val = val * ((val_range[1] - val_range[0]) / (math.pi * 2.0))
-                val = val + ((val_range[1] - val_range[0]) / 2.0)
-                val = torch.clamp(val, min=val_range[0], max=val_range[1])
-                return val
-            result = torch.zeros(shape, dtype=dtype)
-            result.apply_(lambda x: random.randint(val_range[0], val_range[1]))
-            return result
-
-        def make_non_contiguous(shape, dtype):
-            contig = make_contiguous(shape, dtype)
-            non_contig = torch.empty(shape + (2, 2), dtype=dtype)[..., 0]
-            non_contig = non_contig.select(-1, -1)
-            non_contig.copy_(contig)
-            self.assertFalse(non_contig.is_contiguous())
-            return non_contig
-
-        def make_contiguous_slice(size, dtype):
-            contig = make_contiguous((1, size), dtype)
-            non_contig = contig[:1, 1:size - 1]
-            self.assertTrue(non_contig.is_contiguous())
-            return contig
-
-        types = []
-        if use_floating:
-            types += float_types
-        if use_integral:
-            types += int_types
-        if use_complex:
-            types += complex_types
-        tensors = {"cont": [], "noncont": [], "slice": []}
-        for dtype in types:
-            tensors["cont"].append(make_contiguous(shape, dtype))
-            tensors["noncont"].append(make_non_contiguous(shape, dtype))
-            tensors["slice"].append(make_contiguous_slice(sum(list(shape)), dtype))
-
-        return tensors
-
-    def test_dir(self):
-        dir(torch)
-
-    def test_type_conversion_via_dtype_name(self):
-        x = torch.tensor([1])
-        self.assertEqual(x.byte().dtype, torch.uint8)
-        self.assertEqual(x.bool().dtype, torch.bool)
-        self.assertEqual(x.char().dtype, torch.int8)
-        self.assertEqual(x.double().dtype, torch.float64)
-        self.assertEqual(x.float().dtype, torch.float32)
-        self.assertEqual(x.half().dtype, torch.float16)
-        self.assertEqual(x.int().dtype, torch.int32)
-        self.assertEqual(x.bfloat16().dtype, torch.bfloat16)
-
-    def test_doc_template(self):
-        from torch._torch_docs import __file__ as doc_file
-        from torch._torch_docs import multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args
-
-        with open(doc_file, "r") as f:
-            doc_strs = f.read()
-
-        for doc_str in re.findall(r'add_docstr\((.*?),.*?("""|\'\'\')(.*?)("""|\'\'\')\)', doc_strs, re.MULTILINE | re.DOTALL):
-            for common_args in [multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args]:
-                for k, v in common_args.items():
-                    self.assertNotIn(v, doc_str[2], 'The argument description "{}" in {} can be '
-                                                    'replaced by {{{}}}'.format(v, doc_str[0], k))
-
-    def test_doc(self):
-        checked_types = (types.MethodType, types.FunctionType,
-                         types.BuiltinFunctionType, types.BuiltinMethodType)
-
-        def test_namespace(ns, *skips):
-            if isinstance(ns, object):
-                ns_name = ns.__class__.__name__
-            else:
-                ns_name = ns.__name__
-            skip_regexes = []
-            for r in skips:
-                if isinstance(r, string_classes):
-                    skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
-                else:
-                    skip_regexes.append(r)
-
-            for name in dir(ns):
-                if name.startswith('_'):
-                    continue
-
-                # real and imag are only implemented for complex tensors.
-                if name in ['real', 'imag']:
-                    y = torch.randn(1, dtype=torch.cfloat)
-                    var = getattr(y, name)
->>>>>>> a6e09d1d9e... Remove copy_imag and copy_real methods
                 else:
                     ns_name = ns.__name__
                 skip_regexes = []
@@ -257,11 +150,15 @@ class _TestTorchMixin(object):
                         skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                     else:
                         skip_regexes.append(r)
-                skipnames = ['copy_real', 'copy_imag']
+
                 for name in dir(ns):
-                    if name.startswith('_') or name in skipnames:
+                    if name.startswith('_'):
                         continue
-                    var = getattr(ns, name)
+                    if name in ['real', 'imag']:
+                        y = torch.randn(1, dtype=torch.cfloat)
+                        var = getattr(y, name)
+                    else:
+                        var = getattr(ns, name)
                     if not isinstance(var, checked_types):
                         continue
                     doc = var.__doc__
