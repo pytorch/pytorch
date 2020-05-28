@@ -85,17 +85,17 @@ class SerializationMixin(object):
         return b
 
     def _test_serialization_assert(self, b, c):
-        self.assertEqual(b, c, 0)
+        self.assertEqual(b, c, atol=0, rtol=0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
         self.assertTrue(isinstance(c[4], torch.FloatStorage))
         c[0].fill_(10)
-        self.assertEqual(c[0], c[2], 0)
-        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+        self.assertEqual(c[0], c[2], atol=0, rtol=0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
         c[1].fill_(20)
-        self.assertEqual(c[1], c[3], 0)
+        self.assertEqual(c[1], c[3], atol=0, rtol=0)
         # I have to do it in this roundabout fashion, because there's no
         # way to slice storages
         for i in range(4):
@@ -288,17 +288,17 @@ class SerializationMixin(object):
         b += [a[0].reshape(-1)[1:4].clone().storage()]
         path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
         c = torch.load(path)
-        self.assertEqual(b, c, 0)
+        self.assertEqual(b, c, atol=0, rtol=0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
         self.assertTrue(isinstance(c[4], torch.FloatStorage))
         c[0].fill_(10)
-        self.assertEqual(c[0], c[2], 0)
-        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+        self.assertEqual(c[0], c[2], atol=0, rtol=0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
         c[1].fill_(20)
-        self.assertEqual(c[1], c[3], 0)
+        self.assertEqual(c[1], c[3], atol=0, rtol=0)
 
         # test some old tensor serialization mechanism
         class OldTensorBase(object):

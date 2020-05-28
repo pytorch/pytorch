@@ -83,7 +83,7 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
 
 // Check to see if the shape of tensors is compatible
 // for being concatenated along a given dimension.
-static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension) {
+static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension, int64_t index) {
   int64_t first_dims = first.dim();
   int64_t second_dims = second.dim();
   TORCH_CHECK(first_dims == second_dims, "Tensors must have same number of dimensions: got ",
@@ -95,7 +95,8 @@ static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor
     int64_t first_dim_size = first.size(dim);
     int64_t second_dim_size = second.size(dim);
     TORCH_CHECK(first_dim_size == second_dim_size, "Sizes of tensors must match except in dimension ",
-                dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim);
+                dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
+                " (The offending index is ", index, ")");
   }
 }
 
@@ -141,13 +142,14 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 
   // compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
-  for (auto const &tensor : tensors) {
+  for (int i = 0; i < tensors.size(); i++) {
+    auto const &tensor = tensors[i];
     if (should_skip(tensor)) {
       // don't use fast path for empty tensor
       allContiguous = false;
       continue;
     }
-    check_cat_shape_except_dim(notSkippedTensor, tensor, dim);
+    check_cat_shape_except_dim(notSkippedTensor, tensor, dim, i);
     cat_dim_size += tensor.size(dim);
 
     if (!tensor.is_contiguous()) {
