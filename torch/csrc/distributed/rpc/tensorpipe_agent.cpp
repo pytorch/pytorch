@@ -25,11 +25,6 @@ namespace distributed {
 namespace rpc {
 
 constexpr long kToMilliseconds = 1000;
-// This large time duration is for the timeoutMapCV_. We cannot use
-// std::chrono::time_point::max() due to a known overflow-related bug. Here is
-// an explanation of the bug:
-// https://stackoverflow.com/questions/42638847/what-is-the-maximum-value-i-can-pass-to-stdthreadsleep-for-and-sleep-until
-constexpr auto kLargeTimeDuration = std::chrono::hours(10000);
 
 const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 const std::string kThreadPoolSize = "agent.thread_pool_size";
@@ -453,16 +448,15 @@ void TensorPipeAgent::pollTimeoutRpcs() {
         return;
       }
 
-      steady_clock_time_point earliestTimeout =
-          std::chrono::steady_clock::now() + kLargeTimeDuration;
-
-      if (std::chrono::steady_clock::now() >= earliestTimeout) {
-        break;
-      }
       if (!timeoutMap_.empty()) {
-        earliestTimeout = timeoutMap_.begin()->first;
+        steady_clock_time_point earliestTimeout = timeoutMap_.begin()->first;
+        if (std::chrono::steady_clock::now() >= earliestTimeout) {
+          break;
+        }
+        timeoutThreadCV_.wait_until(lock, earliestTimeout);
+      } else {
+        timeoutThreadCV_.wait(lock);
       }
-      timeoutThreadCV_.wait_until(lock, earliestTimeout);
     }
 
     // Move all these futures to a separate vector so we can process them
