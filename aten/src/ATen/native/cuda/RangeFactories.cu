@@ -12,6 +12,12 @@
 
 namespace {
 
+#ifdef __HIP_PLATFORM_HCC__
+#define ROCm_Bug(x)
+#else
+#define ROCm_Bug(x) x
+#endif
+
 constexpr int num_threads = C10_WARP_SIZE * 2;
 constexpr int thread_work_size = 1;
 constexpr int block_work_size = thread_work_size * num_threads;
@@ -112,7 +118,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
-    r.fill_(std::pow(base, start.to<double>()));
+    r.fill_(ROCm_Bug(std)::pow(base, start.to<double>()));
   } else if (isIntegralType(r.scalar_type(), 0)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "logspace_cuda", [&]() {
       float scalar_base = static_cast<float>(base); // Use float to avoid promotion to double
@@ -122,9 +128,9 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
-          return std::pow(scalar_base, scalar_start + step * ind);
+          return ROCm_Bug(std)::pow(scalar_base, scalar_start + step * ind);
         }
-        return std::pow(scalar_base, scalar_end - step * (steps - ind - 1));
+        return ROCm_Bug(std)::pow(scalar_base, scalar_end - step * (steps - ind - 1));
       });
     });
   } else {
@@ -136,9 +142,9 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
-          return std::pow(scalar_base, scalar_start + step * ind);
+          return ROCm_Bug(std)::pow(scalar_base, scalar_start + step * ind);
         }
-        return std::pow(scalar_base, scalar_end - step * (steps - ind - 1));
+        return ROCm_Bug(std)::pow(scalar_base, scalar_end - step * (steps - ind - 1));
       });
     });
   }
@@ -251,5 +257,7 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
+
+#undef ROCm_Bug
 
 }} // namespace at::native
