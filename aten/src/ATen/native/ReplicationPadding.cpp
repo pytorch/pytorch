@@ -2,7 +2,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <algorithm>
-#include <iostream>
 
 namespace at {
 namespace native {
@@ -573,7 +572,7 @@ static inline void shapeCheck3d(
   TORCH_CHECK(
       (input.dim() == 4 && input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0) ||
       (input.dim() == 5 && input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0),
-      "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ", input);
+      "4D or 5D (batch mode) tensor expected for input, but got: ", input);
 
   if (input.dim() == 5)
   {
