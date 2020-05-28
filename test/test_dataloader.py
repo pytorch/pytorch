@@ -312,6 +312,12 @@ class TestConcatDataset(TestCase):
         self.assertEqual((0, 0), result.get_idxs(0))
         self.assertEqual((0, 1), result.get_idxs(1))
 
+    def test_get_idxs_raises_index_error(self):
+        result = ConcatDataset([[0], [1]])
+        self.assertEqual((0, 2), result.get_idxs(2))
+        with self.assertRaises(IndexError):
+            sample_idx, dataset_idx = result.get_idxs(2)
+            result.datasets[dataset_idx][sample_idx]
 
 # takes in dummy var so this can also be used as a `worker_init_fn`
 def set_faulthander_if_available(_=None):
