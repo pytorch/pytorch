@@ -235,6 +235,7 @@ struct cpu_scatter_gather_base_kernel {
     const std::string& method_name,
     bool serial_exec,
     func_t& kernel_func) {
+
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
@@ -325,12 +326,7 @@ struct cpu_scatter_gather_base_kernel {
             }
           }
         };
-        if (serial_exec) {
-          iter.serial_for_each(loop, {0, iter.numel()});
-        }
-        else {
-          iter.for_each(loop);
-        }
+        iter.for_each(loop);
       }
     );
   }
