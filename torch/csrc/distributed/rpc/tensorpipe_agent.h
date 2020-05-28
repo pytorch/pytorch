@@ -1,15 +1,14 @@
 #pragma once
 
+#include <atomic>
+#include <thread>
+
+#include <tensorpipe/tensorpipe.h>
+
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
-#include <tensorpipe/core/context.h>
-#include <tensorpipe/core/listener.h>
-#include <tensorpipe/core/pipe.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-
-#include <atomic>
-#include <thread>
 
 namespace torch {
 namespace distributed {
