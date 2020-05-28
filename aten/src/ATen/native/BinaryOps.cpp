@@ -67,6 +67,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
       "and in a future release div will perform true division like Python 3. ",
       "Use true_divide or floor_divide (// in Python) instead.");
   }
+
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
   div_stub(iter.device_type(), iter);
@@ -81,10 +82,11 @@ Tensor div(const Tensor& self, const Tensor& other) {
       "and in a future release div will perform true division as in Python 3. ",
       "Use true_divide or floor_divide (// in Python) instead.");
   }
-    Tensor result;
-    auto iter = TensorIterator::binary_op(result, self, other);
-    div_stub(iter.device_type(), iter);
-    return iter.output();
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& div_(Tensor& self, const Tensor& other) {

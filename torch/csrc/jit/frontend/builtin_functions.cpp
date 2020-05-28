@@ -76,8 +76,6 @@ def _test_serialization_subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2)
 
 // Division versioned symbols, for Torchscript programs serialized when
 // division on integer tensors was floor division, not true division.
-// NOTE: updated division is not yet implemented. These versioned
-// symbols are here preemptively.
 
 // Tensor x Tensor
 auto div_tensor = R"SCRIPT(
