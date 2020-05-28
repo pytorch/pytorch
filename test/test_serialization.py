@@ -553,6 +553,7 @@ class TestBothSerialization(TestCase, SerializationMixin):
         torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=False)
         x_old_load = torch.load("big_tensor.zip")
         self.assertEqual(x_old_load, x_new_load)
+        os.remove("big_tensor.zip")
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
