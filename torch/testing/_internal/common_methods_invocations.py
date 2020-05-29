@@ -104,7 +104,7 @@ def ident(x):
 #   input size/constructing fn,
 #   args (tuple represents shape of a tensor arg),
 #   test variant name (will be used at test name suffix),    // optional
-#   (True, nonfusible_nodes, fusible_nodes) for autodiff,    // optional
+#   (should_check_autodiff[bool], nonfusible_nodes, fusible_nodes) for autodiff, // optional
 #   indices for possible dim arg,                            // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs                                                   // optional
@@ -254,6 +254,8 @@ def method_tests():
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
+        ('absolute', (S, S, S), NO_ARGS, '', (False,)),
+        ('absolute_', (S, S, S), NO_ARGS, '', (False,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
@@ -562,6 +564,8 @@ def method_tests():
         ('addcdiv', (), ((S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs', (), (), (), ident, {'value': 0.5}),
         ('zero_', (S, S, S), NO_ARGS),
         ('zero_', (), NO_ARGS, 'scalar'),
+        ('logaddexp', (S, S), ((S, S),)),
+        ('logaddexp2', (S, S), ((S, S),)),
         ('logsumexp', (S, S), (1,), '', (True,)),
         ('logsumexp', (), (0,), 'scalar', (True,)),
         ('norm', (S, S), (), 'default'),

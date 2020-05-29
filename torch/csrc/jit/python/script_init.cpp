@@ -981,7 +981,10 @@ void initJitScriptBindings(PyObject* module) {
             return std::make_tuple(pp.str(), consts);
           })
       .def("apply", &Module::apply)
-      .def("_clone", &Module::clone)
+      .def(
+          "_clone",
+          [](Module& self, bool inplace) { return self.clone(inplace); },
+          py::arg("inplace") = false)
       .def("_clone_instance", &Module::clone_instance)
       .def("copy", &Module::copy)
       .def("deepcopy", &Module::deepcopy)
@@ -1190,6 +1193,7 @@ void initJitScriptBindings(PyObject* module) {
         auto typed_inputs = toTraceableStack(input_tuple);
         std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
             func, typed_inputs, var_lookup_fn, strict, force_outplace));
+
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
         auto result = cu->create_function(

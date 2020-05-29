@@ -47,9 +47,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy6 = relu6_module(qx)
 
         self.assertEqual(y_ref, qy.dequantize(),
-                         message="ReLU module API failed")
+                         msg="ReLU module API failed")
         self.assertEqual(y6_ref, qy6.dequantize(),
-                         message="ReLU6 module API failed")
+                         msg="ReLU6 module API failed")
 
 
     @given(
@@ -93,7 +93,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         qlinear.set_weight_bias(W_q, B)
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight(), W_q, atol=1e-5)
+        self.assertEqual(qlinear.weight(), W_q, atol=1e-5, rtol=0)
         W_pack = qlinear._packed_params._packed_params
 
         qlinear.scale = float(scale)
@@ -577,7 +577,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm2d module API failed")
+                         msg="BatchNorm2d module API failed")
 
     def test_batch_norm3d(self):
         """Tests the correctness of the batchnorm3d module.
@@ -595,7 +595,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm3d module API failed")
+                         msg="BatchNorm3d module API failed")
 
     def test_layer_norm(self):
         """Tests the correctness of the layernorm module.
@@ -625,7 +625,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qY = quant_mod(qX)
 
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         msg="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
 
 
@@ -729,47 +729,46 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # Smoke test extra_repr
         self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
 
+    @override_qengines
     def test_lstm_api(self):
         r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
         """
         # Check that module matches the numerics of the op and ensure that module can be
         # instantiated for all engines and dtypes
 
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
-                for dtype in [torch.qint8, torch.float16]:
-                    if dtype == torch.float16 and qengine == "qnnpack":
-                        # fp16 dynamic quant is not supported for qnnpack
-                        continue
-                        # Test default instantiation
-                    seq_len = 128
-                    batch = 16
-                    input_size = 3
-                    hidden_size = 7
-                    num_layers = 2
-                    bias = True
-                    bidirectional = False
+        for dtype in [torch.qint8, torch.float16]:
+            if dtype == torch.float16 and qengine == "qnnpack":
+                # fp16 dynamic quant is not supported for qnnpack
+                continue
+                # Test default instantiation
+            seq_len = 128
+            batch = 16
+            input_size = 3
+            hidden_size = 7
+            num_layers = 2
+            bias = True
+            bidirectional = False
 
-                    x = torch.rand(seq_len, batch, input_size)
-                    h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
-                    c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+            x = torch.rand(seq_len, batch, input_size)
+            h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+            c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
 
 
-                    cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
-                                                              hidden_size=hidden_size,
-                                                              num_layers=num_layers,
-                                                              bias=bias,
-                                                              batch_first=False,
-                                                              dropout=0.0,
-                                                              bidirectional=bidirectional,
-                                                              dtype=dtype)
-                    _all_params = ([m.param for m in cell_dq._all_weight_values])
-                    result = torch.quantized_lstm(x, (h, c), _all_params, cell_dq.bias, cell_dq.num_layers,
-                                                  float(cell_dq.dropout), False, bidirectional,
-                                                  False, dtype=dtype, use_dynamic=True)
+            cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                        hidden_size=hidden_size,
+                                                        num_layers=num_layers,
+                                                        bias=bias,
+                                                        batch_first=False,
+                                                        dropout=0.0,
+                                                        bidirectional=bidirectional,
+                                                        dtype=dtype)
+            _all_params = ([m.param for m in cell_dq._all_weight_values])
+            result = torch.quantized_lstm(x, (h, c), _all_params, cell_dq.bias, cell_dq.num_layers,
+                                            float(cell_dq.dropout), False, bidirectional,
+                                            False, dtype=dtype, use_dynamic=True)
 
 
-                    y, (h, c) = cell_dq(x, (h, c))
-                    self.assertEqual(result[0], y, message="LSTM module API failed")
-                    self.assertEqual(result[1], h, message="LSTM module API failed")
-                    self.assertEqual(result[2], c, message="LSTM module API failed")
+            y, (h, c) = cell_dq(x, (h, c))
+            self.assertEqual(result[0], y, message="LSTM module API failed")
+            self.assertEqual(result[1], h, message="LSTM module API failed")
+            self.assertEqual(result[2], c, message="LSTM module API failed")

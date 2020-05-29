@@ -73,17 +73,15 @@ void TensorIterator::reorder_dimensions() {
   permute_dimensions(perm_);
 }
 
+// Returns the first non-CPU device, if present, or the CPU
+// if all operands are on the CPU.
 Device compute_device(at::ArrayRef<OperandInfo> operands) {
   for (auto& op : operands) {
-    if (!op.tensor.defined()) continue;
-    if (op.tensor.dim() == 0) continue;
-    return op.tensor.device();
+    if (op.tensor.defined() && !op.tensor.device().is_cpu()) {
+      return op.tensor.device();
+    }
   }
-  for (auto& op : operands) {
-    if (!op.tensor.defined()) continue;
-    if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number()) continue;
-    return op.tensor.device();
-  }
+
   return kCPU;
 }
 
@@ -236,15 +234,14 @@ void TensorIterator::compute_types() {
       }
     }
 
+    // Checks for tensors on the wrong device
     if (op.tensor.defined() && op.device != op.tensor.device()) {
       if (op.is_output) {
         TORCH_CHECK(false, "output with device ", op.tensor.device(),
-                  " doesn't match the desired device ", op.device);
-      } else if (op.tensor.dim() == 0) {
-        op.tensor = op.tensor.to(op.options());
+                    " doesn't match the desired device ", op.device);
       } else {
         TORCH_CHECK(false, "expected device ", op.device,
-                  " but got device ", op.tensor.device());
+                    " but got device ", op.tensor.device());
       }
     }
   }
@@ -714,7 +711,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   return iter;
 }
 
-TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
+TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a, bool promote) {
   TORCH_INTERNAL_ASSERT(out1.defined());
   TORCH_INTERNAL_ASSERT(out2.defined());
   TORCH_CHECK((!a.is_cuda() && !out1.is_cuda() && !out2.is_cuda()) || (a.device() == out1.device() && out1.device() == out2.device()),
@@ -730,7 +727,11 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   iter.add_output(out1);
   iter.add_output(out2);
   iter.add_input(a);
-  iter.promote_gpu_output_dtypes_ = true;
+  if (promote) {
+    iter.promote_gpu_output_dtypes_ = true;
+  } else {
+    iter.dont_compute_common_dtype();
+  }
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
   iter.build();
