@@ -161,6 +161,10 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   export PATH="/usr/local/cuda/bin:$PATH"
 fi
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+  # This is needed to work around building onnx in older docker images.
+  if [[ $BUILD_ENVIRONMENT == py3.6-devtoolset7-rocmrpm-centos7.5 ]]; then
+    pip install -U pip==18 setuptools==44
+  fi
   # This is needed to enable ImageInput operator in resnet50_trainer
   build_args+=("USE_OPENCV=ON")
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
