@@ -11895,14 +11895,6 @@ class TestTorchDeviceType(TestCase):
             pt_x = torch.tensor(x, device=device, dtype=dtype)
             np_x = np.array(x, dtype=numpy_dtype)
 
-            # Currently `CUDA` backend is not supported as
-            # at::legacy::cumprod does not support complex dtypes.
-            if self.device_type == 'cuda':
-                with self.assertRaises(RuntimeError):
-                    pt_res = torch.vander(pt_x, increasing=inc) if n is None \
-                        else torch.vander(pt_x, n, inc)
-                break
-
             pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)             
             np_res = np.vander(np_x, n, inc)
 
@@ -11927,6 +11919,14 @@ class TestTorchDeviceType(TestCase):
             numpy_dtype = torch_to_numpy_dtype_dict[dtype]
             pt_x = torch.tensor(x, device=device, dtype=dtype)
             np_x = np.array(x, dtype=numpy_dtype)
+
+            # Currently `CUDA` backend is not supported as
+            # at::legacy::cumprod does not support complex dtypes.
+            if self.device_type == 'cuda':
+                with self.assertRaises(RuntimeError):
+                    pt_res = torch.vander(pt_x, increasing=inc) if n is None \
+                        else torch.vander(pt_x, n, inc)
+                break
 
             pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)
             np_res = np.vander(np_x, n, inc)
