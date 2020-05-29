@@ -150,7 +150,6 @@ void RequestCallbackImpl::processRpc(
                            ->get_function(scriptCall.qualifiedName())
                            .runAsync(stack);
 
-
       if (scriptCall.isAsyncFunction()) {
         jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
           try {
@@ -158,7 +157,7 @@ void RequestCallbackImpl::processRpc(
             valueJitFuture->addCallback([responseFuture,
                                          messageId,
                                          valueJitFuture]() {
-              try{
+              try {
                 Message m =
                     ScriptResp(std::move(valueJitFuture->value())).toMessage();
                 m.setId(messageId);
