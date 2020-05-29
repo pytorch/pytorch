@@ -19,6 +19,16 @@ class PackedParameter(torch.nn.Module):
         super(PackedParameter, self).__init__()
         self.param = param
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(PackedParameter, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'param'] = self.param
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self.param = state_dict[prefix + 'param']
+        super(PackedParameter, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                           missing_keys, unexpected_keys, error_msgs)
+
 class RNNBase(torch.nn.Module):
 
     _FLOAT_MODULE = nn.RNNBase

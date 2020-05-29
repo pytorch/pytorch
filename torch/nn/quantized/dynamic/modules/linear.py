@@ -43,7 +43,7 @@ class Linear(nnq.Linear):
         if self._packed_params.dtype == torch.qint8:
             if self.version is None or self.version < 4:
                 Y = torch.ops.quantized.linear_dynamic(
-                    x, self._packed_params._packed_params, reduce_range=False)
+                    x, self._packed_params._packed_params)
             else:
                 Y = torch.ops.quantized.linear_dynamic(
                     x, self._packed_params._packed_params, reduce_range=True)
