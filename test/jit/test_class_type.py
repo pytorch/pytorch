@@ -929,3 +929,54 @@ class TestClassType(JitTestCase):
             self.assertEqual(m(input), m_loaded(input))
             # Make sure class constant is accessible from module
             self.assertEqual(m.w, m_loaded.w)
+
+    def test_unused_method(self):
+        """
+        Test unused methods on scripted classes.
+        """
+        @torch.jit.script
+        class Unused(object):
+            def __init__(self):
+                self.count: int = 0
+                self.items: List[int] = []
+
+            def used(self):
+                self.count += 1
+                return self.count
+
+            @torch.jit.unused
+            def unused(self, x: int, y: str) -> int:
+                a = next(self.items)
+                return a
+
+            def uses_unused(self) -> int:
+                return self.unused(y="hi", x=3)
+
+        class ModuleWithUnused(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.obj = Unused()
+
+            def forward(self):
+                return self.obj.used()
+
+            @torch.jit.export
+            def calls_unused(self):
+                return self.obj.unused(3, "hi")
+
+            @torch.jit.export
+            def calls_unused_indirectly(self):
+                return self.obj.uses_unused()
+
+        python_module = ModuleWithUnused()
+        script_module = torch.jit.script(ModuleWithUnused())
+
+        # Forward should work because it does not used any methods marked unused.
+        self.assertEqual(python_module.forward(), script_module.forward())
+
+        # Calling a method marked unused should throw.
+        with self.assertRaises(torch.jit.Error):
+            script_module.calls_unused()
+
+        with self.assertRaises(torch.jit.Error):
+            script_module.calls_unused_indirectly()

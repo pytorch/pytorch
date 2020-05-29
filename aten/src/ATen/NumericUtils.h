@@ -42,8 +42,8 @@ inline bool _isnan(T val) {
 
 template <typename T,
          typename std::enable_if<std::is_same<T, at::Half>::value, int>::type = 0>
-inline bool _isnan(T val) {
-  return true;
+inline C10_HOST_DEVICE bool _isnan(T val) {
+  return at::_isnan(float(val));
 }
 
 
@@ -54,7 +54,7 @@ inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
 template <typename T>
 C10_HOST_DEVICE inline T exp(T x) {
   static_assert(!std::is_same<T, double>::value, "this template must be used with float or less precise type");
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
   // use __expf fast approximation for peak bandwidth
   return __expf(x);
 #else
@@ -70,7 +70,7 @@ C10_HOST_DEVICE inline double exp<double>(double x) {
 template <typename T>
 C10_HOST_DEVICE inline T log(T x) {
   static_assert(!std::is_same<T, double>::value, "this template must be used with float or less precise type");
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
   // use __logf fast approximation for peak bandwidth
   return __logf(x);
 #else
@@ -86,7 +86,7 @@ C10_HOST_DEVICE inline double log<double>(double x) {
 template <typename T>
 C10_HOST_DEVICE inline T tan(T x) {
   static_assert(!std::is_same<T, double>::value, "this template must be used with float or less precise type");
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
   // use __tanf fast approximation for peak bandwidth
   return __tanf(x);
 #else
