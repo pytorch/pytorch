@@ -229,8 +229,7 @@ class TensorPipeAgent : public RpcAgent {
   };
 
   // Map of Time-Series metrics tracked by the RPC Agent
-  std::unordered_map<std::string, std::unique_ptr<TimeSeriesMetricsTracker>>
-      timeSeriesMetrics_;
+  std::unordered_map<std::string, TimeSeriesMetricsTracker> timeSeriesMetrics_;
   // Mutex to guard timeSeriesMetrics_
   std::mutex metricsMutex_;
 
