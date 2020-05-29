@@ -21,10 +21,8 @@ TORCH_API bool isWeight(Value* v);
 // quantize
 TORCH_API bool isBiasOfConvOrLinear(Value* v);
 
-// Check if the value may need observation or not
-// one example for values that doesn't need observation is the
-// scalar inputs for ops like add/mul
-TORCH_API bool mayRequireObservation(Value* v);
+// Get the use as scalar input of clamp ops for the input value
+c10::optional<Use> getClampScalarInputUse(Value* v);
 
 // For a given value `v`, get the list of values that we need to check
 // if they are observed/quantized or not, if so, we can say the
@@ -38,6 +36,8 @@ TORCH_API bool isSingleInputGeneralValueAtenFunction(Node* n);
 TORCH_API bool isSingleInputGeneralCallFunction(Node* n);
 
 TORCH_API bool isSingleInputGeneralAtenFunction(Node* n);
+
+TORCH_API bool isClamp(Node* n);
 
 // Check if the node will produce the same result regardless of whether
 // the input tensor is quantized or not, example: aten::size

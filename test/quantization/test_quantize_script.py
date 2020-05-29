@@ -877,35 +877,6 @@ graph(%input, %weight):
         res = get_forward(m._c)(x)
         self.assertEqual(res, ref_res)
 
-    def test_swap_dequantize(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
-                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
-
-            def forward(self, x):
-                x = torch.dequantize(x)
-                x = self.maxpool(x)
-                x = self.avgpool(x)
-                return x
-        x = torch.randn([1, 3, 10, 10], dtype=torch.float)
-        x = torch.quantize_per_tensor(x, 0.5, 1, torch.quint8)
-        m = torch.jit.script(M())
-        ref_res = m(x)
-        torch._C._jit_pass_inline(m.graph)
-        FileCheck().check("aten::dequantize") \
-                   .check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .run(m.graph)
-        torch._C._jit_pass_swap_dequantize(m.graph)
-        FileCheck().check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .check("dequantize") \
-                   .run(m.graph)
-        res = get_forward(m._c)(x)
-        self.assertEqual(res, ref_res)
-
     def test_swap_functional_linear(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1127,7 +1098,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     def _test_op_impl(self, module, data, quantized_op, debug=False):
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model = torch.jit.script(module).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=debug)
         if debug:
             print(model.graph)
         FileCheck().check(quantized_op) \
@@ -1970,6 +1941,24 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         layer_norm = torch.nn.LayerNorm([3, 10, 10])
         m = self._test_op_impl(layer_norm, data, "quantized::layer_norm")
         FileCheck().check_not("aten::layer_norm") \
+                   .run(m.graph)
+
+    def test_clamp(self):
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                return torch.clamp(x, 3, 4)
+
+        m = self._test_op_impl(M(), data, "aten::clamp")
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .run(m.graph)
+
+        FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                    .run(m.graph)
 
     def test_quantize_general_shape_ops(self):

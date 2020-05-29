@@ -25,15 +25,6 @@ TORCH_API void ReplicateQuant(std::shared_ptr<Graph>& graph);
  */
 TORCH_API void ReplicateDeQuant(std::shared_ptr<Graph>& graph);
 
-/** Quantizes two types of general ops(ops that works both for floating point
- *  and quantized Tensors) in this pass
- *  for ops that only manipulates shape, e.g. flatten, quantization
- *  is done by swapping with previous dequantize op
- *  for ops that manipulates values of Tensor, e.g. average pool, quantization
- *  is done by inserting quant/dequant ops after the op
- */
-TORCH_API void PropagateQuantizationOps(std::shared_ptr<Graph>& graph);
-
 /** \brief Insert quantize - dequantize calls to the Tensors
  *  that are observed in insert_observers pass
  *

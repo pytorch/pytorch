@@ -338,6 +338,11 @@ Tensor& clamp_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   return at::clamp_out(self, self, min, max);
 }
 
+Tensor clamp_tensor(const Tensor& self, const Tensor& min, const Tensor& max) {
+  Tensor result = at::empty({0}, self.options());
+  return at::clamp_out(result, self, min.item(), max.item());
+}
+
 Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
   TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.layout() == Layout::Strided,

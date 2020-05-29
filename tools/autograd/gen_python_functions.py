@@ -567,6 +567,7 @@ def handle_python_binding_args(declaration, output_gap):
         expr, _ = parse_arg(binding_arg, binding_arg_index(name))
         return expr
 
+    print(declaration['name'], 'output args:', pa['output_args'])
     has_output = len(pa['output_args']) == 1
     tensor_options_arg = get_tensor_options(declaration)
 

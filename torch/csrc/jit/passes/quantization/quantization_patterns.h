@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -44,6 +45,38 @@ std::string getAtenOpPattern(
   return aten_op_pattern;
 }
 
+std::string getQuantize(const std::string& value, const std::string& input) {
+  auto input_quant = input + "_quant";
+  std::string quantize_pattern = R"(
+          )" + value + "_scale : float = aten::q_scale(" + input_quant + ")";
+  quantize_pattern += R"(
+          )" + value + "_zero_point : int = aten::q_zero_point(" + input_quant + ")";
+  quantize_pattern += R"(
+          )" + value + "_dtype : int = prim::dtype(" + input_quant + ")";
+  quantize_pattern += R"(
+          )" + value + "_float_scalar_type : int = prim::Constant[value=6]()";
+  quantize_pattern += R"(
+          )" + value + "_none : None = prim::Constant()";
+  quantize_pattern += R"(
+          )" + value + "_tensor : Tensor = aten::scalar_tensor(" + value + ", " + \
+    value + "_float_scalar_type";
+  for (auto i = 0; i < 3; ++i) {
+    quantize_pattern += ", " + value + "_none";
+  }
+  quantize_pattern += ")";
+  quantize_pattern += R"(
+          )" + value + "_quant = aten::quantize_per_tensor(" + value + "_tensor";
+  quantize_pattern += ", " + value + "_scale";
+  quantize_pattern += ", " + value + "_zero_point";
+  quantize_pattern += ", " + value + "_dtype)";
+  return quantize_pattern;
+}
+
+std::string getDequantize(const std::string& value) {
+  return R"(
+          )" + value + "_dequant = aten::dequantize(" + value + "_quant)";
+}
+
 // Patterns for the ops that inherit parameters from input
 QuantFusionInfo getInputTensorQParamOpFusionInfo(
     const std::string& op_name,
@@ -55,6 +88,38 @@ QuantFusionInfo getInputTensorQParamOpFusionInfo(
           %a_dequant = aten::dequantize(%a_quant)
           %r = )";
   op_pattern += op_name + "(" + "%a_dequant" + extra_arg_list + ")";
+  // IR pattern common to all ops that inherit qparam from input
+  op_pattern += R"(
+          %r_scale : float = aten::q_scale(%a_quant)
+          %r_zero_point : int = aten::q_zero_point(%a_quant)
+          %r_dtype : int = prim::dtype(%a_quant)
+          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+          return (%r_quant) )";
+
+  std::string aten_op_pattern =
+      getAtenOpPattern(graph_header, op_name, extra_arg_list);
+
+  return {op_name, op_pattern, aten_op_pattern};
+}
+
+QuantFusionInfo getClampOpFusionInfo(
+    const std::string& op_name,
+    const std::vector<std::string>& extra_args) {
+  const auto& extra_arg_list = getExtraArgList(extra_args);
+  std::string graph_header = "graph(%a_quant" + extra_arg_list + "):";
+  std::string op_pattern = graph_header;
+  for (const auto& arg : extra_args) {
+    op_pattern += getQuantize(arg, "%a");
+    op_pattern += getDequantize(arg);
+  }
+  op_pattern += getDequantize("%a");
+  op_pattern += R"(
+          %r = )";
+  std::vector<std::string> dequantized_args;
+  for (const auto& arg : extra_args) {
+    dequantized_args.push_back(arg + "_dequant");
+  }
+  op_pattern += op_name + "(" + "%a_dequant" + getExtraArgList(dequantized_args) + ")";
   // IR pattern common to all ops that inherit qparam from input
   op_pattern += R"(
           %r_scale : float = aten::q_scale(%a_quant)
@@ -685,16 +750,16 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
       {"%output_size", "%align_corners", "%scale_d", "%scale_h", "%scale_w"});
 
   auto clamp =
-      getInputTensorQParamOpFusionInfo("aten::clamp", {"%min", "%max"});
+      getClampOpFusionInfo("aten::clamp", {"%min", "%max"});
 
   auto clamp_ =
-      getInputTensorQParamOpFusionInfo("aten::clamp_", {"%min", "%max"});
+      getClampOpFusionInfo("aten::clamp_", {"%min", "%max"});
 
   auto hardtanh =
-      getInputTensorQParamOpFusionInfo("aten::hardtanh", {"%min", "%max"});
+      getClampOpFusionInfo("aten::hardtanh", {"%min", "%max"});
 
   auto hardtanh_ =
-      getInputTensorQParamOpFusionInfo("aten::hardtanh_", {"%min", "%max"});
+      getClampOpFusionInfo("aten::hardtanh_", {"%min", "%max"});
 
   auto elu = getInputTensorQParamOpFusionInfo(
       "aten::elu", {"%alpha", "%scale", "%input_scale"});

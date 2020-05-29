@@ -767,6 +767,14 @@
     QuantizedCPU: quantized_clamp
     Vulkan: vulkan_clamp
 
+- func: clamp.Tensor(Tensor self, Tensor min, Tensor max) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+  dispatch:
+    CPU: clamp_tensor
+    CUDA: clamp_tensor
+
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
