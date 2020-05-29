@@ -80,7 +80,7 @@ rpc::Message RpcWithProfilingResp::toMessageImpl() && {
   // (i.e. there is only _start and _stop profile.)
   ivalues.emplace_back(
       at::IValue(static_cast<int32_t>(profiledEvents_.size())));
-  for (const auto e : profiledEvents_) {
+  for (const auto& e : profiledEvents_) {
     ivalues.emplace_back(e.getEventIValues());
   }
   std::vector<torch::Tensor> tensorTable;

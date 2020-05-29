@@ -134,8 +134,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       auto fromWorker = rpcWithProfilingResp.fromWorkerId();
       wrappedMsgType = rpcWithProfilingResp.wrappedMessageType();
 
-      torch::autograd::profiler::addEventList(
-          std::move(events), rpcWithProfilingResp.fromWorkerId());
+      torch::autograd::profiler::addEventList(std::move(events), fromWorker);
 
       auto wrappedRPC = std::move(rpcWithProfilingResp).moveWrappedRpc();
       return wrappedRPC;

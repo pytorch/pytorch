@@ -344,7 +344,7 @@ struct TORCH_API TLSProfilerGuard {
       : cb_(std::move(resultCallback)) {
     enableProfiler(
         cfg);
-  };
+  }
   ~TLSProfilerGuard() {
     thread_event_lists event_lists = disableProfiler();
     if (cb_) {

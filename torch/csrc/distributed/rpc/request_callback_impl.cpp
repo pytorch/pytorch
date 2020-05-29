@@ -576,6 +576,7 @@ void RequestCallbackImpl::processRpc(
         torch::autograd::profiler::TLSProfilerGuard g(
             profilingConfig,
             [&profiledEvents](
+                // NOLINTNEXTLINE
                 std::vector<std::vector<torch::autograd::profiler::Event>>
                     event_lists) {
               // Gather all events into a vector

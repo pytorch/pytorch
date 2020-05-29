@@ -417,7 +417,7 @@ thread_event_lists disableProfiler() {
 
 void addEventList(std::vector<Event> profiledEvents, int fromNodeId) {
   auto state_ptr = getProfilerTLSState();
-  int nodeId =
+  int64_t nodeId =
       fromNodeId == -1 ? at::RecordFunction::getDefaultNodeId() : fromNodeId;
   for (auto& evt : profiledEvents ) {
     evt.setNodeId(nodeId);
