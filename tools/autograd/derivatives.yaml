@@ -517,6 +517,14 @@
 - name: log2(Tensor self) -> Tensor
   self: grad / (self * 0.6931471805599453)
 
+- name: logaddexp(Tensor self, Tensor other) -> Tensor
+  self: grad / (1 + exp(other - self))
+  other: grad / (1 + exp(self - other))
+
+- name: logaddexp2(Tensor self, Tensor other) -> Tensor
+  self: grad / (1 + pow(2, other - self))
+  other: grad / (1 + pow(2, self - other))
+
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
 

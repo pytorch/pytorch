@@ -28,6 +28,23 @@ class HasRand : public IRVisitor {
   Stmt* stmt_;
   bool has_rand_ = false;
 };
+
+template <typename Node>
+class NodeFinder : public IRVisitor {
+ public:
+  virtual void visit(const Node* v) override {
+    nodes.push_back((Node*)v);
+    IRVisitor::visit(v);
+  }
+
+  static std::vector<Node*> find(Stmt* s) {
+    NodeFinder<Node> nf;
+    s->accept(&nf);
+    return nf.nodes;
+  }
+
+  std::vector<Node*> nodes;
+};
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
