@@ -17,6 +17,12 @@ namespace c10 {
 // Most of the APIs duplicates std::complex
 // Reference: https://en.cppreference.com/w/cpp/numeric/complex
 //
+// [NOTE: Complex Operator Unification]
+// Operators currently use a mix of std::complex, thrust::complex, and c10::complex internally.
+// The end state is that all operators will use c10::complex internally.  Until then, there may
+// be some hacks to support all variants.
+//
+//
 // [Note on Constructors]
 //
 // The APIs of constructors are mostly copied from C++ standard:
@@ -110,11 +116,6 @@ namespace c10 {
 // [Operator <<, >>]
 //
 // These are implemented by casting to std::complex
-//
-// [NOTE: Complex Operator Unification]
-// Operators currently use a mix of std::complex, thrust::complex, and c10::complex internally.
-// The end state is that all operators will use c10::complex internally.  Until then, there may
-// be some hacks to support all variants.
 //
 //
 //
