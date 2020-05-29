@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/thread_pool.h>
+#include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <tensorpipe/core/context.h>
 #include <tensorpipe/core/listener.h>
@@ -47,6 +48,7 @@ class TensorPipeAgent : public RpcAgent {
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
+      std::shared_ptr<c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
@@ -131,6 +133,17 @@ class TensorPipeAgent : public RpcAgent {
       uint64_t requestSize,
       const std::string& destWorkerName);
 
+  // When a request+response completes, we need to mark the future message as
+  // complete. However, if its timeout has already expired, it already has an
+  // error set. There is no atomic "test-and-set" way to mark a future complete
+  // only if it isn't yet. It does exist for errors (setErrorIfNeeded) but, even
+  // then, it ends up printing a log message, which may worry the user. To solve
+  // both issues we use a separate atomic flag to know the status of the future.
+  struct AtomicFutureMessage {
+    FutureMessage futMsg;
+    std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
+  };
+
   // State per client pipe to keep tracking of pending response message
   // and error sate. pendingResponseMessage_ should be protected by
   // mutex since it can be raced with user send() call.
@@ -140,7 +153,7 @@ class TensorPipeAgent : public RpcAgent {
     explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     bool readError_{false};
-    std::unordered_map<uint64_t, std::shared_ptr<FutureMessage>>
+    std::unordered_map<uint64_t, std::shared_ptr<AtomicFutureMessage>>
         pendingResponseMessage_;
   };
 
@@ -159,11 +172,18 @@ class TensorPipeAgent : public RpcAgent {
   const int worldSize_;
   const TensorPipeRpcBackendOptions opts_;
 
+  // The join method is required to behave like a barrier and perform collective
+  // operations. For simplicity and reliability, we offload this to a process
+  // group, but probably one day we might want to re-implement them using RPCs.
+  const std::shared_ptr<c10d::ProcessGroup> processGroup_;
+
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
 
   // Map to store the expiration times for each message.
-  std::map<steady_clock_time_point, std::vector<std::shared_ptr<FutureMessage>>>
+  std::map<
+      steady_clock_time_point,
+      std::vector<std::shared_ptr<AtomicFutureMessage>>>
       timeoutMap_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
@@ -220,12 +240,27 @@ class TensorPipeAgent : public RpcAgent {
   // Mutex to guarg networkData_
   std::mutex networkDataMutex_;
 
+  // A mutex and a cv to guard access to the call counts and watch for changes.
+  std::mutex callCountMutex_;
+  std::condition_variable callCountCV_;
   // Running total of un-processed, un-errored RPC calls sent
-  std::atomic<int32_t> clientActiveCalls_{0};
+  int32_t clientActiveCalls_{0};
   // Running total of un-processed RPC requests received
-  std::atomic<int32_t> serverActiveCalls_{0};
+  int32_t serverActiveCalls_{0};
   // Running total of RPC requests that will be completed asynchronously
-  std::atomic<int32_t> serverActiveAsyncCalls_{0};
+  int32_t serverActiveAsyncCalls_{0};
+
+  // Helpers to modify the counts while correctly dealing with the mutex and cv.
+  void increaseCallCount(int32_t& count);
+  void decreaseCallCount(int32_t& count);
+
+  // Helpers to set the state of the requests.
+  void markFutureAsComplete(
+      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      Message message);
+  void markFutureWithError(
+      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      std::string errorMsg);
 };
 
 } // namespace rpc
