@@ -574,11 +574,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
          const float rpcTimeoutSeconds,
          const bool isAsyncFunction) {
         return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcPythonUdf(dst,
-                           pickledPythonUDF,
-                           tensors,
-                           rpcTimeoutSeconds,
-                           isAsyncFunction),
+            pyRpcPythonUdf(
+                dst,
+                pickledPythonUDF,
+                tensors,
+                rpcTimeoutSeconds,
+                isAsyncFunction),
             /* unwrap_func */ [](const py::object& value) {
               py::gil_scoped_release release;
               auto& pythonRpcHandler = PythonRpcHandler::getInstance();
