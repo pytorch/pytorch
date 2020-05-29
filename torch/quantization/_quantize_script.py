@@ -45,7 +45,7 @@ def _convert_script(model, inplace=False, debug=False, is_dynamic=False):
     assert not inplace, "The inplace support is still in development"
     _check_is_script_module(model)
     model.eval()
-    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', is_dynamic))
+    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', inplace, is_dynamic))
     if not debug:
         model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, is_dynamic))
     return model
