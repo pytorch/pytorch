@@ -1,5 +1,5 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
-
+#include <ATen/ThreadLocalState.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
@@ -119,9 +119,12 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
   if (hasValue) {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(PyObjectType::get());
-
+    // Save and pass thread local state into the callback
+    at::ThreadLocalState tls_state;
     futureResponseMessage->addCallback(
-        [jitFuture](const FutureMessage& futureResponseMessage) {
+        [jitFuture, tls_state = std::move(tls_state)](
+            const FutureMessage& futureResponseMessage) {
+          at::ThreadLocalStateGuard g(tls_state);
           if (futureResponseMessage.hasError()) {
             jitFuture->setError(futureResponseMessage.error()->what());
           } else {
@@ -134,9 +137,12 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
   } else {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(NoneType::get());
-
+    // Save and pass thread local state into the callback
+    at::ThreadLocalState tls_state;
     futureResponseMessage->addCallback(
-        [jitFuture](const FutureMessage& futureResponseMessage) {
+        [jitFuture, tls_state = std::move(tls_state)](
+            const FutureMessage& futureResponseMessage) {
+          at::ThreadLocalStateGuard g(tls_state);
           if (futureResponseMessage.hasError()) {
             jitFuture->setError(futureResponseMessage.error()->what());
           } else {
@@ -191,9 +197,9 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
 c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
-    const float rpcTimeoutSeconds,
-    const py::args& argsTuple,
-    const py::kwargs& kwargsDict) {
+    const py::tuple& argsTuple,
+    const py::dict& kwargsDict,
+    const float rpcTimeoutSeconds) {
   // No need to catch exception here, if function can not be found,
   // exception will be thrown in get_function() call; if args do not match
   // with function schema, exception will be thrown in
@@ -246,9 +252,13 @@ PyRRef pyRemoteBuiltin(
 
     userRRef->registerOwnerCreationFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
-      callback::confirmPendingUser(fm, forkId);
-    });
+    at::ThreadLocalState tls_state;
+    fm->addCallback(
+        [forkId{userRRef->forkId()},
+         tls_state = std::move(tls_state)](const FutureMessage& fm) {
+          at::ThreadLocalStateGuard g(tls_state);
+          callback::confirmPendingUser(fm, forkId);
+        });
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(returnType);
@@ -264,8 +274,12 @@ PyRRef pyRemoteBuiltin(
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
+    at::ThreadLocalState tls_state;
     fm->addCallback(
-        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
+        [tls_state = std::move(tls_state)](const FutureMessage& fm) {
+          at::ThreadLocalStateGuard g(tls_state);
+          callback::finishCreatingOwnerRRef(fm);
+        });
     return PyRRef(ownerRRef);
   }
 }
@@ -289,11 +303,16 @@ PyRRef pyRemotePythonUdf(
     userRRef->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
-      callback::confirmPendingUser(fm, forkId);
-    });
+    at::ThreadLocalState tls_state;
+    fm->addCallback(
+        [forkId{userRRef->forkId()},
+         tls_state = std::move(tls_state)](const FutureMessage& fm) {
+          at::ThreadLocalStateGuard g(tls_state);
+          callback::confirmPendingUser(fm, forkId);
+        });
     return PyRRef(userRRef);
   } else {
+    // Sending remote message to self
     auto ownerRRef = ctx.createOwnerRRef(PyObjectType::get());
     // prevent this owner RRef being deleted due to other forks
     ctx.addSelfAsFork(ownerRRef);
@@ -305,13 +324,16 @@ PyRRef pyRemotePythonUdf(
 
     ownerRRef->registerOwnerCreationFuture(fm);
 
-    fm->addCallback([](const FutureMessage& fm) {
-      auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
-      if (deletedRRef && deletedRRef->isPyObj()) {
-        py::gil_scoped_acquire ag;
-        deletedRRef.reset();
-      }
-    });
+    at::ThreadLocalState tls_state;
+    fm->addCallback(
+        [tls_state = std::move(tls_state)](const FutureMessage& fm) {
+          at::ThreadLocalStateGuard g(tls_state);
+          auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
+          if (deletedRRef && deletedRRef->isPyObj()) {
+            py::gil_scoped_acquire ag;
+            deletedRRef.reset();
+          }
+        });
     return PyRRef(ownerRRef);
   }
 }

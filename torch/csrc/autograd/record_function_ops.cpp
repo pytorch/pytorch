@@ -16,7 +16,7 @@ namespace profiler {
 
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
-at::Tensor record_function_enter(const std::string& name) {
+at::Tensor record_function_enter(const std::string& name, int64_t nodeId) {
   auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
   if (auto* current = rec->current()) {
     if (current->name().str() == std::string("profiler::_record_function_enter")) {
@@ -26,6 +26,10 @@ at::Tensor record_function_enter(const std::string& name) {
       // a direct child of the parent RecordFunction.
       current->end();
     }
+  }
+
+  if (nodeId != -1) {
+    at::RecordFunction::setDefaultNodeId(nodeId);
   }
   rec->before(name);
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());

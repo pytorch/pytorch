@@ -127,6 +127,11 @@ struct TORCH_API RecordFunction {
   void before(const char* name, int64_t sequence_nr = -1);
   void before(std::string name, int64_t sequence_nr = -1);
 
+  // Sets node ID for distributed profiling
+  static void setDefaultNodeId(int64_t defaultNodeId);
+  // Gets node ID for distributed profiling
+  static int64_t getDefaultNodeId();
+
   template<typename F>
   void before(
       F fn,
@@ -197,6 +202,9 @@ struct TORCH_API RecordFunction {
   // Unique id for this RecordFunction, used in callbacks to track start
   // and end of ranges
   RecordFunctionHandle handle_ {0};
+
+  // Default node ID to be used in conjunction with distributed profiling.
+  static int64_t defaultNodeId_;
 };
 
 //

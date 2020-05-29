@@ -87,10 +87,8 @@ class Conf:
         return parameters
 
     def gen_workflow_job(self, phase):
-        # All jobs require the setup job
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase)
-        job_def["requires"] = ["setup"]
 
         if phase == "test":
 
@@ -100,7 +98,7 @@ class Conf:
             #  pytorch build job (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259452641)
 
             dependency_build = self.parent_build or self
-            job_def["requires"].append(dependency_build.gen_build_name("build"))
+            job_def["requires"] = [dependency_build.gen_build_name("build")]
             job_name = "pytorch_linux_test"
         else:
             job_name = "pytorch_linux_build"
@@ -226,6 +224,9 @@ def instantiate_configs():
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
         parallel_backend = fc.find_prop("parallel_backend") or None
+        build_only = fc.find_prop("build_only") or False
+        if build_only and restrict_phases is None:
+            restrict_phases = ["build"]
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":

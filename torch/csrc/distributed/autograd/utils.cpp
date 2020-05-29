@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/remote_profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 namespace torch {
@@ -80,20 +79,8 @@ Message getMessageWithProfiling(
     torch::distributed::rpc::Message&& wrappedRpcMessage,
     MessageType msgType,
     const torch::autograd::profiler::ProfilerConfig& profilerConfig) {
-  auto& remoteProfiler = rpc::RemoteProfiler::getInstance();
-  // Retrieve profiling key that was set by python so we can send it over the
-  // wire.
-  std::string currentProfilingKey = remoteProfiler.getCurrentProfilingKey();
-  // Commit the key to in-memory map so that we can associate profiled remote
-  // events back to this key.
-  remoteProfiler.writeKey();
-
   auto wrappedProfilingMsg = std::make_unique<RpcWithProfilingReq>(
-      dstId,
-      msgType,
-      std::move(wrappedRpcMessage),
-      profilerConfig,
-      currentProfilingKey);
+      dstId, msgType, std::move(wrappedRpcMessage), profilerConfig);
 
   auto msgWithProfiling = std::move(*wrappedProfilingMsg).toMessage();
   return msgWithProfiling;

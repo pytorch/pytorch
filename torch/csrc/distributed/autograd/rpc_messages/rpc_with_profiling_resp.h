@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
@@ -14,8 +15,7 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
       rpc::worker_id_t fromWorkerId,
       rpc::MessageType messageType,
       rpc::Message&& wrappedMessage,
-      std::string profiledEvents,
-      std::string profilingKey);
+      std::vector<torch::autograd::profiler::Event> profiledEvents);
 
   // For receving RPCs. Used in from message when converting a message received
   // over the wire.
@@ -25,15 +25,12 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
       std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
       rpc::MessageType wrappedMessageType,
       std::vector<torch::Tensor> tensors,
-      std::string profiledEvents,
-      std::string profilingKey);
+      std::vector<torch::autograd::profiler::Event> profiledEvents);
   rpc::Message toMessageImpl() && override;
   static std::unique_ptr<RpcWithProfilingResp> fromMessage(
       const rpc::Message& message);
-  // Retrieve the profiled events string
-  std::string getProfiledEvents() const;
-  // Retrieve profiling key
-  std::string getProfilingKey() const;
+  // Retrieve remote Events
+  std::vector<torch::autograd::profiler::Event> getProfiledEvents() const;
   // Retrieve the original RPC which this ProfilingRPC wraps.
   RpcCommandBase& wrappedRpc();
   // Destructively move the wrapped RPC.
@@ -54,8 +51,7 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
   std::unique_ptr<RpcCommandBase> wrappedRpc_;
   rpc::MessageType wrappedMessageType_;
   std::vector<torch::Tensor> tensors_;
-  std::string profiledEvents_;
-  std::string profilingKey_;
+  std::vector<torch::autograd::profiler::Event> profiledEvents_;
 };
 } // namespace autograd
 } // namespace distributed

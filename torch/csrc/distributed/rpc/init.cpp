@@ -4,7 +4,6 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
-#include <torch/csrc/distributed/rpc/remote_profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
@@ -115,21 +114,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "get_metrics",
               &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
-
-  py::class_<RemoteProfiler, std::unique_ptr<RemoteProfiler, py::nodelete>>(
-      module, "RemoteProfiler")
-      .def(py::init([]() {
-        return std::unique_ptr<RemoteProfiler, py::nodelete>(
-            &RemoteProfiler::getInstance());
-      }))
-      .def(
-          "set_current_profiling_key",
-          [](const std::string key) {
-            RemoteProfiler::getInstance().setCurrentKey(std::move(key));
-          })
-      .def("get_profiled_events", []() {
-        return RemoteProfiler::getInstance().getProfiledEvents();
-      });
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef", R"(
@@ -488,11 +472,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
               std::string /* selfName */,
               worker_id_t /* selfId */,
               int /* worldSize */,
+              std::shared_ptr<::c10d::ProcessGroup> /* processGroup */,
               TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
           py::arg("store"),
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
+          py::arg("process_group"),
           py::arg("rpc_backend_options"))
       .def(
           "join",
@@ -610,11 +596,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
-         const float rpcTimeoutSeconds,
-         const py::args& args,
-         const py::kwargs& kwargs) {
+         const py::tuple& argsTuple,
+         const py::dict& kwargsDict,
+         const float rpcTimeoutSeconds) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
-            dstWorkerName, qualifiedNameStr, rpcTimeoutSeconds, args, kwargs));
+            dstWorkerName,
+            qualifiedNameStr,
+            argsTuple,
+            kwargsDict,
+            rpcTimeoutSeconds));
       },
       py::call_guard<py::gil_scoped_release>());
 

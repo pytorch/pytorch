@@ -51,6 +51,10 @@ std::vector<char>&& Message::movePayload() && {
   return std::move(payload_);
 }
 
+std::vector<char>& Message::payload() {
+  return payload_;
+}
+
 const std::vector<char>& Message::payload() const {
   return payload_;
 }

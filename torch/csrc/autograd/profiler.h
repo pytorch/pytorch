@@ -131,13 +131,48 @@ struct TORCH_API Event final {
       uint16_t thread_id,
       bool record_cuda,
       at::RecordFunctionHandle handle = 0,
-      std::vector<std::vector<int64_t>>&& shapes = {})
+      std::vector<std::vector<int64_t>>&& shapes = {}, int node_id = -1)
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes) {
+        shapes_(shapes), node_id_(node_id) {
     record(record_cuda);
+  }
+
+  void setNodeId(int node_id) {
+    node_id_ = node_id;
+  }
+
+  // Returns IValues corresponding to event structure, to be used for
+  // serialization.
+  at::IValue getEventIValues() const {
+    c10::impl::GenericList eventIValueList(at::AnyType::get());
+    eventIValueList.push_back(at::IValue(static_cast<int64_t>(kind_)));
+    eventIValueList.push_back(at::IValue(std::string(name_.str())));
+    eventIValueList.push_back(at::IValue(thread_id_));
+    eventIValueList.push_back(at::IValue(static_cast<double>(handle_)));
+    eventIValueList.push_back(at::IValue(node_id_));
+    return at::IValue(eventIValueList);
+  }
+
+  // Reconstructs an event from IValues given by getEventIValues.
+  static Event fromIValue(at::IValue eventIValue) {
+    TORCH_INTERNAL_ASSERT(
+        eventIValue.isList(),
+        "Expected IValue to contain type c10::impl::GenericList");
+    auto ivalues = eventIValue.toList();
+
+    Event evt(
+      static_cast<EventKind>(ivalues.get(0).toInt()),
+      at::StringView(ivalues.get(1).toStringRef()),
+      ivalues.get(2).toInt(),
+      false, // TODO: record_cuda
+      static_cast<at::RecordFunctionHandle>(ivalues.get(3).toDouble()),
+      {}, // TODO: record shapes
+      ivalues.get(4).toInt()
+    );
+    return evt;
   }
 
   void record(bool record_cuda);
@@ -150,6 +185,12 @@ struct TORCH_API Event final {
     }
     throw std::runtime_error("unknown EventKind");
   }
+
+  // Get enum kind of this event.
+  EventKind eventKind() const {
+    return kind_;
+  }
+
   const char* name() const {
     return name_.str();
   }
@@ -171,7 +212,8 @@ struct TORCH_API Event final {
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
-    if (device.type() == c10::DeviceType::CUDA) {
+    if (device.type() == c10::DeviceType::CUDA ||
+        device.type() == c10::DeviceType::HIP) {
       cuda_memory_usage_ = alloc_size;
     } else if (device.type() == c10::DeviceType::CPU ||
         device.type() == c10::DeviceType::MKLDNN ||
@@ -194,6 +236,11 @@ struct TORCH_API Event final {
     return handle_;
   }
 
+  // Node ID corresponding to this event.
+  int node_id( )const {
+    return node_id_;
+  }
+
 private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
@@ -206,6 +253,7 @@ private:
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
   struct CUevent_st* cuda_event = nullptr;
+  int node_id_ = 0;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -252,6 +300,9 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 // across thread boundary (e.g. at::launch tasks)
 TORCH_API void enableProfiler(const ProfilerConfig&);
 TORCH_API thread_event_lists disableProfiler();
+// adds profiledEvents to the current thread local recorded events. Each event
+// will be marked with node ID given by fromNodeId.
+TORCH_API void addEventList(std::vector<Event> profiledEvents, int fromNodeId = -1);
 // Returns if the profiler is currently enabled in the current thread.
 TORCH_API bool profilerEnabled();
 // Retrieve the thread_local ProfilerConfig.

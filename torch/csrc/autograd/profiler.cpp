@@ -164,7 +164,7 @@ struct ProfilerThreadLocalState
       const char* msg = "",
       int64_t sequence_nr = -1,
       std::vector<std::vector<int64_t>>&& shapes = {},
-      at::RecordFunctionHandle handle = 0) {
+      at::RecordFunctionHandle handle = 0, int node_id = -1) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
@@ -178,11 +178,11 @@ struct ProfilerThreadLocalState
           at::RecordFunction::currentThreadId(),
           config_.state == ProfilerState::CUDA,
           handle,
-          std::move(shapes));
+          std::move(shapes), node_id != -1 ? node_id : at::RecordFunction::getDefaultNodeId());
     }
   }
 
-  void popRange(uint64_t thread_id, at::RecordFunctionHandle handle) {
+  void popRange(uint64_t thread_id, at::RecordFunctionHandle handle, int node_id = -1) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
@@ -193,12 +193,13 @@ struct ProfilerThreadLocalState
       // called on a different thread than pushRange
       // As a convention, we put the async pop on the original
       // thread and save current thread id in pop event
+      std::vector<std::vector<int64_t>> shapes;
       getEventList(thread_id).record(
           EventKind::PopRange,
           at::StringView(""),
           at::RecordFunction::currentThreadId(),
           config_.state == ProfilerState::CUDA,
-          handle);
+          handle, std::move(shapes), node_id != -1 ? node_id : at::RecordFunction::getDefaultNodeId());
     }
   }
 
@@ -226,6 +227,23 @@ struct ProfilerThreadLocalState
 
   bool memoryProfilingEnabled() const override {
     return config_.profile_memory;
+  }
+
+  RangeEventList& getEventList(int64_t thread_id = -1) {
+    if (thread_id < 0) {
+      thread_id = at::RecordFunction::currentThreadId();
+    }
+    RangeEventList* list_ptr = nullptr;
+    std::lock_guard<std::mutex> guard(state_mutex_);
+    auto it = event_lists_map_.find(thread_id);
+    if (it != event_lists_map_.end()) {
+      list_ptr = it->second.get();
+    } else {
+      auto event_list = std::make_shared<RangeEventList>();
+      event_lists_map_[thread_id] = event_list;
+      list_ptr = event_list.get();
+    }
+    return *list_ptr;
   }
 
  private:
@@ -264,23 +282,6 @@ struct ProfilerThreadLocalState
     } else {
       return name.str();
     }
-  }
-
-  RangeEventList& getEventList(int64_t thread_id = -1) {
-    if (thread_id < 0) {
-      thread_id = at::RecordFunction::currentThreadId();
-    }
-    RangeEventList* list_ptr = nullptr;
-    std::lock_guard<std::mutex> guard(state_mutex_);
-    auto it = event_lists_map_.find(thread_id);
-    if (it != event_lists_map_.end()) {
-      list_ptr = it->second.get();
-    } else {
-      auto event_list = std::make_shared<RangeEventList>();
-      event_lists_map_[thread_id] = event_list;
-      list_ptr = event_list.get();
-    }
-    return *list_ptr;
   }
 
   std::mutex state_mutex_;
@@ -323,9 +324,9 @@ void pushProfilingCallbacks() {
             }
           }
           state_ptr->pushRange(
-              fn.name(), msg, fn.seqNr(), std::move(inputSizes), fn.handle());
+              fn.name(), msg, fn.seqNr(), std::move(inputSizes), fn.handle(), at::RecordFunction::getDefaultNodeId());
         } else {
-          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {}, fn.handle());
+          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {}, fn.handle(), at::RecordFunction::getDefaultNodeId());
         }
       },
       [](const at::RecordFunction& fn) {
@@ -333,7 +334,7 @@ void pushProfilingCallbacks() {
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
-        state_ptr->popRange(fn.getStartCallbacksThreadId(), fn.handle());
+        state_ptr->popRange(fn.getStartCallbacksThreadId(), fn.handle(), at::RecordFunction::getDefaultNodeId());
       })
     .needsInputs(state_ptr->config().report_input_shapes));
   state_ptr->setCallbackHandle(handle);
@@ -414,6 +415,25 @@ thread_event_lists disableProfiler() {
   return state_ptr->consolidate();
 }
 
+void addEventList(std::vector<Event> profiledEvents, int fromNodeId) {
+  auto state_ptr = getProfilerTLSState();
+  int nodeId =
+      fromNodeId == -1 ? at::RecordFunction::getDefaultNodeId() : fromNodeId;
+  for (auto& evt : profiledEvents ) {
+    evt.setNodeId(nodeId);
+    auto& evtList = state_ptr->getEventList();
+
+    evtList.record(
+        evt.eventKind(),
+        // Note: need to construct with std::string so StringView has ownership,
+        // otherwise it will share with a temporary evt.
+        at::StringView(std::string(evt.name())),
+        evt.thread_id(),
+        false,
+        evt.handle(), evt.shapes(), evt.node_id());
+  }
+}
+
 void Event::record(bool record_cuda) {
   if (record_cuda) {
     cuda_stubs->record(&device_, &cuda_event, &cpu_ns_);
@@ -452,18 +472,24 @@ void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& e
     }
   }
   TORCH_CHECK(profiler_start, "Could not find __start_profile mark");
-  std::unordered_map<at::RecordFunctionHandle, Event*> events_map;
+
+struct PairHash {
+  size_t operator()(std::pair<at::RecordFunctionHandle, int> p) const noexcept {
+    return std::hash<unsigned long>()(p.first) ^ std::hash<int>()(p.second);
+  }
+};
+  std::unordered_map<std::pair<at::RecordFunctionHandle, int>, Event*, PairHash> events_map;
   out << "[\n";
   bool first = true;
   for (Event* evt : events) {
     if (evt->kind() == "push") {
-      events_map[evt->handle()] = evt;
+      events_map[std::make_pair(evt->handle(), evt->node_id())] = evt;
     } else if (evt->kind() == "pop") {
       if (!first) {
         out << ",\n";
       }
       first = false;
-      auto it = events_map.find(evt->handle());
+      auto it = events_map.find(std::make_pair(evt->handle(), evt->node_id()));
       TORCH_CHECK(it != events_map.end(), "Unmatched pop event");
       Event* evt_start = it->second;
       events_map.erase(it);

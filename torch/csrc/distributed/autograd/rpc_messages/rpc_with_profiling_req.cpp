@@ -15,13 +15,11 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     rpc::worker_id_t fromWorkerId,
     rpc::MessageType messageType,
     rpc::Message&& wrappedMessage,
-    const torch::autograd::profiler::ProfilerConfig& profilerConfig,
-    const std::string profilingKey)
+    const torch::autograd::profiler::ProfilerConfig& profilerConfig)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
-      profilerConfig_(profilerConfig),
-      profilingKey_(std::move(profilingKey)) {
+      profilerConfig_(profilerConfig) {
   tensors_ = wrappedMessage_.tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_REQ,
@@ -38,15 +36,13 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
     rpc::MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
-    torch::autograd::profiler::ProfilerConfig& profilerConfig,
-    const std::string clientProfilingKey)
+    torch::autograd::profiler::ProfilerConfig& profilerConfig)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
       tensors_(std::move(tensors)),
-      profilerConfig_(profilerConfig),
-      profilingKey_(std::move(clientProfilingKey)) {
+      profilerConfig_(profilerConfig) {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cant be null");
 }
 
@@ -75,7 +71,7 @@ rpc::Message RpcWithProfilingReq::toMessageImpl() && {
   std::vector<at::IValue> ivalues{wrappedMsgType,
                                   static_cast<int64_t>(profilerConfig_.state),
                                   profilerConfig_.report_input_shapes,
-                                  profilingKey_,
+                                  profilerConfig_.profile_memory,
                                   fromWorkerId_};
   // Pickle it into a char payload to be sent over the wire.
   std::vector<torch::Tensor> tensorTable;
@@ -103,10 +99,6 @@ torch::autograd::profiler::ProfilerConfig RpcWithProfilingReq::
   return profilerConfig_;
 }
 
-const std::string RpcWithProfilingReq::getProfilingKey() const {
-  return profilingKey_;
-}
-
 rpc::worker_id_t RpcWithProfilingReq::fromWorkerId() const {
   return fromWorkerId_;
 }
@@ -128,12 +120,12 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
       static_cast<torch::autograd::profiler::ProfilerState>(profilerStateType);
 
   bool clientReportInputShapes = tupleElements[2].toBool();
+  bool profileMemory = tupleElements[3].toBool();
   // Create a config to be enabled on this node that is a replica of the state
   // on the requesting node.
   // TODO: set profile_memory properly.
   torch::autograd::profiler::ProfilerConfig cfg(
-      clientProfilerState, clientReportInputShapes, false);
-  const std::string clientProfilingKey = tupleElements[3].toStringRef();
+      clientProfilerState, clientReportInputShapes, profileMemory);
   int fromWorkerId = tupleElements[4].toInt();
   // Create new message type and build wrapped RPC
   rpc::Message wrappedMessage(
@@ -150,8 +142,7 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
       std::move(wrappedRpc),
       wrappedMsgType,
       wrappedMessage.tensors(),
-      cfg,
-      std::move(clientProfilingKey));
+      cfg);
 }
 
 } // namespace autograd

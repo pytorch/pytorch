@@ -321,6 +321,17 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   manager().runStartCallbacks(*this);
 }
 
+
+int64_t RecordFunction::defaultNodeId_ = -1;
+
+/* static */ void RecordFunction::setDefaultNodeId(int64_t defaultNodeId) {
+  defaultNodeId_ = defaultNodeId;
+}
+
+/* static */ int64_t RecordFunction::getDefaultNodeId() {
+  return defaultNodeId_;
+}
+
 RecordFunction::~RecordFunction() {
   end();
 }

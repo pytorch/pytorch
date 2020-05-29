@@ -7,14 +7,12 @@ from functools import partial
 from unittest import mock
 
 import torch
-import json
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
 import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import (
-    RemoteProfiler,
     _delete_all_user_rrefs,
     _use_rpc_pickler,
 )
@@ -33,7 +31,7 @@ from torch.testing._internal.dist_utils import (
     get_timeout_error_regex,
     initialize_pg,
     wait_until_node_failure,
-    wait_until_pending_users_flushed,
+    wait_until_pending_futures_and_users_flushed,
     worker_name,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
@@ -187,6 +185,7 @@ def my_tensor_function(a, b):
 
 def my_sleep_func(seconds=1):
     time.sleep(seconds)
+    return torch.add(torch.tensor(1), torch.tensor(1))
 
 
 def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
@@ -866,31 +865,58 @@ class RpcTest(RpcAgentTestFixture):
                     fut = rpc.rpc_async(
                         worker_name(dst),
                         torch.mul,
-                        args=(torch.tensor(1), torch.tensor(1)),
+                        args=(
+                            torch.tensor(1.0, requires_grad=True),
+                            torch.tensor(1.0, requires_grad=True),
+                        ),
+                    )
+                    fut2 = rpc.rpc_async(
+                        worker_name(dst),
+                        torch.add,
+                        args=(
+                            torch.tensor(1.0, requires_grad=True),
+                            torch.tensor(1.0, requires_grad=True),
+                        ),
                     )
                     fut.wait()
+                    fut2.wait()
             events = prof.function_events
-            remote_profiled_events = RemoteProfiler.get_profiled_events()
-            for k, v in remote_profiled_events.items():
-                obj = json.loads(v)
-                # We should find a torch.mul in the profiled events.
-                mul_events = [x for x in obj if 'name' in x.keys() and x['name'] == 'mul']
-                self.assertNotEqual(mul_events, [])
+            print(prof.key_averages().table())
 
-            rpc_event = [
-                event for event in events if torch.jit._find_builtin(torch.mul) in event.name
-            ][0]
+            rpc_mul_event = get_function_event(
+                events, torch.jit._find_builtin(torch.mul)
+            )
+            rpc_add_event = get_function_event(
+                events, torch.jit._find_builtin(torch.add)
+            )
+            remote_events = {
+                event for event in events if event.name in ["mul", "add"]
+            } - {rpc_mul_event, rpc_add_event}
+            for remote_event in remote_events:
+                self.assertEqual(dst, remote_event.node_id)
             self.check_profiling_info(
                 worker_name(self.rank),
                 worker_name(dst),
                 torch.mul,
-                rpc_event,
+                rpc_mul_event,
                 RPCExecMode.ASYNC,
             )
+            self.check_profiling_info(
+                worker_name(self.rank),
+                worker_name(dst),
+                torch.add,
+                rpc_add_event,
+                RPCExecMode.SYNC,
+            )
+            # Validate that the invocations of the RPC events themselves have
+            # the current rank as the node id.
+            for evt in [rpc_mul_event, rpc_add_event]:
+                self.assertEqual(evt.node_id, self.rank)
 
 
-    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False):
-        dst = (self.rank + 1) % self.world_size
+    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False, dst=None):
+        dst = dst or (self.rank + 1) % self.world_size
+
         # only run profiler on rank 1.
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
@@ -916,6 +942,14 @@ class RpcTest(RpcAgentTestFixture):
 
             events = prof.function_events
             rpc_event = get_function_event(events, rpc_exec_mode.value)
+            # verify Node ID for this rpc event.
+            self.assertEqual(rpc_event.node_id, self.rank)
+            # Ensure recording of remote events.
+            remote_events = {event for event in events if event.name in ['add']} - {rpc_event}
+            self.assertGreaterEqual(len(remote_events), 1)
+            for remote_event in remote_events:
+                self.assertEqual(remote_event.node_id, dst)
+
             if use_record_function:
                 scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
@@ -933,6 +967,8 @@ class RpcTest(RpcAgentTestFixture):
                 foo_event_ix = next(i for i, event in enumerate(events) if "foo" in event.name)
                 rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
                 self.assertLess(foo_event_ix, rpc_event_idx)
+
+            print(prof.key_averages().table())
 
     @dist_init
     def test_profiler_with_sync_rpc_udf(self):
@@ -969,8 +1005,13 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
-        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,),
-                                     use_record_function=True)
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_sleep_func, args=(1,), use_record_function=True
+        )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_sleep_func, args=(1,), dst=self.rank
+        )
 
     @dist_init
     def test_profiler_with_remote_builtin(self):
@@ -980,6 +1021,13 @@ class RpcTest(RpcAgentTestFixture):
         self._profiler_test_with_rpc(
             RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)),
             use_record_function=True
+        )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE,
+            torch.add,
+            args=(torch.ones(1), torch.ones(1)),
+            dst=self.rank,
         )
 
     @dist_init
@@ -1017,6 +1065,11 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.tensor(1),),
             use_record_function=True,
         )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),), dst=self.rank
+        )
+
 
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
@@ -1853,9 +1906,9 @@ class RpcTest(RpcAgentTestFixture):
         rpc.rpc_sync(worker_name(dst_rank), set_global_rref, args=(rref1,))
 
         # barrier before check 2
+        wait_until_pending_futures_and_users_flushed()
         dist.barrier()
 
-        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
@@ -1879,9 +1932,9 @@ class RpcTest(RpcAgentTestFixture):
         rref3.to_here()
 
         # barrier before check 3
+        wait_until_pending_futures_and_users_flushed()
         dist.barrier()
 
-        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))

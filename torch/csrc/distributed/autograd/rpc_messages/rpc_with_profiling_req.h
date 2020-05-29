@@ -18,8 +18,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
       rpc::worker_id_t fromWorkerId,
       rpc::MessageType messageType,
       rpc::Message&& wrappedMessage,
-      const torch::autograd::profiler::ProfilerConfig& profilerConfig,
-      const std::string profilingKey);
+      const torch::autograd::profiler::ProfilerConfig& profilerConfig);
 
   // For receiving an RPC
   // Used in fromMessage.
@@ -29,8 +28,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
       std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
       rpc::MessageType wrappedMessageType,
       std::vector<torch::Tensor> tensors,
-      torch::autograd::profiler::ProfilerConfig& profilerConfig,
-      const std::string clientProfilingKey);
+      torch::autograd::profiler::ProfilerConfig& profilerConfig);
 
   // Convert this RPC Command to a Message that can be sent over the wire.
   rpc::Message toMessageImpl() && override;
@@ -39,8 +37,6 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
 
   // Retrieve the profiling data that is associated with this command.
   torch::autograd::profiler::ProfilerConfig getProfilingConfig() const;
-  // Retrieve the profiling key that is associated with this command
-  const std::string getProfilingKey() const;
   // Retrieve the original RPC which this ProfilingRPC wraps.
   RpcCommandBase& wrappedRpc();
   // Destructively move the wrapped RPC.
@@ -62,7 +58,6 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
   rpc::MessageType wrappedMessageType_;
   std::vector<torch::Tensor> tensors_;
   torch::autograd::profiler::ProfilerConfig profilerConfig_;
-  std::string profilingKey_;
 };
 } // namespace autograd
 } // namespace distributed

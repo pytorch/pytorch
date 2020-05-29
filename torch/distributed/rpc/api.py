@@ -10,7 +10,6 @@ import torch.distributed as dist
 from torch.jit import Future  # noqa F401
 
 from . import (
-    RemoteProfiler,
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
@@ -450,8 +449,7 @@ def remote(to, func, args=None, kwargs=None):
             get_worker_info().name,
             dst_worker_info.name,
         )
-        RemoteProfiler.set_current_profiling_key(rpc_profiling_key)
-        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
+        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key, get_worker_info().id)
 
     with ctx_manager as rf:
         args = args if args else ()
@@ -509,8 +507,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             get_worker_info().name,
             dst_worker_info.name,
         )
-        RemoteProfiler.set_current_profiling_key(rpc_profiling_key)
-        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key)
+        ctx_manager = torch.autograd.profiler.record_function(rpc_profiling_key, get_worker_info().id)
 
     with ctx_manager as rf:
         args = args if args else ()
@@ -520,7 +517,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
             fut = _invoke_rpc_torchscript(
-                dst_worker_info.name, torch.jit._qualified_name(func), rpc_timeout, *args, **kwargs,
+                dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
             )
         else:
             (pickled_python_udf, tensors) = _default_pickler.serialize(

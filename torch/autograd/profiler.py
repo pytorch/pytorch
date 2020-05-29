@@ -197,8 +197,8 @@ class EventList(list):
 
         def get_key(event, group_by_input_shapes):
             if not group_by_input_shapes:
-                return event.key
-            return (event.key, str(event.input_shapes))
+                return (event.key, event.node_id)
+            return (event.key, str(event.input_shapes), event.node_id)
         for evt in self:
             stats[get_key(evt, group_by_input_shapes)].add(
                 evt, group_by_input_shapes)
@@ -394,13 +394,14 @@ class record_function(ContextDecorator):
         CUDA time total: 0.000us
 
     """
-    def __init__(self, name):
+    def __init__(self, name, node_id=-1):
         self.name = name
+        self.node_id = node_id
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit = True
 
     def __enter__(self):
-        self.handle = torch.ops.profiler._record_function_enter(self.name)
+        self.handle = torch.ops.profiler._record_function_enter(self.name, self.node_id)
         return self
 
     def __exit__(self, *args):
@@ -573,7 +574,7 @@ def format_time(time_us):
 def format_time_share(time_us, total_time_us):
     """Defines how to format time in FunctionEvent"""
     if total_time_us == 0:
-        assert(time_us == 0)
+        assert time_us == 0, "Expected time_us == 0 but got {}".format(time_us)
         return "NaN"
     return '{:.2f}%'.format(time_us * 100.0 / total_time_us)
 
@@ -630,9 +631,10 @@ Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
-            self, id, name, thread, cpu_start, cpu_end, input_shapes=None,
+            self, id, node_id, name, thread, cpu_start, cpu_end, input_shapes=None,
             cpu_memory_usage=0, cuda_memory_usage=0, is_async=False):
         self.id = id
+        self.node_id = node_id
         self.name = name
         self.cpu_interval = Interval(cpu_start, cpu_end)
         self.thread = thread
@@ -697,10 +699,11 @@ class FunctionEvent(FormattedTimesMixin):
 
     def __repr__(self):
         return (
-            '<FunctionEvent id={} cpu_time={} cpu_start={} cpu_end={} '
+            '<FunctionEvent id={} node_id={} cpu_time={} cpu_start={} cpu_end={} '
             'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
             'cpu_memory_usage={} cuda_memory_usage={}>'.format(
                 self.id,
+                self.node_id,
                 self.cpu_time_str,
                 self.cpu_interval.start,
                 self.cpu_interval.end,
@@ -720,6 +723,7 @@ class FunctionEventAvg(FormattedTimesMixin):
     def __init__(self):
         self.key = None
         self.count = 0
+        self.node_id = 0
         self.cpu_time_total = 0
         self.cuda_time_total = 0
         self.self_cpu_time_total = 0
@@ -732,6 +736,7 @@ class FunctionEventAvg(FormattedTimesMixin):
     def add(self, other, group_by_input_shapes=False):
         if self.key is None:
             self.key = other.key
+            self.node_id = other.node_id
             if group_by_input_shapes:
                 self.input_shapes = other.input_shapes
 
@@ -782,6 +787,10 @@ class StringTable(defaultdict):
 ################################################################################
 # CPU checkpoints
 
+def get_record_key(record):
+    return (record.handle(), record.node_id())
+
+
 def parse_cpu_trace(thread_records):
     next_id = 0
     start_record = None
@@ -811,9 +820,10 @@ def parse_cpu_trace(thread_records):
 
     # '__start_profile' is not guarenteed to be first, so we must find it here
     for record in itertools.chain(*thread_records):
-        if record.name() == '__start_profile':
+        name = record.name()
+        if name == '__start_profile':
             start_record = record
-        elif record.name() == '__cuda_start_event':
+        elif name == '__cuda_start_event':
             assert record.device() != -1
             cuda_records[record.device()] = record
     assert start_record is not None
@@ -829,33 +839,42 @@ def parse_cpu_trace(thread_records):
         prev_record = None
         for record in thread_record_list:
             if (record.name() in filtered_out_names or
-                    record.handle() in filtered_handles):
-                filtered_handles.add(record.handle())
+                    get_record_key(record) in filtered_handles):
+                filtered_handles.add(get_record_key(record))
                 continue
 
             if record.kind() == 'push':
                 # workaround to reduce double logging from operator
                 # wrappers and redispatch
                 if prev_record is not None:
-                    if (prev_record.name() == record.name() and
-                            prev_record.kind() == record.kind()):
-                        filtered_handles.add(record.handle())
+                    duplicate = (
+                        prev_record.name() == record.name()
+                        and prev_record.kind() == record.kind()
+                        and prev_record.node_id() == record.node_id()
+                    )
+                    if duplicate:
+                        filtered_handles.add(get_record_key(record))
                         continue
 
-                range_starts[record.handle()] = record
-                cpu_memory_allocs[record.handle()] = 0
-                cuda_memory_allocs[record.handle()] = 0
+                range_starts[get_record_key(record)] = record
+                cpu_memory_allocs[get_record_key(record)] = 0
+                cuda_memory_allocs[get_record_key(record)] = 0
             elif record.kind() == 'pop':
-                assert record.handle() in range_starts
+                assert (
+                    get_record_key(record) in range_starts
+                ), "Expected record (name={}) with key {} to exist in range_starts".format(
+                    record.name(), get_record_key(record)
+                )
 
-                start = range_starts[record.handle()]
+                start = range_starts[get_record_key(record)]
 
-                cpu_memory_usage = cpu_memory_allocs[record.handle()]
-                cuda_memory_usage = cuda_memory_allocs[record.handle()]
+                cpu_memory_usage = cpu_memory_allocs[get_record_key(record)]
+                cuda_memory_usage = cuda_memory_allocs[get_record_key(record)]
                 is_async = start.thread_id() != record.thread_id()
 
                 fe = FunctionEvent(
                     id=record.handle(),
+                    node_id=record.node_id(),
                     name=string_table[start.name()],
                     thread=start.thread_id(),
                     cpu_start=start_record.cpu_elapsed_us(start),
@@ -874,9 +893,9 @@ def parse_cpu_trace(thread_records):
                         cuda_start,
                         cuda_end)
                 functions.append(fe)
-                del range_starts[record.handle()]
-                del cpu_memory_allocs[record.handle()]
-                del cuda_memory_allocs[record.handle()]
+                del range_starts[get_record_key(record)]
+                del cpu_memory_allocs[get_record_key(record)]
+                del cuda_memory_allocs[get_record_key(record)]
             elif record.kind() == 'memory_alloc':
                 for handle in cpu_memory_allocs.keys():
                     cpu_memory_allocs[handle] += record.cpu_memory_usage()
@@ -1024,6 +1043,10 @@ def build_table(
     headers.append(
         'Number of Calls'
     )
+    # Only append Node ID if any event has a valid (>= 0) Node ID
+    append_node_id = any([evt.node_id != -1 for evt in events])
+    if append_node_id:
+        headers.append('Node ID')
 
     # Have to use a list because nonlocal is Py3 only...
     SPACING_SIZE = 2
@@ -1104,6 +1127,9 @@ def build_table(
         row_values.append(
             evt.count,  # Number of calls
         )
+
+        if append_node_id:
+            row_values.append(evt.node_id)  # node id
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:SHAPES_COLUMN_WIDTH])
         append(row_format.format(*row_values))

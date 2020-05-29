@@ -568,31 +568,28 @@ void RequestCallbackImpl::processRpc(
       auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
       auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
       const auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
-      const auto profilingKey = rpcWithProfilingReq.getProfilingKey();
       auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
       auto fromWorkerId = rpcWithProfilingReq.fromWorkerId();
       // Enable the profiler with the config from the sender.
-      std::stringstream out;
+      std::vector<torch::autograd::profiler::Event> profiledEvents;
       {
         torch::autograd::profiler::TLSProfilerGuard g(
             profilingConfig,
-            [&out](std::vector<std::vector<torch::autograd::profiler::Event>>
-                       event_lists) {
+            [&profiledEvents](
+                std::vector<std::vector<torch::autograd::profiler::Event>>
+                    event_lists) {
               // Gather all events into a vector
-              std::vector<torch::autograd::profiler::Event*> events;
               for (auto& l : event_lists) {
                 for (auto& e : l) {
-                  events.push_back(&e);
+                  profiledEvents.push_back(e);
                 }
               }
-              torch::autograd::profiler::writeProfilerEventsToStream(
-                  out, events);
             });
         TORCH_INTERNAL_ASSERT(
             torch::autograd::profiler::profilerEnabled(),
             "Expected profiler to be enabled!");
         // Kick off processing for nested work and get Future<T> result in
-        // wrappedrpcresponsefuture
+        // wrappedRpcResponseFuture
         processRpc(
             rpcWithProfilingReq.wrappedRpc(),
             wrappedMsgType,
@@ -602,9 +599,8 @@ void RequestCallbackImpl::processRpc(
       wrappedRpcResponseFuture->addCallback([wrappedRpcResponseFuture,
                                              responseFuture,
                                              fromWorkerId,
-                                             outStr = std::move(out.str()),
-                                             profilingKey =
-                                                 std::move(profilingKey)] {
+                                             profiledEvents =
+                                                 std::move(profiledEvents)] {
         if (wrappedRpcResponseFuture->hasError()) {
           // Propagate error
           responseFuture->setError(wrappedRpcResponseFuture->error()->what());
@@ -613,8 +609,7 @@ void RequestCallbackImpl::processRpc(
               fromWorkerId,
               MessageType::RUN_WITH_PROFILING_RESP,
               std::move(*wrappedRpcResponseFuture).moveValue(),
-              outStr,
-              profilingKey);
+              profiledEvents);
           responseFuture->markCompleted(
               std::move(*rpcWithProfilingResp).toMessage());
         }
