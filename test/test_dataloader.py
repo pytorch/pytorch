@@ -1312,9 +1312,23 @@ except RuntimeError as e:
 
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
 
+    def _test_sampler(self, **kwargs):
+        indices = range(2, 12)  # using a regular iterable
+        dl = DataLoader(self.dataset, sampler=indices, batch_size=2, **kwargs)
+        self.assertEqual(len(dl), 5)
+        for i, (input, _target) in enumerate(dl):
+            self.assertEqual(len(input), 2)
+            self.assertEqual(input, self.data[i * 2 + 2:i * 2 + 4])
+
+    def test_sampler(self):
+        self._test_sampler()
+        self._test_sampler(num_workers=4)
+        if not NO_MULTIPROCESSING_SPAWN and torch.multiprocessing._supports_context:
+            self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
+
     def _test_batch_sampler(self, **kwargs):
         # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]
-        batches = []
+        batches = []  # using a regular iterable
         for i in range(0, 20, 5):
             batches.append(tuple(range(i, i + 2)))
             batches.append(tuple(range(i + 2, i + 5)))
@@ -1565,6 +1579,29 @@ except RuntimeError as e:
         check_len(DataLoader(self.dataset, batch_size=2), 50)
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
+    def test_iterabledataset_len(self):
+        class IterableDataset(torch.utils.data.IterableDataset):
+            def __len__(self):
+                return 10
+
+            def __iter__(self):
+                return iter(range(10))
+
+        iterable_loader = DataLoader(IterableDataset(), batch_size=1)
+        self.assertEqual(len(iterable_loader), 10)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=1, drop_last=True)
+        self.assertEqual(len(iterable_loader), 10)
+
+        iterable_loader = DataLoader(IterableDataset(), batch_size=2)
+        self.assertEqual(len(iterable_loader), 5)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=2, drop_last=True)
+        self.assertEqual(len(iterable_loader), 5)
+
+        iterable_loader = DataLoader(IterableDataset(), batch_size=3)
+        self.assertEqual(len(iterable_loader), 4)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=3, drop_last=True)
+        self.assertEqual(len(iterable_loader), 3)
+
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_numpy_scalars(self):
         import numpy as np
@@ -1603,7 +1640,8 @@ except RuntimeError as e:
 
         arr = [1.1, 2.3, -0.9]
         collated = _utils.collate.default_collate(arr)
-        self.assertEqual(collated, torch.tensor(arr))
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(collated, torch.tensor(arr))
         self.assertEqual(collated.dtype, torch.float64)
 
         arr = [True, False]
@@ -1631,6 +1669,11 @@ except RuntimeError as e:
 
         arr = np.array([[[object(), object(), object()]]])
         self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+
+    def test_default_collate_bad_sequence_type(self):
+        batch = [['X'], ['X', 'X']]
+        self.assertRaises(RuntimeError, lambda: _utils.collate.default_collate(batch))
+        self.assertRaises(RuntimeError, lambda: _utils.collate.default_collate(batch[::-1]))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_shared_tensor(self):

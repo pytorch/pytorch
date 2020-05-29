@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/api/module.h>
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -213,7 +213,8 @@ Module Module::clone_impl(
           type()->getAttributeName(i),
           type()->getAttribute(i),
           s,
-          type()->is_parameter(i));
+          type()->is_parameter(i),
+          type()->is_buffer(i));
     }
   }
 

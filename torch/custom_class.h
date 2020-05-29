@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/stack.h>
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
@@ -114,6 +115,17 @@ class class_ {
   class_& def(std::string name, Func f) {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
     defineMethod(std::move(name), std::move(wrapped_f));
+    return *this;
+  }
+
+  /// This is an unsafe method registration API added for adding custom JIT backend support via custom
+  /// C++ classes. It is not for general purpose use.
+  class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema) {
+    auto qualMethodName = qualClassName + "." + name;
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
+        qualMethodName, std::move(schema), std::move(func));
+    classTypePtr->addMethod(method.get());
+    registerCustomClassMethod(std::move(method));
     return *this;
   }
 

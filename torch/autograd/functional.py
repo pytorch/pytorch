@@ -11,7 +11,7 @@ def _as_tuple(inp, arg_name, fn_name):
         is_inp_tuple = False
 
     for i, el in enumerate(inp):
-        if not torch.is_tensor(el):
+        if not isinstance(el, torch.Tensor):
             if is_inp_tuple:
                 raise TypeError("The {} given to {} must be either a Tensor or a tuple of Tensors but the"
                                 " value at index {} has type {}.".format(arg_name, fn_name, i, type(el)))
@@ -64,7 +64,7 @@ def _grad_preprocess(inputs, create_graph, need_graph):
 def _grad_postprocess(inputs, create_graph):
     # Postprocess the generated Tensors to avoid returning Tensors with history when the user did not
     # request it.
-    if torch.is_tensor(inputs[0]):
+    if isinstance(inputs[0], torch.Tensor):
         if not create_graph:
             return tuple(inp.detach() for inp in inputs)
         else:
@@ -540,7 +540,7 @@ def hessian(func, inputs, create_graph=False, strict=False):
         is_out_tuple, t_out = _as_tuple(out, "outputs of the user-provided function", "hessian")
         _check_requires_grad(t_out, "outputs", strict=strict)
 
-        if is_out_tuple or not torch.is_tensor(out):
+        if is_out_tuple or not isinstance(out, torch.Tensor):
             raise RuntimeError("The function given to hessian should return a single Tensor")
 
         if out.nelement() != 1:
@@ -621,7 +621,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
     is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "vhp")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
-    if is_outputs_tuple or not torch.is_tensor(outputs[0]):
+    if is_outputs_tuple or not isinstance(outputs[0], torch.Tensor):
         raise RuntimeError("The function given to vhp should return a single Tensor")
 
     if outputs[0].nelement() != 1:
@@ -718,7 +718,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
     is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "hvp")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
-    if is_outputs_tuple or not torch.is_tensor(outputs[0]):
+    if is_outputs_tuple or not isinstance(outputs[0], torch.Tensor):
         raise RuntimeError("The function given to hvp should return a single Tensor")
 
     if outputs[0].nelement() != 1:

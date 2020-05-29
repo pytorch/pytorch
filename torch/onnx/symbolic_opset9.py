@@ -1240,10 +1240,6 @@ def abs(g, self):
     return g.op("Abs", self)
 
 
-def absolute(g, self):
-    return g.op("Abs", self)
-
-
 def log(g, self):
     return g.op("Log", self)
 
@@ -1253,7 +1249,16 @@ def log1p(g, self):
 
 
 def pow(g, self, exponent):
-    return g.op("Pow", self, exponent)
+    f_dtype = self_dtype = self.type().scalarType()
+    if not sym_help._is_fp(self):
+        f_dtype = 'Float'
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[f_dtype])
+    if not sym_help._is_fp(exponent):
+        exponent = g.op("Cast", exponent, to_i=sym_help.cast_pytorch_to_onnx[f_dtype])
+    pow = g.op("Pow", self, exponent)
+    if self_dtype and self_dtype != f_dtype:
+        pow = g.op("Cast", pow, to_i=sym_help.cast_pytorch_to_onnx[self_dtype])
+    return pow
 
 
 def clamp(g, self, min, max):

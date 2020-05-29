@@ -262,35 +262,62 @@ struct SourceImporterImpl : public Resolver,
     }
   }
 
-  c10::optional<Assign> qconvAttributeAssignmentSpecialHandlingHack(
+  c10::optional<Assign> attributeAssignmentSpecialHandlingHack(
       const QualifiedName& qualified_classname,
       const Assign& assign) {
-    static std::regex mangle_re("\\.___torch_mangle_\\d+");
-    auto replaced_string =
-        std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
-    auto is_conv2d = [](const std::string& type) {
-      return type == "__torch__.torch.nn.quantized.modules.conv.Conv2d" ||
-          type ==
-          "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d";
+    struct AttrTypeReplacementDescr {
+      std::string attr_name;
+      std::string expected_type;
+      std::string replacement_type;
     };
 
-    auto is_conv3d = [](const std::string& type) {
-      return type == "__torch__.torch.nn.quantized.modules.conv.Conv3d" ||
-          type ==
-          "__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d";
-    };
-    if (is_conv2d(replaced_string) || is_conv3d(replaced_string)) {
+    // module demangled qualname -> ReplacementDescr
+    static std::unordered_map<std::string, AttrTypeReplacementDescr> replacements{
+        {"__torch__.torch.nn.quantized.modules.linear.LinearPackedParams",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.linear.Linear",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.dynamic.modules.linear.Linear",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.LinearPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.conv.Conv2d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+        {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"}},
+        {"__torch__.torch.nn.quantized.modules.conv.Conv3d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}},
+        {"__torch__.torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU3d",
+         {"_packed_params",
+          "Tensor",
+          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase"}}};
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto demangled_classname =
+        std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
+    if (replacements.count(demangled_classname)) {
       auto lhs = Var(assign.lhs());
       if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
         return c10::nullopt;
       }
       auto type = Var(assign.type().get());
-      if (lhs.name().name() == "_packed_params" &&
-          type.name().name() == "Tensor") {
-        std::string packed_params_typename = is_conv2d(replaced_string)
-            ? "__torch__.torch.classes.quantized.Conv2dPackedParamsBase"
-            : "__torch__.torch.classes.quantized.Conv3dPackedParamsBase";
-        Parser p(std::make_shared<Source>(std::move(packed_params_typename)));
+
+      auto& attr_name = replacements.at(demangled_classname).attr_name;
+      auto& expected_type = replacements.at(demangled_classname).expected_type;
+      auto& replacement_type =
+          replacements.at(demangled_classname).replacement_type;
+      if (lhs.name().name() == attr_name &&
+          type.name().name() == expected_type) {
+        Parser p(std::make_shared<Source>(replacement_type));
         auto typename_expr = p.parseExp();
         auto maybe_typename =
             Maybe<Expr>::create(typename_expr.range(), typename_expr);
@@ -331,6 +358,7 @@ struct SourceImporterImpl : public Resolver,
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
+    std::unordered_set<std::string> buffer_names;
     // Process statements, splitting things into attribute and method
     // definitions.
     for (const auto& statement : class_def.body()) {
@@ -357,8 +385,16 @@ struct SourceImporterImpl : public Resolver,
               } else if (name == "__annotations__") {
                 // This is to initialize the annotations dict, just ignore.
                 continue;
+              } else if (name == "__buffers__") {
+                TORCH_INTERNAL_ASSERT(
+                    is_module, "Buffers only exist on modules at the moment");
+                const auto buffer_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& buffer : buffer_list) {
+                  buffer_names.insert(StringLiteral(buffer).text());
+                }
               } else {
-                if (auto fixed_up = qconvAttributeAssignmentSpecialHandlingHack(
+                if (auto fixed_up = attributeAssignmentSpecialHandlingHack(
                         qualified_classname, assign)) {
                   attributes.push_back(std::move(*fixed_up));
                 } else if (assign.rhs().present()) {
@@ -412,7 +448,8 @@ struct SourceImporterImpl : public Resolver,
           TORCH_INTERNAL_ASSERT(name != "__parameters__");
           const auto type = type_parser.parseTypeFromExpr(assign.type().get());
           const bool is_parameter = parameter_names.count(name);
-          class_type->addAttribute(name, type, is_parameter);
+          const bool is_buffer = buffer_names.count(name);
+          class_type->addAttribute(name, type, is_parameter, false, is_buffer);
         } break;
         case TK_SUBSCRIPT: {
           const auto name =
@@ -420,7 +457,8 @@ struct SourceImporterImpl : public Resolver,
                   .text();
           const auto type = type_parser.parseTypeFromExpr(assign.rhs().get());
           const bool is_parameter = parameter_names.count(name);
-          class_type->addAttribute(name, type, is_parameter);
+          const bool is_buffer = buffer_names.count(name);
+          class_type->addAttribute(name, type, is_parameter, false, is_buffer);
         }
       }
     }

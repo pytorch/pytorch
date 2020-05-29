@@ -401,6 +401,8 @@ struct C10_API TensorOptions {
             return DispatchKey::MSNPU;
           case DeviceType::XLA:
             return DispatchKey::XLA;
+          case DeviceType::Vulkan:
+            return DispatchKey::Vulkan;
           default:
             AT_ERROR("Unsupported device type for dense layout: ", device().type());
         }
@@ -645,6 +647,8 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::HIP;
   } else if (tid == DispatchKey::MkldnnCPU) {
     return DeviceType::CPU;
+  } else if (tid == DispatchKey::Vulkan) {
+    return DeviceType::Vulkan;
   } else {
     AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
   }

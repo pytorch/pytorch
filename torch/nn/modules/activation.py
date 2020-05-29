@@ -281,7 +281,7 @@ class Hardsigmoid(Module):
         \text{Hardsigmoid}(x) = \begin{cases}
             0 & \text{if~} x \le -3, \\
             1 & \text{if~} x \ge +3, \\
-            x / 6 & \text{otherwise}
+            x / 6 + 1 / 2 & \text{otherwise}
         \end{cases}
 
 
@@ -334,7 +334,7 @@ class Hardswish(Module):
         \text{Hardswish}(x) = \begin{cases}
             0 & \text{if~} x \le -3, \\
             x & \text{if~} x \ge +3, \\
-            x^2/6 & \text{otherwise}
+            x \cdot (x + 3) /6 & \text{otherwise}
         \end{cases}
 
     Shape:
@@ -1049,6 +1049,9 @@ class Softmax(Module):
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
+    When the input Tensor is a sparse tensor then the unspecifed
+    values are treated as ``-inf``.
+
     Shape:
         - Input: :math:`(*)` where `*` means, any number of additional
           dimensions
@@ -1072,6 +1075,7 @@ class Softmax(Module):
         >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
+
     """
     __constants__ = ['dim']
 

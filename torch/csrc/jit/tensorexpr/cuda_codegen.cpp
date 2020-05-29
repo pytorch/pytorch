@@ -107,6 +107,8 @@ void CudaPrinter::maybe_insert_sync() {
 
 std::string cudaDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
+    case ScalarType::Bool:
+      return "bool";
     case ScalarType::Half:
       return "half";
     case ScalarType::Char:
@@ -117,9 +119,9 @@ std::string cudaDtypeCppString(const Dtype& dtype) {
       return "short";
     case ScalarType::Long:
       return "long";
-    default:; /* nothing */
+    default:
+      return dtype.ToCppString();
   }
-  return dtype.ToCppString();
 }
 
 static void print_flat_alloc(std::ostream& os, const Allocate* alloc) {
@@ -225,6 +227,13 @@ void CudaPrinter::visit(const For* v) {
   } else {
     IRPrinter::visit(v);
   }
+}
+
+void CudaPrinter::visit(const Cast* v) {
+  os() << cudaDtypeCppString(v->dtype());
+  os() << "(";
+  v->src_value()->accept(this);
+  os() << ")";
 }
 
 void CudaPrinter::visit(const Intrinsics* v) {
@@ -392,26 +401,6 @@ void CudaPrinter::visit(const Min* v) {
   os() << ")";
 }
 
-void CudaPrinter::visit(const LetStmt* v) {
-  emitIndent();
-  const Var* var = v->var();
-  if (var->dtype().scalar_type() == ScalarType::Half) {
-    // we do math in floats so use that.
-    os() << "float";
-  } else {
-    os() << cudaDtypeCppString(var->dtype());
-  }
-  os() << " " << *var << " = " << *v->value() << "; " << std::endl;
-  auto b = dynamic_cast<Block*>(v->body());
-  if (b) {
-    emitIndent();
-  }
-  v->body()->accept(this);
-  if (b) {
-    os() << std::endl;
-  }
-}
-
 void CudaPrinter::visit(const IfThenElse* v) {
   os() << "((";
   v->condition()->accept(this);
@@ -420,6 +409,34 @@ void CudaPrinter::visit(const IfThenElse* v) {
   os() << " : ";
   v->false_value()->accept(this);
   os() << ")";
+}
+
+void CudaPrinter::visit(const Block* v) {
+  os() << "{" << std::endl;
+  indent_++;
+  for (const auto& pair : v->varBindings()) {
+    emitIndent();
+    const Var* var = pair.first;
+    const Expr* val = pair.second;
+
+    if (var->dtype().scalar_type() == ScalarType::Half) {
+      // we do math in floats so use that.
+      os() << "float";
+    } else {
+      os() << cudaDtypeCppString(var->dtype());
+    }
+    os() << " " << *var << " = ";
+    val->accept(this);
+    os() << "; " << std::endl;
+  }
+
+  for (Stmt* s : v->stmts()) {
+    s->accept(this);
+  }
+
+  indent_--;
+  emitIndent();
+  os() << "}";
 }
 
 class PrioritizeLoad : public IRMutator {
@@ -479,25 +496,6 @@ class PrioritizeLoad : public IRMutator {
     return new For(var_new, start_new, stop_new, body_with_loads, loop_options);
   }
 
-  Stmt* mutate(const LetStmt* v) override {
-    const Var* var = v->var();
-    const Expr* value = v->value();
-    Stmt* body = v->body();
-    const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
-    if (var_new == nullptr) {
-      throw std::runtime_error("LetStmt var must be variable");
-    }
-    const Expr* value_new = value->accept_mutator(this);
-    PushList();
-    Stmt* body_new = body->accept_mutator(this);
-    Stmt* body_with_loads = AddMemLoadsFromList(body_new);
-    PopList();
-    if (var == var_new && value == value_new && body == body_with_loads) {
-      return (Stmt*)v;
-    }
-    return new LetStmt(var_new, value_new, body_with_loads);
-  }
-
   Stmt* mutate(const Cond* v) override {
     const Expr* cond_old = v->condition();
     Stmt* true_old = v->true_stmt();
@@ -551,13 +549,18 @@ class PrioritizeLoad : public IRMutator {
 
   Stmt* AddMemLoadsFromList(Stmt* stmt) {
     MemLoadList& load_list = load_stack_.back();
-    Stmt* stmt_v = stmt;
-    for (auto iter = load_list.rbegin(); iter != load_list.rend(); iter++) {
-      const MemLoadEntry& entry = *iter;
-      const Var* var_ptr = entry.first;
-      stmt_v = new LetStmt(var_ptr, entry.second, stmt_v);
+    if (load_list.empty()) {
+      return stmt;
     }
-    return stmt_v;
+
+    if (Block* b = dynamic_cast<Block*>(stmt)) {
+      for (const auto& pair : load_list) {
+        b->add_var_binding(pair.first, pair.second);
+      }
+      return b;
+    }
+
+    return Block::make(load_list, {stmt});
   }
 
   MemoryLoadStack load_stack_;
@@ -589,12 +592,12 @@ std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
 // and wrap them under a trivial thread idx.
 class NoThreadIdxRewriter : public IRMutator {
  private:
-  Stmt* rewrite(const std::vector<Stmt*>& stmts) {
+  Stmt* rewrite(const VarMapping& vars, const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> cloned_stmts(stmts.size());
     for (size_t index = 0; index < stmts.size(); index++) {
       cloned_stmts[index] = Stmt::clone(stmts[index]);
     }
-    Stmt* new_block = Block::make(cloned_stmts);
+    Stmt* new_block = Block::make(vars, cloned_stmts);
     // Wrap the new block under a trivial thread-idx
     //   for t in 0..1: // threadIdx
     //     if (t < 1):
@@ -670,7 +673,7 @@ class NoThreadIdxRewriter : public IRMutator {
       Stmt* parent = v->get_parent();
       For* loop_parent = dynamic_cast<For*>(parent);
       if (loop_parent && loop_parent->loop_options().is_gpu_block_index()) {
-        Stmt* new_block = rewrite(new_stmts);
+        Stmt* new_block = rewrite(v->varBindings(), new_stmts);
         return new_block;
       }
       need_rewrite_ = true;
@@ -697,12 +700,12 @@ class NoThreadIdxRewriter : public IRMutator {
       // Rewrite the stmts from [start, stop)
       std::vector<Stmt*> stmts_to_rewrite(
           new_stmts.begin() + start, new_stmts.begin() + stop);
-      Stmt* rewritten_stmt = rewrite(stmts_to_rewrite);
+      Stmt* rewritten_stmt = rewrite(v->varBindings(), stmts_to_rewrite);
       rewrite_stmts.push_back(rewritten_stmt);
 
       start = stop;
     }
-    Stmt* rewritten_block = Block::make(rewrite_stmts);
+    Stmt* rewritten_block = Block::make(v->varBindings(), rewrite_stmts);
     return rewritten_block;
   }
 
@@ -910,7 +913,10 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     ptr_to_args[buffer_args.size()] = &rand_seed;
     ptr_to_args[buffer_args.size() + 1] = &rand_offset;
   }
-
+  const auto prior_device = at::cuda::current_device();
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(this->device().index());
+  }
   // Launch the kernels
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
@@ -926,13 +932,9 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
       ptr_to_args.data(),
       nullptr));
   USE_TRIGGER(cuda_codegen_executed);
-}
 
-void CudaSetContext(CUcontext pctx) {
-  if (!pctx) {
-    std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(0);
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(prior_device);
   }
 }
 
@@ -944,11 +946,17 @@ void CudaCodeGen::CompileToNVRTC(
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
   const auto prior_device = at::cuda::current_device();
-  at::cuda::set_device(this->device().index());
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(this->device().index());
+  }
   // cudaSetDevice does not have to really change the underlying device if it
   // doesn't have to, so calling cudaFree to force that change
-  CudaSetContext(pctx);
-
+  if (!pctx) {
+    std::unique_lock<std::mutex> cudaFreeMutexLock(
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+    cudaFree(nullptr);
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  }
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
@@ -1000,7 +1008,10 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
-  at::cuda::set_device(prior_device);
+
+  if (prior_device != this->device().index()) {
+    at::cuda::set_device(prior_device);
+  }
 }
 
 CudaCodeGen::~CudaCodeGen() = default;

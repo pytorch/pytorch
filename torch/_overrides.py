@@ -51,6 +51,7 @@ def get_ignored_functions():
         torch.get_default_dtype,
         torch.get_num_interop_threads,
         torch.get_num_threads,
+        torch.init_num_threads,
         torch.import_ir_module,
         torch.import_ir_module_from_buffer,
         torch.is_anomaly_enabled,
@@ -139,6 +140,7 @@ def get_ignored_functions():
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
         torch.nn.functional.hardswish,
+        torch.is_vulkan_available,
     )
 
 def get_testing_overrides():
@@ -245,6 +247,7 @@ def get_testing_overrides():
         torch.cummin: lambda input, dim, out=None: -1,
         torch.cumprod: lambda input, dim, out=None, dtype=None: -1,
         torch.cumsum: lambda input, dim, out=None, dtype=None: -1,
+        torch.logcumsumexp: lambda input, dim, out=None: -1,
         torch.dequantize: lambda input: -1,
         torch.det: lambda input: -1,
         torch.detach: lambda input: -1,
@@ -260,7 +263,6 @@ def get_testing_overrides():
         torch.dsmm: lambda input, mat2: -1,
         torch.hsmm: lambda mat1, mat2: -1,
         torch.eig: lambda input, eigenvectors=False, out=None: -1,
-        torch.einsum: lambda equation, *operands: -1,
         torch.einsum: lambda equation, *operands: -1,
         torch.embedding: (lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False,
                           sparse=False: -1),
@@ -349,6 +351,8 @@ def get_testing_overrides():
         torch.log10: lambda input, out=None: -1,
         torch.log1p: lambda input, out=None: -1,
         torch.log2: lambda input, out=None: -1,
+        torch.logaddexp: lambda input, other, out=None: -1,
+        torch.logaddexp2: lambda input, other, out=None: -1,
         torch.logdet: lambda input: -1,
         torch.logical_and: lambda input, other, out=None: -1,
         torch.logical_not: lambda input, out=None: -1,

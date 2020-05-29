@@ -316,6 +316,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` is mkldnn tensor.
   bool is_mkldnn() const;
 
+  /// Returns if a `Tensor` is vulkan tensor.
+  bool is_vulkan() const;
+
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
@@ -401,6 +404,7 @@ class CAFFE2_API Tensor {
   C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
+  Tensor operator~() const;
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
   Tensor& operator+=(Scalar other);
@@ -410,6 +414,9 @@ class CAFFE2_API Tensor {
   Tensor& operator*=(Scalar other);
   Tensor& operator/=(const Tensor & other);
   Tensor& operator/=(Scalar other);
+  Tensor& operator&=(const Tensor & other);
+  Tensor& operator|=(const Tensor & other);
+  Tensor& operator^=(const Tensor & other);
   Tensor operator[](Scalar index) const;
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
@@ -425,6 +432,7 @@ class CAFFE2_API Tensor {
   Tensor cpu() const;
   Tensor cuda() const;
   Tensor hip() const;
+  Tensor vulkan() const;
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -549,7 +557,7 @@ class CAFFE2_API Tensor {
   }
 
   template <typename F, typename... Args>
-  auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
+  decltype(auto) m(F func, Args&&... params) const {
     return func(*this, std::forward<Args>(params)...);
   }
 
