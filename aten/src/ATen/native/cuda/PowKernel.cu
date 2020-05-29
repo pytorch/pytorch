@@ -4,6 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Pow.h>
+#include <c10/util/C++17.h>
 
 namespace at { namespace native {
 
@@ -73,14 +74,22 @@ static inline __host__ __device__ typename std::enable_if<!std::is_floating_poin
   return static_cast<T>(1.0 / std::sqrt(static_cast<double>(x)));
 }
 #else
+#if !defined(__HIP_PLATFORM_HCC__)
 template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
-  return ::pow(base, exp);
-}
-template <typename Base_type, typename Exp_type>
-static inline __host__ __device__ Base_type complex_pow_(Base_type base, Exp_type exp) {
   return std::pow(base, exp);
 }
+#else
+template <typename Base_type, typename Exp_type>
+static inline __host__ __device__ std::enable_if_t<c10::is_complex_t<Base_type>::value || c10::is_complex_t<Exp_type>::value, Base_type> pow_(Base_type base, Exp_type exp) {
+  return std::pow(base, exp);
+}
+template <typename Base_type, typename Exp_type>
+static inline __host__ __device__ std::enable_if_t<!c10::is_complex_t<Base_type>::value && !c10::is_complex_t<Exp_type>::value, Base_type> pow_(Base_type base, Exp_type exp) {
+  // Can not use std::pow because ROCm has bug on it
+  return ::pow(base, exp);
+}
+#endif
 template <typename T>
 static inline __host__ __device__ T sqrt_(T x) {
   return ::sqrt(x);
@@ -147,7 +156,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
-        return complex_pow_(base, exp);
+        return pow_(base, exp);
       });
     });
   } else if (isFloatingType(iter.dtype()) || exp_scalar.isIntegral(false)) {
