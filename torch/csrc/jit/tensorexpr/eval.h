@@ -160,6 +160,12 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     }
   }
 
+  void bindVar(const Var* v, const Expr* e) {
+    e->accept(this);
+    Value value = value_;
+    eval_context_[v] = value_;
+  }
+
   template <typename... Ts>
   void operator()(const Ts&... ts) {
     std::vector<CallArg> args({CallArg(ts)...});
@@ -409,52 +415,17 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT
 
-  TORCH_API void visit(const Let* v) override {
-    const Var* var = dynamic_cast<const Var*>(v->var());
-    if (!var) {
-      throw malformed_input("bad Var in Let", v);
-    }
-    v->value()->accept(this);
-    Value value = value_;
-    auto iter = eval_context_.find(var);
-    if (iter != eval_context_.end()) {
-      // Save the old value
-      auto stash = iter->second;
-      iter->second = value;
-
-      v->body()->accept(this);
-
-      // Restore the old value
-      eval_context_[var] = stash;
-    } else {
-      eval_context_[var] = value_;
-      v->body()->accept(this);
-      eval_context_.erase(var);
-    }
-  }
-
-  TORCH_API void visit(const LetStmt* v) override {
-    const Var* var = v->var();
-    if (!var) {
-      throw malformed_input("bad Var in LetStmt", v);
+  TORCH_API void visit(const Block* v) override {
+    for (const auto& pair : v->varBindings()) {
+      bindVar(pair.first, pair.second);
     }
 
-    v->value()->accept(this);
-    Value value = value_;
-    auto iter = eval_context_.find(var);
-    if (iter != eval_context_.end()) {
-      // Save the old value
-      auto stash = iter->second;
-      iter->second = value;
+    for (Stmt* s : v->stmts()) {
+      s->accept(this);
+    }
 
-      v->body()->accept(this);
-
-      // Restore the old value
-      eval_context_[var] = stash;
-    } else {
-      eval_context_[var] = value_;
-      v->body()->accept(this);
-      eval_context_.erase(var);
+    for (const auto& pair : v->varBindings()) {
+      eval_context_.erase(pair.first);
     }
   }
 
@@ -854,6 +825,14 @@ class ExprEval {
 
   void operator()(const std::vector<CallArg>& call_args) {
     call(call_args);
+  }
+
+  void bindVar(const Var* v, const Expr* e) {
+    codegen_->bindVar(v, e);
+  }
+
+  void bindVar(const VarHandle& v, const ExprHandle& e) {
+    codegen_->bindVar(v.node(), e.node());
   }
 
   template <typename... Ts>

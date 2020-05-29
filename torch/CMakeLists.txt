@@ -176,11 +176,15 @@ if(USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(NOT MSVC)
       append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
+      # Disable certain warnings for GCC-9.X
+      if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      endif()
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
-      if(USE_CUDA OR USE_ROCM)
-        list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/ddp.cpp)
-      endif()
     endif()
 endif()
 
@@ -268,7 +272,8 @@ set(ModulesStubOut
     ${TORCH_SRC_DIR}/nn/modules/upsampling.pyi
 )
 add_custom_target(torch_python_stubs DEPENDS
-    "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     ${ModuleStubOut}
 )
@@ -276,7 +281,8 @@ add_custom_target(torch_python_stubs DEPENDS
 add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
 add_custom_command(
     OUTPUT
-    "${TORCH_SRC_DIR}/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/__init__.pyi"
+    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     ${ModuleStubOut}
     COMMAND
@@ -284,7 +290,8 @@ add_custom_command(
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-    "${TORCH_SRC_DIR}/__init__.pyi.in"
+    "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
+    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
     ${ModuleStubIn}
     "${TOOLS_PATH}/pyi/gen_pyi.py"
@@ -307,6 +314,12 @@ set_source_files_properties(
     ${GENERATED_CXX_PYTHON}
     PROPERTIES GENERATED TRUE
     )
+
+# Disable certain warnings for GCC-9.X
+if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 

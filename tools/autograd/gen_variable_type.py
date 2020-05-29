@@ -109,7 +109,9 @@ DONT_REQUIRE_DERIVATIVE = {
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
     # Quantize functions should not record gradients
-    'quantize_per_tensor', 'quantize_per_channel'
+    'quantize_per_tensor', 'quantize_per_channel',
+    # Functions that return integers should not have output that require gradients
+    'argmax', 'argmin', 'argsort',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -178,11 +180,11 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) ;
+${return_type} ${type_wrapper_name}(${formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${formals}) {
   ${type_definition_body}
 }
 """)
@@ -217,7 +219,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_DEFAULT = CodeTemplate("""\
-TypeDefault::${type_wrapper_name}(${type_method_args})""")
+TypeDefault::${type_wrapper_name}(${args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
@@ -337,7 +339,7 @@ ${statements}
 
 # Generate a file that lists all functions and their schema string. Used for XLA
 REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
+${return_type} ${api_name}(${formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
 # ProfiledType templates
@@ -345,7 +347,7 @@ PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
 TORCH_INTERNAL_ASSERT(op);
 RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
-return c10::Dispatcher::singleton().callUnboxedRedispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
+return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
 FACTORY_FUNCTION_NAMES = None
@@ -1053,6 +1055,10 @@ def emit_body(declaration):
     combined = nested_dict(env, declaration)
 
     body = []
+
+    pre_record_trace, post_record_trace = format_trace(declaration)
+    body.append(pre_record_trace)
+
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
@@ -1060,18 +1066,12 @@ def emit_body(declaration):
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables())
 
-    pre_record_trace, post_record_trace = format_trace(declaration)
-
-    body.append(pre_record_trace)
     body.append(emit_call(env))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.extend(emit_increment_version())
         body.append(emit_history())
-    # post_record_trace must appear before save_outputs so that saved outputs
-    # have their tracing state saved (that is setup by recordTrace)
-    body.append(post_record_trace)
     if requires_derivative:
         body.append(emit_save_outputs())
     if base_name in RESET_GRAD_ACCUMULATOR:
@@ -1081,6 +1081,7 @@ def emit_body(declaration):
         # remove this assert but the code generation will get more elaborate
         assert inplace
         body.append('reset_grad_accumulator(self);')
+    body.append(post_record_trace)
     if not returns_void:
         body.append('return {};'.format(get_return_value()))
     return body

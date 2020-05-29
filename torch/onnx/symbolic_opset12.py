@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args
+from torch.onnx.symbolic_helper import parse_args, _parse_arg
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -26,8 +26,10 @@ def dropout(g, input, p, train):
     # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
     if not sym_help._training_mode:
         return input
+
     p = g.op("Constant", value_t=torch.tensor(p))
-    r, _ = g.op("Dropout", input, p, outputs=2)
+    t = g.op("Constant", value_t=torch.tensor(True))
+    r, _ = g.op("Dropout", input, p, t, outputs=2)
     return r
 
 
@@ -55,5 +57,38 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
 
     return nllloss
 
+
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
+
+
+def argmax(g, input, dim, keepdim):
+    if sym_help._is_none(dim):
+        from torch.onnx.symbolic_opset9 import reshape
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
+
+
+def argmin(g, input, dim, keepdim):
+    if sym_help._is_none(dim):
+        from torch.onnx.symbolic_opset9 import reshape
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
+
+
+def pow(g, self, exponent):
+    return g.op("Pow", self, exponent)
+
+def ge(g, input, other):
+    return g.op('GreaterOrEqual', input, other)
+
+def le(g, input, other):
+    return g.op('LessOrEqual', input, other)

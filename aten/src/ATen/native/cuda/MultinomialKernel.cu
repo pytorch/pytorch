@@ -35,13 +35,13 @@ __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      CUDA_ALWAYS_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
 
     sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
     if (threadIdx.x == 0) {
-      CUDA_ALWAYS_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
@@ -61,7 +61,7 @@ void renormRows(Tensor& t) {
   int64_t cols = t.size(1);
 
   auto props = at::cuda::getCurrentDeviceProperties();
-  CUDA_ALWAYS_ASSERT(props != NULL);
+  CUDA_KERNEL_ASSERT(props != NULL);
   int numSM = props->multiProcessorCount;
   int maxThreads = props->maxThreadsPerBlock;
 
@@ -84,7 +84,7 @@ __device__ int binarySearchForMultinomial(scalar_t* cumdist,
   int start = 0;
   int end = size;
   // cumdist[size - 1] = 0 => all zero prob dist
-  CUDA_ALWAYS_ASSERT(cumdist[size - 1] > static_cast<scalar_t>(0));
+  CUDA_KERNEL_ASSERT(cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
     int mid = start + (end - start) / 2;
@@ -124,36 +124,33 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
 
-  // global index formula for 1D grid of 2D blocks
-  int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+  // global index formula for 2D grid of 1D blocks
+  int idx = blockIdx.y * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
 
   curandStatePhilox4_32_10_t state;
   curand_init(seeds.first, idx, seeds.second, &state);
 
   // The block determines the distribution for which we generate a point
-  for (int64_t curDist = blockIdx.x;
+  for (int64_t curDist = blockIdx.y;
        curDist < distributions;
-       curDist += gridDim.x) {
-    for (int sampleBase = 0;
-         sampleBase < totalSamples; sampleBase += blockDim.y) {
-      // The warp determines the sample
-      int sample = sampleBase + threadIdx.y;
+       curDist += gridDim.y) {
+    for (int sample = blockIdx.x*blockDim.x + threadIdx.x;
+         sample < totalSamples; sample += blockDim.x*gridDim.x) {
 
-      // All threads participate in this
+      //we are losing 3 out of 4 generated numbers but it's ok
+      //this kernel is not very efficient anyway
       auto rand = curand_uniform4(&state);
       scalar_t r = static_cast<scalar_t>(rand.x);
 
-      if (threadIdx.x == 0 && sample < totalSamples) {
-        // Find the bucket that a uniform sample lies in
-        int choice = binarySearchForMultinomial<scalar_t>(
-            normDistPrefixSum + curDist * categories,
-            normDist + curDist * categories,
-            categories,
-            r);
+      // Find the bucket that a uniform sample lies in
+      int choice = binarySearchForMultinomial<scalar_t>(
+          normDistPrefixSum + curDist * categories,
+          normDist + curDist * categories,
+          categories,
+          r);
 
-        // Torch indices are 1-based
-        dest[curDist * totalSamples + sample] = choice;
-      }
+      dest[curDist * totalSamples + sample] = choice;
+
     }
   }
 }
@@ -180,17 +177,14 @@ sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
 
   // The block and warp determines the distribution for which we
   // generate a point
-  for (int64_t curDistBase = blockIdx.x * blockDim.y;
-       curDistBase < distributions;
-       curDistBase += gridDim.x * blockDim.y) {
-    // The warp determines the distribution
-    int64_t curDist = curDistBase + threadIdx.y;
+  for (int64_t curDist = blockIdx.x * blockDim.y + threadIdx.y;
+       curDist < distributions;
+       curDist += gridDim.x * blockDim.y) {
 
-    // All threads must participate in this
     auto rand = curand_uniform4(&state);
     scalar_t r = static_cast<scalar_t>(rand.x);
 
-    if (threadIdx.x == 0 && curDist < distributions) {
+    if (threadIdx.x == 0) {
       // Find the bucket that a uniform sample lies in
       int choice = binarySearchForMultinomial<scalar_t>(
           normDistPrefixSum + curDist * categories,
@@ -240,9 +234,9 @@ sampleMultinomialOnce(int64_t* dest,
     scalar_t val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      CUDA_ALWAYS_ASSERT(val >= zero);
-      CUDA_ALWAYS_ASSERT(!THCNumerics<scalar_t>::isinf(val));
-      CUDA_ALWAYS_ASSERT(!THCNumerics<scalar_t>::isnan(val));
+      CUDA_KERNEL_ASSERT(val >= zero);
+      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::isinf(val));
+      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::isnan(val));
       sum = sum + static_cast<accscalar_t>(val);
     }
 
@@ -252,8 +246,8 @@ sampleMultinomialOnce(int64_t* dest,
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      CUDA_ALWAYS_ASSERT(!THCNumerics<accscalar_t>::isinf(sum));
-      CUDA_ALWAYS_ASSERT(sum > accZero);
+      CUDA_KERNEL_ASSERT(!THCNumerics<accscalar_t>::isinf(sum));
+      CUDA_KERNEL_ASSERT(sum > accZero);
 
       asmem[0] = sum;
       smem[0] = sampled[curDist];
@@ -363,7 +357,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
-    CUDA_ALWAYS_ASSERT(props != NULL);
+    CUDA_KERNEL_ASSERT(props != NULL);
     int numSM = props->multiProcessorCount;
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
@@ -410,30 +404,31 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
       renormRows(normDist);
 
       // Prefix sum along rows
-      legacy::cuda::_th_cumsum_out(prefixSum, normDist, 1);
+      at::_cumsum_out(prefixSum, normDist, 1);
 
       std::pair<uint64_t, uint64_t> rng_engine_inputs;
 
       if (with_replacement) {
+        // Binary search is warp divergent (so effectively we're running
+        // with just a single thread), but for better utilization,
+        // we need each block to have at least 4 warps.
+        dim3 block(128);
+
+        // Each block will generate a sample from one
+        // distribution concurrently.
+        int grid_y=std::min<int>(numDist, at::cuda::getCurrentDeviceProperties()->maxGridSize[1]);
+        dim3 grid((n_sample-1)/block.x+1, grid_y);
         {
           // See Note [Acquire lock when using random generators]
           std::lock_guard<std::mutex> lock(gen->mutex_);
 
-          // each thread will utilize one random, however, since we have to use
+          // each thread generates a single sample for (numdist/numblocks.y) distributions, however, since we have to use
           // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
-          // offset is 4.
-          rng_engine_inputs = gen->philox_engine_inputs(4);
+          // offset is 4 times that.
+          auto offset = ((numDist-1)/grid.y+1)*4;
+          rng_engine_inputs = gen->philox_engine_inputs(offset);
         }
         // Sample with replacement
-
-        // Binary search is warp divergent (so effectively we're running
-        // with just a single thread), but for better utilization,
-        // we need each block to have at least 4 warps.
-        dim3 block(32, 4);
-
-        // Each warp in a block will generate a sample from one
-        // distribution concurrently.
-        dim3 grid(numDist < MAX_NUM_BLOCKS ? numDist : MAX_NUM_BLOCKS);
 
         sampleMultinomialWithReplacement
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -464,16 +459,17 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
             renormRows(normDist);
 
             // Prefix sum along rows
-            legacy::cuda::_th_cumsum_out(prefixSum, normDist, 1);
+            at::_cumsum_out(prefixSum, normDist, 1);
           }
           {
             // See Note [Acquire lock when using random generators]
             std::lock_guard<std::mutex> lock(gen->mutex_);
 
-            // each thread will utilize one random, however, since we have to use
+            // each thread will utilize distributions/(gridDim.x*blockDim.y) randoms, however, since we have to use
             // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
-            // offset is 4.
-            rng_engine_inputs = gen->philox_engine_inputs(4);
+            // offset is 4 times that.
+            auto offset = ((numDist-1)/(grid.x*block.y)+1)*4;
+            rng_engine_inputs = gen->philox_engine_inputs(offset);
           }
 
           // The kernel can only draw one sample before we have to

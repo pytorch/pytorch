@@ -76,7 +76,7 @@ struct TopKTypeConfig<short> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(short v) {
-    CUDA_KERNEL_ASSERT(sizeof(short) == 2);
+    static_assert(sizeof(short) == 2, "");
     return 32768u + v;
   }
 
@@ -90,7 +90,7 @@ struct TopKTypeConfig<int> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(int v) {
-    CUDA_KERNEL_ASSERT(sizeof(int) == 4);
+    static_assert(sizeof(int) == 4, "");
     return 2147483648u + v;
   }
 
@@ -104,6 +104,7 @@ struct TopKTypeConfig<long> {
   typedef unsigned long long int RadixType;
 
   static inline __device__ RadixType convert(long v) {
+    //static_assert fails on windows, so leave it as CUDA_KERNEL_ASSERT
     CUDA_KERNEL_ASSERT(sizeof(long) == 8);
     return 9223372036854775808ull + v;
   }
@@ -171,11 +172,7 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #if defined(__HIP_PLATFORM_HCC__)
       counts[j] += __popcll(__ballot(vote));
 #else
-#if CUDA_VERSION >= 9000
       counts[j] += __popc(__ballot_sync(__activemask(), vote));
-#else
-      counts[j] += __popc(__ballot(vote));
-#endif
 #endif  // __HIP_PLATFORM_HCC__
     }
   }

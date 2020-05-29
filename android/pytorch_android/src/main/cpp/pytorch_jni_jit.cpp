@@ -6,7 +6,7 @@
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/script.h>
 #include "caffe2/serialize/read_adapter_interface.h"
@@ -88,12 +88,12 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 
 #ifdef TRACE_ENABLED
   static bool onFunctionEnter(
-      const RecordFunction& fn) {
+      const at::RecordFunction& fn) {
     Trace::beginSection(fn.name().str());
     return true;
   }
 
-  static void onFunctionExit(const RecordFunction&) {
+  static void onFunctionExit(const at::RecordFunction&) {
     Trace::endSection();
   }
 #endif
@@ -112,12 +112,10 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
 #ifdef TRACE_ENABLED
-    pushCallback(
+    at::addGlobalCallback(at::RecordFunctionCallback(
         &onFunctionEnter,
-        &onFunctionExit,
-        /* need_inputs */ false,
-        /* sampling_prob */ 1.0,
-        /* scopes */ {RecordScope::FUNCTION, RecordScope::USER_SCOPE});
+        &onFunctionExit)
+      .scopes({RecordScope::FUNCTION, RecordScope::USER_SCOPE}));
 #endif
   }
 
