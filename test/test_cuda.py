@@ -22,8 +22,8 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, \
+    slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1721,7 +1721,6 @@ class TestCuda(TestCase):
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
