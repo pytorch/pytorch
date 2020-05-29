@@ -825,6 +825,12 @@ def async_add(to, x, y):
     return rpc.rpc_async(to, script_add, (x, y))
 
 
+@rpc.async_function
+@torch.jit.script
+def async_wrong_type():
+    # type: () -> Tensor
+    return torch.zeros(2)
+
 
 class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, FutureTypingTest, RpcAgentTestFixture):
     @dist_init
@@ -1068,3 +1074,14 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
             args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
         )
         self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_async_function_wrong_return_type(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected Future but got Tensor"
+        ):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                async_wrong_type
+            )
