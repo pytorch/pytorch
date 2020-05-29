@@ -164,6 +164,40 @@ class TensorDataset(Dataset):
     def __len__(self):
         return self.tensors[0].size(0)
 
+class CacheDataset(Dataset):
+    r"""A caching Dataset.
+
+    The first time an item is called by index, it will be loaded into `cache`.
+    Subsequent iterations will use the cached data. This class is useful for
+    faster retrieval of data from second batch on by caching the loaded data
+    into the `cache`, whose keys are the indices of the data sample.
+
+    All subclasses should overwrite :meth:`get_item`, which supports fetching
+    a data sample by index from file.
+
+    Example 1:
+
+        >>> class MyCacheDataset(torch.utils.data.CacheDataset):
+        ...     def __init__(self):
+        ...         self.data = read_from_file(path_to_data)
+        ...
+        ...     def get_item(self, index):
+        ...         return self.data[index]
+        ...
+    """
+
+    def __init__(self):
+        self.cache = dict()
+
+    def __getitem__(self, index):
+        if index in self.cache.keys():
+            return self.cache[index]
+        sample = self.get_item(index)
+        self.cache[index] = sample
+        return sample
+
+    def get_item(self, index):
+        raise NotImplementedError
 
 class ConcatDataset(Dataset):
     r"""Dataset as a concatenation of multiple datasets.

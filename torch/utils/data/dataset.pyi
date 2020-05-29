@@ -17,6 +17,13 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
 
     def __init__(self, *tensors: Tensor) -> None: ...
 
+class CacheDataset(Dataset[T_co]):
+    def __iter__(self) -> None: ...
+
+    def __getitem__(self, index: int) -> T_co: ...
+
+    def get_item(self, index)  -> T_co: ...
+
 class ConcatDataset(Dataset[T_co]):
     datasets: List[Dataset[T_co]]
     cumulative_sizes: List[int]
