@@ -11936,7 +11936,9 @@ class TestTorchDeviceType(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
-    @dtypes(torch.bool, torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.short, torch.int, torch.long,
+            torch.float, torch.double,
+            torch.cfloat, torch.cdouble)
     def test_vander_types(self, device, dtype):
         if dtype is torch.uint8:
             # Note: no negative uint8 values
@@ -11945,6 +11947,9 @@ class TestTorchDeviceType(TestCase):
             # Note: see https://github.com/pytorch/pytorch/issues/37398
             # for why this is necessary.
             X = [[True, True, True, True], [False, True, True, True, True]]
+        elif dtype in [torch.cfloat, torch.cdouble]:
+            X = [[1 + 1j, 1 + 0j, 0 + 1j, 0 + 0j],
+                 [2 + 2j, 3 + 2j, 4 + 3j, 5 + 4j]]
         else:
             X = [[1, 2, 3, 5], [-math.pi, 0, 1 / 3, 1, math.pi, 3 / 7]]
 
@@ -11957,31 +11962,6 @@ class TestTorchDeviceType(TestCase):
             np_x = np.array(x, dtype=numpy_dtype)
 
             pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)             
-            np_res = np.vander(np_x, n, inc)
-
-            self.assertEqual(
-                pt_res,
-                torch.from_numpy(np_res),
-                atol=1e-3,
-                rtol=0,
-                exact_dtype=False)
-
-    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.cfloat, torch.cdouble)
-    def test_vander_complex_types(self, device, dtype):
-        X = [[1 + 1j, 1 + 0j, 0 + 1j, 0 + 0j],
-             [2 + 2j, 3 + 2j, 4 + 3j, 5 + 4j]]
-
-        N = [None, 0, 1, 3]
-        increasing = [False, True]
-
-        for x, n, inc in product(X, N, increasing):
-            numpy_dtype = torch_to_numpy_dtype_dict[dtype]
-            pt_x = torch.tensor(x, device=device, dtype=dtype)
-            np_x = np.array(x, dtype=numpy_dtype)
-
-            pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)
             np_res = np.vander(np_x, n, inc)
 
             self.assertEqual(
