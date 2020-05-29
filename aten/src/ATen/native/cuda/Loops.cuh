@@ -3,6 +3,7 @@
 
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 
 namespace at { namespace native {
@@ -14,28 +15,6 @@ namespace at { namespace native {
 constexpr int num_threads = NUM_THREADS;
 constexpr int thread_work_size = THREAD_WORK_SIZE;
 constexpr int block_work_size = BLOCK_WORK_SIZE;
-
-// `needs_dynamic_casting` compares the types expected by iterator
-// (i.e. dtypes of the operands) with the actual type of the arguments
-// of func_t
-template<typename func_t, int nargs=function_traits<func_t>::arity>
-struct needs_dynamic_casting {
-  static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
-    if (iter.dtype(nargs) != c10::impl::CPPTypeToScalarType<typename traits::template arg<nargs - 1>::type>::value) {
-      return true;
-    }
-    return needs_dynamic_casting<func_t, nargs - 1>::check(iter);
-  }
-};
-
-template<typename func_t>
-struct needs_dynamic_casting<func_t, 0> {
-  static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
-    return iter.dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::result_type>::value;
-  }
-};
 
 template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {

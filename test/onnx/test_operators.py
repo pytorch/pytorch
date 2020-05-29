@@ -21,6 +21,7 @@ import unittest
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
           --produce-onnx-test-data: generate onnx test data
+          --accept: accept onnx updates and overwrite models
 '''
 
 _onnx_test = False  # flag to produce onnx test cases.
