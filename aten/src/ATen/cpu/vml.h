@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec256/functional.h>
 #include <ATen/cpu/vec256/vec256.h>
+#include <c10/util/complex_type.h>
 
 // This header implements various unary operations using a MKL VML style
 // interface.
@@ -39,14 +40,14 @@
 // https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280. Calling zeroall
 // when using AVX/AVX2 code resolves this.
 #if defined(CPU_CAPABILITY_AVX) && defined(__GLIBC__) && __GLIBC_MINOR__ == 23
-#define DL_RUNTIME_BUG(op, type)                              \
-  using value_t = typename at::native::ztype<type>::value_t;  \
-  volatile value_t x = (value_t)(1);                          \
-  x = std::op(x);                                             \
+#define DL_RUNTIME_BUG(op, type_)                              \
+  using value_t = typename c10::scalar_value_type<type_>::type;\
+  volatile value_t x = (value_t)(1);                           \
+  x = std::op(x);                                              \
   _mm256_zeroall();
 #define DL_RUNTIME_BUG_BFLOAT16() _mm256_zeroall();
 #else
-#define DL_RUNTIME_BUG(op, type)
+#define DL_RUNTIME_BUG(op, type_)
 #define DL_RUNTIME_BUG_BFLOAT16()
 #endif
 
