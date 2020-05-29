@@ -1,13 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <tensorpipe/core/message.h>
-#include <torch/torch.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/torch.h>
 
 #include <memory>
 #include <string>
 #include <vector>
-
 
 TEST(TensorpipeSerialize, Base) {
   // Sender serializes
@@ -22,9 +21,11 @@ TEST(TensorpipeSerialize, Base) {
   torch::distributed::rpc::Message sendingRpcMessage(
       std::move(payload), std::move(tensors), mtype);
   sendingRpcMessage.setId(mId);
-  torch::distributed::rpc::TensorPipeEntry tpEntry =
-      torch::distributed::rpc::tensorpipeSerialize(sendingRpcMessage);
-  tensorpipe::Message sendingTpMessage = std::move(tpEntry.message);
+  tensorpipe::Message sendingTpMessage;
+  torch::distributed::rpc::TensorpipeWriteBuffers sendingTpBuffers;
+  std::tie(sendingTpMessage, sendingTpBuffers) =
+      torch::distributed::rpc::tensorpipeSerialize(
+          std::move(sendingRpcMessage));
 
   // Mimic receiving message descriptor: recvingTpMessage is a copy of
   // sendingTpMessage except for the data pointers which are left null.
@@ -37,8 +38,7 @@ TEST(TensorpipeSerialize, Base) {
     p.metadata = tpPayload.metadata;
     recvingTpMessage.payloads.push_back(std::move(p));
   }
-  EXPECT_EQ(
-      recvingTpMessage.payloads.size(), sendingTpMessage.payloads.size());
+  EXPECT_EQ(recvingTpMessage.payloads.size(), sendingTpMessage.payloads.size());
   recvingTpMessage.tensors.reserve(sendingTpMessage.tensors.size());
   for (auto& tpTensor : sendingTpMessage.tensors) {
     tensorpipe::Message::Tensor t;
@@ -46,14 +46,13 @@ TEST(TensorpipeSerialize, Base) {
     t.metadata = tpTensor.metadata;
     recvingTpMessage.tensors.push_back(std::move(t));
   }
-  EXPECT_EQ(
-      recvingTpMessage.tensors.size(), sendingTpMessage.tensors.size());
+  EXPECT_EQ(recvingTpMessage.tensors.size(), sendingTpMessage.tensors.size());
 
   // Mimic readDescriptor() callback:
-  // 1. Allocate rpc message
-  // 2. Fill pointers to tensorpipe message
-  torch::distributed::rpc::Message recvingRpcMessage =
-      torch::distributed::rpc::tensorpipeAllocateMessage(recvingTpMessage);
+  // - Allocate buffers
+  // - Fill pointers in tensorpipe message
+  torch::distributed::rpc::TensorpipeReadBuffers recvingTpBuffers =
+      torch::distributed::rpc::tensorpipeAllocate(recvingTpMessage);
 
   // Mimic tensorpipe data transfer
   for (int i = 0; i < recvingTpMessage.payloads.size(); i++) {
@@ -66,6 +65,12 @@ TEST(TensorpipeSerialize, Base) {
     tensorpipe::Message::Tensor& dstTensor = recvingTpMessage.tensors[i];
     memcpy(dstTensor.data, srcTensor.data, srcTensor.length);
   }
+
+  // Mimic read() callback:
+  // - Unpickle
+  torch::distributed::rpc::Message recvingRpcMessage =
+      torch::distributed::rpc::tensorpipeDeserialize(
+          std::move(recvingTpMessage), std::move(recvingTpBuffers));
 
   // Data is ready
   EXPECT_EQ(mtype, recvingRpcMessage.type());
@@ -90,14 +95,16 @@ TEST(TensorpipeSerialize, RecopySparseTensors) {
   torch::distributed::rpc::Message sendingRpcMessage(
       std::move(payload), std::move(tensors), mtype);
 
-  torch::distributed::rpc::TensorPipeEntry tpEntry =
-      torch::distributed::rpc::tensorpipeSerialize(sendingRpcMessage);
-  tensorpipe::Message sendingTpMessage = std::move(tpEntry.message);
+  tensorpipe::Message sendingTpMessage;
+  torch::distributed::rpc::TensorpipeWriteBuffers tpBuffers;
+  std::tie(sendingTpMessage, tpBuffers) =
+      torch::distributed::rpc::tensorpipeSerialize(
+          std::move(sendingRpcMessage));
 
-  EXPECT_EQ(tpEntry.reservedTensors.size(), 2);
+  EXPECT_EQ(tpBuffers.tensors.size(), 2);
   EXPECT_EQ(sendingTpMessage.tensors.size(), 2);
-  EXPECT_TRUE(torch::equal(main, tpEntry.reservedTensors[0]));
-  EXPECT_TRUE(torch::equal(tiny, tpEntry.reservedTensors[1]));
+  EXPECT_TRUE(torch::equal(main, tpBuffers.tensors[0]));
+  EXPECT_TRUE(torch::equal(tiny, tpBuffers.tensors[1]));
   // Test cloned storage
   EXPECT_EQ(main.storage().data(), sendingTpMessage.tensors[0].data);
   EXPECT_NE(tiny.storage().data(), sendingTpMessage.tensors[1].data);
@@ -116,24 +123,30 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
   torch::distributed::rpc::Message sendingRpcMessage(
       std::move(payload), std::move(tensors), mtype);
 
-  torch::distributed::rpc::TensorPipeEntry tpEntry =
-      torch::distributed::rpc::tensorpipeSerialize(sendingRpcMessage);
-  tensorpipe::Message sendingTpMessage = std::move(tpEntry.message);
+  tensorpipe::Message sendingTpMessage;
+  torch::distributed::rpc::TensorpipeWriteBuffers tpBuffers;
+  std::tie(sendingTpMessage, tpBuffers) =
+      torch::distributed::rpc::tensorpipeSerialize(
+          std::move(sendingRpcMessage));
 
-  EXPECT_EQ(tpEntry.copiedTensors.size(), 2);
+  EXPECT_EQ(tpBuffers.copiedTensors.size(), 2);
   EXPECT_EQ(sendingTpMessage.tensors.size(), 2);
-  EXPECT_EQ(tpEntry.copiedTensors[0].size(), sendingTpMessage.tensors[0].length);
-  EXPECT_EQ(tpEntry.copiedTensors[1].size(), sendingTpMessage.tensors[1].length);
-  EXPECT_EQ(tpEntry.copiedTensors[0].data(), sendingTpMessage.tensors[0].data);
-  EXPECT_EQ(tpEntry.copiedTensors[1].data(), sendingTpMessage.tensors[1].data);
+  EXPECT_EQ(
+      tpBuffers.copiedTensors[0].size(), sendingTpMessage.tensors[0].length);
+  EXPECT_EQ(
+      tpBuffers.copiedTensors[1].size(), sendingTpMessage.tensors[1].length);
+  EXPECT_EQ(
+      tpBuffers.copiedTensors[0].data(), sendingTpMessage.tensors[0].data);
+  EXPECT_EQ(
+      tpBuffers.copiedTensors[1].data(), sendingTpMessage.tensors[1].data);
   EXPECT_TRUE(
       memcmp(
-          tpEntry.copiedTensors[0].data(),
+          tpBuffers.copiedTensors[0].data(),
           t1.storage().data(),
           sendingTpMessage.tensors[0].length) == 0);
   EXPECT_TRUE(
       memcmp(
-          tpEntry.copiedTensors[1].data(),
+          tpBuffers.copiedTensors[1].data(),
           t2.storage().data(),
           sendingTpMessage.tensors[1].length) == 0);
 }

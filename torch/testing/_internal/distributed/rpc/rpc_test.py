@@ -27,7 +27,7 @@ from torch.testing._internal.dist_utils import (
     get_timeout_error_regex,
     initialize_pg,
     wait_until_node_failure,
-    wait_until_pending_users_flushed,
+    wait_until_pending_futures_and_users_flushed,
     worker_name,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
@@ -1811,9 +1811,9 @@ class RpcTest(RpcAgentTestFixture):
         rpc.rpc_sync(worker_name(dst_rank), set_global_rref, args=(rref1,))
 
         # barrier before check 2
+        wait_until_pending_futures_and_users_flushed()
         dist.barrier()
 
-        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
@@ -1837,9 +1837,9 @@ class RpcTest(RpcAgentTestFixture):
         rref3.to_here()
 
         # barrier before check 3
+        wait_until_pending_futures_and_users_flushed()
         dist.barrier()
 
-        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))

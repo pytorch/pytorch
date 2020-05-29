@@ -31,7 +31,6 @@ class MobileJob:
             "build_only": miniutils.quote(str(int(True))),
             "docker_image": self.docker_image,
             "name": full_job_name,
-            "requires": ["setup"],
         }
 
         if self.is_master_only:
