@@ -45,12 +45,23 @@ if [[ $BUILD_ENVIRONMENT == py3.6-devtoolset7-rocmrpm-centos* ]]; then
     conda_install nnpack -c killeent
 
     # Install some other packages
+
+    # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
+    # defaults installs the most recent networkx version, so we install this lower
+    # version explicitly before scikit-image pulls it in as a dependency
+    pip install networkx==2.0
+
     # TODO: Why is scipy pinned
     # numba & llvmlite is pinned because of https://github.com/numba/numba/issues/4368
     # scikit-learn is pinned because of
     # https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5
     # only)
     pip install --progress-bar off pytest scipy==1.1.0 scikit-learn==0.20.3 scikit-image librosa>=0.6.2 psutil numba==0.46.0 llvmlite==0.30.0
+
+    # click - onnx
+    # hypothesis - tests
+    # jupyter - for tutorials
+    pip install --progress-bar off click hypothesis jupyter protobuf tabulate virtualenv mock typing-extensions
 
     popd
   else
