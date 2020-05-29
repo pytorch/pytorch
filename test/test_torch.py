@@ -11934,11 +11934,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "x must be a one-dimensional tensor."):
             torch.vander(torch.stack((x, x)))
 
-        # This passes on the xla backend
-        if self.device_type != 'xla' and self.device_type != 'cpu':
-            with self.assertRaises(RuntimeError):
-                torch.vander(x.to(torch.complex64))
-
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
@@ -11985,14 +11980,6 @@ class TestTorchDeviceType(TestCase):
             numpy_dtype = torch_to_numpy_dtype_dict[dtype]
             pt_x = torch.tensor(x, device=device, dtype=dtype)
             np_x = np.array(x, dtype=numpy_dtype)
-
-            # Currently `CUDA` backend is not supported as
-            # at::legacy::cumprod does not support complex dtypes.
-            if self.device_type == 'cuda':
-                with self.assertRaises(RuntimeError):
-                    pt_res = torch.vander(pt_x, increasing=inc) if n is None \
-                        else torch.vander(pt_x, n, inc)
-                break
 
             pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)
             np_res = np.vander(np_x, n, inc)
