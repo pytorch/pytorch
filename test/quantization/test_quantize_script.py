@@ -713,7 +713,7 @@ graph(%input, %weight):
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
             m(data)
-            m = convert_script(m)
+            m = convert_script(m, debug=True)
             assert len(m._modules._c.items()) == 1, \
                 'Expected to have single submodule of conv'
             # make sure the quantized model is executable
@@ -752,7 +752,7 @@ graph(%input, %weight):
 
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
             m(data)
-            m = convert_script(m)
+            m = convert_script(m, debug=True)
             m(data)
             assert m.conv1._c._type() == m.conv2._c._type()
 
