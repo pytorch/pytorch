@@ -74,19 +74,26 @@ class ModuleCloneHelper {
    *  but configured with different QConfig
    *  code is copied and modified from
    * https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/api/module.cpp
+   * inplace option means if the copy of the Tensor is deepcopy or not
+   * if inplace is true, the cloned module will share the tensors with
+   * original model instead of deepcopy them
    */
   Module clone(
       const Module& module,
-      const ModuleQConfigMap& module_qconfig_map) {
+      const ModuleQConfigMap& module_qconfig_map,
+      bool inplace = false) {
     std::unordered_map<TypePtr, QConfigTypePtrMap> type_remap;
-    return clone_impl(module, module_qconfig_map, type_remap);
+    IValue::HashAliasedIValueMap memo;
+    return clone_impl(module, module_qconfig_map, type_remap, inplace, memo);
   }
 
  private:
   Module clone_impl(
       const Module& module,
       const ModuleQConfigMap& module_qconfig_map,
-      std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap) {
+      std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap,
+      bool inplace,
+      IValue::HashAliasedIValueMap memo) {
     auto qconfig = module_qconfig_map.at(module._ivalue());
     auto type = module.type();
     // Create a new _ivalue in the same compilation unit.
@@ -115,13 +122,15 @@ class ModuleCloneHelper {
       IValue s = module._ivalue()->getSlot(i);
       if (type->getAttribute(i)->is_module()) {
         const Module& orig = Module(s.toObject());
-        Module cloned = clone_impl(orig, module_qconfig_map, type_remap);
+        Module cloned =
+            clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
         r.register_module(type->getAttributeName(i), cloned);
       } else {
+        // we'll deepcopy the IValue in non inplace option
         r.register_attribute(
             type->getAttributeName(i),
             type->getAttribute(i),
-            s,
+            inplace ? s : s.deepcopy(memo),
             type->is_parameter(i),
             type->is_buffer(i));
       }
@@ -1129,8 +1138,7 @@ Module InsertObservers(
   ModuleQConfigMap map_before_clone;
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
-  Module module =
-      inplace ? input_module : mh.clone(input_module, map_before_clone);
+  Module module = mh.clone(input_module, map_before_clone, inplace);
   ModuleQConfigMap module_qconfig_map;
   // Since the types are changed after clone, we need to fill
   // the qconfig map again
