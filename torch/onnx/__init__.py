@@ -95,10 +95,10 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                   %3 : Float = onnx::Mul(%2, %0) # registered op
                   return (%3)
             OperatorExportTypes.RAW: Export raw ir.
-            OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not exportable to ONNX,
-            fall through and export the operator as is, as a custom ONNX op. Using
-            this mode, it can be registered and implemented by the user for their
-            runtime backend.
+            OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
+            in ONNX, fall through and export the operator as is, as a custom 
+            ONNX op. Using this mode, the op can be exported and implemented by
+            the user for their runtime backend.
             Example graph:
                 graph(%x.1 : Long(1:1)):
                   %1 : None = prim::Constant()
