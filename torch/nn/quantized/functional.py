@@ -366,8 +366,7 @@ def celu(input, alpha=1., inplace=False):
     # type: (Tensor, Optional[float], Optional[bool]) -> Tensor
     r"""celu(input, inplace=False) -> Tensor
 
-    Applies the quantized continuously differentiable ELU function element-wise.
-
+    Applies the quantized CELU function element-wise.
     .. math::
         \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x / \alpha) - 1))
 
@@ -382,6 +381,7 @@ def celu(input, alpha=1., inplace=False):
         return torch.celu_(input, alpha)
     else:
         return torch.celu(input, alpha)
+
 
 def relu(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
@@ -499,9 +499,9 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
         torch._C._nn.elu(input, alpha, out=output)
         return output
     elif inplace:
-        return torch._C._nn.elu_(input, alpha, 1., 1.)
+        return torch._C._nn.elu_(input, alpha)
     else:
-        return torch._C._nn.elu(input, alpha, 1., 1.)
+        return torch._C._nn.elu(input, alpha)
 
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor
