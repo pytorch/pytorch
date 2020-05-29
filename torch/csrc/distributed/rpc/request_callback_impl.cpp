@@ -214,13 +214,19 @@ void RequestCallbackImpl::processRpc(
           try {
             pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
           } catch (...) {
+            // user function return type cannot be cast to a Future type.
             auto type = result.get_type();
-            throw std::runtime_error(c10::str(
+            auto errMsg = c10::str(
                 "Functions decorated with @rpc.async_function must return a "
                 "torch.futures.Future object, but got ",
                 type.attr("__module__").cast<std::string>(),
                 ".",
-                type.attr("__qualname__").cast<std::string>()));
+                type.attr("__qualname__").cast<std::string>());
+
+            py::gil_scoped_release release;
+            responseFuture->markCompleted(
+                createExceptionResponse(errMsg, messageId));
+            return;
           }
         }
         pyFuture->fut->addCallback([msgId = messageId,
