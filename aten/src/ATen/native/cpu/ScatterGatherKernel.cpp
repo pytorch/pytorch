@@ -218,13 +218,7 @@ struct cpu_scatter_gather_base_kernel {
             }
           }
         };
-        
-        if (serial_exec) {
-          iter.serial_for_each(loop, {0, iter.numel()});
-        }
-        else {
-          iter.for_each(loop);
-        }
+        iter.for_each(loop);
       }
     );
   }

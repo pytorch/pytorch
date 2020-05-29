@@ -79,7 +79,7 @@ class AbstractTestCases:
                 result = torch.zeros(shape, dtype=dtype)
                 result.apply_(lambda x: random.randint(val_range[0], val_range[1]))
                 return result
-
+ 
             def make_non_contiguous(shape, dtype):
                 contig = make_contiguous(shape, dtype)
                 non_contig = torch.empty(shape + (2, 2), dtype=dtype)[..., 0]
@@ -2579,6 +2579,10 @@ class AbstractTestCases:
 
         @staticmethod
         def _test_gather(self, cast, test_bounds=True):
+            m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
+            elems_per_row = random.randint(1, 10)
+            dim = random.randrange(3)
+            
             for dtype in {torch.float32, torch.complex64, torch.complex128}:
                 src = torch.randn(m, n, o, dtype=dtype)
                 idx_size = [m, n, o]
@@ -2649,7 +2653,7 @@ class AbstractTestCases:
                 idx_size = [m, n, o]
                 idx_size[dim] = elems_per_row
                 idx = cast(torch.LongTensor().resize_(*idx_size))
-                _TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
+                AbstractTestCases._TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
 
                 src_size = [random.randint(1, 5) + s for s in idx_size]
                 if is_scalar:
@@ -2700,7 +2704,7 @@ class AbstractTestCases:
                     actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
                 else:
                     actual = getattr(base.clone(), method)(dim, idx, src)
-                self.assertEqual(actual, base, 0)
+                self.assertEqual(actual, base, atol=0, rtol=0)
 
         def test_scatter(self):
             self._test_scatter_base(self, lambda t: t, 'scatter_')
@@ -12358,7 +12362,7 @@ class TestTorchDeviceType(TestCase):
 
         for input, src, result, operation in test_data:
             input.scatter_(0, index, src, reduce=operation)
-            self.assertEqual(input, result, operation)
+            self.assertEqual(input, result)
 
     @onlyCPU
     def test_scatter_reduce_scalar(self, device):
@@ -12389,7 +12393,7 @@ class TestTorchDeviceType(TestCase):
 
         for input, src, result, operation in test_data:
             input.scatter_(0, index, src, reduce=operation)
-            self.assertEqual(input, result, operation)
+            self.assertEqual(input, result)
 
     # TODO: remove this after scatter_add_ is deprecated.
     def test_scatter_add_non_unique_index(self, device):
@@ -12432,7 +12436,7 @@ class TestTorchDeviceType(TestCase):
 
         for input, src, result, operation in test_data:
             input.scatter_(0, index, src, reduce=operation)
-            self.assertEqual(input, result, operation)
+            self.assertEqual(input, result)
 
 
     def test_scatter_to_large_input(self, device):
