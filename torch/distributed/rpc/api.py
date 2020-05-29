@@ -544,7 +544,6 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
                 is_async_fn
             )
         else:
-            is_async_fn = hasattr(func, "_wrapped_async_rpc_function")
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
