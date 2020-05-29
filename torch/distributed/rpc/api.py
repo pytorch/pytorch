@@ -294,6 +294,18 @@ def _init_rpc_backend(
     _set_and_start_rpc_agent(rpc_agent)
 
 
+def async_function(fn):
+    r"""
+    Wrapper of a function indicating that the return value of the function is
+    guranteed to be a ``torch.futures.Future``.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+    wrapper._wrapped_async_rpc_function = fn
+    return wrapper
+
+
 @_require_initialized
 def get_worker_info(worker_name=None):
     r"""
@@ -520,10 +532,11 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
                 dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
             )
         else:
+            is_async_fn = hasattr(func, "_wrapped_async_rpc_function")
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
-            fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rpc_timeout)
+            fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rpc_timeout, is_async_fn)
         if should_profile:
             assert torch.autograd._profiler_enabled()
             assert rf is not None

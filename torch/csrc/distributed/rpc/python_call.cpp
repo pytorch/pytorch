@@ -6,12 +6,19 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-PythonCall::PythonCall(SerializedPyObj&& serializedPyObj)
-    : serializedPyObj_(std::move(serializedPyObj)) {}
+PythonCall::PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncFunction)
+    : serializedPyObj_(std::move(serializedPyObj)),
+      isAsyncFunction_(isAsyncFunction) {}
 
 Message PythonCall::toMessageImpl() && {
-  auto payload = std::vector<char>(
-      serializedPyObj_.payload_.begin(), serializedPyObj_.payload_.end());
+  std::vector<char> payload;
+  payload.reserve(serializedPyObj_.payload_.length() + 1);
+  payload.push_back(isAsyncFunction_);
+  payload.insert(
+      payload.end(),
+      serializedPyObj_.payload_.begin(),
+      serializedPyObj_.payload_.end());
+
   return Message(
       std::move(payload),
       std::move(serializedPyObj_.tensors_),
@@ -19,10 +26,12 @@ Message PythonCall::toMessageImpl() && {
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
-  std::string payload(message.payload().begin(), message.payload().end());
+  bool isAsyncFunction = message.payload()[0];
+  std::string payload(message.payload().begin() + 1, message.payload().end());
   std::vector<Tensor> tensors = message.tensors();
   SerializedPyObj serializedPyObj(std::move(payload), std::move(tensors));
-  return std::make_unique<PythonCall>(std::move(serializedPyObj));
+  return std::make_unique<PythonCall>(
+      std::move(serializedPyObj), isAsyncFunction);
 }
 
 const SerializedPyObj& PythonCall::serializedPyObj() const {

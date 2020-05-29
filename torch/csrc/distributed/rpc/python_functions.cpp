@@ -173,11 +173,13 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const bool asyncFunction) {
   DCHECK(!PyGILState_Check());
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
-  auto pythonCall = std::make_unique<PythonCall>(std::move(serializedPyObj));
+  auto pythonCall =
+      std::make_unique<PythonCall>(std::move(serializedPyObj), asyncFunction);
 
   auto agent = RpcAgent::getCurrentRpcAgent();
   return wrapFutureMessageInJitFuture(sendMessageWithAutograd(

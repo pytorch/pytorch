@@ -39,7 +39,8 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
   switch (messageType) {
     case MessageType::PYTHON_CALL: {
       auto& pc = static_cast<PythonCall&>(rpc);
-      return std::make_unique<UnpickledPythonCall>(pc.serializedPyObj());
+      return std::make_unique<UnpickledPythonCall>(
+          pc.serializedPyObj(), pc.isAsyncFunction());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -168,15 +169,43 @@ void RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_CALL: {
       auto& upc = static_cast<UnpickledPythonCall&>(rpc);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
-      {
-        py::gil_scoped_acquire acquire;
-        serializedPyObj =
-            std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
-                pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())));
+      if (upc.isAsyncFunction()) {
+        std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
+        {
+          py::gil_scoped_acquire acquire;
+          pyFuture = pythonRpcHandler
+              .runPythonUdf(std::move(upc).movePythonUdf())
+              .cast<std::shared_ptr<jit::PythonFutureWrapper>>();
+        }
+        pyFuture->fut->addCallback([
+            msgId = messageId,
+            responseFuture = responseFuture,
+            jitFuture = pyFuture->fut]() {
+          auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+          std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
+          {
+            py::gil_scoped_acquire acquire;
+            serializedPyObj = std::make_shared<SerializedPyObj>(
+                pythonRpcHandler.serialize(
+                    jit::toPyObject(jitFuture->value())));
+          }
+          auto m =
+              std::move(PythonResp(std::move(*serializedPyObj))).toMessage();
+          m.setId(msgId);
+          responseFuture->markCompleted(std::move(m));
+        });
+      } else {
+        std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
+        {
+          py::gil_scoped_acquire acquire;
+          serializedPyObj =
+              std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
+                  pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())));
+        }
+        markComplete(
+            std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
       }
-      markComplete(
-          std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
+
       return;
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
