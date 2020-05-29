@@ -14,14 +14,14 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
 from torch.quantization import get_default_qconfig
 
-# torch.quantization._quantize_script
-from torch.quantization._quantize_script import script_qconfig
-from torch.quantization._quantize_script import prepare_script
-from torch.quantization._quantize_script import convert_script
-from torch.quantization._quantize_script import quantize_script
-from torch.quantization._quantize_script import prepare_dynamic_script
-from torch.quantization._quantize_script import convert_dynamic_script
-from torch.quantization._quantize_script import quantize_dynamic_script
+# torch.quantization.quantize_script
+from torch.quantization.quantize_script import script_qconfig
+from torch.quantization.quantize_script import prepare_script
+from torch.quantization.quantize_script import convert_script
+from torch.quantization.quantize_script import quantize_script
+from torch.quantization.quantize_script import prepare_dynamic_script
+from torch.quantization.quantize_script import convert_dynamic_script
+from torch.quantization.quantize_script import quantize_dynamic_script
 
 # Testing utils
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
