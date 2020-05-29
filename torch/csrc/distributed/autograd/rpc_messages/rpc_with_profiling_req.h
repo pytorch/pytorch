@@ -8,9 +8,7 @@
 namespace torch {
 namespace distributed {
 namespace autograd {
-// TODO: Both this class and RpcWithAutograd wrap other RPC message types with
-// some information. We can dedupe these into a generic WrappedRpc class,
-// which these classes can inherit from.
+
 class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
  public:
   // For sending RPCs, invoked when client is creating this RPC command.
