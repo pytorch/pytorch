@@ -51,7 +51,7 @@ cc_library(
             "onnx/defs/sequence/*.cc",
             "onnx/defs/tensor/*.cc",
             "onnx/defs/traditionalml/*.cc",
-            "onnx/defs/traditionalml/*.cc",
+            "onnx/defs/training/defs.cc",
             "onnx/optimizer/*.cc",
             "onnx/shape_inference/*.cc",
             "onnx/version_converter/*.cc",

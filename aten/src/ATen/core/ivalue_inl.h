@@ -283,17 +283,20 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   void setError(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
-    completed_ = true;
-    error_ = std::move(error);
+    setErrorInternal(std::move(error), lock);
+  }
 
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
-    finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
+  void setErrorIfNeeded(std::string errorMsg) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (completed_) {
+      // This should be rare and shouldn't cause log spew. Its important to
+      // log errors and thats why we have this log here.
+      LOG(INFO) << "Skipping setting following error on the Future since " <<
+        "it is already marked completed (this is not neccessarily an error): "
+        << errorMsg;
+      return;
+    } else {
+      setErrorInternal(FutureError(std::move(errorMsg)), lock);
     }
   }
 
@@ -304,6 +307,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     if (error_) {
       throw *error_;
     }
+    return value_;
+  }
+
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
+  const IValue& constValue() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
     return value_;
   }
 
@@ -321,6 +332,30 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       return;
     }
     callbacks_.emplace_back(std::move(callback));
+  }
+
+  /**
+   * Add a callback to the future, and return another Future to hold the return
+   * value of the callback. This is necessary when the callback provider needs
+   * to know for sure when the callback has finished.
+   */
+  c10::intrusive_ptr<Future> then(
+      std::function<IValue(void)> callback,
+      TypePtr type) {
+    auto fut = c10::make_intrusive<Future>(type);
+    // Cannot move capture std::function in lambda, because it cannot deduce
+    // the template type for std::function. Hence use std::bind to explicitly
+    // specify types.
+    addCallback(std::bind(
+        [fut](std::function<IValue(void)> cb) {
+          try {
+            fut->markCompleted(cb());
+          } catch (std::exception& e) {
+            fut->setError(e.what());
+          }
+        },
+        std::move(callback)));
+    return fut;
   }
 
   // Check if the current future has completed
@@ -347,6 +382,23 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
+  void setErrorInternal(
+      FutureError error,
+      std::unique_lock<std::mutex>& lock) {
+    AT_ASSERT(!completed());
+    completed_ = true;
+    error_ = std::move(error);
+
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
+    finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
+  }
+
   mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
@@ -433,7 +485,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return type_.cu_;
   }
 
+  c10::intrusive_ptr<Object> copy() const;
+
   c10::intrusive_ptr<Object> deepcopy() const;
+
   c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
  private:

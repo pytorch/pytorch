@@ -2,11 +2,11 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #ifdef USE_DISTRIBUTED
@@ -814,7 +815,7 @@ struct CodeImpl {
         break;
       case prim::CallMethod:
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
-          emitCall(class_type->getMethod(node->s(attr::name)), node->inputs());
+          emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
@@ -943,6 +944,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     // unique to every frame with prim::profile across all threads
     c10::optional<size_t> id;
     static std::atomic<size_t> num_frames;
+
+    // RecordFunction object associated with this frame
+    std::unique_ptr<at::RecordFunction> record_function;
+    // symbol table for a frame
+    ShapeSymbolTable symbols2dims;
   };
 
   // saved-by-value stuff that can exist on the stack inside runInterpreter
@@ -1020,8 +1026,19 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
             .code;
     frames.back().pc = af->pc + 1;
-    RECORD_TORCHSCRIPT_FUNCTION(fn->name(), last(stack, code.num_inputs()));
     enterFrame(code, stack.size() - code.num_inputs());
+    if (at::hasCallbacks() && at::isRecordFunctionEnabled()) {
+      auto rec_fn = std::make_unique<at::RecordFunction>(
+          at::RecordScope::TORCHSCRIPT_FUNCTION);
+      if (rec_fn->active) {
+        if (rec_fn->needs_inputs) {
+          rec_fn->before(fn->name(), last(stack, code.num_inputs()));
+        } else {
+          rec_fn->before(fn->name());
+        }
+        frames.back().record_function = std::move(rec_fn);
+      }
+    }
     *af = ActiveFrame(frames.back());
   }
 
@@ -1142,14 +1159,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // reduce the number of compilations for too dynamic callers we
             // might miss opportunities where a caller is dynamic but a callee
             // gets stable arguments
-            auto function = peek(stack, 0, inst.N)
-                                .toObject()
-                                ->type()
-                                ->getMethod(af.constants[inst.X].toStringRef());
-            if (!function->isGraphFunction()) {
-              runBuiltinFunction(stack, function, &af);
+            Function& function =
+                peek(stack, 0, inst.N)
+                    .toObject()
+                    ->type()
+                    ->getMethod(af.constants[inst.X].toStringRef());
+            if (!function.isGraphFunction()) {
+              runBuiltinFunction(stack, &function, &af);
             } else {
-              runGraphFunction(stack, function, &af);
+              runGraphFunction(stack, &function, &af);
             }
           } break;
           case RET:
@@ -1184,13 +1202,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 }
                 void operator()() {
                   at::launch(InterpreterContinuation(
-                      state_, std::move(stack_), dist_autograd_context_id_));
+                      state_,
+                      std::move(stack_),
+                      dist_autograd_context_id_,
+                      std::move(tls_state_)));
                 }
 
                private:
                 InterpreterState state_;
                 Stack stack_;
                 int64_t dist_autograd_context_id_;
+                // preserve the original ThreadLocalState
+                at::ThreadLocalState tls_state_;
               };
 
               // we are suspending, so we need to reset the stack to where we
@@ -1245,9 +1268,30 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               push(stack, true);
             } else {
               auto t = stack.back().toTensor();
-              const TypePtr& expected = af.types[inst.X];
               auto pttp = tensorTypeInCurrentExecutionContext(t);
-              push(stack, pttp->isSubtypeOf(expected));
+              const TypePtr& expected = af.types[inst.X];
+              auto expected_type = expected->cast<TensorType>();
+              bool bound_successfully = true;
+              if (t.defined()) {
+                // check if symbols in the `expected_type` can bind to
+                // `t.sizes()`
+                bound_successfully =
+                    frames.back().symbols2dims.bindSymbolicShapes(
+                        t.sizes(), expected_type->symbolic_sizes());
+
+                // `merge(,false)` makes the merge result
+                // use the symbols from the `expected_type`
+                // since we already know that they bound
+                // successfully, so pttp should have
+                // the same symbolic type information
+                // as `expected_type`
+                if (bound_successfully) {
+                  pttp = expected_type->merge(pttp, false);
+                }
+              }
+              push(
+                  stack,
+                  bound_successfully && pttp->isSubtypeOf(expected_type));
             }
             ++af.pc;
           } break;
@@ -1511,7 +1555,12 @@ void InterpreterContinuation::operator()() {
   auto prev_dist_id = DistAutogradContainer::currentContextId();
   DistAutogradContainer::forceCurrentContextId(dist_autograd_context_id_);
 #endif
-  state.runAsync(stack);
+  if (tls_state_ != c10::nullopt) {
+    at::ThreadLocalStateGuard g(*tls_state_);
+    state.runAsync(stack);
+  } else {
+    state.runAsync(stack);
+  }
 #ifdef USE_DISTRIBUTED
   DistAutogradContainer::forceCurrentContextId(prev_dist_id);
 #endif

@@ -26,14 +26,26 @@ namespace c10 {
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
 class C10_API Error : public std::exception {
-  std::vector<std::string> msg_stack_;
+  // The actual error message.
+  std::string msg_;
+
+  // Context for the message (in order of decreasing specificity).  Context will
+  // be automatically formatted appropriately, so it is not necessary to add
+  // extra leading/trailing newlines to strings inside this vector
+  std::vector<std::string> context_;
+
+  // The C++ backtrace at the point when this exception was raised.  This
+  // may be empty if there is no valid backtrace.  (We don't use optional
+  // here to reduce the dependencies this file has.)
   std::string backtrace_;
 
   // These two are derived fields from msg_stack_ and backtrace_, but we need
   // fields for the strings so that we can return a const char* (as the
-  // signature of std::exception requires).
-  std::string msg_;
-  std::string msg_without_backtrace_;
+  // signature of std::exception requires).  Currently, the invariant
+  // is that these fields are ALWAYS populated consistently with respect
+  // to msg_stack_ and backtrace_.
+  std::string what_;
+  std::string what_without_backtrace_;
 
   // This is a little debugging trick: you can stash a relevant pointer
   // in caller, and then when you catch the exception, you can compare
@@ -43,11 +55,11 @@ class C10_API Error : public std::exception {
   const void* caller_;
 
  public:
-  Error(
-      const std::string& msg,
-      const std::string& backtrace,
-      const void* caller = nullptr);
-  Error(SourceLocation source_location, const std::string& msg);
+  // PyTorch-style Error constructor.  NB: the implementation of this
+  // is actually in Logging.cpp
+  Error(SourceLocation source_location, std::string msg);
+
+  // Caffe2-style error message
   Error(
       const char* file,
       const uint32_t line,
@@ -56,20 +68,35 @@ class C10_API Error : public std::exception {
       const std::string& backtrace,
       const void* caller = nullptr);
 
-  void AppendMessage(const std::string& msg);
+  // Base constructor
+  Error(
+      std::string msg,
+      std::string backtrace,
+      const void* caller = nullptr);
 
-  // Compute the full message from msg_ and msg_without_backtrace_
-  // TODO: Maybe this should be private
-  std::string msg() const;
-  std::string msg_without_backtrace() const;
+  // Add some new context to the message stack.  The last added context
+  // will be formatted at the end of the context list upon printing.
+  // WARNING: This method is O(n) in the size of the stack, so don't go
+  // wild adding a ridiculous amount of context to error messages.
+  void add_context(std::string msg);
 
-  const std::vector<std::string>& msg_stack() const {
-    return msg_stack_;
+  const std::string& msg() const {
+    return msg_;
+  }
+
+  const std::vector<std::string>& context() const {
+    return context_;
+  }
+
+  const std::string& backtrace() const {
+    return backtrace_;
   }
 
   /// Returns the complete error message, including the source location.
+  /// The returned pointer is invalidated if you call add_context() on
+  /// this object.
   const char* what() const noexcept override {
-    return msg_.c_str();
+    return what_.c_str();
   }
 
   const void* caller() const noexcept {
@@ -77,9 +104,15 @@ class C10_API Error : public std::exception {
   }
 
   /// Returns only the error message string, without source location.
+  /// The returned pointer is invalidated if you call add_context() on
+  /// this object.
   const char* what_without_backtrace() const noexcept {
-    return msg_without_backtrace_.c_str();
+    return what_without_backtrace_.c_str();
   }
+
+ private:
+  void refresh_what();
+  std::string compute_what(bool include_backtrace) const;
 };
 
 class C10_API WarningHandler {
@@ -204,6 +237,16 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // Error reporting macros
 // ----------------------------------------------------------------------------
 
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_RETHROW(e, ...) throw
+#else
+#define TORCH_RETHROW(e, ...)      \
+  do { \
+    e.add_context(::c10::str(__VA_ARGS__)); \
+    throw; \
+  } while (false)
+#endif
+
 // A utility macro to provide assert()-like functionality; that is, enforcement
 // of internal invariants in code.  It supports an arbitrary number of extra
 // arguments (evaluated only on failure), which will be printed in the assert
@@ -265,25 +308,28 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike CHECK() from glog.)
 //
+#define TORCH_CHECK_WITH(error_t, cond, ...) \
+  TORCH_CHECK_WITH_MSG(error_t, cond, "", __VA_ARGS__)
+
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK_WITH(error_t, cond, ...)  \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(error_t,                  \
-        #cond " CHECK FAILED at "             \
-        C10_STRINGIZE(__FILE__)               \
-    );                                        \
+#define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)  \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                 \
+    C10_THROW_ERROR(Error,                              \
+        #cond #type " CHECK FAILED at "                 \
+        C10_STRINGIZE(__FILE__)                         \
+    );                                                  \
   }
 #else
-#define TORCH_CHECK_WITH(error_t, cond, ...)                \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
-    C10_THROW_ERROR(error_t,                                \
-      ::c10::detail::if_empty_then(                         \
-        ::c10::str(__VA_ARGS__),                            \
-        "Expected " #cond " to be true, but got false.  "   \
-        "(Could this error message be improved?  If so, "   \
-        "please report an enhancement request to PyTorch.)" \
-      )                                                     \
-    );                                                      \
+#define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
+    C10_THROW_ERROR(error_t,                                          \
+      ::c10::detail::if_empty_then(                                   \
+        ::c10::str(__VA_ARGS__),                                      \
+        "Expected " #cond " to be true, but got false.  "             \
+        "(Could this error message be improved?  If so, "             \
+        "please report an enhancement request to PyTorch.)"           \
+      )                                                               \
+    );                                                                \
   }
 #endif
 #define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
@@ -315,50 +361,12 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // this way; check if this actually affects binary size.
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
-#ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK_INDEX(cond, ...)          \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                    \
-        #cond " INDEX CHECK FAILED at "       \
-        C10_STRINGIZE(__FILE__)               \
-    );                                        \
-  }
-#else
-#define TORCH_CHECK_INDEX(cond, ...)                        \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
-    C10_THROW_ERROR(IndexError,                             \
-      ::c10::detail::if_empty_then(                         \
-        ::c10::str(__VA_ARGS__),                            \
-        "Expected " #cond " to be true, but got false.  "   \
-        "(Could this error message be improved?  If so, "   \
-        "please report an enhancement request to PyTorch.)" \
-      )                                                     \
-    );                                                      \
-  }
-#endif
+#define TORCH_CHECK_INDEX(cond, ...) \
+  TORCH_CHECK_WITH_MSG(IndexError, cond, "INDEX", __VA_ARGS__)
 
 // Like TORCH_CHECK, but raises ValueErrors instead of Errors.
-#ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK_VALUE(cond, ...)          \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                    \
-        #cond " VALUE CHECK FAILED at "       \
-        C10_STRINGIZE(__FILE__)               \
-    );                                        \
-  }
-#else
-#define TORCH_CHECK_VALUE(cond, ...)                        \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
-    C10_THROW_ERROR(ValueError,                             \
-      ::c10::detail::if_empty_then(                         \
-        ::c10::str(__VA_ARGS__),                            \
-        "Expected " #cond " to be true, but got false.  "   \
-        "(Could this error message be improved?  If so, "   \
-        "please report an enhancement request to PyTorch.)" \
-      )                                                     \
-    );                                                      \
-  }
-#endif
+#define TORCH_CHECK_VALUE(cond, ...) \
+  TORCH_CHECK_WITH_MSG(ValueError, cond, "VALUE", __VA_ARGS__)
 
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<

@@ -89,8 +89,6 @@ class LLVMCodeGenImpl : public IRVisitor {
 
   void visit(const Cast* v) override;
   void visit(const Var* v) override;
-  void visit(const Let* v) override;
-  void visit(const LetStmt* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
   void visit(const For* v) override;
@@ -228,6 +226,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   HalfTy_ = llvm::Type::getHalfTy(getContext());
   FloatTy_ = llvm::Type::getFloatTy(getContext());
   DoubleTy_ = llvm::Type::getDoubleTy(getContext());
+  BoolTy_ = ByteTy_;
 
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
@@ -522,7 +521,7 @@ void LLVMCodeGenImpl::visit(const Max* v) {
   v->rhs()->accept(this);
   auto rhs = this->value_;
 
-  if (v->dtype() == kInt) {
+  if (v->dtype().is_integral()) {
     auto icmp = irb_.CreateICmpSGT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
@@ -707,49 +706,6 @@ void LLVMCodeGenImpl::visit(const Var* v) {
     value_ = arg;
   } else if (varToVal_.count(v)) {
     value_ = varToVal_.at(v);
-  }
-}
-
-void LLVMCodeGenImpl::visit(const Let* v) {
-  const Var* var = dynamic_cast<const Var*>(v->var());
-  if (!var) {
-    throw malformed_input("llvm_codgen: bad Var in Let", v);
-  }
-
-  v->value()->accept(this);
-  auto value = value_;
-  if (!varToVal_.count(var)) {
-    varToVal_.emplace(var, value);
-  } else {
-    throw std::runtime_error("var should not exist before");
-  }
-  v->body()->accept(this);
-  if (varToVal_.count(var)) {
-    varToVal_.erase(var);
-  } else {
-    throw std::runtime_error("erasing var that doesn't exist");
-  }
-}
-
-// TODO: refactor this and merge with Let
-void LLVMCodeGenImpl::visit(const LetStmt* v) {
-  const Var* var = v->var();
-  if (!var) {
-    throw malformed_input("llvm_codgen: bad Var in LetStmt", v);
-  }
-
-  v->value()->accept(this);
-  auto value = value_;
-  if (!varToVal_.count(var)) {
-    varToVal_.emplace(var, value);
-  } else {
-    throw std::runtime_error("var should not exist before");
-  }
-  v->body()->accept(this);
-  if (varToVal_.count(var)) {
-    varToVal_.erase(var);
-  } else {
-    throw std::runtime_error("erasing var that doesn't exist");
   }
 }
 
@@ -962,8 +918,25 @@ void LLVMCodeGenImpl::visit(const For* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Block* v) {
+  for (auto pair : v->varBindings()) {
+    const Var* v = pair.first;
+    pair.second->accept(this);
+    if (!varToVal_.count(v)) {
+      varToVal_.emplace(v, value_);
+    } else {
+      throw std::runtime_error("var should not exist before");
+    }
+  }
+
   for (Stmt* s : *v) {
     s->accept(this);
+  }
+
+  for (auto pair : v->varBindings()) {
+    const Var* v = pair.first;
+    if (varToVal_.erase(v) != 1) {
+      throw std::runtime_error("erasing var that doesn't exist");
+    }
   }
 }
 
@@ -1083,8 +1056,8 @@ void LLVMCodeGenImpl::visit(const Broadcast* v) {
 void LLVMCodeGenImpl::visit(const IfThenElse* v) {
   v->condition()->accept(this);
   llvm::Value* condition = value_;
-  llvm::Value* c =
-      irb_.CreateICmpNE(condition, llvm::ConstantInt::get(IntTy_, 0));
+  llvm::Value* c = irb_.CreateICmpNE(
+      condition, llvm::ConstantInt::get(condition->getType(), 0));
 
   auto then_block = llvm::BasicBlock::Create(getContext(), "then", fn_);
   auto else_block = llvm::BasicBlock::Create(getContext(), "else", fn_);

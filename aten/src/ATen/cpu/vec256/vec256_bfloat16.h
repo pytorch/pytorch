@@ -1,5 +1,8 @@
 #pragma once
 
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
@@ -50,7 +53,6 @@ static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
 template <> class Vec256<BFloat16> {
 private:
   __m256i values;
-  static const Vec256<BFloat16> ones;
 public:
   using value_type = uint16_t;
   static constexpr int size() {
@@ -75,6 +77,11 @@ public:
   }
   BFloat16& operator[](int idx) = delete;
   const BFloat16& operator[](int idx) const  = delete;
+  int zero_mask() const {
+    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
+    __m256i cmp = _mm256_cmpeq_epi16(values, _mm256_set1_epi16(0));
+    return _mm256_movemask_epi8(cmp);
+  }
   static Vec256<BFloat16> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
@@ -244,6 +251,15 @@ public:
   }
   Vec256<BFloat16> expm1() const {
     return map(Sleef_expm1f8_u10);
+  }
+  Vec256<BFloat16> fmod(const Vec256<BFloat16> & q) const {
+    __m256 x_lo, x_hi;
+    cvtbf16_fp32(values, x_lo, x_hi);
+    __m256 q_lo, q_hi;
+    cvtbf16_fp32(q.values, q_lo, q_hi);
+    auto o1 = Sleef_fmodf8(x_lo, q_lo);
+    auto o2 = Sleef_fmodf8(x_hi, q_hi);
+    return cvtfp32_bf16(o1, o2);
   }
   Vec256<BFloat16> log() const {
     return map(Sleef_logf8_u10);
@@ -428,30 +444,28 @@ Vec256<BFloat16> inline operator^(const Vec256<BFloat16>& a, const Vec256<BFloat
   return _mm256_xor_si256(a, b);
 }
 
-const Vec256<BFloat16> Vec256<BFloat16>::ones(1.0f);
-
 Vec256<BFloat16> Vec256<BFloat16>::eq(const Vec256<BFloat16>& other) const {
-  return (*this == other) & Vec256<BFloat16>::ones;
+  return (*this == other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::ne(const Vec256<BFloat16>& other) const {
-  return (*this != other) & Vec256<BFloat16>::ones;
+  return (*this != other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::gt(const Vec256<BFloat16>& other) const {
-  return (*this > other) & Vec256<BFloat16>::ones;
+  return (*this > other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::ge(const Vec256<BFloat16>& other) const {
-  return (*this >= other) & Vec256<BFloat16>::ones;
+  return (*this >= other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::lt(const Vec256<BFloat16>& other) const {
-  return (*this < other) & Vec256<BFloat16>::ones;
+  return (*this < other) & Vec256<BFloat16>(1.0f);
 }
 
 Vec256<BFloat16> Vec256<BFloat16>::le(const Vec256<BFloat16>& other) const {
-  return (*this <= other) & Vec256<BFloat16>::ones;
+  return (*this <= other) & Vec256<BFloat16>(1.0f);
 }
 
 // frac. Implement this here so we can use subtraction

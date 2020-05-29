@@ -712,7 +712,7 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
 
 accreal THTensor_(meanall)(THTensor *tensor)
 {
-  return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
+  return THTensor_wrap(tensor).sum().item<accreal>()/THTensor_(nElement)(tensor);
 }
 
 accreal THTensor_(var_all)(THTensor *tensor, bool unbiased)
@@ -744,8 +744,8 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t 
   maxval = maxvalue;
   if (minval == maxval)
   {
-    minval = THTensor_(minall)(tensor);
-    maxval = THTensor_(maxall)(tensor);
+    minval = THTensor_wrap(tensor).min().item<scalar_t>();
+    maxval = THTensor_wrap(tensor).max().item<scalar_t>();
   }
   if (minval == maxval)
   {

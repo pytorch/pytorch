@@ -1,5 +1,8 @@
 :orphan:
 
+.. contents:: :local:
+    :depth: 2
+
 .. _distributed-rpc-framework:
 
 Distributed RPC Framework
@@ -130,6 +133,12 @@ details.
     :members:
 
 
+.. toctree::
+    :caption: More Information about RRef
+
+    rpc/rref
+
+
 Distributed Autograd Framework
 ------------------------------
 
@@ -143,8 +152,30 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 .. automodule:: torch.distributed.autograd
     :members: context, backward, get_gradients
 
+.. toctree::
+    :caption: More Information about RPC Autograd
+
+    rpc/distributed_autograd
+
+
 Distributed Optimizer
 ---------------------
 
 .. automodule:: torch.distributed.optim
     :members: DistributedOptimizer
+
+Design Notes
+------------
+The distributed autograd design note covers the design of the RPC-based distributed autograd framework that is useful for applications such as model parallel training.
+
+-  :ref:`distributed-autograd-design`
+
+The RRef design note covers the design of the :ref:`rref` (Remote REFerence) protocol used to refer to values on remote workers by the framework.
+
+-  :ref:`remote-reference-protocol`
+
+Tutorials
+---------
+The RPC tutorial introduces users to the RPC framework and provides two example applications using :ref:`torch.distributed.rpc<distributed-rpc-framework>` APIs.
+
+-  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__

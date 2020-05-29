@@ -4,6 +4,7 @@ import glob
 import imp
 import os
 import re
+import shlex
 import setuptools
 import subprocess
 import sys
@@ -160,6 +161,11 @@ COMMON_HIPCC_FLAGS = [
 ]
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
+
+PLAT_TO_VCVARS = {
+    'win32' : 'x86',
+    'win-amd64' : 'x86_amd64',
+}
 
 
 def _is_binary_build():
@@ -319,15 +325,12 @@ class BuildExtension(build_ext, object):
         super(BuildExtension, self).__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
-        self.use_ninja = kwargs.get('use_ninja', False if IS_HIP_EXTENSION else True)
+        self.use_ninja = kwargs.get('use_ninja', True)
         if self.use_ninja:
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
-            if IS_HIP_EXTENSION:
-                warnings.warn(msg.format('HIP extensions is not supported yet for ninja.'))
-                self.use_ninja = False
-            elif not _is_ninja_available():
+            if not _is_ninja_available():
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
 
@@ -361,6 +364,13 @@ class BuildExtension(build_ext, object):
             return (COMMON_NVCC_FLAGS +
                     ['--compiler-options', "'-fPIC'"] +
                     cflags + _get_cuda_arch_flags(cflags))
+
+        def convert_to_absolute_paths_inplace(paths):
+            # Helper function. See Note [Absolute include_dirs]
+            if paths is not None:
+                for i in range(len(paths)):
+                    if not os.path.isabs(paths[i]):
+                        paths[i] = os.path.abspath(paths[i])
 
         def unix_wrap_single_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
             # Copy before we make any modifications.
@@ -410,6 +420,10 @@ class BuildExtension(build_ext, object):
             # Use absolute path for output_dir so that the object file paths
             # (`objects`) get generated with absolute paths.
             output_dir = os.path.abspath(output_dir)
+
+            # See Note [Absolute include_dirs]
+            convert_to_absolute_paths_inplace(self.compiler.include_dirs)
+
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
@@ -425,6 +439,8 @@ class BuildExtension(build_ext, object):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
+            if IS_HIP_EXTENSION:
+                post_cflags += COMMON_HIPCC_FLAGS
             append_std14_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
@@ -435,14 +451,20 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = extra_postargs['nvcc']
                 else:
                     cuda_post_cflags = list(extra_postargs)
-                cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
+                if IS_HIP_EXTENSION:
+                    cuda_post_cflags = cuda_post_cflags + _get_rocm_arch_flags(cuda_post_cflags)
+                    cuda_post_cflags = cuda_post_cflags + COMMON_HIPCC_FLAGS
+                else:
+                    cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
                 append_std14_if_no_std_present(cuda_post_cflags)
+                cuda_cflags = [shlex.quote(f) for f in cuda_cflags]
+                cuda_post_cflags = [shlex.quote(f) for f in cuda_post_cflags]
 
             _write_ninja_file_and_compile_objects(
                 sources=sources,
                 objects=objects,
-                cflags=extra_cc_cflags + common_cflags,
-                post_cflags=post_cflags,
+                cflags=[shlex.quote(f) for f in extra_cc_cflags + common_cflags],
+                post_cflags=[shlex.quote(f) for f in post_cflags],
                 cuda_cflags=cuda_cflags,
                 cuda_post_cflags=cuda_post_cflags,
                 build_directory=output_dir,
@@ -535,6 +557,15 @@ class BuildExtension(build_ext, object):
             if not self.compiler.initialized:
                 self.compiler.initialize()
             output_dir = os.path.abspath(output_dir)
+
+            # Note [Absolute include_dirs]
+            # Convert relative path in self.compiler.include_dirs to absolute path if any,
+            # For ninja build, the build location is not local, the build happens
+            # in a in script created build folder, relative path lost their correctness.
+            # To be consistent with jit extension, we allow user to enter relative include_dirs
+            # in setuptools.setup, and we convert the relative path to absolute path here
+            convert_to_absolute_paths_inplace(self.compiler.include_dirs)
+
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
                                              include_dirs, sources,
@@ -636,6 +667,12 @@ class BuildExtension(build_ext, object):
         else:
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
+        # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
+        if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
+            msg = ('It seems that the VC environment is activated but DISTUTILS_USE_SDK is not set.'
+                   'This may lead to multiple activations of the VC env.'
+                   'Please set `DISTUTILS_USE_SDK=1` and try again.')
+            raise UserWarning(msg)
 
     def _add_compile_flag(self, extension, flag):
         extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
@@ -1297,7 +1334,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
                 extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
-        else:
+        elif not IS_HIP_EXTENSION:
             extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
             extra_ldflags.append('-lcudart')
             if CUDNN_HOME is not None:
@@ -1425,6 +1462,22 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
     num_workers = _get_num_workers(verbose)
     if num_workers is not None:
         command.extend(['-j', str(num_workers)])
+    env = os.environ.copy()
+    # Try to activate the vc env for the users
+    if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
+        from distutils.util import get_platform
+        from distutils._msvccompiler import _get_vc_env
+
+        plat_name = get_platform()
+        plat_spec = PLAT_TO_VCVARS[plat_name]
+
+        vc_env = _get_vc_env(plat_spec)
+        vc_env = {k.upper(): v for k, v in vc_env.items()}
+        for k, v in env.items():
+            uk = k.upper()
+            if uk not in vc_env:
+                vc_env[uk] = v
+        env = vc_env
     try:
         sys.stdout.flush()
         sys.stderr.flush()
@@ -1447,12 +1500,14 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
                 stdout=stdout_fileno if verbose else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
-                check=True)
+                check=True,
+                env=env)
         else:
             subprocess.check_output(
                 command,
                 stderr=subprocess.STDOUT,
-                cwd=build_directory)
+                cwd=build_directory,
+                env=env)
     except subprocess.CalledProcessError:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
@@ -1671,6 +1726,7 @@ def _write_ninja_file(path,
             source_file = source_file.replace(':', '$:')
             object_file = object_file.replace(':', '$:')
         source_file = source_file.replace(" ", "$ ")
+        object_file = object_file.replace(" ", "$ ")
         build.append('build {}: {} {}'.format(object_file, rule, source_file))
 
     if library_target is not None:

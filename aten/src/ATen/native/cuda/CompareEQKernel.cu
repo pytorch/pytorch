@@ -11,7 +11,7 @@
 namespace at { namespace native {
 
 void eq_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "eq_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "eq_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "eq_cuda", [&] {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
         return a == b;

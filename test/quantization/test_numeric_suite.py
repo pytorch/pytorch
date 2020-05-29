@@ -4,15 +4,16 @@ import torch.nn.quantized as nnq
 from torch.quantization import (
     DeQuantStub,
     QuantStub,
+    convert,
     default_eval_fn,
     default_qconfig,
-    quantize,
     prepare,
-    convert,
+    quantize,
 )
 from torch.quantization._numeric_suite import (
-    RecordingLogger,
     Shadow,
+    ShadowLogger,
+    compare_model_outputs,
     compare_model_stub,
     compare_weights,
 )
@@ -21,7 +22,11 @@ from torch.testing._internal.common_quantization import (
     AnnotatedConvModel,
     QuantizationTestCase,
 )
-from torch.testing._internal.common_quantized import override_quantized_engine, supported_qengines
+from torch.testing._internal.common_quantized import (
+    override_quantized_engine,
+    supported_qengines,
+)
+
 
 class SubModule(torch.nn.Module):
     def __init__(self):
@@ -92,7 +97,10 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
+                model_list = [
+                    AnnotatedConvModel(qengine),
+                    AnnotatedConvBnReLUModel(qengine),
+                ]
                 for model in model_list:
                     model.eval()
                     if hasattr(model, "fuse_model"):
@@ -106,7 +114,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, module_swap_list, data):
             ob_dict = compare_model_stub(
-                float_model, q_model, module_swap_list, data, RecordingLogger
+                float_model, q_model, module_swap_list, data, ShadowLogger
             )
             self.assertEqual(len(ob_dict), 1)
             for k, v in ob_dict.items():
@@ -114,7 +122,10 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
+                model_list = [
+                    AnnotatedConvModel(qengine),
+                    AnnotatedConvBnReLUModel(qengine),
+                ]
                 data = self.img_data[0][0]
                 module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d]
                 for model in model_list:
@@ -129,12 +140,14 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 q_model = quantize(model, default_eval_fn, self.img_data)
                 module_swap_list = [SubModule]
                 ob_dict = compare_model_stub(
-                    model, q_model, module_swap_list, data, RecordingLogger
+                    model, q_model, module_swap_list, data, ShadowLogger
                 )
                 self.assertTrue(isinstance(q_model.mod1, Shadow))
                 self.assertFalse(isinstance(q_model.conv, Shadow))
                 for k, v in ob_dict.items():
-                    torch.testing.assert_allclose(v["float"], v["quantized"])
+                    torch.testing.assert_allclose(
+                        v["float"], v["quantized"].dequantize()
+                    )
 
                 # Test adding stub to functionals
                 model = ModelWithFunctionals().eval()
@@ -144,7 +157,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 q_model = convert(q_model)
                 module_swap_list = [nnq.FloatFunctional]
                 ob_dict = compare_model_stub(
-                    model, q_model, module_swap_list, data, RecordingLogger
+                    model, q_model, module_swap_list, data, ShadowLogger
                 )
                 self.assertEqual(len(ob_dict), 6)
                 self.assertTrue(isinstance(q_model.mycat, Shadow))
@@ -154,4 +167,55 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 self.assertTrue(isinstance(q_model.my_scalar_add, Shadow))
                 self.assertTrue(isinstance(q_model.my_scalar_mul, Shadow))
                 for k, v in ob_dict.items():
+                    self.assertTrue(v["float"].shape == v["quantized"].shape)
+
+    def test_compare_model_outputs(self):
+        r"""Compare the output of conv layer in quantized model and corresponding
+        output of conv layer in float model
+        """
+
+        def compare_and_validate_results(float_model, q_model, data):
+            act_compare_dict = compare_model_outputs(float_model, q_model, data)
+            self.assertEqual(len(act_compare_dict), 2)
+            expected_act_compare_dict_keys = {"conv.stats", "quant.stats"}
+            self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
+            for k, v in act_compare_dict.items():
+                self.assertTrue(v["float"].shape == v["quantized"].shape)
+
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model_list = [
+                    AnnotatedConvModel(qengine),
+                    AnnotatedConvBnReLUModel(qengine),
+                ]
+                data = self.img_data[0][0]
+                module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d]
+                for model in model_list:
+                    model.eval()
+                    if hasattr(model, "fuse_model"):
+                        model.fuse_model()
+                    q_model = quantize(model, default_eval_fn, self.img_data)
+                    compare_and_validate_results(model, q_model, data)
+
+                # Test functionals
+                model = ModelWithFunctionals().eval()
+                model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+                q_model = prepare(model, inplace=False)
+                q_model(data)
+                q_model = convert(q_model)
+                act_compare_dict = compare_model_outputs(model, q_model, data)
+                self.assertEqual(len(act_compare_dict), 7)
+                expected_act_compare_dict_keys = {
+                    "mycat.stats",
+                    "myadd.stats",
+                    "mymul.stats",
+                    "myadd_relu.stats",
+                    "my_scalar_add.stats",
+                    "my_scalar_mul.stats",
+                    "quant.stats",
+                }
+                self.assertTrue(
+                    act_compare_dict.keys() == expected_act_compare_dict_keys
+                )
+                for k, v in act_compare_dict.items():
                     self.assertTrue(v["float"].shape == v["quantized"].shape)

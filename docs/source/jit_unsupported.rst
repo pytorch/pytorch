@@ -25,7 +25,6 @@ are not bound on `torch` or because Python expects a different schema than
 TorchScript.
 
   * :func:`torch.tensordot`
-  * :func:`torch.unique`
   * :func:`torch.unique_consecutive`
   * :func:`torch.nn.init.calculate_gain`
   * :func:`torch.nn.init.eye_`
@@ -91,4 +90,4 @@ we suggest using :meth:`torch.jit.trace`.
   * :class:`torch.autograd.Function`
   * :class:`torch.autograd.no_grad`
   * :class:`torch.autograd.enable_grad`
-  * :class:`torch._C.Generator`
+  * :class:`torch.Generator`

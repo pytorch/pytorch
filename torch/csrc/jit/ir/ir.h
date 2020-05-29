@@ -162,6 +162,8 @@ struct Value {
  public:
   Value* setType(TypePtr type);
   TORCH_API void inferTypeFrom(const at::Tensor& output);
+  TORCH_API void inferTypeFrom(
+      const c10::intrusive_ptr<c10::ivalue::Object>& output);
   const TypePtr& type() const {
     AT_ASSERT(type_ != nullptr);
     return type_;
@@ -330,6 +332,16 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
+
+  Node* copyMetadata(Node* from) {
+    this->setSourceRange(from->sourceRange());
+    this->setScope(from->scope());
+    if (auto cs = from->callstack()) {
+      this->setCallStack(*cs);
+    }
+    return this;
+  }
+
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }

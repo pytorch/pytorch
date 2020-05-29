@@ -20,7 +20,7 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.10)
 endif()
 
 # ---[ Project and semantic versioning.
-project(Caffe2 CXX C)
+project(Torch CXX C)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
@@ -51,6 +51,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 #      find_package(Caffe2 REQUIRED)
 #    endif()
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
+
+# Googletest's cmake files are going to set it on once they are processed. Let's
+# set it at the very beginning so that the entire build is deterministic.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 if(NOT DEFINED BLAS_SET_BY_USER)
   if(DEFINED BLAS)
@@ -187,6 +191,9 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
+option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
+option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -471,6 +478,18 @@ if(USE_XNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK -DUSE_INTERNAL_THREADPOOL_IMPL")
 endif()
 
+if(USE_VULKAN)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN")
+endif()
+
+if(USE_VULKAN_WRAPPER)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_WRAPPER")
+endif()
+
+if(USE_VULKAN_SHADERC_RUNTIME)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_SHADERC_RUNTIME")
+endif()
+
 # ---[ Whitelist file if whitelist is specified
 include(cmake/Whitelist.cmake)
 
@@ -500,6 +519,7 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-overflow")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-aliasing")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")

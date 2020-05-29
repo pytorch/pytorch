@@ -109,7 +109,8 @@ class _BatchNorm(_NormBase):
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -167,9 +168,6 @@ class BatchNorm1d(_BatchNorm):
         >>> m = nn.BatchNorm1d(100, affine=False)
         >>> input = torch.randn(20, 100)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -181,7 +179,8 @@ class BatchNorm1d(_BatchNorm):
 class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -239,9 +238,6 @@ class BatchNorm2d(_BatchNorm):
         >>> m = nn.BatchNorm2d(100, affine=False)
         >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -253,7 +249,8 @@ class BatchNorm2d(_BatchNorm):
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -312,9 +309,6 @@ class BatchNorm3d(_BatchNorm):
         >>> m = nn.BatchNorm3d(100, affine=False)
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -326,7 +320,8 @@ class BatchNorm3d(_BatchNorm):
 class SyncBatchNorm(_BatchNorm):
     r"""Applies Batch Normalization over a N-Dimensional input (a mini-batch of [N-2]D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -355,19 +350,21 @@ class SyncBatchNorm(_BatchNorm):
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
-    Because the Batch Normalization is done over the `C` dimension, computing statistics
-    on `(N, +)` slices, it's common terminology to call this Volumetric Batch Normalization
-    or Spatio-temporal Batch Normalization.
+    Because the Batch Normalization is done for each channel in the ``C`` dimension, computing
+    statistics on ``(N, +)`` slices, it's common terminology to call this Volumetric Batch
+    Normalization or Spatio-temporal Batch Normalization.
 
-    Currently SyncBatchNorm only supports DistributedDataParallel with single GPU per process. Use
-    torch.nn.SyncBatchNorm.convert_sync_batchnorm() to convert BatchNorm layer to SyncBatchNorm before wrapping
+    Currently :class:`SyncBatchNorm` only supports
+    :class:`~torch.nn.DistributedDataParallel` (DDP) with single GPU per process. Use
+    :meth:`torch.nn.SyncBatchNorm.convert_sync_batchnorm()` to convert
+    :attr:`BatchNorm*D` layer to :class:`SyncBatchNorm` before wrapping
     Network with DDP.
 
     Args:
         num_features: :math:`C` from an expected input of size
             :math:`(N, C, +)`
         eps: a value added to the denominator for numerical stability.
-            Default: 1e-5
+            Default: ``1e-5``
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1
@@ -404,9 +401,6 @@ class SyncBatchNorm(_BatchNorm):
         >>>                         sync_bn_network,
         >>>                         device_ids=[args.local_rank],
         >>>                         output_device=args.local_rank)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
@@ -506,11 +500,8 @@ class SyncBatchNorm(_BatchNorm):
                                                    process_group)
             if module.affine:
                 with torch.no_grad():
-                    module_output.weight.copy_(module.weight)
-                    module_output.bias.copy_(module.bias)
-                # keep requires_grad unchanged
-                module_output.weight.requires_grad = module.weight.requires_grad
-                module_output.bias.requires_grad = module.bias.requires_grad
+                    module_output.weight = module.weight
+                    module_output.bias = module.bias
             module_output.running_mean = module.running_mean
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked

@@ -70,67 +70,30 @@ enum class ScalarType : int8_t {
 
 namespace impl {
 
-// These are used to map ScalarTypes to C++ types.  Feel free to add more or even
-// macro generate this; the examples here are just those we have found to be
-// necessary.
+// These are used to map ScalarTypes to C++ types.
 
 template <c10::ScalarType N>
 struct ScalarTypeToCPPType;
 
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::Half> {
-  using type = c10::Half;
-
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
+#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type)                  \
+template<>                                                                     \
+struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {                     \
+  using type = cpp_type;                                                       \
+                                                                               \
+  /* This is a workaround for the CUDA bug which prevents */                   \
+  /* ::detail::ScalarTypeToCType<T>::type being used directly due to */        \
+  /* ambiguous reference which can't to be resolved. For some reason it */     \
+  /* cant pick between at::detail and at::cuda::detail. */                     \
+  /* For repro example, please see: */                                         \
+  /* https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba */        \
+  /* TODO: remove once the bug is fixed. */                                    \
+  static type t;                                                               \
 };
 
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::BFloat16> {
-  using type = c10::BFloat16;
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
 
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
-};
+#undef SPECIALIZE_ScalarTypeToCPPType
 
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::Bool> {
-  using type = bool;
-
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
-};
-
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::Byte> {
-  using type = uint8_t;
-
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
-};
-
-template<>
-struct ScalarTypeToCPPType<c10::ScalarType::Long> {
-  using type = int64_t;
-
-  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
-  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
-  // TODO: remove once the bug is fixed.
-  static type t;
-};
 
 // These are used to map C++ types to ScalarTypes.
 
@@ -228,16 +191,6 @@ static inline c10::optional<ScalarType> tryTypeMetaToScalarType(
   }
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_IF)
 #undef DEFINE_IF
-// TODO(@zasdfgbnm): Remove this!
-// This is needed only when the migration of std::complex to c10::complex
-// is not done. This should be removed once the migration is done.
-  if (dtype == caffe2::TypeMeta::Make<std::complex<float>>()) {
-    return {ScalarType::ComplexFloat};
-  }
-  if (dtype == caffe2::TypeMeta::Make<std::complex<double>>()) {
-    return {ScalarType::ComplexDouble};
-  }
-// end TODO
   if (dtype == caffe2::TypeMeta()) {
     return {ScalarType::Undefined};
   }

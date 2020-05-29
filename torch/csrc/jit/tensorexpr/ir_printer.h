@@ -10,6 +10,9 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+class Tensor;
+class Function;
+
 class TORCH_API IRPrinter : public IRVisitor {
  public:
   explicit IRPrinter(std::ostream& os) : printer_os_(this, os) {}
@@ -35,7 +38,6 @@ class TORCH_API IRPrinter : public IRVisitor {
 #undef IMM_PRINT_VISIT
   void visit(const Cast* v) override;
   void visit(const Var* v) override;
-  void visit(const Let* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
   void visit(const Broadcast* v) override;
@@ -46,7 +48,6 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const RoundOff* v) override;
   void visit(const ReduceOp* v) override;
 
-  void visit(const LetStmt* v) override;
   void visit(const AtomicAdd* v) override;
   void visit(const Store* v) override;
   void visit(const For* v) override;
@@ -78,8 +79,9 @@ class TORCH_API IRPrinter : public IRVisitor {
   }
   void emitIndent();
 
- private:
   int indent_ = 0;
+
+ private:
   PrinterStream printer_os_;
   UniqueNameManager name_manager_;
 };
@@ -87,10 +89,13 @@ class TORCH_API IRPrinter : public IRVisitor {
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Expr&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const ExprHandle&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt&);
-TORCH_API std::ostream& operator<<(std::ostream& stream, Stmt*);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const Tensor&);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const Function&);
 
 TORCH_API void print(const Expr* expr);
 TORCH_API void print(const Stmt* stmt);
+TORCH_API void print(const Tensor* t);
+TORCH_API void print(const Function* f);
 
 } // namespace tensorexpr
 } // namespace jit
@@ -99,8 +104,12 @@ TORCH_API void print(const Stmt* stmt);
 namespace std {
 
 using torch::jit::tensorexpr::Expr;
+using torch::jit::tensorexpr::Function;
 using torch::jit::tensorexpr::Stmt;
+using torch::jit::tensorexpr::Tensor;
 
 TORCH_API std::string to_string(const Expr* expr);
 TORCH_API std::string to_string(const Stmt* stmt);
+TORCH_API std::string to_string(const Tensor* t);
+TORCH_API std::string to_string(const Function* f);
 } // namespace std
