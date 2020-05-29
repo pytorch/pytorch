@@ -60,10 +60,11 @@ void reflection_pad1d_out_template(
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
   int64_t nbatch = 1;
-
-  TORCH_CHECK(input_.numel() > 0 &&
-    (input_.ndimension() == 2 || input_.ndimension() == 3), "non-empty 2D "
-    "or 3D (batch mode) tensor expected for input, but got: ", input_);
+  // allow dim=0 only in the batch dimension.
+  TORCH_CHECK(
+      (input_.ndimension() == 2 && input_.size(1) != 0) ||
+      (input_.ndimension() == 3 && input_.size(1) != 0 && input_.size(2) != 0),
+      "2D or 3D (batch mode) tensor expected for input, but got: ", input_);
 
   if (input_.ndimension() == 3) {
     nbatch = input_.size(0);
