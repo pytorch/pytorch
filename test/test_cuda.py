@@ -1063,8 +1063,6 @@ class TestCuda(TestCase):
         self.assertTrue("torch.cuda.Event" in e.__repr__())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    # Note: fails sometimes on the CI, passes on dual gfx906
-    @skipIfRocm
     def test_stream_context(self):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream(device=1)
@@ -2433,7 +2431,6 @@ t2.start()
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
-    @skipIfRocm
     def test_cublas_multiple_threads_same_device(self):
         # Note, these parameters should be very carefully tuned
         # Too small number makes it hard for the racing condition
@@ -2538,7 +2535,6 @@ t2.start()
                     self.assertEqual(results[t].sum().item(),
                                      (2048 - test_iters) * (2048 - test_iters))
 
-    @skipIfRocm
     def test_cusparse_multiple_threads_same_device(self):
         size = 1024
         num_threads = 2
