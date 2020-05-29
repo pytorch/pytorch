@@ -59,6 +59,13 @@ CONFIG_TREE_DATA = [
                 ]),
             ]),
         ]),
+        ("gcc", [
+            ("9", [
+                ("3.8", [
+                    ("build_only", [XImportant(True)]),
+                ]),
+            ]),
+        ]),
     ]),
 ]
 
@@ -130,6 +137,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
+            "build_only": BuildOnlyConfigNode,
             "android_abi": AndroidAbiConfigNode,
             "cuda_gcc_override": CudaGccOverrideConfigNode
         }
@@ -194,6 +202,15 @@ class CudaGccOverrideConfigNode(TreeConfigNode):
 
     def child_constructor(self):
         return ImportantConfigNode
+
+class BuildOnlyConfigNode(TreeConfigNode):
+
+    def init2(self, node_name):
+        self.props["build_only"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
 
 class ImportantConfigNode(TreeConfigNode):
     def modify_label(self, label):
