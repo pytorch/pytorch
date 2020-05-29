@@ -4876,6 +4876,20 @@ class TestCudaComm(TestCase):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
 
+    def test_out_of_bounds_exception(self):
+        import subprocess
+        curdir = os.path.dirname(os.path.abspath(__file__))
+        test_path = os.path.join(curdir, 'bounds_test', 'cuda_bounds_test.py')
+
+        # Test in-bounds access succeeds
+        p = subprocess.run([sys.executable, test_path, '1'], capture_output=True, timeout=15)
+        self.assertEqual(p.returncode, 0, msg=f'run of {test_path} failed:{p.stdout}')
+        # Test out-of-bounds access fails
+        p = subprocess.run([sys.executable, test_path, '11'], capture_output=True, timeout=15)
+        self.assertNotEqual(p.returncode, 0, msg=f'run of {test_path} succeeded:{p.stdout}')
+        self.assertIn('cudaErrorAssert', p.stdout.decode('ascii'))
+        self.assertIn('"index out of bounds"', p.stderr.decode('ascii'))
+
 
 instantiate_parametrized_tests(TestCuda)
 
