@@ -14,6 +14,7 @@ import warnings
 import types
 import pickle
 import textwrap
+import operator
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement, permutations
@@ -5379,6 +5380,72 @@ def add_neg_dim_tests():
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.complex64, torch.complex128)
+    def test_abs_angle_complex_to_float(self, device, dtype):
+        # Constructs random complex values
+        from random import random
+        random_vals = []
+        for multiplier in (-1, 1, -10, 10, -100, 100):
+            for _ in range(10):
+                random_vals.append(complex(random() * multiplier, random() * multiplier))
+
+        for vals in (random_vals, []):
+            a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
+            t = torch.tensor(vals, device=device, dtype=dtype)
+
+            for fn_name in ('abs', 'angle'):
+                torch_fn = getattr(torch, fn_name)
+                np_fn = getattr(np, fn_name)
+
+                # Tests function
+                np_result = torch.from_numpy(np_fn(a))
+                torch_result = torch_fn(t).cpu()
+                self.assertEqual(np_result, torch_result, exact_dtype=True)
+
+                # Tests float out
+                float_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+                np_float_out = np_fn(a).astype(torch_to_numpy_dtype_dict[float_dtype])
+                float_out = torch.empty_like(t).float()
+                torch_fn(t, out=float_out)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(torch.from_numpy(np_float_out), float_out.cpu())
+
+                # Tests float out (resized out)
+                float_out = torch.empty(1, device=device, dtype=float_dtype)
+                torch_fn(t, out=float_out)
+                self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
+
+                # Tests complex out
+                np_complex_out = np_fn(a)
+                complex_out = torch.empty_like(t)
+                torch_fn(t, out=complex_out)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
+
+                # Tests complex out (resized out)
+                complex_out = torch.empty(1, device=device, dtype=dtype)
+                torch_fn(t, out=complex_out)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
+
+                # Tests long out behavior (expected failure)
+                long_out = torch.empty(0, device=device, dtype=torch.long)
+                with self.assertRaises(RuntimeError):
+                    torch_fn(t, out=long_out)
+
+                # Tests inplace
+                if fn_name == 'abs':
+                    torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
+                    np_fn(a, out=a)
+                    torch_inplace_method(t)
+                    self.assertEqual(torch.from_numpy(a), t.cpu())
+
+                # Note: angle does not have an in-place variant
+                if fn_name == 'angle':
+                    with self.assertRaises(AttributeError):
+                        torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
+
     # Verifies that the inplace dunders (like idiv) actually are in place
     @onlyOnCPUAndCUDA
     def test_inplace_dunders(self, device):
@@ -9403,6 +9470,16 @@ class TestTorchDeviceType(TestCase):
             if 'memory' in str(e):
                 raise unittest.SkipTest('Insufficient memory')
             raise
+
+    def test_argminmax_axis_with_dim_one(self, device):
+        # See: https://github.com/pytorch/pytorch/issues/38922
+        n = 32768
+        x = torch.zeros(1, n)
+        self.assertEqual(x.argmax(dim=0), torch.zeros(n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=0), torch.zeros(n, dtype=torch.int64))
+
+        self.assertEqual(x.argmax(dim=0, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=0, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
 
     def test_remainder_overflow(self, device):
         # Check Integer Overflows
@@ -13835,30 +13912,54 @@ class TestTorchDeviceType(TestCase):
         run_test(device, torch.uint8)
         run_test(device, torch.bool)
 
+    # Tests that CUDA tensors on different devices cannot be used in the same
+    # binary operation, and that CUDA "scalars" cannot be used in the same
+    # binary operation as non-scalar CPU tensors.
     @deviceCountAtLeast(2)
     @onlyCUDA
-    def test_reverse_binary_ops_multiple_device(self, devices):
-        self.assertEqual(2 + torch.tensor(3), 2 + torch.tensor(3).to(devices[1]))    # __radd__
-        self.assertEqual(2 - torch.tensor(3), 2 - torch.tensor(3).to(devices[1]))    # __rsub__
-        self.assertEqual(2 * torch.tensor(3), 2 * torch.tensor(3).to(devices[1]))    # __rmul__
-        self.assertEqual(2 / torch.tensor(3.), 2 / torch.tensor(3.).to(devices[1]))  # __rtruediv__
-        self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to(devices[1]))  # __rfloordiv__
+    def test_cross_device_binary_ops(self, devices):
+        vals = (1, (2,))
+        cpu_tensor = torch.randn(2, 2)
+        for op in (operator.add, torch.add,
+                   operator.sub, torch.sub,
+                   operator.mul, torch.mul,
+                   operator.truediv, torch.true_divide,
+                   operator.floordiv, torch.floor_divide):
+            for a, b in product(vals, vals):
+                a = torch.tensor(a, device=devices[0])
+                b = torch.tensor(b, device=devices[1])
 
-        self.assertEqual(
-            torch.tensor(2).to(devices[1]) + torch.tensor(3).to(devices[0]),
-            torch.tensor(2) + torch.tensor(3))
-        self.assertEqual(
-            torch.tensor(2).to(devices[1]) - torch.tensor(3).to(devices[0]),
-            torch.tensor(2) - torch.tensor(3))
-        self.assertEqual(
-            torch.tensor(2).to(devices[1]) * torch.tensor(3).to(devices[0]),
-            torch.tensor(2) * torch.tensor(3))
-        self.assertEqual(
-            torch.tensor(2.).to(devices[1]) / torch.tensor(3.).to(devices[0]),
-            torch.tensor(2.) / torch.tensor(3.))
-        self.assertEqual(
-            torch.tensor(2).to(devices[1]) // torch.tensor(3).to(devices[0]),
-            torch.tensor(2) // torch.tensor(3))
+                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                    op(a, b)
+                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                    op(b, a)
+                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                    op(a, cpu_tensor)
+                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                    op(cpu_tensor, a)
+
+    # Tests that CPU scalars (including zero dim tensors) can be used in
+    # binary operations with CUDA tensors.
+    @onlyCUDA
+    def test_cuda_cpu_scalar_binary_ops(self, device):
+        val_scalar = math.pi
+        val_tensor = torch.tensor(val_scalar)
+        for op in (operator.add, torch.add,
+                   operator.sub, torch.sub,
+                   operator.mul, torch.mul,
+                   operator.truediv, torch.true_divide,
+                   operator.floordiv, torch.floor_divide):
+            for tensor_val in (1, (1,)):
+                t_cuda = torch.tensor(tensor_val, device=device)
+                t_cpu = t_cuda.cpu()
+                for val in (val_scalar, val_tensor):
+                    cpu_result = op(t_cpu, val)
+                    cuda_result = op(t_cuda, val)
+                    self.assertEqual(cpu_result, cuda_result)
+
+                    reverse_cpu_result = op(val, t_cpu)
+                    reverse_cuda_result = op(val, t_cuda)
+                    self.assertEqual(reverse_cpu_result, reverse_cuda_result)
 
     @onlyCUDA
     def test_ceil_out_mismatch(self, device):
