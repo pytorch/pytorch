@@ -177,35 +177,35 @@ void Reducer::verify_replicas_within_process() {
        replica_index++) {
     const auto variable_count = replicas_[replica_index].size();
     TORCH_CHECK(
-	replicas_[replica_index].size() == replicas_[0].size(),
-	"Model replicas must have an equal number of parameters.");
+        replicas_[replica_index].size() == replicas_[0].size(),
+        "Model replicas must have an equal number of parameters.");
     TORCH_CHECK(
-	expect_sparse_gradients_[replica_index].size() ==
-	    expect_sparse_gradients_[0].size(),
-	"Expected number of entries in expect_sparse_gradients ",
-	"to be equal across replicas.");
+        expect_sparse_gradients_[replica_index].size() ==
+            expect_sparse_gradients_[0].size(),
+        "Expected number of entries in expect_sparse_gradients ",
+        "to be equal across replicas.");
     for (size_t variable_index = 0; variable_index < variable_count;
-	 variable_index++) {
+         variable_index++) {
       TORCH_CHECK(
-	  replicas_[replica_index][variable_index].requires_grad(),
-	  "Variables must require gradients (have `requires_grad` set).");
+          replicas_[replica_index][variable_index].requires_grad(),
+          "Variables must require gradients (have `requires_grad` set).");
       TORCH_CHECK(
-	  replicas_[replica_index][variable_index].sizes() ==
-	      replicas_[0][variable_index].sizes(),
-	  "Variables across model replicas must have identical sizes.");
+          replicas_[replica_index][variable_index].sizes() ==
+              replicas_[0][variable_index].sizes(),
+          "Variables across model replicas must have identical sizes.");
       TORCH_CHECK(
-	  replicas_[replica_index][variable_index].strides() ==
-	      replicas_[0][variable_index].strides(),
-	  "Variables across model replicas must have identical strides.");
+          replicas_[replica_index][variable_index].strides() ==
+              replicas_[0][variable_index].strides(),
+          "Variables across model replicas must have identical strides.");
       TORCH_CHECK(
-	  replicas_[replica_index][variable_index].dtype() ==
-	      replicas_[0][variable_index].dtype(),
-	  "Variables across model replicas must have identical dtype.");
+          replicas_[replica_index][variable_index].dtype() ==
+              replicas_[0][variable_index].dtype(),
+          "Variables across model replicas must have identical dtype.");
       TORCH_CHECK(
-	  expect_sparse_gradients_[replica_index][variable_index] ==
-	      expect_sparse_gradients_[0][variable_index],
-	  "Expected the same variables across replicas to either both ",
-	  "or neither expect a sparse gradient.");
+          expect_sparse_gradients_[replica_index][variable_index] ==
+              expect_sparse_gradients_[0][variable_index],
+          "Expected the same variables across replicas to either both ",
+          "or neither expect a sparse gradient.");
     }
   }
 }
@@ -242,15 +242,15 @@ void Reducer::verify_replica0_across_processes() {
     // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {
       TORCH_CHECK(sz == metadata_control[i++].item<int64_t>(),
-		  "replicas[0][", p, "] in this process"
-		  " with sizes ", t.sizes(),
-		  " appears not to match sizes of the same param in process 0.");
+                  "replicas[0][", p, "] in this process"
+                  " with sizes ", t.sizes(),
+                  " appears not to match sizes of the same param in process 0.");
     }
     for (const auto& str : t.strides()) {
       TORCH_CHECK(str == metadata_control[i++].item<int64_t>(),
-		  "replicas[0][", p, "] in this process"
-		  " with strides ", t.strides(),
-		  " appears not to match strides of the same param in process 0.");
+                  "replicas[0][", p, "] in this process"
+                  " with strides ", t.strides(),
+                  " appears not to match strides of the same param in process 0.");
     }
   }
 }

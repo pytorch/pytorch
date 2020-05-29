@@ -68,7 +68,7 @@ If ``param.grad`` is initially ``None``:
    created with strides matching ``param``.
 2. Otherwise, ``.grad`` is created with rowmajor-contiguous strides.
 
-If ``param`` already has a non-sparse `.grad` attribute:
+If ``param`` already has a non-sparse ``.grad`` attribute:
 
 3. If ``create_graph=False``, ``backward()`` accumulates into ``.grad``
    in-place, which preserves its strides.
