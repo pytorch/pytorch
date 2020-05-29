@@ -1077,7 +1077,7 @@ class RpcTest(RpcAgentTestFixture):
         if self.rank == 1:
             # Validate that calling the function twice results in an error.
             with torch.autograd.profiler.profile() as pf:
-                with torch.autograd.profiler.record_function("foo") as rf:
+                with torch.autograd.profiler.record_function("foo", node_id=1) as rf:
                     fut = rpc.rpc_async(
                         worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
                     )
@@ -1098,7 +1098,7 @@ class RpcTest(RpcAgentTestFixture):
                     "worker1",
                     "worker0",
                 )
-                with torch.autograd.profiler.record_function(key) as rf:
+                with torch.autograd.profiler.record_function(key, node_id=1) as rf:
                     fut = rpc.rpc_async(
                         worker_name(0), my_script_func, args=(torch.tensor(1),)
                     )
