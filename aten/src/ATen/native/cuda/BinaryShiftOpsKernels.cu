@@ -9,6 +9,11 @@
 
 namespace at { namespace native {
 
+#ifdef __HIP_PLATFORM_HCC__
+#define ROCm_Bug(x)
+#else
+#define ROCm_Bug(x) x
+#endif
 
 void lshift_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Float ||
@@ -18,7 +23,7 @@ void lshift_kernel_cuda(TensorIterator& iter) {
       gpu_kernel_with_scalars(
         iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a * std::pow(static_cast<scalar_t>(2), b);
+          return a * ROCm_Bug(std)::pow(static_cast<scalar_t>(2), b);
       });
     });
   } else {
@@ -39,7 +44,7 @@ void rshift_kernel_cuda(TensorIterator& iter) {
       gpu_kernel_with_scalars(
         iter,
         []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a / std::pow(static_cast<scalar_t>(2), b);
+          return a / ROCm_Bug(std)::pow(static_cast<scalar_t>(2), b);
       });
     });
   } else {
@@ -51,6 +56,8 @@ void rshift_kernel_cuda(TensorIterator& iter) {
     });
   }
 }
+
+#undef ROCm_Bug
 
 REGISTER_DISPATCH(lshift_stub, &lshift_kernel_cuda);
 REGISTER_DISPATCH(rshift_stub, &rshift_kernel_cuda);
