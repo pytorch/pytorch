@@ -30,17 +30,5 @@ at::Tensor vulkan_convolution_prepacked(
     const float output_min,
     const float output_max);
 
-// No-op batch norm at the moment to be able to profile models with batch_norm
-std::tuple<Tensor, Tensor, Tensor> batch_norm_vulkan(
-    const Tensor& input,
-    const Tensor& weight,
-    const Tensor& bias,
-    const Tensor& running_mean,
-    const Tensor& running_var,
-    bool train,
-    double momentum,
-    double eps);
-
->>>>>>> 1d0da9e3a3... [vulkan] Conv2d with optional clamp
 } // namespace native
 } // namespace at
