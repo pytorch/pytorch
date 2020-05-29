@@ -577,17 +577,9 @@ def squeeze(g, self, dim=None):
             else:
                 return _unimplemented('squeeze', 'negative axis with unknown input rank')
 
-    # create 'cond' node (condition is shape[i]==1)
-    dim_constant = g.op("Constant", value_t=torch.tensor(dims))
-    size = sym_help._size_helper(g, self, dim_constant)
-    const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
-    cond = g.op("Equal", size, const_one)
-    # create the 'If' node and add the 'then' and 'else' blocks to it.
-    if_node_outputs = g.op("If", cond)
-    if_node = if_node_outputs.node()
-    torch.onnx.utils._add_block(if_node, self, "onnx::Squeeze", axes_i=dims)
-    torch.onnx.utils._add_block(if_node, self, "onnx::Identity")
-    return if_node_outputs
+    warnings.warn("Opset version 9 does not support squeezing on dimensions of shape greater than 1." + 
+                  " It is recommended to use opset version 11 or higher to export this model.")
+    return g.op("Squeeze", self, axes_i = dims)
 
 def prelu(g, self, weight):
     if self.isCompleteTensor():
