@@ -8,15 +8,17 @@ checking quantization api and properties of resulting modules.
 """
 
 import io
+import functools
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
+    default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
+import unittest
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -112,14 +114,33 @@ def _make_conv_test_input(
 
     return (X, X_q, W, W_q, b if use_bias else None)
 
+def skipIfNoFBGEMM(fn):
+    reason = 'Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs with instruction set support AVX2 or newer.'
+    if isinstance(fn, type):
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        self.img_data = [(torch.rand(2, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
+        self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
                          for _ in range(2)]
+        self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
+                            for _ in range(2)]
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
@@ -177,6 +198,15 @@ class QuantizationTestCase(TestCase):
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
+    def checkDynamicQuantizedModule(self, mod, reference_module_type, dtype):
+        r"""Checks that mod has been swapped for an nnqd.Linear
+            module, the bias is float.
+        """
+        wt_dtype_map = {torch.qint8: 'quantized_dynamic', torch.float16: 'quantized_fp16'}
+        self.assertEqual(type(mod), reference_module_type)
+        for packed_params in mod._all_weight_values:
+            self.assertEqual(packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype])
+
     # calib_data follows the same schema as calib_data for
     # test_only_eval_fn, i.e. (input iterable, output iterable)
     def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
@@ -197,7 +227,6 @@ class QuantizationTestCase(TestCase):
 
         buffer.seek(0)
         loaded_mod = torch.jit.load(buffer)
-
         # Pending __get_state_ and __set_state__ support
         # See tracking task https://github.com/pytorch/pytorch/issues/23984
         if check_save_load:
@@ -243,7 +272,7 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
 class LSTMDynamicModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = default_dynamic_qconfig
         self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
 
     def forward(self, x):
@@ -597,12 +626,12 @@ class SubModelWithoutFusion(nn.Module):
 class ModelForFusion(nn.Module):
     def __init__(self, qconfig):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
+        self.conv1 = nn.Conv2d(3, 2, 1, bias=None).to(dtype=torch.float)
         self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
         self.relu1 = nn.ReLU(inplace=True).to(dtype=torch.float)
         self.sub1 = SubModelForFusion()
         self.sub2 = SubModelWithoutFusion()
-        self.fc = nn.Linear(72, 10).to(dtype=torch.float)
+        self.fc = nn.Linear(36, 10).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.qconfig = qconfig
@@ -610,22 +639,29 @@ class ModelForFusion(nn.Module):
         self.relu2 = nn.ReLU(inplace=False).to(dtype=torch.float)
         self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
         self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
+        self.conv3 = nn.Conv1d(3, 3, 2).to(dtype=torch.float)
+        self.bn3 = nn.BatchNorm1d(3).to(dtype=torch.float)
+        self.relu4 = nn.ReLU(inplace=True).to(dtype=torch.float)
         # don't quantize sub2
         self.sub2.qconfig = None
         self.fc.qconfig = None
 
     def forward(self, x):
-        y = x.unsqueeze(2)
+        x = x.squeeze(2)
         x = self.quant(x)
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = self.relu4(x)
+        x = x.unsqueeze(2)
+        y = x.unsqueeze(2)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu1(x)
         x = self.sub1(x)
         x = self.dequant(x)
         x = self.sub2(x)
-        x = x.view(-1, 72).contiguous()
+        x = x.view(-1, 36).contiguous()
         x = self.fc(x)
-        y = self.quant(y)
         y = self.conv2(y)
         y = self.relu2(y)
         y = self.bn2(y)

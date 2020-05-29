@@ -474,6 +474,15 @@ elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
   list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
 endif()
 
+# ---[ Vulkan deps
+if(USE_VULKAN)
+  set(Vulkan_LIBS)
+  set(Vulkan_INCLUDES)
+  include(${CMAKE_CURRENT_LIST_DIR}/VulkanDependencies.cmake)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${Vulkan_LIBS})
+  include_directories(SYSTEM ${Vulkan_INCLUDES})
+endif()
+
 # ---[ gflags
 if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
@@ -596,6 +605,13 @@ if(USE_FBGEMM)
   if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
     message(WARNING
       "A compiler with AVX512 support is required for FBGEMM. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
+    set(USE_FBGEMM OFF)
+  endif()
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(WARNING
+      "x64 operating system is required for FBGEMM. "
       "Not compiling with FBGEMM. "
       "Turn this warning off by USE_FBGEMM=OFF.")
     set(USE_FBGEMM OFF)
@@ -881,9 +897,11 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-find_package(pybind11 CONFIG)
-if(NOT pybind11_FOUND)
-  find_package(pybind11)
+if(NOT ${pybind11_PREFER_third_party})
+  find_package(pybind11 CONFIG)
+  if(NOT pybind11_FOUND)
+    find_package(pybind11)
+  endif()
 endif()
 
 if(pybind11_FOUND)
@@ -894,6 +912,9 @@ else()
     install(DIRECTORY ${pybind11_INCLUDE_DIRS}
             DESTINATION ${CMAKE_INSTALL_PREFIX}
             FILES_MATCHING PATTERN "*.h")
+    set(pybind11_PREFER_third_party ON CACHE BOOL
+        "Use the third_party/pybind11 submodule, instead of looking for system
+        installation of pybind11")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
@@ -1125,7 +1146,12 @@ if(USE_ROCM)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
+endif()
 
+# ---[ ROCm
+if(USE_ROCM)
+  # We check again for USE_ROCM because it might have been set to OFF
+  # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
   include_directories(SYSTEM ${ROCBLAS_PATH}/include)
   include_directories(SYSTEM ${ROCFFT_PATH}/include)
@@ -1573,6 +1599,15 @@ if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKLDNN_ENABLED 0)
   set(CAFFE2_USE_MKLDNN OFF)
   if(USE_MKLDNN)
+    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+      message(WARNING
+        "x64 operating system is required for MKLDNN. "
+        "Not compiling with MKLDNN. "
+        "Turn this warning off by USE_MKLDNN=OFF.")
+      set(USE_MKLDNN OFF)
+    endif()
+  endif()
+  if(USE_MKLDNN)
     include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
     if(MKLDNN_FOUND)
       set(AT_MKLDNN_ENABLED 1)
@@ -1620,6 +1655,7 @@ if(NOT INTERN_BUILD_MOBILE)
     endif(HAVE_MALLOC_USABLE_SIZE)
   endif(UNIX)
 
+  add_definitions(-DUSE_EXTERNAL_MZCRC)
   add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
 
   # Is __thread supported?

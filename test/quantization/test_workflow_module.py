@@ -15,8 +15,10 @@ from torch.quantization import (
     get_observer_dict,
     prepare,
 )
+import torch.nn as nn
 
 # Standard library
+import copy
 import io
 import unittest
 import math
@@ -27,6 +29,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
@@ -172,29 +175,6 @@ class TestObserver(QuantizationTestCase):
         self.assertEqual(ref[0], qparams[0])
         self.assertEqual(ref[1], qparams[1])
 
-    def test_tensor_list_observer(self):
-        from torch.quantization.observer import _MinMaxTensorListObserver
-        x = [torch.tensor([1.0, 2.5, 3.5]),
-             torch.tensor([2.0, 4.5, 3.5]),
-             torch.tensor([4.0, 2.5, 3.5]), ]
-        obs = _MinMaxTensorListObserver()
-        obs(x)
-        qparams = obs.calculate_qparams()
-        ref_min_val = []
-        ref_max_val = []
-        ref_qparams = []
-        for i in x:
-            obs_ref = MinMaxObserver()
-            obs_ref(i)
-            ref_min_val.append(obs_ref.min_val)
-            ref_max_val.append(obs_ref.max_val)
-            ref_qparams.append(obs_ref.calculate_qparams())
-        for i in range(len(x)):
-            self.assertEqual(obs.min_val[i], ref_min_val[i])
-            self.assertEqual(obs.max_val[i], ref_max_val[i])
-            self.assertEqual(qparams[0][i], ref_qparams[i][0])
-            self.assertEqual(qparams[1][i], ref_qparams[i][1])
-
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
@@ -304,15 +284,6 @@ class TestObserver(QuantizationTestCase):
             buf.seek(0)
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
-
-        # Check TensorListObserver
-        from torch.quantization.observer import _MinMaxTensorListObserver
-        obs = _MinMaxTensorListObserver()
-        scripted = torch.jit.script(obs)
-        x = [torch.rand(3, 4), torch.rand(4, 5)]
-        obs(x)
-        scripted(x)
-        self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
 
     # TODO: move this to test_quantize.py
     def test_no_qconfig_propagation(self):
@@ -544,8 +515,12 @@ class TestFakeQuantizePerTensor(TestCase):
         Y = fq_module(X)
         # Fake quant is disabled,output is identical to input
         self.assertEqual(Y, X)
-        scale = fq_module.scale
-        zero_point = fq_module.zero_point
+
+        # Explicit copy at this point in time, because FakeQuant keeps internal
+        # state in mutable buffers.
+        scale = fq_module.scale.clone().detach()
+        zero_point = fq_module.zero_point.clone().detach()
+
         torch.quantization.disable_observer(fq_module)
         torch.quantization.enable_fake_quant(fq_module)
         X = 10.0 * torch.rand(20, 10, dtype=torch.float32) - 5.0
@@ -561,6 +536,34 @@ class TestFakeQuantizePerTensor(TestCase):
         self.assertNotEqual(fq_module.scale, scale)
         self.assertNotEqual(fq_module.zero_point, zero_point)
 
+    def test_fake_quant_preserves_qparam_shapes_for_activations(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear = nn.Linear(4, 4)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x
+
+        m = Model()
+
+        m.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        torch.quantization.prepare_qat(m, inplace=True)
+
+        scale_shape_before = m.linear.activation_post_process.scale.shape
+        zero_point_shape_before = m.linear.activation_post_process.zero_point.shape
+
+        x = torch.rand(4, 4, 4, 4)
+        m(x)
+        scale_shape_after = m.linear.activation_post_process.scale.shape
+        zero_point_shape_after = m.linear.activation_post_process.zero_point.shape
+        self.assertEqual(
+            scale_shape_before, scale_shape_after,
+            msg="FakeQuant scale shape must stay consistent")
+        self.assertEqual(
+            zero_point_shape_before, zero_point_shape_after,
+            msg="FakeQuant zero_point shape must stay consistent")
 
 
 class TestFakeQuantizePerChannel(TestCase):
@@ -670,3 +673,140 @@ class TestFakeQuantizePerChannel(TestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
+
+def _get_buffer_ids(module):
+    """
+    Object addresses stay constant if and only if all modifications are in-place
+    """
+    return [id(v) for k, v in module._buffers.items()]
+
+class TestDistributed(QuantizationTestCase):
+
+    def test_observers_preserve_buffers(self):
+        """
+        Tests that observers only modify buffers in place. Note: this is important
+        because nn.DataParallel depends on this assumption to work correctly.
+        However, DataParallel does not expose IDs of the replicas, so we test it
+        without DataParallel in order to easily access the object IDs.
+        """
+        observer_types = [
+            torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8),
+            torch.quantization.MovingAverageMinMaxObserver.with_args(dtype=torch.qint8),
+            torch.quantization.MinMaxDynamicQuantObserver.with_args(dtype=torch.qint8),
+            torch.quantization.PerChannelMinMaxObserver.with_args(dtype=torch.qint8),
+            torch.quantization.MovingAveragePerChannelMinMaxObserver.with_args(dtype=torch.qint8),
+            torch.quantization.HistogramObserver.with_args(dtype=torch.qint8),
+            torch.quantization.RecordingObserver.with_args(dtype=torch.qint8),
+            torch.quantization.NoopObserver.with_args(dtype=torch.float16),
+        ]
+
+        for observer_type in observer_types:
+            observer = observer_type()
+            buffer_ids_before = _get_buffer_ids(observer)
+            for _i in range(5):
+                inputs = torch.rand((4, 4, 4))
+                observer(inputs)
+            buffer_ids_after = _get_buffer_ids(observer)
+            self.assertEqual(
+                buffer_ids_before,
+                buffer_ids_after,
+                msg="{}: Buffers must be modified in place".format(str(observer)))
+
+    def test_fake_quant_preserves_buffers(self):
+        """
+        Tests that fake quant only modifies buffers in place. Note: this is important
+        because nn.DataParallel depends on this assumption to work correctly.
+        However, DataParallel does not expose IDs of the replicas, so we test it
+        without DataParallel in order to easily access the object IDs.
+        """
+        model = torch.quantization.FakeQuantize()
+        buffer_ids_before = _get_buffer_ids(model)
+        for _i in range(5):
+            inputs = torch.rand((4, 4, 4))
+            model(inputs)
+        model.apply(torch.quantization.enable_fake_quant)
+        model.apply(torch.quantization.disable_fake_quant)
+        model.apply(torch.quantization.enable_observer)
+        model.apply(torch.quantization.disable_observer)
+        buffer_ids_after = _get_buffer_ids(model)
+        self.assertEqual(
+            buffer_ids_before,
+            buffer_ids_after,
+            msg="FakeQuant: Buffers must be modified in place")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_qat_data_parallel(self):
+        """
+        Tests that doing QAT in nn.DataParallel does not crash.
+        """
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            device = torch.device('cuda')
+
+            model = nn.Sequential(
+                torch.quantization.QuantStub(),
+                nn.Conv2d(3, 1, 1, bias=False),
+                nn.BatchNorm2d(1),
+                nn.ReLU(),
+                nn.Conv2d(1, 2, 3, stride=2, padding=1, bias=False),
+                nn.BatchNorm2d(2),
+                nn.AvgPool2d(14),
+                nn.Sigmoid(),
+                torch.quantization.DeQuantStub(),
+            )
+
+            torch.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+
+            model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+            torch.quantization.prepare_qat(model, inplace=True)
+            model = nn.DataParallel(model, device_ids=[0, 1])
+            model.to(device)
+            model.train()
+
+            for epoch in range(3):
+                inputs = torch.rand(2, 3, 28, 28).to(device)
+                model(inputs)
+                if epoch >= 1:
+                    model.apply(torch.quantization.disable_observer)
+                if epoch >= 2:
+                    model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                quant_model = copy.deepcopy(model.module)
+                quant_model = torch.quantization.convert(quant_model.eval().cpu(), inplace=False)
+                with torch.no_grad():
+                    out = quant_model(torch.rand(1, 3, 28, 28))
+
+    def test_qat_convbn_fused_syncbn_replacement(self):
+        """
+        Tests that SyncBatchNorm replacement works for fused ConvBN.
+        """
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            # create conv-bn
+            class Model(nn.Module):
+                def __init__(self):
+                    super(Model, self).__init__()
+                    self.conv = nn.Conv2d(4, 1, 3, padding=1)
+                    self.bn = nn.BatchNorm2d(1)
+
+                def forward(self, x):
+                    x = self.conv(x)
+                    x = self.bn(x)
+                    return x
+
+            model = Model()
+            # fuse it
+            fused_model = torch.quantization.fuse_modules(
+                model,
+                [['conv', 'bn']],
+            )
+            # convert to QAT
+            fused_model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+            torch.quantization.prepare_qat(fused_model, inplace=True)
+            # replace with DDP
+            fused_model = nn.SyncBatchNorm.convert_sync_batchnorm(fused_model)
+            self.assertTrue(
+                isinstance(fused_model.conv.bn, nn.SyncBatchNorm),
+                "Expected BN to be converted to SyncBN")

@@ -18,7 +18,7 @@
 #include <sys/time.h> // for gettimeofday()
 #endif
 
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 
 typedef struct CUevent_st* CUDAEventStub;
 
@@ -101,17 +101,24 @@ enum class TORCH_API ProfilerState {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(ProfilerState state, bool report_input_shapes)
-      : state(state), report_input_shapes(report_input_shapes) {}
+  ProfilerConfig(
+      ProfilerState state,
+      bool report_input_shapes,
+      bool profile_memory)
+      : state(state),
+        report_input_shapes(report_input_shapes),
+        profile_memory(profile_memory) {}
   ~ProfilerConfig();
   ProfilerState state;
   bool report_input_shapes;
+  bool profile_memory;
 };
 
 enum class TORCH_API EventKind : uint16_t {
   Mark,
   PushRange,
-  PopRange
+  PopRange,
+  MemoryAlloc,
 };
 #ifndef _MSC_VER
 #  pragma GCC diagnostic pop
@@ -120,13 +127,15 @@ enum class TORCH_API EventKind : uint16_t {
 struct TORCH_API Event final {
   Event(
       EventKind kind,
-      StringView name,
+      at::StringView name,
       uint16_t thread_id,
       bool record_cuda,
+      at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {})
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
+        handle_(handle),
         shapes_(shapes) {
     record(record_cuda);
   }
@@ -137,6 +146,7 @@ struct TORCH_API Event final {
       case EventKind::Mark: return "mark";
       case EventKind::PushRange: return "push";
       case EventKind::PopRange: return "pop";
+      case EventKind::MemoryAlloc: return "memory_alloc";
     }
     throw std::runtime_error("unknown EventKind");
   }
@@ -154,88 +164,96 @@ struct TORCH_API Event final {
   }
   double cuda_elapsed_us(const Event & e);
   bool has_cuda() const {
-    return event != nullptr;
+    return cuda_event != nullptr;
   }
   int device() const {
     return device_;
   }
+
+  void updateMemoryStats(int64_t alloc_size, c10::Device device) {
+    if (device.type() == c10::DeviceType::CUDA ||
+        device.type() == c10::DeviceType::HIP) {
+      cuda_memory_usage_ = alloc_size;
+    } else if (device.type() == c10::DeviceType::CPU ||
+        device.type() == c10::DeviceType::MKLDNN ||
+        device.type() == c10::DeviceType::IDEEP) {
+      cpu_memory_usage_ = alloc_size;
+    } else {
+      LOG(WARNING) << "Unsupported memory profiling device: " << device;
+    }
+  }
+
+  int64_t cpu_memory_usage() const {
+    return cpu_memory_usage_;
+  }
+
+  int64_t cuda_memory_usage() const {
+    return cuda_memory_usage_;
+  }
+
+  at::RecordFunctionHandle handle() const {
+    return handle_;
+  }
+
 private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
-  StringView name_;
+  at::StringView name_;
   EventKind kind_;
   uint16_t thread_id_;
+  at::RecordFunctionHandle handle_ {0};
   std::vector<std::vector<int64_t>> shapes_;
+  int64_t cpu_memory_usage_ = 0;
+  int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  struct CUevent_st* event = nullptr;
+  struct CUevent_st* cuda_event = nullptr;
 };
 
 // a linked-list of fixed sized vectors, to avoid
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
-  // This mutex is used to serialize access when different threads are writing
-  // to the same instance of RangeEventList.
-  std::mutex mutex_;
-  constexpr static size_t MB = 1024 * 1024;
-  constexpr static size_t event_block_size = 16 * MB;
-  constexpr static size_t num_block_elements =
-    event_block_size / ceilToMultiple(sizeof(Event), alignof(Event));
-  static_assert(sizeof(Event[num_block_elements]) <= event_block_size,
-                "num_block_elements is calculated incorrectly");
-  using block_type = std::vector<Event>;
+  RangeEventList() {
+    events_.reserve(kReservedCapacity);
+  }
 
   template<typename... Args>
   void record(Args&&... args) {
     std::lock_guard<std::mutex> guard(mutex_);
-    if (blocks.empty() || blocks.front().size() == num_block_elements) {
-      allocBlock();
-    }
-    blocks.front().emplace_back(std::forward<Args>(args)...);
+    events_.emplace_back(std::forward<Args>(args)...);
   }
 
   std::vector<Event> consolidate() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    std::forward_list<block_type> localBlocks;
-    localBlocks.swap(blocks);
-    lock.unlock();
+    std::lock_guard<std::mutex> lock(mutex_);
     std::vector<Event> result;
-
-    for (auto & block : localBlocks) {
-      result.insert(result.begin(),
-                    std::make_move_iterator(block.begin()),
-                    std::make_move_iterator(block.end()));
-    }
+    result.insert(
+        result.begin(),
+        std::make_move_iterator(events_.begin()),
+        std::make_move_iterator(events_.end()));
+    events_.erase(events_.begin(), events_.end());
     return result;
   }
 
-  std::forward_list<block_type> blocks;
-  private:
-     // allocBlock() assumes that mutex_ is held when called, in order to prevent
-    // multiple threads' block writes stomping over each other.
-    void allocBlock() {
-      blocks.emplace_front();
-      auto & new_block = blocks.front();
-      new_block.reserve(num_block_elements);
-      // Materialize all pages in the new block to release jitter when recording events.
-      const char * const end_ptr = reinterpret_cast<char*>(new_block.data() + num_block_elements);
-      for (volatile const char * ptr = reinterpret_cast<char*>(new_block.data());
-          ptr < end_ptr; ptr += 4 * 1024) {
-        (*ptr);
-      }
-    }
+  size_t size() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return events_.size();
+  }
+
+ private:
+  // This mutex is used to serialize access when different threads are writing
+  // to the same instance of RangeEventList.
+  std::mutex mutex_;
+  std::vector<Event> events_;
+
+  static const size_t kReservedCapacity = 1024;
 };
 
-TORCH_API RangeEventList& getEventList();
-TORCH_API void mark(std::string name, bool include_cuda = true);
-
 using thread_event_lists = std::vector<std::vector<Event>>;
-// NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
-// there no autograd functions are being executed when these function are used.
-TORCH_API void enableProfiler(ProfilerConfig);
+// NOTE: profiler mode is thread local, with automatic propagation
+// across thread boundary (e.g. at::launch tasks)
+TORCH_API void enableProfiler(const ProfilerConfig&);
 TORCH_API thread_event_lists disableProfiler();
 TORCH_API bool profilerEnabled();
-
 
 // Usage:
 //   {

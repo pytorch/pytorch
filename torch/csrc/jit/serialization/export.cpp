@@ -616,6 +616,13 @@ GraphEncoder::GraphEncoder(
     validateGraph(graph, operator_export_type);
   }
 
+  if (use_external_data_format) {
+    TORCH_CHECK(
+        !onnx_file_path.empty(),
+        "For large model export, f in torch.onnx.export must be a non-empty string "
+        "specifying the location of the model.");
+  }
+
   auto* imp = model_proto_.add_opset_import();
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
@@ -957,6 +964,11 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       add_node_names,
       use_external_data_format,
       onnx_file_path);
+  const size_t proto_size = graph_encoder.get_model_proto().ByteSizeLong();
+  TORCH_CHECK(
+      proto_size <= INT_MAX,
+      "Exporting model exceed maximum protobuf size of 2GB. "
+      "Please call torch.onnx.export with use_external_data_format=True.");
   return std::make_tuple(
       graph_encoder.get_model_proto().SerializeAsString(),
       graph_encoder.get_raw_data_export_map());

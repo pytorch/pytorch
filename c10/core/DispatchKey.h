@@ -55,6 +55,7 @@ enum class DispatchKey : uint8_t {
   MSNPU, // unused externally, but tested at
          // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
+  Vulkan,
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
@@ -150,6 +151,10 @@ enum class DispatchKey : uint8_t {
   // There are a number of alternative modes which may want to handle before
   // autograd; for example, error checking, tracing, profiling or vmap.  They
   // go here.
+
+  // This is the dispatch key for BatchedTensorImpl, which is used to implement
+  // batching rules for vmap.
+  Batched,
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single

@@ -95,6 +95,7 @@ static void compute_q8gemm(
   uint8_t* c = context->c;
   const size_t c_stride = context->c_stride;
 
+  const size_t output_channel_index = nr_block_start + group_index * n;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -105,6 +106,7 @@ static void compute_q8gemm(
       c + (pixel_index + mr_block_start) * c_stride + nr_block_start +
           group_index * n,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
@@ -147,6 +149,7 @@ static void compute_q8conv(
   uint8_t* c = context->c;
   const size_t c_stride = context->c_stride;
 
+  const size_t output_channel_index = group_index * n + nr_block_start;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -158,6 +161,7 @@ static void compute_q8conv(
       c + (mr_block_start + image_index * m) * c_stride + group_index * n +
           nr_block_start,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
@@ -277,11 +281,13 @@ enum pytorch_qnnp_status qnnpackConv(
     const size_t batch_size,
     const size_t input_height,
     const size_t input_width,
-    const float input_scale,
     const uint8_t input_zero_point,
     const uint8_t* input,
-    const float output_scale,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
     const uint8_t output_zero_point,
+    const uint8_t output_min,
+    const uint8_t output_max,
     uint8_t* output,
     pthreadpool_t threadpool) {
   const size_t input_pixel_stride = conv_p.input_channels;
@@ -293,34 +299,28 @@ enum pytorch_qnnp_status qnnpackConv(
   const size_t dilation_height = conv_p.dilation[1];
   const size_t groups = conv_p.groups;
 
-  const float convolution_scale =
-      input_scale * conv_p.kernel_scale / output_scale;
-  if (convolution_scale >= 1.0f) {
-    pytorch_qnnp_log_error(
-        "failed to create convolution with %.7g input scale, %.7g kernel scale,"
-        " and %.7g output scale: "
-        "convolution scale %.7g is greater or equal to 1.0",
-        input_scale,
-        conv_p.kernel_scale,
-        output_scale,
-        convolution_scale);
+  if (batch_size == 0) {
+    // If no batches, return
+    return pytorch_qnnp_status_success;
   }
+
   union pytorch_qnnp_q31_requantization_params requantization_params;
   union pytorch_qnnp_conv_quantization_params conv_quantization_params;
   if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
     requantization_params = pytorch_qnnp_compute_requantization_params(
-        convolution_scale,
+        // Note. XZP kernels are not changed for per channel quant.
+        requantization_scales[0],
         output_zero_point,
-        conv_p.output_min,
-        conv_p.output_max);
+        output_min,
+        output_max);
   } else {
     conv_quantization_params = pytorch_qnnp_compute_conv_quantization_params(
         input_zero_point,
-        conv_p.kernel_zero_point,
-        convolution_scale,
+        kernel_zero_points,
+        requantization_scales,
         output_zero_point,
-        conv_p.output_min,
-        conv_p.output_max);
+        output_min,
+        output_max);
   }
   uint32_t stride_width = conv_p.stride_dims[0];
   uint32_t stride_height = conv_p.stride_dims[1];
@@ -430,8 +430,14 @@ enum pytorch_qnnp_status qnnpackConv(
               .output_col_increment =
                   (output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = conv_quantization_params,
-              .unipass_ukernel = pytorch_qnnp_params.q8dw9.updw,
-              .multipass_ukernel = pytorch_qnnp_params.q8dw25.mpdw,
+              .unipass_ukernel =
+                  conv_p.per_channel ?
+                      pytorch_qnnp_params.q8dw9.updw_per_channel :
+                      pytorch_qnnp_params.q8dw9.updw,
+              .multipass_ukernel =
+                  conv_p.per_channel ?
+                      pytorch_qnnp_params.q8dw25.mpdw_per_channel :
+                      pytorch_qnnp_params.q8dw25.mpdw,
           };
           pthreadpool_compute_2d(
               threadpool,
@@ -459,8 +465,14 @@ enum pytorch_qnnp_status qnnpackConv(
               .output_col_increment =
                   (output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = conv_quantization_params,
-              .unipass_ukernel = pytorch_qnnp_params.q8dw9.updw,
-              .multipass_ukernel = pytorch_qnnp_params.q8dw25.mpdw,
+              .unipass_ukernel =
+                  conv_p.per_channel ?
+                      pytorch_qnnp_params.q8dw9.updw_per_channel :
+                      pytorch_qnnp_params.q8dw9.updw,
+              .multipass_ukernel =
+                  conv_p.per_channel ?
+                      pytorch_qnnp_params.q8dw25.mpdw_per_channel :
+                      pytorch_qnnp_params.q8dw25.mpdw,
           };
           pthreadpool_compute_2d(
               threadpool,
@@ -502,7 +514,10 @@ enum pytorch_qnnp_status qnnpackConv(
           .m = input_size,
           .k = conv_p.group_input_channels,
           .a_stride = input_pixel_stride,
-          .multiplier = (int32_t)-conv_p.kernel_zero_point,
+          // XZP kernels are not supporting per channel quant.
+          // We dont really use XZP kernels ATM.
+          // Thus assigning the zero point of first channel.
+          .multiplier = (int32_t)-kernel_zero_points[0],
           .a_sum = a_sum,
           .a_sum_stride = input_size,
           .ukernel = pytorch_qnnp_params.q8sum_rows.sum_rows,

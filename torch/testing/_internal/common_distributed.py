@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import os
 import sys
 import tempfile
 import time
@@ -8,7 +9,7 @@ import logging
 import traceback
 import types
 
-from collections import namedtuple
+from typing import NamedTuple
 from functools import wraps
 
 import torch
@@ -17,15 +18,43 @@ import torch.distributed as c10d
 from functools import partial, reduce
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-TestSkip = namedtuple('TestSkip', 'exit_code, message')
+class TestSkip(NamedTuple):
+    exit_code: int
+    message: str
 
 
 TEST_SKIPS = {
+    "backend_unavailable": TestSkip(72, "Skipped because distributed backend is not available."),
+    "small_worldsize": TestSkip(73, "Skipped due to small world size."),
+    "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
-    "known_issues": TestSkip(77, "Test skipped due to known issues"),
     "skipIfRocm": TestSkip(78, "Test skipped for ROCm")
 }
+
+def skip_if_no_gpu(func):
+    """ Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not torch.cuda.is_available():
+            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
+        if torch.cuda.device_count() < int(os.environ["WORLD_SIZE"]):
+            sys.exit(TEST_SKIPS["multi-gpu"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def skip_if_small_worldsize(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
+            sys.exit(TEST_SKIPS["small_worldsize"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 def skip_if_not_multigpu(func):
@@ -49,16 +78,6 @@ def skip_if_lt_x_gpu(x):
         return wrapper
 
     return decorator
-
-
-def skip_for_known_issues(func):
-    """Skips a test due to known issues (for c10d)."""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        sys.exit(TEST_SKIPS['known_issues'].exit_code)
-
-    return wrapper
-
 
 def requires_gloo():
     return unittest.skipUnless(
@@ -96,6 +115,7 @@ def requires_mpi():
 def skip_if_rocm(func):
     """Skips a test for ROCm"""
     func.skip_if_rocm = True
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not TEST_WITH_ROCM:
@@ -251,11 +271,11 @@ class MultiProcessTestCase(TestCase):
         subprocess_error = False
         while True:
             # check to see if any subprocess exited with an error early.
-            for p in self.processes:
-                # This is the exited code processes exit with if they
+            for (i, p) in enumerate(self.processes):
+                # This is the exit code processes exit with if they
                 # encountered an exception.
                 if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
-                    print("Some process exited badly, terminating rest.")
+                    print("Process {} terminated with exit code {}, terminating remaining processes.".format(i, p.exitcode))
                     active_children = torch.multiprocessing.active_children()
                     for ac in active_children:
                         ac.terminate()
@@ -325,7 +345,7 @@ class MultiProcessTestCase(TestCase):
             self.assertEqual(
                 p.exitcode,
                 first_process.exitcode,
-                "Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
+                msg="Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
                     i, first_process.exitcode, p.exitcode
                 ),
             )
@@ -335,7 +355,7 @@ class MultiProcessTestCase(TestCase):
         self.assertEqual(
             first_process.exitcode,
             0,
-            "Expected zero exit code but got {}".format(first_process.exitcode)
+            msg="Expected zero exit code but got {}".format(first_process.exitcode)
         )
 
     @property

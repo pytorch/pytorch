@@ -23,16 +23,19 @@ static c10::optional<c10::Device> getDevice(const Value* const value) {
 
 static c10::optional<c10::Device> getDevice(const Node* const node) {
   auto outputs = node->outputs();
-  if (outputs.size() == 0) {
-    return c10::nullopt;
+  for (auto output : outputs) {
+    auto device = getDevice(output);
+    if (device.has_value()) {
+      return device;
+    }
   }
-  return getDevice(outputs[0]);
+  return c10::nullopt;
 }
 
 static bool isFusableDevice(const Node* node, const c10::Device device) {
   for (auto value : node->outputs()) {
     auto output_device = getDevice(value);
-    if (!output_device.has_value() || output_device.value() != device) {
+    if (output_device.has_value() && output_device.value() != device) {
       return false;
     }
   }
@@ -43,33 +46,15 @@ static bool isFusableDevice(const Node* node, const c10::Device device) {
 static bool isFusableDevice(const Node* node) {
   auto device = getDevice(node);
   if (!device.has_value()) {
-    return false;
+    return true;
   }
-  // Technically we don't need to check device for node->outputs()[0] again, meh
-  return isFusableDevice(node, device.value());
+  return device->is_cuda();
 }
 
 inline bool isFusableNode(const Node* const node) {
   // checks if node is compatible with parser:
   // 1. if we have a parsing rule; or 2. if the node is already a fusion group.
   return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
-}
-
-// TODO: how would symbolic shape from profiling executor play with this?
-static bool compatible_broadcast_shape(
-    const c10::VaryingShape<int64_t>& e,
-    const c10::VaryingShape<int64_t>& a) {
-  if (e.isComplete() && a.isComplete()) {
-    auto e_size = e.concrete_sizes().value();
-    auto a_size = a.concrete_sizes().value();
-    for (size_t i = 0; i < e_size.size(); i++) {
-      if (e_size[i] != a_size[i]) {
-        return false;
-      }
-    }
-    return true;
-  }
-  return false;
 }
 
 } // namespace
@@ -84,33 +69,37 @@ bool isFusableCudaFusionGroup(const Node* const node) {
 bool isFusableCudaFusionGroup(
     const Node* const fusion,
     const Node* const node) {
-  if (isFusableNode(node)) {
-    auto device = getDevice(fusion);
+  if (isFusableCudaFusionGroup(node)) {
+    // TODO: ensure legit fusion.
+    // issue 0: currently codegen doesn't support broadcasting, except in the
+    //          form of stride 0.
+    // We WAR by explicitly extend all tensor to be the broadcasted size. This
+    // however requires that we have identical tensor shape for all output
+    // tensors.
+    // We previously have a check, where for any `node` that we try to fuse, all
+    // `auto output : node->outputs(); auto use : output->uses();` has to meet
+    // one of the three conditions:
+    //   a. use.user == fusion;
+    //   b. node->outputs() sizes are compatible with `fusion` outputs;
+    //   c. isFusableNode(use.user) && use.user->outputs() sizes are compatible
+    //      with `fusion` outputs;
+    //
+    // However, given the instance of legacy executor, it is not guaranteed the
+    // necessary shape information is available to do the check. Hence we are
+    // omitting it for now and we'll wait until proper support from profiling is
+    // implemented to justify another look at this.
+    // And the broadcasting Hack won't be applicable after reduction is
+    // supported in codegen. So it's going to be a more complicated story.
+    //
+    // For now, a voilating fusion would result in no codegen kernel (fallback
+    // execution with interpreter and non-optimized graph is used instead)
 
-    auto tensor_type = fusion->outputs()[0]->type()->cast<TensorType>();
-    if (tensor_type) {
-      for (auto output : node->outputs()) {
-        // We only check shape of tensor output
-        auto output_type = output->type()->cast<TensorType>();
-        if (output_type) {
-          bool output_tensor = false;
-          for (auto use : output->uses()) {
-            if (use.user != fusion) {
-              output_tensor = true;
-              break;
-            }
-          }
-          // if the output is not used by outside, there's no need to check its
-          // shape
-          if (output_tensor &&
-              !compatible_broadcast_shape(
-                  tensor_type->sizes(), output_type->sizes())) {
-            return false;
-          }
-        }
-      }
-      return (device.has_value() && isFusableDevice(node, device.value()));
-    }
+    // ensure if the node has a designated device, it's on the same device with
+    // fusion.
+    // TODO: is there a danger of us fusing operations that's supposed to be on
+    //       separate GPUs? And is that necessarily bad?
+    auto device = getDevice(fusion);
+    return (!device.has_value() || isFusableDevice(node, device.value()));
   }
   return false;
 }

@@ -777,9 +777,11 @@ class TestCaffe2End2End(TestCase):
         np.random.seed(seed=0)
         try:
             c2_init_net, c2_predict_net, value_info, debug_str = self.model_downloader.get_c2_model_dbg(net_name)
-        except (OSError, IOError) as e:
+        except Exception as e:
             # catch IOError/OSError that is caused by FileNotFoundError and PermissionError
             # This is helpful because sometimes we get errors due to gfs not available
+            # get_c2_model_dbg wraps URLError/HTTPErrors into generic Exception
+            # Skip the tests if model can not be downloaded due to the any of the above
             print("\n_test_net exception: ", e)
             self.skipTest(str(e))
 

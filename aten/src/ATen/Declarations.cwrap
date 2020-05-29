@@ -57,38 +57,6 @@
     - THTensor* source
 ]]
 [[
-  name: _th_masked_select
-  cname: maskedSelect
-  cpu_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  backends:
-    - CPU
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THByteTensor* mask
-]]
-[[
-  name: _th_masked_select_bool
-  cname: maskedSelectBool
-  cpu_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  backends:
-    - CPU
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THBoolTensor* mask
-]]
-[[
   name: _th_nonzero
   cname: nonzero
   cpu_half: True
@@ -179,36 +147,6 @@
       - real value
 ]]
 [[
-  name: _th_scatter_add_
-  return: argument 0
-  cname: scatterAdd
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  arguments:
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-    - THTensor* src
-]]
-[[
-  name: _th_gather
-  cname: gather
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-    - THIndexTensor* index
-]]
-[[
   name: _th_equal
   cname: equal
   cpu_bool: True
@@ -221,68 +159,6 @@
   arguments:
     - THTensor* self
     - THTensor* other
-]]
-[[
-  name: _th_min
-  cuda_bool: True
-  backends:
-    - CUDA
-  variants:
-    - function
-  options:
-    - cname: minall
-      return: real
-      arguments:
-        - THTensor* self
-]]
-[[
-  name: _th_min
-  cuda_bool: True
-  backends:
-    - CUDA
-  variants: function
-  options:
-    - cname: min
-      return: argument 0,1
-      arguments:
-        - arg: THTensor* min
-          output: True
-        - arg: THIndexTensor* min_indices
-          output: True
-        - THTensor* self
-        - long dim
-        - bool keepdim
-]]
-[[
-  name: _th_max
-  cuda_bool: True
-  backends:
-    - CUDA
-  variants:
-    - function
-  options:
-    - cname: maxall
-      return: real
-      arguments:
-        - THTensor* self
-]]
-[[
-  name: _th_max
-  cuda_bool: True
-  backends:
-    - CUDA
-  variants: function
-  options:
-    - cname: max
-      return: argument 0,1
-      arguments:
-        - arg: THTensor* max
-          output: True
-        - arg: THIndexTensor* max_indices
-          output: True
-        - THTensor* self
-        - long dim
-        - bool keepdim
 ]]
 [[
   name: _th_mode
@@ -333,62 +209,6 @@
     - long dim
     - bool largest
     - bool sorted
-]]
-[[
-  name: _th_exp
-  cname: exp
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_atan
-  cname: atan
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_erf
-  cname: erf
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_erfc
-  cname: erfc
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
 ]]
 [[
   name: _th_var
@@ -476,34 +296,6 @@
     - real max
 ]]
 [[
-  name: _th_cumsum
-  cname: cumsum
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-]]
-[[
-  name: _th_cumprod
-  cname: cumprod
-  backends:
-    - CUDA
-  cuda_bool: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long dim
-]]
-[[
   name: _th_trace
   cname: trace
   variants:
@@ -530,8 +322,7 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - arg: THTensor* self
-          broadcast: other fallback
+        - THTensor* self
         - THTensor* other
 ]]
 [[
@@ -549,49 +340,8 @@
     - cname: cfmod
       arguments:
         - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
+        - THTensor* self
         - THTensor* other
-]]
-[[
-  name: _th_clamp
-  cname: clamp
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-    - real max
-]]
-[[
-  name: _th_clamp_min
-  cname: cmaxValue
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-]]
-[[
-  name: _th_clamp_max
-  cname: cminValue
-  variants: function
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real max
 ]]
 [[
   name: _th_dot
@@ -645,8 +395,7 @@
     - arguments:
       - arg: THTensor* result
         output: True
-      - arg: THTensor* self
-        broadcast: mat1,mat2 dims:mat1.dim0,mat2.dim1
+      - THTensor* self
       - THTensor* mat1
       - THTensor* mat2
       - real beta
@@ -678,8 +427,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: vec1,vec2 dims:vec1.dim0,vec2.dim0
+    - THTensor* self
     - THTensor* vec1
     - THTensor* vec2
     - real beta
@@ -713,7 +461,6 @@
   arguments:
     - arg: THTensor* result
       output: True
-      resize: [ [self,0], [self,1], [mat2,2] ]
     - argument 0
     - THTensor* self
     - THTensor* mat2
@@ -730,8 +477,7 @@
   arguments:
     - arg: THTensor* result
       output: True
-    - arg: THTensor* self
-      broadcast: batch1,batch2 dims:batch1.dim1,batch2.dim2
+    - THTensor* self
     - THTensor* batch1
     - THTensor* batch2
     - real beta
@@ -764,7 +510,6 @@
     - arg: THTensor* result
       output: True
     - arg: THTensor* self
-      broadcast: batch1,batch2 dims:batch1.dim0,batch1.dim1,batch2.dim2
     - THTensor* batch1
     - THTensor* batch2
     - real beta

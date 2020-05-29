@@ -119,14 +119,16 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
 
   int64_t nelements = prod_intlist(size);
   auto dtype = options.dtype();
+  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
-    dtype,
-    nelements,
-    allocator->allocate(nelements * dtype.itemsize()),
-    allocator,
-    /*resizeable=*/true);
+      c10::StorageImpl::use_byte_size_t(),
+      size_bytes,
+      allocator->allocate(size_bytes),
+      allocator,
+      /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::DispatchKey::CPU);
+  auto tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage_impl), at::DispatchKey::CPU, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -976,18 +978,20 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
     TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
-    size_t my_size = size.value_or(0);
+    int64_t my_size = size.value_or(0);
     int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
     auto dtype = options.dtype();
+    size_t size_bytes = my_size * dtype.itemsize();
     auto storage_impl = c10::make_intrusive<at::StorageImpl>(
-      dtype,
-      my_size,
-      THMapAllocator::makeDataPtr(
-          filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
-      /*allocator=*/nullptr,
-      /*resizable=*/false);
-    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::DispatchKey::CPU);
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
+        c10::StorageImpl::use_byte_size_t(),
+        size_bytes,
+        THMapAllocator::makeDataPtr(
+            filename.c_str(), flags, size_bytes, nullptr),
+        /*allocator=*/nullptr,
+        /*resizable=*/false);
+    auto tensor = detail::make_tensor<at::TensorImpl>(
+        storage_impl, at::DispatchKey::CPU, dtype);
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous({my_size});
     return tensor;
 }
 
