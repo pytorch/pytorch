@@ -350,36 +350,32 @@ def gradcheck(
             if gi.size() != i.size():
                 return fail_test('grad is incorrect size')
 
-    if check_undefined_grad:
-        output = _differentiable_outputs(func(*tupled_inputs))
-        # Sending undefined output grads into the backward function should
-        # result in undefined input grads
-        output_grads_all_undef = [torch._C._functions.UndefinedGrad()(o) for o in output]
-        if any([o.requires_grad for o in output_grads_all_undef]):
-            grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_grads_all_undef]
-            grads_input = torch.autograd.grad(output_grads_all_undef,
-                                              diff_input_list,
-                                              grads_output,
-                                              allow_unused=True)
-            for gi, i in zip(grads_input, diff_input_list):
-                if gi is not None:
-                    return fail_test('expected all input grads to be undefined when all output grads are undefined')
+        if check_undefined_grad:
+            def check_undefined_grad_support(output_to_check):
+                grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_to_check]
+                grads_input = torch.autograd.grad(output_to_check,
+                                                  diff_input_list,
+                                                  grads_output,
+                                                  allow_unused=True)
+                for gi, i in zip(grads_input, diff_input_list):
+                    if (gi is not None) and (not gi.eq(0).all()):
+                        return fail_test('expected all input grads to be undefined or zero when all output grads are undefined or zero')
+                return True
+
+            # All backward functions must work properly if all output grads are undefined
+            outputs_to_check = [[torch._C._functions.UndefinedGrad()(o) for o in _differentiable_outputs(func(*tupled_inputs))]]
 
             # If there are multiple output grads, we should be able to undef one at a time without error
-            if len(grads_output) > 1:
-                for undef_grad_idx in range(len(grads_output)):
-                    output = _differentiable_outputs(func(*tupled_inputs))
-                    output_grads_one_undef = [
-                        torch._C._functions.UndefinedGrad()(o) if idx == undef_grad_idx else o for idx, o in enumerate(output)
-                    ]
-                    grads_input = torch.autograd.grad(output_grads_one_undef,
-                                                      diff_input_list,
-                                                      grads_output,
-                                                      allow_unused=True)
-                    for gi, i in zip(grads_input, diff_input_list):
-                        if (gi is not None) and (not gi.eq(0).all()):
-                            print(gi)
-                            return fail_test('expected input grads to be zero or undefined when output grads are zero or undefined')
+            if len(outputs_to_check[0]) > 1:
+                for undef_grad_idx in range(len(output)):
+                    output_to_check = _differentiable_outputs(func(*tupled_inputs))
+                    outputs_to_check.append([
+                        torch._C._functions.UndefinedGrad()(o) if idx == undef_grad_idx else o for idx, o in enumerate(output_to_check)
+                    ])
+
+            for output_to_check in outputs_to_check:
+                if not check_undefined_grad_support(output_to_check):
+                    return False
 
     return True
 
