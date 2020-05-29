@@ -92,6 +92,14 @@ def enable_profiling_mode():
         torch._C._jit_set_profiling_executor(old_prof_exec_state)
         torch._C._jit_set_profiling_mode(old_prof_mode_state)
 
+@contextmanager
+def num_profiled_runs(num_runs):
+    old_num_runs = torch._C._jit_set_num_profiled_runs(num_runs)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_num_profiled_runs(old_num_runs)
+
 func_call = torch._C.ScriptFunction.__call__
 meth_call = torch._C.ScriptMethod.__call__
 
@@ -617,15 +625,9 @@ class CudaMemoryLeakCheck():
         afters = self.get_cuda_memory_usage()
 
         for i, (before, after) in enumerate(zip(self.befores, afters)):
-            if not TEST_WITH_ROCM:
-                self.testcase.assertEqual(
-                    before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
-                        self.name, after - before, i))
-            else:
-                # TODO: Investigate ROCm memory leaking.
-                if before != after:
-                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
-                        self.name, after - before, i), RuntimeWarning)
+            self.testcase.assertEqual(
+                before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
+                    self.name, after - before, i))
 
 #  "min_satisfying_examples" setting has been deprecated in hypythesis
 #  3.56.0 and removed in hypothesis 4.x
@@ -1107,8 +1109,8 @@ class TestCase(expecttest.TestCase):
         self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
 
     def assertNotEqual(self, x, y, *, msg=None, atol=None, rtol=None):
-        with self.assertRaises(AssertionError):
-            self.assertEqual(x, y, msg=msg, atol=atol, rtol=rtol)
+        with self.assertRaises(AssertionError, msg=msg):
+            self.assertEqual(x, y, atol=atol, rtol=rtol)
 
     def assertEqualTypeString(self, x, y):
         # This API is used simulate deprecated x.type() == y.type()
