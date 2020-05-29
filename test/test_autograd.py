@@ -1922,7 +1922,18 @@ class TestAutograd(TestCase):
 
     def test_numpy_requires_grad(self):
         x = torch.randn(2, 2, requires_grad=True)
-        self.assertRaisesRegex(RuntimeError, 'requires grad', lambda: x.numpy())
+        err_msg_outputs = r"Can't call numpy\(\) on Tensor that requires grad. Use tensor.detach\(\).numpy\(\) instead."
+        with self.assertRaisesRegex(RuntimeError, err_msg_outputs):
+            x.numpy()
+
+        with torch.no_grad():
+            x.numpy()
+
+        x = torch.randn(2, 2)
+        x.numpy()
+
+        with torch.no_grad():
+            x.numpy()
 
     def test_return_leaf(self):
         class Identity(Function):
@@ -5549,25 +5560,6 @@ class TestAutogradDeviceType(TestCase):
 
             m = torch.cat((asd, asd))
             m.sum().backward()
-
-
-    @deviceCountAtLeast(2)
-    def test_scalar_different_devices(self, devices):
-        a = torch.rand([], requires_grad=True, device=devices[0])
-        b = torch.rand(10, requires_grad=True, device=devices[1])
-
-        c = b * a
-        c.sum().backward()
-
-
-    @onlyCUDA
-    def test_scalar_different_device_types(self, device):
-        c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
-        c.sum().backward()
-
-        d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
-        d.sum().backward()
-
 
     # NOTE: flaky on ROCm CI
     @skipCUDAIfRocm
