@@ -70,6 +70,8 @@ namespace jit {
   _(ReduceSplitMask)                        \
   _(ReduceSplitNoMask)                      \
   _(ReduceOverSplitMask)                    \
+  _(ReduceSplitRfactor)                     \
+  _(ReduceOverSplitRfactor)                 \
   _(SplitReduceAxis)                        \
   _(SplitNonReduceAxis)                     \
   _(TypeTest01)                             \

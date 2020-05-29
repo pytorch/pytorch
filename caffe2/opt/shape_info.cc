@@ -55,32 +55,31 @@ ShapeInfo constructShapeInfoWithDefaultDimType(
 void parseShapeInfoMapFromString(
     const std::string& input,
     ShapeInfoMap& shape_hints) {
-  auto hints = caffe2::split(';', input);
+  auto hints = caffe2::split('|', input);
   for (const auto& hint : hints) {
-    auto kv = caffe2::split(':', hint);
-    if (kv.size() == 2) {
-      auto dims = caffe2::split(',', kv.back());
-      TensorShape input;
-      if (kv.front().find("int8") != std::string::npos) {
-        input.set_data_type(TensorProto_DataType_UINT8);
-      } else {
-        input.set_data_type(TensorProto_DataType_FLOAT);
-      }
-      bool valid = true;
-      for (const auto& d : dims) {
-        try {
-          input.add_dims(std::stoi(d));
-        } catch (const std::exception& e) {
-          valid = false;
-          CAFFE_THROW("Cannot parse shape hint: ", hint);
-        }
-      }
-      if (valid) {
-        shape_hints.emplace(
-            kv.front(), constructShapeInfoWithDefaultDimType(input));
-      }
+    auto kv = caffe2::split(',', hint);
+    CAFFE_ENFORCE_GE(kv.size(), 2, "Cannot parse shape hint: ", hint);
+    const auto& name = kv[0];
+
+    TensorShape shape;
+    if (name.find("int8") != std::string::npos) {
+      shape.set_data_type(TensorProto_DataType_UINT8);
     } else {
-      CAFFE_THROW("Cannot parse shape hint: ", hint);
+      shape.set_data_type(TensorProto_DataType_FLOAT);
+    }
+
+    bool valid = true;
+    for (int i = 1; i < kv.size(); i++) {
+      auto dim = kv[i];
+      try {
+        shape.add_dims(std::stoi(dim));
+      } catch (const std::exception& e) {
+        valid = false;
+        CAFFE_THROW("Cannot parse shape hint: ", hint);
+      }
+    }
+    if (valid) {
+      shape_hints.emplace(name, constructShapeInfoWithDefaultDimType(shape));
     }
   }
 }
