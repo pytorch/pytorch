@@ -1950,10 +1950,24 @@ new_module_tests = [
         input_size=(2, 3, 8),
     ),
     dict(
+        module_name='ReflectionPad1d',
+        constructor_args=((2,),
+        cpp_constructor_args='torch::nn::ReflectionPad1dOptions(2)',
+        input_size=(0, 3, 10),
+        desc='zero_batch',
+    ),
+    dict(
         module_name='ReflectionPad2d',
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
         input_size=(2, 3, 8, 8),
+    ),
+    dict(
+        module_name='ReflectionPad2d',
+        constructor_args=(2,),
+        cpp_constructor_args='torch::nn::ReflectionPad2dOptions(2)',
+        input_size=(0, 3, 10, 10),
+        desc='zero_batch',
     ),
     dict(
         module_name='ReplicationPad1d',
