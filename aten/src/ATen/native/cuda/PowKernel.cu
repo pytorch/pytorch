@@ -17,7 +17,7 @@ namespace {
 //   pow(float, int)
 //   pow(double, int)
 //   pow(float, float)
-//   pow(double, double)
+//   pow(std::complex<?>, ?)
 // As for sqrt, the following signatures are defined as the device function:
 //   sqrt(float)
 //   sqrt(double)
@@ -44,6 +44,12 @@ template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ typename std::enable_if<std::is_integral<Base_type>::value && std::is_same<Base_type, Exp_type>::value, Base_type>::type
   pow_(Base_type base, Exp_type exp) {
   return native::powi(base, exp);
+}
+// pow (complex, ?)
+template <typename Base_type, typename Exp_type>
+static inline __host__ __device__ typename std::enable_if<c10::is_complex_t<Base_type>::value, Base_type>::type
+  pow_(Base_type base, Exp_type exp) {
+  return std::pow(base, exp);
 }
 // pow (Otherwise)
 template <typename Base_type, typename Exp_type>
