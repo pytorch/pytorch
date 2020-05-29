@@ -1742,6 +1742,20 @@ log2_() -> Tensor
 In-place version of :meth:`~Tensor.log2`
 """)
 
+add_docstr_all('logaddexp',
+               r"""
+logaddexp(other) -> Tensor
+
+See :func:`torch.logaddexp`
+""")
+
+add_docstr_all('logaddexp2',
+               r"""
+logaddexp2(other) -> Tensor
+
+See :func:`torch.logaddexp2`
+""")
+
 add_docstr_all('log_normal_', r"""
 log_normal_(mean=1, std=2, *, generator=None)
 
