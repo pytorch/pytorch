@@ -79,7 +79,7 @@ class AbstractTestCases:
                 result = torch.zeros(shape, dtype=dtype)
                 result.apply_(lambda x: random.randint(val_range[0], val_range[1]))
                 return result
- 
+
             def make_non_contiguous(shape, dtype):
                 contig = make_contiguous(shape, dtype)
                 non_contig = torch.empty(shape + (2, 2), dtype=dtype)[..., 0]
@@ -2582,7 +2582,7 @@ class AbstractTestCases:
             m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
             elems_per_row = random.randint(1, 10)
             dim = random.randrange(3)
-            
+
             for dtype in {torch.float32, torch.complex64, torch.complex128}:
                 src = torch.randn(m, n, o, dtype=dtype)
                 idx_size = [m, n, o]

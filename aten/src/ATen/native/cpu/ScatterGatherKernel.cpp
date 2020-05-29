@@ -146,18 +146,12 @@ struct cpu_scatter_gather_base_kernel {
     index_sizes[dim] = 1;
     index_strides[dim] = 0;
 
-    // set self.shape = src.shape = index.shape,
-    // this defines the number of elements to iterate over,
-    // and set self.stride(dim) = src.stride(dim) = 0,
-    // because `dim` is traversed in the kernel.
-    auto self_restrided = restride_dim(self, dim, index_sizes);
-    auto index_restrided = index.as_strided(index_sizes, index_strides);
-
     auto iter = TensorIterator();
     iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
-    iter.add_output(self_restrided);
-    iter.add_input(index_restrided);
+    iter.declare_static_shape(index.sizes(), /*squash_dim=*/dim);
+    iter.add_output(self);
+    iter.add_input(index);
     iter.build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
