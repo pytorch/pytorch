@@ -3,17 +3,15 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-#include <arpa/inet.h>
-#include <ifaddrs.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+// An environment variable along the lines of GLOO_ and NCCL_SOCKET_IFNAME that
+// allows the user to specify a device to bind to, instead of binding to the
+// address that the hostname resolves to.
+const std::string kSocketIfnameEnvVar = "TP_SOCKET_IFNAME";
+const std::string kDefaultUvAddress = "127.0.0.1";
 
 constexpr long kToMilliseconds = 1000;
 
@@ -102,8 +100,29 @@ TensorPipeAgent::~TensorPipeAgent() {
 }
 
 void TensorPipeAgent::startImpl() {
-  context_->registerTransport(
-      1, "tcp", std::make_shared<tensorpipe::transport::uv::Context>());
+  auto uvContext = std::make_shared<tensorpipe::transport::uv::Context>();
+
+  tensorpipe::Error error;
+  std::string uvAddress;
+  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
+  if (ifnameEnv != nullptr) {
+    std::tie(error, uvAddress) = uvContext->lookupAddrForIface(ifnameEnv);
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for interface "
+                   << ifnameEnv << " (" << error.what() << "), defaulting to "
+                   << kDefaultUvAddress;
+      uvAddress = kDefaultUvAddress;
+    }
+  } else {
+    std::tie(error, uvAddress) = uvContext->lookupAddrForHostname();
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
+                   << error.what() << "), defaulting to " << kDefaultUvAddress;
+      uvAddress = kDefaultUvAddress;
+    }
+  }
+
+  context_->registerTransport(1, "tcp", std::move(uvContext));
 #ifdef TP_ENABLE_SHM
   context_->registerTransport(
       0, "shm", std::make_shared<tensorpipe::transport::shm::Context>());
@@ -115,11 +134,7 @@ void TensorPipeAgent::startImpl() {
       0, "cma", std::make_shared<tensorpipe::channel::cma::Context>());
 #endif
 
-  // TODO: We currently hardcoded localhost as pipes handshake IP address.
-  // Ideally tensorpipe could provide a helper to get IP address for given
-  // device interface or host names, or return the IP address of the default
-  // host name. https://github.com/pytorch/pytorch/issues/36715
-  std::vector<std::string> addresses = {"tcp://" + getDefaultIPAddress()};
+  std::vector<std::string> addresses = {"tcp://" + uvAddress};
 #ifdef TP_ENABLE_SHM
   addresses.push_back(createUniqueShmAddr());
 #endif
@@ -690,65 +705,6 @@ void TensorPipeAgent::trackNetworkError(
   networkData_[destWorkerName].numCalls++;
   networkData_[destWorkerName].totalSentBytes += requestSize;
   networkData_[destWorkerName].totalErrors++;
-}
-
-std::string TensorPipeAgent::getDefaultIPAddress() {
-  std::string defaultIP = "127.0.0.1";
-
-  std::array<char, NI_MAXHOST> hostname{};
-  int rv = gethostname(hostname.data(), NI_MAXHOST);
-  if (rv != 0) {
-    LOG(WARNING) << "Unable to get local hostname. Falling back to "
-                 << "bind with " << defaultIP;
-    return defaultIP;
-  }
-
-  struct addrinfo hints {};
-  memset(&hints, 0, sizeof hints);
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_protocol = IPPROTO_TCP;
-  struct addrinfo* servinfo;
-  rv = getaddrinfo(hostname.data(), nullptr, &hints, &servinfo);
-  if (rv != 0) {
-    LOG(WARNING) << "Get address info error: " << gai_strerror(rv)
-                 << ". Falling back to bind with " << defaultIP;
-    return defaultIP;
-  }
-
-  // Loop through all the results and pick up the first we can bind.
-  for (struct addrinfo* p = servinfo; p != nullptr; p = p->ai_next) {
-    int fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-    if (fd == -1) {
-      continue;
-    }
-    int bind_rv = bind(fd, p->ai_addr, p->ai_addrlen);
-    if (bind_rv == -1) {
-      close(fd);
-      continue;
-    }
-    close(fd);
-
-    if (p->ai_family == AF_INET6) {
-      std::string ipv6(INET6_ADDRSTRLEN, '\0');
-      struct sockaddr_in6* h = (struct sockaddr_in6*)p->ai_addr;
-      inet_ntop(AF_INET6, &h->sin6_addr, (char*)ipv6.data(), INET6_ADDRSTRLEN);
-      freeaddrinfo(servinfo);
-      return ipv6;
-    } else if (p->ai_family == AF_INET) {
-      std::string ipv4(INET_ADDRSTRLEN, '\0');
-      struct sockaddr_in* h = (struct sockaddr_in*)p->ai_addr;
-      inet_ntop(AF_INET, &h->sin_addr, (char*)ipv4.data(), INET_ADDRSTRLEN);
-      freeaddrinfo(servinfo);
-      return ipv4;
-    }
-  }
-
-  freeaddrinfo(servinfo);
-
-  LOG(WARNING) << "TensorPipe agent didn't find associated IP address with "
-               << hostname.data() << ". Using " << defaultIP << " to bind";
-  return defaultIP;
 }
 
 void TensorPipeAgent::increaseCallCount(int32_t& count) {
