@@ -5,6 +5,9 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
+constexpr auto kDistAutogradBackwardProfilingKey =
+    "torch::distributed::autograd::backward";
+
 void backward(
     int64_t context_id,
     const variable_list& roots,
