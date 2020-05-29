@@ -12413,12 +12413,19 @@ class TestTorchDeviceType(TestCase):
         a_masked = a.masked_select(mask_copy_3_times)
         self.assertEqual(a_masked, a.unsqueeze(0).expand(3, 100).flatten())
 
-    def test_masked_non_contiguous(self, device):
-        
-        x, m, z = torch.ones((4,3,2)), torch.zeros((4,3), dtype=torch.bool), torch.zeros((4,2,2))
-        m[:, 1] = True
+    def test_masked_select_non_contiguous(self, device):
+        # See https://github.com/pytorch/pytorch/issues/31895
+        src = torch.ones(4, 3, 2, device=device)
+        dst = torch.zeros(4, 2, 2, device=device)
+        mask = torch.zeros(4, 3, dtype=torch.bool, device=device)
+        mask[:, 1] = True
 
-        torch.masked_select(x, m[..., None], out=z[:, 1, :])
+        torch.masked_select(src, mask[..., None], out=dst[:, 1, :])
+
+        expected_dst = torch.zeros(4, 2, 2)
+        expected_dst[:, 1] = 1 
+
+        self.assertEqual(dst, expected_dst)
 
     def test_masked_fill_bool_tensor(self, device):
         dst = torch.tensor([True, False, True], device=device)
