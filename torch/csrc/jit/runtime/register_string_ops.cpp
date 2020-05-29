@@ -574,7 +574,7 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 
   m.impl(
       "split.str",
-      [](std::string string,
+      [](const std::string& string,
          c10::optional<std::string> separator,
          int64_t max) {
         if (!separator.has_value()) {
