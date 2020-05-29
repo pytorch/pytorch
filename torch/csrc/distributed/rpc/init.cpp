@@ -468,7 +468,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
           py::init<
-              std::shared_ptr<::c10d::Store> /* addressStore */,
+              const std::shared_ptr<::c10d::Store>& /* store */,
               std::string /* selfName */,
               worker_id_t /* selfId */,
               int /* worldSize */,
