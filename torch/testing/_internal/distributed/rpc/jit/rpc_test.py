@@ -812,6 +812,20 @@ def save_rref(rref_var, fname):
     torch.save(rref_var, fname)
 
 
+@torch.jit.script
+def script_add(x, y):
+    # type: (Tensor, Tensor) -> Tensor
+    return x + y
+
+
+@rpc.async_function
+@torch.jit.script
+def async_add(to, x, y):
+    # type: (str, Tensor, Tensor) -> Future[Tensor]
+    return rpc.rpc_async(to, script_add, (x, y))
+
+
+
 class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, FutureTypingTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
@@ -1042,3 +1056,15 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         events = prof.function_events
         function_event = get_function_event(events, "foo")
         self.assertEqual(function_event.name, "foo")
+
+    @dist_init
+    def test_async_function_simple(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(
+            dst1,
+            async_add,
+            args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
+        )
+        self.assertEqual(ret, torch.ones(2, 2) + 1)

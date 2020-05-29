@@ -525,11 +525,23 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
+        is_async_fn = hasattr(func, "_wrapped_async_rpc_function")
+
+        if is_async_fn:
+            wrapped = getattr(func, "_wrapped_async_rpc_function")
+            if isinstance(wrapped, torch.jit.ScriptFunction):
+                func = wrapped
+
         if qualified_name is not None:
             fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
             fut = _invoke_rpc_torchscript(
-                dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
+                dst_worker_info.name,
+                torch.jit._qualified_name(func),
+                args,
+                kwargs,
+                rpc_timeout,
+                is_async_fn
             )
         else:
             is_async_fn = hasattr(func, "_wrapped_async_rpc_function")

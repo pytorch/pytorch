@@ -150,20 +150,45 @@ void RequestCallbackImpl::processRpc(
                            ->get_function(scriptCall.qualifiedName())
                            .runAsync(stack);
 
-      if (jitFuture->completed()) {
-        markComplete(
-            std::move(ScriptResp(std::move(jitFuture->value()))).toMessage());
-        return;
-      }
-      jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
-        try {
-          Message m = ScriptResp(std::move(jitFuture->value())).toMessage();
-          m.setId(messageId);
-          responseFuture->markCompleted(std::move(m));
-        } catch (const std::exception& e) {
-          responseFuture->setError(e.what());
+
+      if (scriptCall.isAsyncFunction()) {
+        jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
+          try {
+            auto valueJitFuture = jitFuture->value().toFuture();
+            valueJitFuture->addCallback([responseFuture,
+                                         messageId,
+                                         valueJitFuture]() {
+              try{
+                Message m =
+                    ScriptResp(std::move(valueJitFuture->value())).toMessage();
+                m.setId(messageId);
+                responseFuture->markCompleted(std::move(m));
+              } catch (const std::exception& e) {
+                responseFuture->setError(e.what());
+              }
+            });
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
+      } else {
+        if (jitFuture->completed()) {
+          markComplete(
+              std::move(ScriptResp(std::move(jitFuture->value()))).toMessage());
+          return;
         }
-      });
+
+        jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
+          try {
+            Message m = ScriptResp(std::move(jitFuture->value())).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
+      }
+
       return;
     }
     case MessageType::PYTHON_CALL: {

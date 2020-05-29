@@ -40,7 +40,8 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
     const py::dict& kwargsDict,
-    const float rpcTimeoutSeconds);
+    const float rpcTimeoutSeconds,
+    const bool asyncFunction);
 
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
