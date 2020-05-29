@@ -109,9 +109,9 @@ class DistributedDataParallel(Module):
         same model and thus the exact same parameter registration order.
 
     .. warning::
-        DDP allows parameters with non-rowmajor-contiguous strides.
-        For example, ``model`` may contain some parameters whose
-        :class:`torch.memory_format` is ``torch.contiguous_format``,
+        This module allows parameters with non-rowmajor-contiguous strides.
+        For example, your model may contain some parameters whose
+        :class:`torch.memory_format` is ``torch.contiguous_format``
         and others whose format is ``torch.channels_last``.  However,
         corresponding parameters in different processes must have the
         same strides.
