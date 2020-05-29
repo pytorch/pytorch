@@ -11,6 +11,7 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
+import torch.nn.functional as F
 import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
@@ -204,6 +205,29 @@ class TestMkldnn(TestCase):
                         max_pool2d(x),
                         max_pool2d(x.to_mkldnn()).to_dense())
 
+    def test_max_pool2d_stride_none(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+
+        for H, W in [(64, 64), (35, 39), (16, 19), [7, 8]]:
+            x = torch.randn(N, C, H, W, dtype=torch.float32) * 10
+            for ceil_mode in [False, True]:
+                y1 = F.max_pool2d(
+                    x,
+                    kernel_size=3 if not ceil_mode else 7,
+                    stride=None,
+                    padding=1,
+                    ceil_mode=ceil_mode)
+
+                y2 = F.max_pool2d(
+                    x.to_mkldnn(),
+                    kernel_size=3 if not ceil_mode else 7,
+                    stride=None,
+                    padding=1,
+                    ceil_mode=ceil_mode)
+
+                self.assertEqual(y1, y2.to_dense())
+
     def test_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
@@ -219,6 +243,27 @@ class TestMkldnn(TestCase):
             self.assertEqual(
                 avg_pool2d(x),
                 avg_pool2d(x.to_mkldnn()).to_dense())
+
+    def test_avg_pool2d_stride_none(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
+
+        for count_include_pad in [True, False]:
+            y1 = F.avg_pool2d(
+                x,
+                kernel_size=3,
+                stride=None,
+                padding=1,
+                count_include_pad=count_include_pad)
+            y2 = F.avg_pool2d(
+                x.to_mkldnn(),
+                kernel_size=3,
+                stride=None,
+                padding=1,
+                count_include_pad=count_include_pad)
+
+            self.assertEqual(y1, y2.to_dense())
 
     def test_adaptive_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
