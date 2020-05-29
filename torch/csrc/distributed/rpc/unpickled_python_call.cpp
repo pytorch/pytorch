@@ -8,7 +8,8 @@ namespace distributed {
 namespace rpc {
 
 UnpickledPythonCall::UnpickledPythonCall(
-    const SerializedPyObj& serializedPyObj, bool isAsyncFunction)
+    const SerializedPyObj& serializedPyObj,
+    bool isAsyncFunction)
     : isAsyncFunction_(isAsyncFunction) {
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   pybind11::gil_scoped_acquire ag;

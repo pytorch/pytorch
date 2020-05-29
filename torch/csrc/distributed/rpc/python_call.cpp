@@ -13,7 +13,7 @@ PythonCall::PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncFunction)
 Message PythonCall::toMessageImpl() && {
   std::vector<char> payload;
   payload.reserve(serializedPyObj_.payload_.length() + 1);
-  payload.push_back(isAsyncFunction_);
+  payload.push_back(isAsyncFunction_ ? 1 : 0);
   payload.insert(
       payload.end(),
       serializedPyObj_.payload_.begin(),
@@ -26,7 +26,9 @@ Message PythonCall::toMessageImpl() && {
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
-  bool isAsyncFunction = message.payload()[0];
+  const char& c = message.payload()[0];
+  TORCH_INTERNAL_ASSERT(c == 0 || c == 1);
+  bool isAsyncFunction = (c == 1);
   std::string payload(message.payload().begin() + 1, message.payload().end());
   std::vector<Tensor> tensors = message.tensors();
   SerializedPyObj serializedPyObj(std::move(payload), std::move(tensors));

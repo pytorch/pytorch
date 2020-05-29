@@ -173,20 +173,19 @@ void RequestCallbackImpl::processRpc(
         std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
         {
           py::gil_scoped_acquire acquire;
-          pyFuture = pythonRpcHandler
-              .runPythonUdf(std::move(upc).movePythonUdf())
-              .cast<std::shared_ptr<jit::PythonFutureWrapper>>();
+          pyFuture =
+              pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())
+                  .cast<std::shared_ptr<jit::PythonFutureWrapper>>();
         }
-        pyFuture->fut->addCallback([
-            msgId = messageId,
-            responseFuture = responseFuture,
-            jitFuture = pyFuture->fut]() {
-          auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-          std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
+        pyFuture->fut->addCallback([msgId = messageId,
+                                    responseFuture = responseFuture,
+                                    jitFuture = pyFuture->fut,
+                                    &pythonRpcHandler]() {
+          std::shared_ptr<SerializedPyObj> serializedPyObj;
           {
             py::gil_scoped_acquire acquire;
-            serializedPyObj = std::make_shared<SerializedPyObj>(
-                pythonRpcHandler.serialize(
+            serializedPyObj =
+                std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
                     jit::toPyObject(jitFuture->value())));
           }
           auto m =
@@ -195,12 +194,12 @@ void RequestCallbackImpl::processRpc(
           responseFuture->markCompleted(std::move(m));
         });
       } else {
-        std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
+        std::shared_ptr<SerializedPyObj> serializedPyObj;
         {
           py::gil_scoped_acquire acquire;
-          serializedPyObj =
-              std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
-                  pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())));
+          serializedPyObj = std::make_shared<SerializedPyObj>(
+              pythonRpcHandler.serialize(pythonRpcHandler.runPythonUdf(
+                  std::move(upc).movePythonUdf())));
         }
         markComplete(
             std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
