@@ -82,7 +82,7 @@ class Int8OpsTest(unittest.TestCase):
         m=st.integers(1, 1024),
         k=st.integers(1, 1024),
         rand_seed=st.integers(0, 65534),
-        quantize_bias=st.sampled_from([True]),
+        quantize_bias=st.sampled_from([False]),
     )
     def test_int8_fc(
         self, n, m, k, rand_seed, quantize_bias
