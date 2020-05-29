@@ -11961,7 +11961,7 @@ class TestTorchDeviceType(TestCase):
             pt_x = torch.tensor(x, device=device, dtype=dtype)
             np_x = np.array(x, dtype=numpy_dtype)
 
-            pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)             
+            pt_res = torch.vander(pt_x, increasing=inc) if n is None else torch.vander(pt_x, n, inc)
             np_res = np.vander(np_x, n, inc)
 
             self.assertEqual(
