@@ -301,9 +301,10 @@ void reflection_pad2d_out_template(
   int dim_slices = 0;
   int64_t nbatch = 1;
 
-  TORCH_CHECK(input_.numel() > 0 &&
-    (input_.ndimension() == 3 || input_.ndimension() == 4), "non-empty 3D or "
-    "4D (batch mode) tensor expected for input, but got: ", input_);
+  TORCH_CHECK(
+      (input_.ndimension() == 3 && input_.size(1) != 0 && input_.size(2) != 0) ||
+      (input_.ndimension() == 4 && input_.size(1) != 0 && input_.size(2) != 0 || input_.size(3) != 0),
+      "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
 
   if (input_.ndimension() == 4) {
     nbatch = input_.size(0);
