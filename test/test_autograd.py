@@ -45,7 +45,8 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 S)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
+                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
+                                                        skipCUDAIf)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -559,8 +560,8 @@ class TestAutograd(TestCase):
         z.register_hook(bw_hook)
         z.sum().backward()
 
-        self.assertEqual(counter[0], 1, 'bw_hook not called')
-        self.assertEqual(x.grad, torch.ones(5, 5) * 2, atol=1e-5)
+        self.assertEqual(counter[0], 1, msg='bw_hook not called')
+        self.assertEqual(x.grad, torch.ones(5, 5) * 2, atol=1e-5, rtol=0)
 
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
@@ -1327,7 +1328,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                return (grad_output * 0).type(torch.DoubleTensor)
+                return (grad_output * 0).to(torch.double)
 
         x = torch.randn(5, 5, requires_grad=True)
         mask = MyFunction.apply(x)
@@ -1915,7 +1916,18 @@ class TestAutograd(TestCase):
 
     def test_numpy_requires_grad(self):
         x = torch.randn(2, 2, requires_grad=True)
-        self.assertRaisesRegex(RuntimeError, 'requires grad', lambda: x.numpy())
+        err_msg_outputs = r"Can't call numpy\(\) on Tensor that requires grad. Use tensor.detach\(\).numpy\(\) instead."
+        with self.assertRaisesRegex(RuntimeError, err_msg_outputs):
+            x.numpy()
+
+        with torch.no_grad():
+            x.numpy()
+
+        x = torch.randn(2, 2)
+        x.numpy()
+
+        with torch.no_grad():
+            x.numpy()
 
     def test_return_leaf(self):
         class Identity(Function):
@@ -2648,8 +2660,8 @@ class TestAutograd(TestCase):
         self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
-        names = ['is_complex', 'mul', 'mul', 'to', 'empty_strided', 'copy_', 'empty', 'is_complex',
-                 'add', 'add', 'to', 'empty_strided', 'copy_', 'empty']
+        names = ['is_complex', 'mul', 'to', 'empty_strided', 'copy_', 'empty', 'is_complex',
+                 'add', 'to', 'empty_strided', 'copy_', 'empty']
         top_level_names = ['is_complex', 'mul', 'is_complex', 'add']
         top_level_iter = iter(top_level_names)
         self.assertEqual(len(p.function_events), len(names))
@@ -2675,6 +2687,48 @@ class TestAutograd(TestCase):
 
         self.assertEqual(len(prof.function_events), 1)
         self.assertEqual(prof.function_events[0].name, '_TorchScriptTesting::take_an_instance')
+
+    def test_profiler_propagation(self):
+        def foo(x):
+            with record_function("in_foo") as rf:
+                return x * 2
+
+        x = torch.rand(3, 4)
+        traced_foo = torch.jit.trace(foo, x)
+
+        def bar(x):
+            with record_function("in_bar") as rf:
+                # we expect that profiler will be able
+                # propagate across fork
+                fut = torch.jit._fork(traced_foo, x)
+                y = torch.jit._wait(fut)
+                # note: continuation (and rf's end) can
+                # be executed in a different thread
+                with record_function("in_bar_after_wait") as rf2:
+                    y = y * 2
+                return y
+
+        traced_bar = torch.jit.trace(bar, x)
+
+        with profile() as p:
+            traced_bar(x)
+
+        found_foo = False
+        found_bar = False
+        found_bar_after_wait = False
+        for info in p.function_events:
+            if info.name == "in_foo":
+                self.assertFalse(found_foo)
+                found_foo = True
+            elif info.name == "in_bar":
+                self.assertFalse(found_bar)
+                found_bar = True
+            elif info.name == "in_bar_after_wait":
+                self.assertFalse(found_bar_after_wait)
+                found_bar_after_wait = True
+        self.assertTrue(found_foo)
+        self.assertTrue(found_bar)
+        self.assertTrue(found_bar_after_wait)
 
     def test_record_function_callbacks(self):
         x = torch.randn(10, 10)
@@ -2724,6 +2778,22 @@ class TestAutograd(TestCase):
             return [child.id for child in event.cpu_children]
 
         assert([get_children_ids(event) for event in events] == res)
+
+    def test_profiler_aggregation_table(self):
+        """
+        Test if the profiling result is aggregated for `str(prof)`
+
+        See: https://github.com/pytorch/pytorch/issues/37500
+        """
+
+        x = torch.randn(1024)
+        with torch.autograd.profiler.profile() as prof:
+            torch.einsum("i->", x)
+
+        prof_str = str(prof)
+        prof_table = prof.table()
+
+        self.assertEqual(prof_table, prof_str)
 
     def test_profiler_function_event_avg(self):
         avg = FunctionEventAvg()
@@ -2816,6 +2886,115 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
+    def test_memory_profiler(self):
+        def run_profiler(tensor_creation_fn, metric):
+            # collecting allocs / deallocs
+            with profile(profile_memory=True, record_shapes=True) as prof:
+                x = None
+                with record_function("test_user_scope_alloc"):
+                    x = tensor_creation_fn()
+                with record_function("test_user_scope_dealloc"):
+                    del x
+            stats = prof.key_averages(group_by_input_shape=True)
+            print(stats.table(sort_by=metric))
+            return stats
+
+        def check_metrics(stats, metric, allocs=None, deallocs=None):
+            stat_metrics = {}
+            for stat in stats:
+                stat_metrics[stat.key] = getattr(stat, metric)
+            if allocs is not None:
+                for alloc_fn in allocs:
+                    self.assertTrue(alloc_fn in stat_metrics)
+                    self.assertTrue(stat_metrics[alloc_fn] > 0)
+            if deallocs is not None:
+                for dealloc_fn in deallocs:
+                    self.assertTrue(dealloc_fn in stat_metrics)
+                    self.assertTrue(stat_metrics[dealloc_fn] < 0)
+
+        def create_cpu_tensor():
+            return torch.rand(10, 10)
+
+        def create_cuda_tensor():
+            return torch.rand(10, 10).cuda()
+
+        def create_mkldnn_tensor():
+            return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
+
+        print("Running CPU test")
+        stats = run_profiler(create_cpu_tensor, "cpu_memory_usage")
+        check_metrics(
+            stats,
+            "cpu_memory_usage",
+            allocs=[
+                "empty",
+                "rand",
+                "test_user_scope_alloc",
+            ],
+            deallocs=[
+                "test_user_scope_dealloc",
+            ]
+        )
+
+        if torch.cuda.is_available():
+            create_cuda_tensor()
+            print("Running CUDA test")
+            stats = run_profiler(create_cuda_tensor, "cuda_memory_usage")
+            check_metrics(
+                stats,
+                "cuda_memory_usage",
+                allocs=[
+                    "test_user_scope_alloc",
+                    "to",
+                    "empty_strided",
+                ],
+                deallocs=[
+                    "test_user_scope_dealloc",
+                ]
+            )
+            check_metrics(
+                stats,
+                "cpu_memory_usage",
+                allocs=[
+                    "rand",
+                    "empty",
+                ]
+            )
+
+        if torch._C.has_mkldnn:
+            create_mkldnn_tensor()
+            print("Running MKLDNN test")
+            stats = run_profiler(create_mkldnn_tensor, "cpu_memory_usage")
+            check_metrics(
+                stats,
+                "cpu_memory_usage",
+                allocs=[
+                    "test_user_scope_alloc",
+                    "rand",
+                    "empty",
+                    "to_mkldnn",
+                ],
+                deallocs=[
+                    "test_user_scope_dealloc",
+                ]
+            )
+
+        # check partial overlap of tensor allocation with memory profiler
+        x = torch.rand(10, 10)
+        with profile(profile_memory=True, record_shapes=True) as prof:
+            del x
+            x = torch.rand(10, 10)
+        del x
+        stats = prof.key_averages(group_by_input_shape=True)
+        check_metrics(
+            stats,
+            "cpu_memory_usage",
+            allocs=[
+                "rand",
+                "empty",
+            ]
+        )
+
     def test_record_function(self):
         x = torch.randn(10, 10)
 
@@ -2847,26 +3026,6 @@ class TestAutograd(TestCase):
             if idx == len(important_events):
                 break
         self.assertEqual(idx, len(important_events))
-
-        def count_events_before(before, target):
-            matches = [e for e in events if e.name == before]
-            self.assertEqual(len(matches), 1)
-            match = matches[0]
-
-            count = 0
-            for e in events:
-                if e.name == target and e.cpu_interval.end <= match.cpu_interval.end:
-                    count += 1
-            return count
-
-        self.assertEqual(
-            count_events_before("inner", "profiler::_record_function_exit"),
-            1,
-        )
-        self.assertEqual(
-            count_events_before("outer", "profiler::_record_function_exit"),
-            2,
-        )
 
         # We can also use record_function to decorate arbitrary function
         @record_function('my_func')
@@ -2973,7 +3132,7 @@ class TestAutograd(TestCase):
         self._test_lerp_tensor_weights(lambda t: t)
 
     def test_reduce_dtype(self):
-        def test_reduction(op, has_no_dim):
+        def test_reduction(op, has_no_dim, takes_dtype=True):
             x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
 
             if has_no_dim:
@@ -2984,7 +3143,10 @@ class TestAutograd(TestCase):
 
             gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
             grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
-            grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            if takes_dtype:
+                grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            else:
+                grad2, = torch.autograd.grad([op(x.double(), dim=0)], [x], gi.double())
             self.assertEqual(grad1, grad2)
             self.assertEqual(grad2.dtype, torch.float)
 
@@ -2992,6 +3154,7 @@ class TestAutograd(TestCase):
         test_reduction(torch.prod, True)
         test_reduction(torch.cumsum, False)
         test_reduction(torch.cumprod, False)
+        test_reduction(torch.logcumsumexp, False, takes_dtype=False)
 
     def test_inplace_view_saved_output(self):
         # Test an in-place operation on a view in which the in-place op saves
@@ -4007,13 +4170,13 @@ for shape in [(1,), ()]:
         b = torch.tensor([-1., 0., 1.], requires_grad=True)
         c = torch.sum(a**b)
         c.backward()
-        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
         s = 0
         b = torch.tensor([-1., 0., 1.], requires_grad=True)
         c = torch.sum(s**b)
         c.backward()
-        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
     def test_custom_function_error(self):
         class BadFw(Function):
@@ -4053,6 +4216,13 @@ for shape in [(1,), ()]:
 
         foo = MyFn.apply(base, True)
         self.assertEqual(foo.grad_fn.__class__.__name__, "MyFnBackward")
+
+    def test_integer_outputs(self):
+        inp = torch.rand(4, requires_grad=True)
+
+        out = inp.argmax()
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
 
 
 def index_variable(shape, max_indices):
@@ -4133,14 +4303,23 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.Tensor) and output_variable.requires_grad and self_variable is not None:
         output_variable.backward(randn_like(output_variable))
-        test_case.assertEqual(self_variable.type(), self_variable.grad.type())
+        test_case.assertEqualTypeString(self_variable, self_variable.grad)
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
+# this list corresponds to ops which have separate tests defined for complex dtypes in
+# common_methods_invocations.py
+# test for these ops with 'complex' in variant should only run for complex and
+# the tests for these ops which do not have 'complex' in variant should not run for complex
+# and only run for floating point
+
+separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
+
 # white list for complex
-complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as',
-                'zero_', 'clone', 'tril', 'triu', 'fill_', 'eq_', 'ne_',
-                'permute', 'squeeze', 'unsqueeze', 'chunk', 'split',
-                'split_with_sizes', 'resize', 'resize_as']
+complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
+                'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
+                'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
+                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
+                '__radd__', 'repeat', 'expand', 'mul', 'tanh'] + separate_complex_tests
 
 def add_test(
         name,
@@ -4157,17 +4336,29 @@ def add_test(
     if variant_name != '':
         basic_test_name += '_' + variant_name
 
+    if name in separate_complex_tests and 'complex' in variant_name:
+        run_only_complex = True
+    else:
+        run_only_complex = False
+
     for dtype in [torch.double, torch.cdouble]:
         for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
             test_name = basic_test_name
             new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
             test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
+
             if dtype.is_complex:
                 # TODO: remove this. this is temporary while we ramp up the complex support.
                 if name in complex_list and 'scalar' not in test_name and 'constant' not in test_name:
-                    test_name = test_name + '_complex'
+                    if name in separate_complex_tests and 'complex' not in variant_name:
+                        continue
+                    if not run_only_complex:
+                        test_name = test_name + '_complex'
                 else:
                     continue
+            elif run_only_complex:
+                continue
+
             new_args = tuple(new_args)
 
             # for-loop bodies don't define scopes, so we have to save the variables
@@ -4190,8 +4381,6 @@ def add_test(
                         output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                         output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
                         if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
-                            # TODO: I'm not sure why we insert an outer dimension
-                            # here, seems a bit strange
                             if dtype.is_complex:
                                 output_tensor = torch.tensor((output_tensor, ), dtype=torch.cfloat, device=device)
                             else:
@@ -4302,15 +4491,15 @@ def add_test(
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
         # base and res should be Tensors or tuple of Tensors with the same size
-        if torch.is_tensor(base):
-            self.assertTrue(torch.is_tensor(res))
+        if isinstance(base, torch.Tensor):
+            self.assertTrue(isinstance(res, torch.Tensor))
             self.assertEqual(base.size(), res.size())
         elif isinstance(base, tuple):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(base), len(res))
             for el_base, el_res in zip(base, res):
-                self.assertTrue(torch.is_tensor(el_base))
-                self.assertTrue(torch.is_tensor(el_res))
+                self.assertTrue(isinstance(el_base, torch.Tensor))
+                self.assertTrue(isinstance(el_res, torch.Tensor))
                 self.assertEqual(el_base.size(), el_res.size())
         else:
             # Wrong base
@@ -4325,22 +4514,22 @@ class TestAutogradFunctional(TestCase):
         # - tuple, Tensor: res[i][k][l] = (base1[i][k], base2[l])
         # - Tensor, tuple: res[i][j][l] = (base1[i], base2[j][l])
         # - Tensor, Tensor: res[k][l] = (base1[k], base2[l])
-        if torch.is_tensor(base1) and torch.is_tensor(base2):
-            self.assertTrue(torch.is_tensor(res))
+        if isinstance(base1, torch.Tensor) and isinstance(base2, torch.Tensor):
+            self.assertTrue(isinstance(res, torch.Tensor))
             self.assertEqual(res.size(), base1.size() + base2.size())
-        elif isinstance(base1, tuple) and torch.is_tensor(base2):
+        elif isinstance(base1, tuple) and isinstance(base2, torch.Tensor):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(res), len(base1))
             for el_res, el_base1 in zip(res, base1):
-                self.assertTrue(torch.is_tensor(el_res))
-                self.assertTrue(torch.is_tensor(el_base1))
+                self.assertTrue(isinstance(el_res, torch.Tensor))
+                self.assertTrue(isinstance(el_base1, torch.Tensor))
                 self.assertEqual(el_res.size(), el_base1.size() + base2.size())
-        elif torch.is_tensor(base1) and isinstance(base2, tuple):
+        elif isinstance(base1, torch.Tensor) and isinstance(base2, tuple):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(res), len(base2))
             for el_res, el_base2 in zip(res, base2):
-                self.assertTrue(torch.is_tensor(el_res))
-                self.assertTrue(torch.is_tensor(el_base2))
+                self.assertTrue(isinstance(el_res, torch.Tensor))
+                self.assertTrue(isinstance(el_base2, torch.Tensor))
                 self.assertEqual(el_res.size(), base1.size() + el_base2.size())
         elif isinstance(base1, tuple) and isinstance(base2, tuple):
             self.assertTrue(isinstance(res, tuple))
@@ -4349,8 +4538,8 @@ class TestAutogradFunctional(TestCase):
                 self.assertTrue(isinstance(el_res, tuple))
                 self.assertEqual(len(res), len(base2))
                 for el_el_res, el_base2 in zip(el_res, base2):
-                    self.assertTrue(torch.is_tensor(el_el_res))
-                    self.assertTrue(torch.is_tensor(el_base2))
+                    self.assertTrue(isinstance(el_el_res, torch.Tensor))
+                    self.assertTrue(isinstance(el_base2, torch.Tensor))
                     self.assertEqual(el_el_res.size(), el_base1.size() + el_base2.size())
         else:
             # Wrong bases
@@ -5366,25 +5555,6 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-
-    @deviceCountAtLeast(2)
-    def test_scalar_different_devices(self, devices):
-        a = torch.rand([], requires_grad=True, device=devices[0])
-        b = torch.rand(10, requires_grad=True, device=devices[1])
-
-        c = b * a
-        c.sum().backward()
-
-
-    @onlyCUDA
-    def test_scalar_different_device_types(self, device):
-        c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
-        c.sum().backward()
-
-        d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
-        d.sum().backward()
-
-
     # NOTE: flaky on ROCm CI
     @skipCUDAIfRocm
     def test_sparse_ctor_getter_backward(self, device):
@@ -5449,9 +5619,9 @@ class TestAutogradDeviceType(TestCase):
             f[0] = nan
             self.assertTrue(math.isnan(float(f)))
             f[0] = inf
-            self.assertEqual(float(f), inf, allow_inf=True)
+            self.assertEqual(float(f), inf)
             f[0] = -inf
-            self.assertEqual(float(f), -inf, allow_inf=True)
+            self.assertEqual(float(f), -inf)
 
             # integral -> floating point
             # check we can convert something that loses precision
@@ -5615,8 +5785,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where, [cond, x, y], raise_exception=True)
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
 
-    @skipCUDAIfRocm
-    @unittest.skipIf(IS_WINDOWS, """Test is flaky on Windows:
+    @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
             https://github.com/pytorch/pytorch/issues/34870""")
     def test_ctc_loss(self, device):
         batch_size = 64
@@ -5689,7 +5858,7 @@ class TestAutogradDeviceType(TestCase):
                                                   input_lengths, target_lengths, reduction='none')
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
-        self.assertEqual(grad_cudnn, grad_native, atol=1e-4)
+        self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
     @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_neg_slope(self, device):
@@ -5848,7 +6017,8 @@ class TestAutogradDeviceType(TestCase):
         outputs = Broadcast.apply(list(range(len(devices))), x)
         y = outputs[-1] * 2
         y.sum().backward()
-        self.assertEqual(x.grad, torch.ones(5, 5) * 2)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(x.grad, torch.ones(5, 5) * 2)
 
     @deviceCountAtLeast(2)
     def test_backward_device(self, devices):
@@ -6084,6 +6254,36 @@ class TestAutogradDeviceType(TestCase):
         v2.mul_(2)
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
+
+    def test_mv_grad_stride_0(self, device):
+        # Reference: https://github.com/pytorch/pytorch/issues/38315
+        mat = torch.randn(2, 2, device=device)
+        vec = torch.randn(1, device=device).requires_grad_(True)
+
+        def fn(vec):
+            # Expand inside the function to make sure the input to
+            # gradcheck does not have overlapping memory
+            vec = vec.expand(2)
+            return (mat @ vec).sum()
+
+        gradcheck(fn, (vec))
+        gradgradcheck(fn, (vec))
+
+    def test_logcumsumexp_large_value(self, device):
+        a = torch.rand(4, 4, 4, dtype=torch.double, requires_grad=True)
+        with torch.no_grad():
+            # Large Number
+            a[0] = 10000
+
+        gradcheck(lambda x: x.logcumsumexp(0), a)
+        gradgradcheck(lambda x: x.logcumsumexp(0), a)
+
+        gradcheck(lambda x: x.logcumsumexp(1), a)
+        gradgradcheck(lambda x: x.logcumsumexp(1), a)
+
+        gradcheck(lambda x: x.logcumsumexp(2), a)
+        gradgradcheck(lambda x: x.logcumsumexp(2), a)
+
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):

@@ -211,23 +211,23 @@ int main(int argc, char** argv) {
       ".");
   caffe2::Timer timer;
   std::vector<float> times;
-  auto millis = timer.MilliSeconds();
+  auto micros = timer.MicroSeconds();
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
     module.forward(inputs);
     auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<milliseconds>(stop - start);
+    auto duration = duration_cast<microseconds>(stop - start);
     times.push_back(duration.count());
   }
-  millis = timer.MilliSeconds();
+  micros = timer.MicroSeconds();
   if (FLAGS_report_pep) {
     for (auto t : times) {
       std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"us\", \"metric\": \"latency\", \"value\": \"" << t << "\"}" << std::endl;
     }
   }
-  std::cout << "Main run finished. Milliseconds per iter: "
-            << millis / FLAGS_iter
-            << ". Iters per second: " << 1000.0 * FLAGS_iter / millis
+  std::cout << "Main run finished. Microseconds per iter: "
+            << micros / FLAGS_iter
+            << ". Iters per second: " << 1000.0 * 1000 * FLAGS_iter / micros
             << std::endl;
 
   return 0;

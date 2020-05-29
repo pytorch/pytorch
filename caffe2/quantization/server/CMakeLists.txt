@@ -27,6 +27,7 @@ list(APPEND Caffe2_CPU_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/elementwise_mul_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/elementwise_sum_dnnlowp_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/elementwise_sum_relu_op.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/fb_fc_packed_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fbgemm_fp16_pack_op.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fbgemm_pack_matrix_cache.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fbgemm_pack_op.cc"

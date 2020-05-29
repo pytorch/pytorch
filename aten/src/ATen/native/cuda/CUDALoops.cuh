@@ -228,7 +228,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   constexpr int ntensors = traits::arity + 1;
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
 
   at::detail::Array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {

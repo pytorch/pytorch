@@ -27,6 +27,7 @@ DEFAULT_MODULE_MAPPING = {
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
+    nni.ConvReLU1d: nniq.ConvReLU1d,
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,

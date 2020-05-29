@@ -9,12 +9,15 @@ namespace {
 void SetInputTensorDescriptorTypeAndBuffer(
     const Tensor& cpu_tensor,
     onnxTensorDescriptorV1* desc) {
-  if (cpu_tensor.template IsType<float>()) {
-    desc->dataType = ONNXIFI_DATATYPE_FLOAT32;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<float>());
-  } else if (cpu_tensor.template IsType<int32_t>()) {
+  if (cpu_tensor.template IsType<int32_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT32;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int32_t>());
+  } else if (cpu_tensor.template IsType<c10::Half>()) {
+    desc->dataType = ONNXIFI_DATATYPE_FLOAT16;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<c10::Half>());
+  } else if (cpu_tensor.template IsType<float>()) {
+    desc->dataType = ONNXIFI_DATATYPE_FLOAT32;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<float>());
   } else if (cpu_tensor.template IsType<int8_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT8;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int8_t>());
@@ -27,9 +30,6 @@ void SetInputTensorDescriptorTypeAndBuffer(
   } else if (cpu_tensor.template IsType<int16_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT16;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int16_t>());
-  } else if (cpu_tensor.template IsType<c10::Half>()) {
-    desc->dataType = ONNXIFI_DATATYPE_FLOAT16;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<c10::Half>());
   } else if (cpu_tensor.template IsType<uint16_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_UINT16;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint16_t>());
@@ -62,6 +62,7 @@ void SetInputTensorDescriptorTypeAndBuffer(
 TypeMeta OnnxifiTypeToDataType(uint64_t onnxifi_type) {
   static std::map<uint64_t, TypeMeta> data_type_map{
       {ONNXIFI_DATATYPE_FLOAT32, TypeMeta::Make<float>()},
+      {ONNXIFI_DATATYPE_FLOAT16, TypeMeta::Make<c10::Half>()},
       {ONNXIFI_DATATYPE_INT32, TypeMeta::Make<int>()},
       {ONNXIFI_DATATYPE_INT8, TypeMeta::Make<int8_t>()},
       {ONNXIFI_DATATYPE_UINT8, TypeMeta::Make<uint8_t>()},
@@ -238,10 +239,11 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   // Otherwise, do a pass of shape inference to get the real shapes of the
   // outputs.
   const auto& t = Input(nominal_batch_idx_);
-  const auto dims = t.sizes();
-  const int current_batch_size = dims[0];
   CAFFE_ENFORCE(
       !t.sizes().empty(), input_names_[nominal_batch_idx_], " cannot be empty");
+  const auto dims = t.sizes();
+  const int current_batch_size = dims[0];
+
   if (current_batch_size == max_batch_size_) {
     return max_batch_size_;
   }
@@ -273,7 +275,7 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     input_shape_info_[input_names_[i]] = ShapeInfo(dim_type, std::move(shape));
   }
   bound_shape_inferencer->InferBoundShapeAndType(
-      netdef_, input_shape_info_, nullptr);
+      netdef_, input_shape_info_, nullptr, false);
   const auto& shape_info = bound_shape_inferencer->shape_info();
   for (int i = 0; i < OutputSize(); ++i) {
     const auto it = shape_info.find(output_names_[i]);
@@ -317,7 +319,13 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
 
 template <>
 void OnnxifiOp<CPUContext>::adjustOutputBatchSizes(int current_batch_size) {
-  const auto& output_reshape_info = output_reshape_info_.at(current_batch_size);
+  auto it = output_reshape_info_.find(current_batch_size);
+  CAFFE_ENFORCE(
+      it != output_reshape_info_.end(),
+      "Cannot find current_batch_size ",
+      current_batch_size,
+      " in output_reshape_info_");
+  const auto& output_reshape_info = it->second;
   CPUContext context;
   Tensor tmp(CPU);
   for (int i = 0; i < OutputSize(); ++i) {

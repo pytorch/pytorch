@@ -522,7 +522,7 @@ class AdagradOptimizer(Optimizer):
                  output_effective_lr_and_update=False,
                  pruning_options=None, swa_options=None, weight_scale=None, **kwargs):
         for k, v in locals().items():
-            logger.info(f'AdagradOptimizer: input arguments: {k}: {v}')
+            logger.info('AdagradOptimizer: input arguments: {}: {}'.format(k, v))
 
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
@@ -667,7 +667,7 @@ class AdagradOptimizer(Optimizer):
             )
 
             if self.engine in FP16_ENGINES:
-                assert self.weight_decay == 0, f'weight decay is not tested for engine: {self.engine}'
+                assert self.weight_decay == 0, 'weight decay is not tested for engine: {}'.format(self.engine)
 
                 shapes, types = workspace.InferShapesAndTypes([param_init_net])
                 assert str(param) in shapes, shapes
@@ -743,16 +743,20 @@ class AdagradOptimizer(Optimizer):
         weight_decay = 0.
         if isinstance(grad, core.GradientSlice):
             if len(param_shape) == 1:
-                logger.warn(f"APPLYING weight decay on 1d sparse param: {str(param)}.shape is {param_shape}")
+                logger.warn("APPLYING weight decay on 1d sparse param: {}.shape is {}".format(
+                    str(param), param_shape))
             weight_decay = self.weight_decay
         else:
             # Skip weight decay for 1d parameters
             if len(param_shape) == 1:
                 weight_decay = 0.
-                logger.warn(f"SKIPPING weight decay on 1d dense param: {str(param)}.shape is {param_shape}")
+                logger.warn("SKIPPING weight decay on 1d dense param: {}.shape is {}".format(
+                    str(param), param_shape))
+
             else:
                 weight_decay = self.weight_decay
-        logger.info(f"weight_decay for {str(param)} (shape:{param_shape}): {weight_decay}")
+        logger.info("weight_decay for {} (shape:{}): {}".format(
+            str(param), param_shape, weight_decay))
 
         if isinstance(grad, core.GradientSlice):
             assert self.decay == 1.,\
@@ -764,18 +768,18 @@ class AdagradOptimizer(Optimizer):
             if self.rowWise:
                 if self.use_mask is True:
                     op = 'MaskedRowWiseSparseAdagrad'
-                    assert weight_decay == 0, f'weight decay is not implemented for {op} yet'
+                    assert weight_decay == 0, 'weight decay is not implemented for {} yet'.format(op)
                     input_args += [mask_blob, mask_changed_blob]
                 else:
                     op = 'RowWiseSparseAdagrad'
             else:
                 if self.use_mask is True:
                     op = 'MaskedSparseAdagrad'
-                    assert weight_decay == 0, f'weight decay is not implemented for {op} yet'
+                    assert weight_decay == 0, 'weight decay is not implemented for {} yet'.format(op)
                     input_args += [mask_blob, mask_changed_blob]
                 else:
                     op = 'SparseAdagrad'
-            logger.info(f"using {op} for {str(param)}")
+            logger.info("using {} for {}".format(op, str(param)))
 
             if self.prune_delays:
                 input_args += [lr_iteration, last_mask_updated_iter]
@@ -818,7 +822,7 @@ class AdagradOptimizer(Optimizer):
                 output_args += [mask_blob, last_mask_updated_iter]
 
             if self.use_mask:
-                assert weight_decay == 0, f'weight decay is not implemented for use_mask yet'
+                assert weight_decay == 0, 'weight decay is not implemented for use_mask yet'
                 net.MaskedAdagrad(
                     input_args,
                     output_args,
