@@ -3,6 +3,7 @@ import sys
 import time
 import unittest
 from collections import namedtuple
+import contextlib
 from functools import partial
 from unittest import mock
 
@@ -48,6 +49,12 @@ from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture i
 
 def foo_add():
     return torch.add(torch.ones(1), torch.ones(1))
+
+def udf_with_torch_ops():
+    t = torch.add(torch.ones(1), torch.ones(1))
+    t = torch.mul(t, t)
+    t = t.relu()
+    t = t.sigmoid()
 
 
 def requires_process_group_agent(message=""):
@@ -856,6 +863,48 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rpc_event.count, 1)
 
     @dist_init
+    def test_profiler_remote_events_profiled(self):
+        # Tests that we can successfully invoke the profiler on a remote node,
+        # and collect the remote events back in the local profiler.
+        if self.rank != 1:
+            return
+
+        dst_ranks = [rank for rank in range(self.world_size) if rank != self.rank]
+        for dst in dst_ranks:
+            dst_worker = worker_name(dst)
+            with torch.autograd.profiler.profile() as prof:
+                fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+                ret = fut.wait()
+
+            events = prof.function_events
+
+            rpc_event = get_function_event(events, RPCExecMode.ASYNC.value)
+            self.check_profiling_info(
+                worker_name(self.rank),
+                dst_worker,
+                udf_with_torch_ops,
+                rpc_event,
+                RPCExecMode.ASYNC,
+            )
+            expected_remote_events = [
+                "mul",
+                "add",
+                "ones",
+                "relu",
+                "sigmoid",
+                "threshold",
+            ]
+            remote_events = {
+                event.name: event
+                for event in events
+                if event.name in expected_remote_events
+            }
+            for expected_remote_event_name in expected_remote_events:
+                self.assertTrue(expected_remote_event_name in remote_events)
+                remote_event = remote_events[expected_remote_event_name]
+                self.assertEqual(remote_event.node_id, dst)
+
+    @dist_init
     def test_profiler_with_autograd_context(self):
         dst = (self.rank + 1) % self.world_size
         if self.rank == 1:
@@ -920,25 +969,28 @@ class RpcTest(RpcAgentTestFixture):
         # only run profiler on rank 1.
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
-                if use_record_function:
-                    record_function = torch.autograd.profiler.record_function("foo")
-                    record_function.__enter__()
-                if rpc_exec_mode == RPCExecMode.SYNC:
-                    rpc.rpc_sync(worker_name(dst), func, args=args)
-                elif rpc_exec_mode == RPCExecMode.ASYNC:
-                    fut = rpc.rpc_async(worker_name(dst), func, args=args)
-                    fut.wait()
-                else:
-                    self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
-                    rref = rpc.remote(worker_name(dst), func, args=args)
-                    rref.to_here()
-                    # To avoid flakiness, wait for the RRef to be profiled. This
-                    # means that we received the acknowledgement of successful
-                    # creation on the owner and ran the callbacks responsible
-                    # for recording the profiling event.
-                    rref._get_profiling_future().wait()
-                if use_record_function:
-                    record_function.__exit__()
+                record_function_ctx_mgr = (
+                    contextlib.suppress()
+                    if not use_record_function
+                    else torch.autograd.profiler.record_function(
+                        "foo", node_id=self.rank
+                    )
+                )
+                with record_function_ctx_mgr as rf:
+                    if rpc_exec_mode == RPCExecMode.SYNC:
+                        rpc.rpc_sync(worker_name(dst), func, args=args)
+                    elif rpc_exec_mode == RPCExecMode.ASYNC:
+                        fut = rpc.rpc_async(worker_name(dst), func, args=args)
+                        fut.wait()
+                    else:
+                        self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
+                        rref = rpc.remote(worker_name(dst), func, args=args)
+                        rref.to_here()
+                        # To avoid flakiness, wait for the RRef to be profiled. This
+                        # means that we received the acknowledgement of successful
+                        # creation on the owner and ran the callbacks responsible
+                        # for recording the profiling event.
+                        rref._get_profiling_future().wait()
 
             events = prof.function_events
             rpc_event = get_function_event(events, rpc_exec_mode.value)

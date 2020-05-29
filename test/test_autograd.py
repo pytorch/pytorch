@@ -2761,6 +2761,7 @@ class TestAutograd(TestCase):
                 events.append(
                     FunctionEvent(
                         id=range[2],
+                        node_id=0,
                         name="",
                         thread=thread,
                         cpu_start=range[0],
@@ -2797,8 +2798,8 @@ class TestAutograd(TestCase):
 
     def test_profiler_function_event_avg(self):
         avg = FunctionEventAvg()
-        avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
-        avg.add(FunctionEvent(id=1, name="foo", thread=0, cpu_start=20, cpu_end=30))
+        avg.add(FunctionEvent(id=0, node_id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
+        avg.add(FunctionEvent(id=1, node_id=0, name="foo", thread=0, cpu_start=20, cpu_end=30))
         avg.add(avg)
         self.assertEqual(avg.key, "foo")
 
