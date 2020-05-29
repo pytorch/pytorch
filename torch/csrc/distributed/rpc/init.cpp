@@ -468,15 +468,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
           py::init<
-              std::shared_ptr<::c10d::Store> /* addressStore */,
+              const std::shared_ptr<::c10d::Store>& /* store */,
               std::string /* selfName */,
               worker_id_t /* selfId */,
               int /* worldSize */,
+              std::shared_ptr<::c10d::ProcessGroup> /* processGroup */,
               TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
           py::arg("store"),
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
+          py::arg("process_group"),
           py::arg("rpc_backend_options"))
       .def(
           "join",
