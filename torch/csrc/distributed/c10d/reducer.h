@@ -13,6 +13,9 @@
 
 namespace c10d {
 
+constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
+constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
+
 class Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
@@ -23,7 +26,8 @@ class Reducer {
       std::vector<std::vector<torch::autograd::Variable>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group,
-      std::vector<std::vector<bool>> expect_sparse_gradients);
+      std::vector<std::vector<bool>> expect_sparse_gradients,
+      int64_t bucket_bytes_cap);
 
   ~Reducer() noexcept(false);
 
@@ -108,6 +112,20 @@ class Reducer {
 
   void finalize_backward();
 
+  // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
+  // the buckets
+  void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
+  // TODO this function makes broadcast communication call and
+  // could be overlapped with next forward() call, thus
+  // it could be async. Will make it async when rebuilding buckets for
+  // find_unused_parameters = true case, as we could rebuild buckets more than
+  // once for find_unused_parameters = true case, where subgraphs are trained
+  // and parameter indices order may change more frequently.
+  // For find_unused_parameters = false case, buckets are only rebuilt once,
+  // the performance cost is negligible.
+  std::vector<std::vector<size_t>> rebuildBuckets();
+
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
   //
@@ -186,11 +204,18 @@ class Reducer {
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
   int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
+
+  // Following variables are to help build dynamic bucket order
+  bool has_rebuilt_bucket_;
+  std::vector<at::Tensor> rebuilt_params_;
+  std::vector<int64_t> rebuilt_param_indices_;
+  const int64_t bucket_bytes_cap_;
 };
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
-    const std::vector<bool>& expect_sparse_gradient = {});
+    const std::vector<bool>& expect_sparse_gradient = {},
+    const std::vector<int64_t>& tensor_indices = {});
 
 } // namespace c10d
