@@ -94,6 +94,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                   %2 : Float = aten::ATen[operator="triu"](%0, %1)  # missing op
                   %3 : Float = onnx::Mul(%2, %0) # registered op
                   return (%3)
+            In the above example, aten::triu is not supported in ONNX, hence
+            exporter falls back on this op.
             OperatorExportTypes.RAW: Export raw ir.
             OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
             in ONNX, fall through and export the operator as is, as a custom 
@@ -110,6 +112,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                   %1 : Tensor = onnx::ReduceSum[keepdims=0](%x.1)
                   %y.1 : Long() = prim::ListConstruct(%1)
                   return (%y.1)
+            In the above example, prim::ListConstruct is not supported, hence
+            exporter falls through.
 
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
