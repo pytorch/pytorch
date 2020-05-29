@@ -12,6 +12,9 @@
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
 #endif
+#ifdef USE_VULKAN
+#include <ATen/native/vulkan/VulkanAten.h>
+#endif
 
 
 constexpr int MIOPEN_DIM_MAX = 5;
@@ -47,6 +50,7 @@ struct ConvParams {
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
   bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool use_vulkan(const at::Tensor& input, const at::Tensor& weight) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -272,6 +276,20 @@ auto ConvParams::use_xnnpack(
   }
 #endif
   return false;
+}
+
+auto ConvParams::use_vulkan(
+        const at::Tensor &input, const at::Tensor& weight) const -> bool {
+#ifdef USE_VULKAN
+  if (!(input.is_vulkan() && input.scalar_type() == kFloat &&
+        !transposed && input.ndimension() == 4)) {
+    return false;
+  }
+  return (groups == 1) || (input.size(1) == groups && groups > 1 &&
+                           weight.size(0) % input.size(1) == 0);
+#else
+  return false;
+#endif
 }
 
 // We currently only have depthwise support for the case where groups ==
@@ -669,6 +687,12 @@ at::Tensor _convolution(
         output = at::miopen_depthwise_convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
+#ifdef USE_VULKAN
+      } else if (params.use_vulkan(input, weight)) {
+        output = at::native::vulkan_convolution(
+            input, weight, bias,
+            params.padding, params.stride, params.dilation, params.groups);
+#endif
       } else {
           output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
       }
@@ -761,6 +785,12 @@ at::Tensor _convolution(
           bias,
           params.stride,
           params.padding);
+#ifdef USE_VULKAN
+  } else if (params.use_vulkan(input, weight)) {
+    output = at::native::vulkan_convolution(
+        input, weight, bias,
+        params.padding, params.stride, params.dilation, params.groups);
+#endif
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
