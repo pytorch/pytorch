@@ -3,15 +3,6 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-#include <tensorpipe/channel/basic/context.h>
-#ifdef TP_ENABLE_CMA
-#include <tensorpipe/channel/cma/context.h>
-#endif
-#ifdef TP_ENABLE_SHM
-#include <tensorpipe/transport/shm/context.h>
-#endif
-#include <tensorpipe/transport/uv/context.h>
-
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <netdb.h>
@@ -163,7 +154,14 @@ void TensorPipeAgent::onListenerAccepted(
     const tensorpipe::Error& error,
     std::shared_ptr<tensorpipe::Pipe>& pipe) {
   if (error) {
-    LOG(WARNING) << "got error from listener: " << error.what();
+    if (error.isOfType<tensorpipe::ListenerClosedError>() &&
+        !rpcAgentRunning_.load()) {
+      // This is expected.
+    } else {
+      LOG(WARNING) << "RPC agent for " << workerInfo_.name_
+                   << " encountered error when accepting incoming pipe: "
+                   << error.what();
+    }
     return;
   }
 
@@ -251,9 +249,14 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   responseMessage.setId(messageId);
   if (!error) {
     pipeWrite(
-        pipe, std::move(responseMessage), [](const tensorpipe::Error& error) {
+        pipe,
+        std::move(responseMessage),
+        [this](const tensorpipe::Error& error) {
           if (error) {
-            LOG(WARNING) << "sending response failed: " << error.what();
+            LOG(WARNING)
+                << "RPC agent for " << workerInfo_.name_
+                << " encountered error when writing outgoing response: "
+                << error.what();
             return;
           }
         });
@@ -261,9 +264,12 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     pipeWrite(
         pipe,
         createExceptionResponse(error->what(), responseMessage.id()),
-        [](const tensorpipe::Error& error) {
+        [this](const tensorpipe::Error& error) {
           if (error) {
-            LOG(WARNING) << "sending error response failed: " << error.what();
+            LOG(WARNING)
+                << "RPC agent for " << workerInfo_.name_
+                << " encountered error when writing outgoing response: "
+                << error.what();
             return;
           }
         });
@@ -275,9 +281,13 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       pipe,
       [this, pipe](
           const tensorpipe::Error& error, Message&& requestMessage) mutable {
-        // TODO: Handle server pipe read error
+        // FIXME Find a way for the client to tell the server they are done with
+        // the pipe and are intentionally shutting it down. Perhaps sending an
+        // empty message?
         if (error) {
-          LOG(WARNING) << "Server read message: " << error.what();
+          LOG(WARNING) << "RPC agent for " << workerInfo_.name_
+                       << " encountered error when reading incoming request: "
+                       << error.what();
           return;
         }
 
@@ -393,7 +403,14 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
       [this, &clientPipe, futureResponseMessage](
           const tensorpipe::Error& error) mutable {
         if (error) {
-          LOG(WARNING) << "client write error: " << error.what();
+          if (error.isOfType<tensorpipe::PipeClosedError>() &&
+              !rpcAgentRunning_.load()) {
+            // This is expected.
+          } else {
+            LOG(WARNING) << "RPC agent for " << workerInfo_.name_
+                         << " encountered error when writing outgoing request: "
+                         << error.what();
+          }
           markFutureWithError(std::move(futureResponseMessage), error.what());
           return;
         }
@@ -403,7 +420,15 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
             [this, &clientPipe](
                 const tensorpipe::Error& error, Message&& responseMessage) {
               if (error) {
-                LOG(WARNING) << "Read response error: " << error.what();
+                if (error.isOfType<tensorpipe::PipeClosedError>() &&
+                    !rpcAgentRunning_.load()) {
+                  // This is expected.
+                } else {
+                  LOG(WARNING)
+                      << "RPC agent for " << workerInfo_.name_
+                      << " encountered error when reading incoming request: "
+                      << error.what();
+                }
                 // We may get garbage content in responseMessage upon error.
                 // Flushing all future messages belonging to this pipe due to
                 // error state.
