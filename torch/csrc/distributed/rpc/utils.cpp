@@ -353,119 +353,163 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
   return {std::move(payload), std::move(tensors)};
 }
 
-TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage) {
-  tensorpipe::Message tpMessage;
-  std::vector<torch::Tensor> reservedTensors;
-  std::vector<std::vector<uint8_t>> copiedTensors;
+namespace {
 
-  const std::vector<char>& payload = rpcMessage.payload();
-  c10::List<at::Tensor> tensors = cloneSparseTensors(rpcMessage.tensors());
+// The TensorPipe agent splits the RPC message's information across multiple
+// payloads. This allows the agent to provide the data to TensorPipe without
+// performing a copy into a single contiguous buffer, and without storing it as
+// metadata, which is less efficient.
+
+// First come the rpc::Message::type() and ::id().
+constexpr int kTpMessageTypeIdx = 0;
+constexpr int kTpMessageIdIdx = 1;
+// Then comes the rpc::Message::payload();
+constexpr int kTpMessagePayloadIdx = 2;
+// Last comes the pickle of rpc::Message::tensors() (with the tensors themselves
+// stored as, well, tensors in the tensorpipe::Message).
+constexpr int kTpMessagePickleIdx = 3;
+
+} // namespace
+
+std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
+    Message&& rpcMessage) {
+  tensorpipe::Message tpMessage;
+  TensorpipeWriteBuffers buffers;
+
+  // Metadata
+  buffers.type = std::make_unique<MessageType>(rpcMessage.type());
+  buffers.id = std::make_unique<int64_t>(rpcMessage.id());
+  tpMessage.payloads.push_back(
+      tensorpipe::Message::Payload{buffers.type.get(), sizeof(MessageType)});
+  tpMessage.payloads.push_back(
+      tensorpipe::Message::Payload{buffers.id.get(), sizeof(int64_t)});
 
   // Payload
-  tensorpipe::Message::Payload tpPayload;
-  tpPayload.data = (uint8_t*)(payload.data());
-  tpPayload.length = payload.size();
-  tpMessage.payloads.push_back(std::move(tpPayload));
-
-  // Metadata - encode rpc message type and message id into
-  // 8 bytes respectively
-  tpMessage.metadata.resize(2 * sizeof(int64_t));
-  int64_t mType = static_cast<int>(rpcMessage.type());
-  int64_t mId = rpcMessage.id();
-  memcpy((void*)tpMessage.metadata.data(), &mType, sizeof(int64_t));
-  memcpy(
-      (void*)(tpMessage.metadata.data() + sizeof(int64_t)),
-      &mId,
-      sizeof(int64_t));
+  buffers.payload = std::move(rpcMessage.payload());
+  // TensorPipe uses the same Message class for both reading and writing, thus
+  // it uses non-const pointers even though it doesn't modify them when writing.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  char* payloadPtr = const_cast<char*>(buffers.payload.data());
+  tpMessage.payloads.push_back(
+      tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
   // Tensors
-  tpMessage.tensors.reserve(tensors.size());
-  for (at::Tensor tensor : tensors) {
-    // Keep original user tensors and cloned sparse tensors
-    reservedTensors.push_back(tensor);
-    tensorpipe::Message::Tensor tpTensor;
-    torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
-      tpTensor.metadata.append(static_cast<const char*>(buf), sz);
-      return sz;
-    });
-    pickler.protocol();
-    pickler.pushIValue(tensor);
-    pickler.stop();
-    const auto& tensorDataVec = pickler.tensorData();
-    TORCH_INTERNAL_ASSERT(
-        tensorDataVec.size() == 1, "There should be single pickled tensor");
-    const auto& tensorData = tensorDataVec.front();
+  buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+  torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
+    buffers.pickle.insert(
+        buffers.pickle.end(),
+        static_cast<const char*>(buf),
+        static_cast<const char*>(buf) + sz);
+    return sz;
+  });
+  pickler.protocol();
+  pickler.pushIValue(buffers.tensors);
+  pickler.stop();
+  tpMessage.payloads.push_back(tensorpipe::Message::Payload{
+      buffers.pickle.data(), buffers.pickle.size()});
+  for (const auto& tensorData : pickler.tensorData()) {
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
     if (!tensorData.storageHasDeleter()) {
-      std::vector<uint8_t> storageData(tensorData.sizeInBytes());
-      memcpy(storageData.data(), tensorData.data(), storageData.size());
-      tpTensor.data = storageData.data();
-      copiedTensors.push_back(std::move(storageData));
+      std::vector<char> storageData(
+          tensorData.data(), tensorData.data() + tensorData.sizeInBytes());
+      tpMessage.tensors.push_back(
+          tensorpipe::Message::Tensor{storageData.data(), storageData.size()});
+      buffers.copiedTensors.push_back(std::move(storageData));
     } else {
-      tpTensor.data = (uint8_t*)(tensorData.data());
+      // TensorPipe uses the same Message class for both reading and writing, so
+      // it uses non-const ptrs even though it doesn't modify them when writing.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      char* tensorPtr = const_cast<char*>(tensorData.data());
+      tpMessage.tensors.push_back(
+          tensorpipe::Message::Tensor{tensorPtr, tensorData.sizeInBytes()});
     }
-    tpTensor.length = tensorData.sizeInBytes();
-    tpMessage.tensors.push_back(std::move(tpTensor));
   }
 
-  return TensorPipeEntry{std::move(tpMessage),
-                         std::move(reservedTensors),
-                         std::move(copiedTensors)};
+  return std::make_tuple(std::move(tpMessage), std::move(buffers));
 }
 
-Message tensorpipeAllocateMessage(tensorpipe::Message& tpMessage) {
-  // Payload, message type and message id
+TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
+  TensorpipeReadBuffers buffers;
+
   TORCH_INTERNAL_ASSERT(
-      tpMessage.payloads.size() == 1,
-      "message expected to contain 1 payload, whereas it contained ",
+      tpMessage.payloads.size() == 4,
+      "message expected to contain 4 payloads, whereas it contained ",
       tpMessage.payloads.size(),
       " payloads");
-  std::vector<char> payload(tpMessage.payloads[0].length);
-  tpMessage.payloads[0].data = (uint8_t*)(payload.data());
+
   TORCH_INTERNAL_ASSERT(
-      tpMessage.metadata.size() == 2 * sizeof(int64_t),
-      "message metadata must be ",
-      2 * sizeof(int64_t),
-      " bytes, whereas it is ",
-      tpMessage.metadata.size(),
+      tpMessage.payloads[kTpMessageTypeIdx].length == sizeof(MessageType),
+      "first payload expected to contain ",
+      sizeof(MessageType),
+      " bytes, whereas it contained ",
+      tpMessage.payloads[kTpMessageTypeIdx].length,
       " bytes");
-  int64_t mtypei, mId;
-  memcpy(&mtypei, tpMessage.metadata.data(), sizeof(int64_t));
-  memcpy(&mId, tpMessage.metadata.data() + sizeof(int64_t), sizeof(int64_t));
-  MessageType mType = static_cast<MessageType>(mtypei);
+  buffers.type = std::make_unique<MessageType>();
+  tpMessage.payloads[kTpMessageTypeIdx].data = buffers.type.get();
 
-  // Tensors
-  std::vector<torch::Tensor> tensors;
-  tensors.reserve(tpMessage.tensors.size());
-  for (tensorpipe::Message::Tensor& tpTensor : tpMessage.tensors) {
-    const std::string& metadata = tpTensor.metadata;
-    size_t metadataPos = 0;
-    auto metaDataReadFunc = [&](char* buf, size_t n) -> size_t {
-      if (metadataPos >= metadata.size() || n == 0) {
-        return 0;
-      }
-      size_t toCopy = std::min(n, metadata.size() - metadataPos);
-      memcpy(buf, metadata.data() + metadataPos, toCopy);
-      metadataPos += toCopy;
-      return toCopy;
-    };
+  TORCH_INTERNAL_ASSERT(
+      tpMessage.payloads[kTpMessageIdIdx].length == sizeof(int64_t),
+      "second payload expected to contain ",
+      sizeof(int64_t),
+      " bytes, whereas it contained ",
+      tpMessage.payloads[kTpMessageIdIdx].length,
+      " bytes");
+  buffers.id = std::make_unique<int64_t>();
+  tpMessage.payloads[kTpMessageIdIdx].data = buffers.id.get();
 
-    auto sectionReadFunc = [&](const std::string& ename) -> at::DataPtr {
-      TORCH_INTERNAL_ASSERT(ename == "0", "single tensor ename must be \"0\"");
-      // TODO: CUDA memory allocation
-      return at::getCPUAllocator()->allocate(tpTensor.length);
-    };
+  // FIXME The two resizes below zero out the vectors, which is not needed.
 
-    torch::jit::Unpickler unpickler(
-        metaDataReadFunc, nullptr, nullptr, sectionReadFunc, {});
-    c10::IValue ival = unpickler.parse_ivalue();
-    at::Tensor rpcTensor = ival.toTensor();
-    tpTensor.data = (uint8_t*)(rpcTensor.data_ptr());
-    tensors.emplace_back(std::move(rpcTensor));
+  buffers.payload.resize(tpMessage.payloads[kTpMessagePayloadIdx].length);
+  tpMessage.payloads[kTpMessagePayloadIdx].data = buffers.payload.data();
+
+  buffers.pickle.resize(tpMessage.payloads[kTpMessagePickleIdx].length);
+  tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
+
+  for (auto& tensor : tpMessage.tensors) {
+    buffers.tensors.push_back(at::getCPUAllocator()->allocate(tensor.length));
+    tensor.data = buffers.tensors.back().get();
   }
 
-  return Message(std::move(payload), std::move(tensors), mType, mId);
+  return buffers;
+}
+
+Message tensorpipeDeserialize(
+    tensorpipe::Message&& message,
+    TensorpipeReadBuffers&& buffers) {
+  // Tensors
+  std::vector<at::Tensor> tensors;
+  const char* pickleData = buffers.pickle.data();
+  size_t pickleLen = buffers.pickle.size();
+  size_t picklePos = 0;
+  auto pickleReadFunc = [&](char* buf, size_t n) -> size_t {
+    if (picklePos >= pickleLen || n == 0) {
+      return 0;
+    }
+    size_t toCopy = std::min(picklePos + n, pickleLen) - picklePos;
+    memcpy(buf, pickleData + picklePos, toCopy);
+    picklePos += toCopy;
+    return toCopy;
+  };
+  auto tensorReadFunc = [&](const std::string& ename) -> at::DataPtr {
+    unsigned long index = std::stoul(ename);
+    return std::move(buffers.tensors.at(index));
+  };
+
+  // No need to pass typeResolver here, as it always processes string and
+  // tensors only
+  torch::jit::Unpickler unpickler(
+      pickleReadFunc, nullptr, nullptr, tensorReadFunc, {});
+  auto ival = unpickler.parse_ivalue();
+  for (auto&& t : ival.toTensorList()) {
+    tensors.emplace_back(std::move(t));
+  }
+
+  return Message(
+      std::move(buffers.payload),
+      std::move(tensors),
+      *buffers.type,
+      *buffers.id);
 }
 
 } // namespace rpc
