@@ -579,7 +579,7 @@ def squeeze(g, self, dim=None):
 
     warnings.warn("Opset version 9 does not support squeezing on dimensions of shape greater than 1." + 
                   " It is recommended to use opset version 11 or higher to export this model.")
-    return g.op("Squeeze", self, axes_i = dims)
+    return g.op("Squeeze", self, axes_i=dims)
 
 def prelu(g, self, weight):
     if self.isCompleteTensor():
