@@ -191,20 +191,6 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
   }
 }
 
-std::tuple<Tensor &,Tensor &> _max_out_cpu(Tensor& max, Tensor& max_indices,
-                                        const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
-  max_stub(kCPU, max, max_indices, self, dim, keepdim);
-  return std::tuple<Tensor &,Tensor &>{max, max_indices};
-}
-
-std::tuple<Tensor, Tensor> _max_cpu(const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
-  Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
-  Tensor max = at::empty({0}, self.options());
-  return at::native::_max_out_cpu(max, max_indices, self, dim, keepdim);
-}
-
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
   TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
@@ -238,7 +224,8 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
     max_indices.resize_({}).fill_(0);
     return std::forward_as_tuple(max, max_indices);
   } else {
-    return at::_max_out(max, max_indices, self, dim, keepdim);
+    max_stub(self.device().type(), max, max_indices, self, dim, keepdim);
+    return std::tuple<Tensor &,Tensor &>{max, max_indices};
   }
 }
 
@@ -252,20 +239,6 @@ std::tuple<Tensor&,Tensor&> max_out(Tensor& max, Tensor& max_indices,
   namedinference::propagate_names_for_reduction(max, self, dim, keepdim);
   namedinference::propagate_names_for_reduction(max_indices, self, dim, keepdim);
   return result;
-}
-
-std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
-                                        const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
-  min_stub(kCPU, min, min_indices, self, dim, keepdim);
-  return std::tuple<Tensor &,Tensor &>{min, min_indices};
-}
-
-std::tuple<Tensor, Tensor> _min_cpu(const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
-  Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
-  Tensor min = at::empty({0}, self.options());
-  return at::native::_min_out_cpu(min, min_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
@@ -300,7 +273,8 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
     min_indices.resize_({}).fill_(0);
     return std::forward_as_tuple(min, min_indices);
   } else {
-    return at::_min_out(min, min_indices, self, dim, keepdim);
+    min_stub(self.device().type(), min, min_indices, self, dim, keepdim);
+    return std::tuple<Tensor &,Tensor &>{min, min_indices};
   }
 }
 

@@ -10,7 +10,7 @@ namespace native {
 
 namespace upsample {
 // TODO: Remove duplicate declaration.
-c10::SmallVector<int64_t, 3> compute_output_size(
+TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
     c10::optional<c10::IntArrayRef> output_size,
     c10::optional<c10::ArrayRef<double>> scale_factors);

@@ -253,6 +253,17 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     auto param = *it;
     auto def = param.defaultValue();
     if (def.present()) {
+      if (!param.type().present()) {
+        // We require explicit type-hints for default expressions.
+        // If param doesn't have a type, we could default to "Tensor",
+        // just like what happens in the Python frontend.
+        // However here things are a bit more complicated, because
+        // default expressions are evaluated using a custom-built
+        // graph, and error messages coming out of that in case
+        // the type doesn't match the value are quite obscure.
+        throw ErrorReport(param.range())
+            << "Keyword arguments with defaults need to be type-hinted (TorchScript C++ frontend)";
+      }
       default_types.emplace_back(param.type().get());
       default_exprs.emplace_back(def.get());
     }

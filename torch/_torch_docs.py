@@ -272,14 +272,14 @@ Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
 
 .. warning::
-    Integer division with addcdiv is deprecated, and in a future release
+    Integer division with addcdiv is no longer supported, and in a future release
     addcdiv will perform a true division of :attr:`tensor1` and :attr:`tensor2`.
-    The current addcdiv behavior can be replicated using :func:`floor_divide`
+    The historic addcdiv behavior can be implemented using :func:`floor_divide`
     for integral inputs
     (:attr:`input` + :attr:`value` * :attr:`tensor1` // :attr:`tensor2`)
     and :func:`div` for float inputs
     (:attr:`input` + :attr:`value` * :attr:`tensor1` / :attr:`tensor2`).
-    The new addcdiv behavior can be implemented with :func:`true_divide`
+    The future addcdiv behavior can be implemented with :func:`true_divide`
     (:attr:`input` + :attr:`value` * torch.true_divide(:attr:`tensor1`,
     :attr:`tensor2`).
 
@@ -1416,12 +1416,13 @@ add_docstr(torch.logcumsumexp,
            r"""
 logcumsumexp(input, dim, out=None) -> Tensor
 Returns the logarithm of the cumulative summation of the exponentiation of
-elements of :attr:`input` in the dimension :attr:`dim`. 
+elements of :attr:`input` in the dimension :attr:`dim`.
 
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
-.. math::
-    \text{{logcumsumexp}}(x)_{{i}} = \log \cumsum_j \exp(x_{{ij}})
+    .. math::
+        \text{{logcumsumexp}}(x)_{{ij}} = \log \sum\limits_{{j=0}}^{{i}} \exp(x_{{ij}})
+
 Args:
     {input}
     dim  (int): the dimension to do the operation over
@@ -3003,6 +3004,55 @@ Example::
     >>> torch.log2(a)
     tensor([-0.2483, -0.3213, -0.0042, -0.9196, -4.3504])
 
+""".format(**common_args))
+
+add_docstr(torch.logaddexp,
+           r"""
+logaddexp(input, other, out=None) -> Tensor
+
+Logarithm of the sum of exponentiations of the inputs.
+
+Calculates pointwise :math:`\log\left(e^x + e^y\right)`. This function is useful
+in statistics where the calculated probabilities of events may be so small as to
+exceed the range of normal floating point numbers. In such cases the logarithm
+of the calculated probability is stored. This function allows adding
+probabilities stored in such a fashion.
+
+This op should be disambiguated with :func:`torch.logsumexp` which performs a
+reduction on a single tensor.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> torch.logaddexp(torch.tensor([-1.0]), torch.tensor([-1.0, -2, -3]))
+    tensor([-0.3069, -0.6867, -0.8731])
+    >>> torch.logaddexp(torch.tensor([-100.0, -200, -300]), torch.tensor([-1.0, -2, -3]))
+    tensor([-1., -2., -3.])
+    >>> torch.logaddexp(torch.tensor([1.0, 2000, 30000]), torch.tensor([-1.0, -2, -3]))
+    tensor([1.1269e+00, 2.0000e+03, 3.0000e+04])
+""".format(**common_args))
+
+add_docstr(torch.logaddexp2,
+           r"""
+logaddexp2(input, other, out=None) -> Tensor
+
+Logarithm of the sum of exponentiations of the inputs in base-2.
+
+Calculates pointwise :math:`\log_2\left(2^x + 2^y\right)`. See
+:func:`torch.logaddexp` for more details.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword arguments:
+    {out}
 """.format(**common_args))
 
 add_docstr(torch.logical_and,
@@ -7691,7 +7741,7 @@ Example::
             [100, 200]], dtype=torch.uint8)
 """)
 
-add_docstr(torch._C.Generator,
+add_docstr(torch.Generator,
            r"""
 Generator(device='cpu') -> Generator
 
@@ -7712,7 +7762,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.set_state,
+add_docstr(torch.Generator.set_state,
            r"""
 Generator.set_state(new_state) -> void
 
@@ -7729,7 +7779,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.get_state,
+add_docstr(torch.Generator.get_state,
            r"""
 Generator.get_state() -> Tensor
 
@@ -7746,7 +7796,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.manual_seed,
+add_docstr(torch.Generator.manual_seed,
            r"""
 Generator.manual_seed(seed) -> Generator
 
@@ -7767,7 +7817,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.initial_seed,
+add_docstr(torch.Generator.initial_seed,
            r"""
 Generator.initial_seed() -> int
 
@@ -7781,7 +7831,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.seed,
+add_docstr(torch.Generator.seed,
            r"""
 Generator.seed() -> int
 
@@ -7796,7 +7846,7 @@ Example::
 """)
 
 
-add_docstr(torch._C.Generator.device,
+add_docstr(torch.Generator.device,
            r"""
 Generator.device -> device
 
@@ -7813,15 +7863,15 @@ add_docstr(torch.searchsorted,
            r"""
 searchsorted(sorted_sequence, values, out_int32=False, right=False, out=None) -> Tensor
 
-Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the 
-corresponding values in :attr:`values` were inserted before the indices, the order of the 
-corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved. 
-Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False (default), 
-then the left boundary of :attr:`sorted_sequence` is closed. More formally, the returned index 
-satisfies the following rules: 
+Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
+corresponding values in :attr:`values` were inserted before the indices, the order of the
+corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
+Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False (default),
+then the left boundary of :attr:`sorted_sequence` is closed. More formally, the returned index
+satisfies the following rules:
 
-.. list-table:: 
-   :widths: 12 10 78 
+.. list-table::
+   :widths: 12 10 78
    :header-rows: 1
 
    * - :attr:`sorted_sequence`
@@ -7841,27 +7891,27 @@ satisfies the following rules:
      - ``sorted_sequence[m][n]...[l][i-1] < values[m][n]...[l][x] <= sorted_sequence[m][n]...[l][i]``
 
 Args:
-    sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost* 
+    sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
                               dimension.
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
-    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise. 
+    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
-    right (bool, optional): if False, return the first suitable location that is found. If True, return the 
-                            last such index. If no suitable index found, return 0 for non-numerical value 
-                            (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence` 
-                            (one pass the last index of the *innermost* dimension). In other words, if False, 
-                            gets the lower bound index for each value in :attr:`values` on the corresponding 
-                            *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper 
+    right (bool, optional): if False, return the first suitable location that is found. If True, return the
+                            last such index. If no suitable index found, return 0 for non-numerical value
+                            (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence`
+                            (one pass the last index of the *innermost* dimension). In other words, if False,
+                            gets the lower bound index for each value in :attr:`values` on the corresponding
+                            *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper
                             bound index instead. Default value is False.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
 
-.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred, 
+.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred,
           because it has fewer dimension checks resulting in slightly better performance.
 
 
 Example::
 
-    >>> sorted_sequence = torch.tensor([[1, 3, 5, 7, 9], [2, 4, 6, 8, 10]]) 
+    >>> sorted_sequence = torch.tensor([[1, 3, 5, 7, 9], [2, 4, 6, 8, 10]])
     >>> sorted_sequence
     tensor([[ 1,  3,  5,  7,  9],
             [ 2,  4,  6,  8, 10]])
@@ -7889,12 +7939,12 @@ add_docstr(torch.bucketize,
 bucketize(input, boundaries, out_int32=False, right=False, out=None) -> Tensor
 
 Returns the indices of the buckets to which each value in the :attr:`input` belongs, where the
-boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size 
-as :attr:`input`. If :attr:`right` is False (default), then the left boundary is closed. More 
+boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size
+as :attr:`input`. If :attr:`right` is False (default), then the left boundary is closed. More
 formally, the returned index satisfies the following rules:
 
-.. list-table:: 
-   :widths: 15 85 
+.. list-table::
+   :widths: 15 85
    :header-rows: 1
 
    * - :attr:`right`
@@ -7907,14 +7957,14 @@ formally, the returned index satisfies the following rules:
 Args:
     input (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
     boundaries (Tensor): 1-D tensor, must contain a monotonically increasing sequence.
-    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise. 
+    out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
-    right (bool, optional): if False, return the first suitable location that is found. If True, return the 
-                            last such index. If no suitable index found, return 0 for non-numerical value 
-                            (eg. nan, inf) or the size of :attr:`boundaries` (one pass the last index). 
-                            In other words, if False, gets the lower bound index for each value in :attr:`input` 
-                            from :attr:`boundaries`. If True, gets the upper bound index instead. 
-                            Default value is False. 
+    right (bool, optional): if False, return the first suitable location that is found. If True, return the
+                            last such index. If no suitable index found, return 0 for non-numerical value
+                            (eg. nan, inf) or the size of :attr:`boundaries` (one pass the last index).
+                            In other words, if False, gets the lower bound index for each value in :attr:`input`
+                            from :attr:`boundaries`. If True, gets the upper bound index instead.
+                            Default value is False.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`input` if provided.
 
 
