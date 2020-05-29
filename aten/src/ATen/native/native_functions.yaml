@@ -1592,19 +1592,15 @@
     CUDA: log2_out
 
 - func: logaddexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: logaddexp(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: method, function
 
 - func: logaddexp2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: logaddexp2(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: method, function
 
 - func: logdet(Tensor self) -> Tensor
@@ -1649,18 +1645,14 @@
     CUDA: _logcumsumexp_out_cuda
 
 - func: logcumsumexp(Tensor self, int dim) -> Tensor
-  supports_named_tensor: True
   variants: function, method
 
 - func: logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: logcumsumexp.dimname(Tensor self, Dimname dim) -> Tensor
-  supports_named_tensor: True
   variants: function, method
 
 - func: logcumsumexp.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
@@ -3660,15 +3652,12 @@
 
 - func: result_type.Tensor(Tensor tensor, Tensor other) -> ScalarType
   variants: function
-  supports_named_tensor: True
 
 - func: result_type.Scalar(Tensor tensor, Scalar other) -> ScalarType
   variants: function
-  supports_named_tensor: True
 
 - func: result_type.Scalar_Tensor(Scalar scalar, Tensor tensor) -> ScalarType
   variants: function
-  supports_named_tensor: True
 
 - func: result_type.Scalar_Scalar(Scalar scalar1, Scalar scalar2) -> ScalarType
 

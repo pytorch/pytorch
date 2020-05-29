@@ -236,6 +236,14 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("log_normal_", CppFunction::makeFallthrough());
   m.impl("log_softmax.Dimname", CppFunction::makeFallthrough());
   m.impl("log_softmax.int", CppFunction::makeFallthrough());
+  m.impl("logaddexp", CppFunction::makeFallthrough());
+  m.impl("logaddexp.out", CppFunction::makeFallthrough());
+  m.impl("logaddexp2", CppFunction::makeFallthrough());
+  m.impl("logaddexp2.out", CppFunction::makeFallthrough());
+  m.impl("logcumsumexp", CppFunction::makeFallthrough());
+  m.impl("logcumsumexp.dimname", CppFunction::makeFallthrough());
+  m.impl("logcumsumexp.dimname_out", CppFunction::makeFallthrough());
+  m.impl("logcumsumexp.out", CppFunction::makeFallthrough());
   m.impl("logical_and", CppFunction::makeFallthrough());
   m.impl("logical_and.out", CppFunction::makeFallthrough());
   m.impl("logical_and_", CppFunction::makeFallthrough());
@@ -346,6 +354,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("reshape", CppFunction::makeFallthrough());
   m.impl("resize_", CppFunction::makeFallthrough());
   m.impl("resize_as_", CppFunction::makeFallthrough());
+  m.impl("result_type.Scalar", CppFunction::makeFallthrough());
+  m.impl("result_type.Scalar_Tensor", CppFunction::makeFallthrough());
+  m.impl("result_type.Tensor", CppFunction::makeFallthrough());
   m.impl("round", CppFunction::makeFallthrough());
   m.impl("round.out", CppFunction::makeFallthrough());
   m.impl("round_", CppFunction::makeFallthrough());
