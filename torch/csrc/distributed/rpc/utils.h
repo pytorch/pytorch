@@ -40,27 +40,54 @@ TORCH_API std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
     const void* data,
     size_t data_size);
 
-// TensorPipeEntry represents serialized tensorpipe message,
-// plus reserved tensor datas to keep memory lifetime.
-struct TensorPipeEntry {
-  tensorpipe::Message message;
-  // To keep original user tensors + cloned sparse tensors.
-  std::vector<torch::Tensor> reservedTensors;
-  // To keep memory of tensors who do not own underlying
-  // memory, say created from torch::from_blob()
-  std::vector<std::vector<uint8_t>> copiedTensors;
+// We use vector<char> as the type of blobs because it's what rpc::Message uses
+// for its payload, even though it has the disadvantage that it cannot be
+// allocated with uninitialized memory: it is always zeroed out.
+
+// A struct that holds pointers that keep alive all the memory that will be
+// accessed by TensorPipe during a write operation.
+struct TensorpipeWriteBuffers {
+  // Allocate on heap so pointers stay valid as we move the holder.
+  std::unique_ptr<MessageType> type;
+  std::unique_ptr<int64_t> id;
+  std::vector<char> payload;
+  std::vector<char> pickle;
+  // This contains the original tensors and the clones of the sparse tensors.
+  std::vector<torch::Tensor> tensors;
+  // This contains the copies of the data of the tensors that didn't own their
+  // memory, e.g., the ones created from torch::from_blob() with no deleter.
+  std::vector<std::vector<char>> copiedTensors;
 };
 
-// TensorPipe doesn't own any underlying memory. Users are required to
-// keep rpcMessage alive for the returned TensorPipeEntry to be valid,
-// since TensorPipe message just keeps raw pointers to the memory.
-TORCH_API TensorPipeEntry tensorpipeSerialize(const Message& rpcMessage);
+// A struct that holds pointers that keep alive all the memory that will be
+// accessed by TensorPipe during a read operation.
+struct TensorpipeReadBuffers {
+  // Allocate on heap so pointers stay valid as we move the holder.
+  std::unique_ptr<MessageType> type;
+  std::unique_ptr<int64_t> id;
+  std::vector<char> payload;
+  std::vector<char> pickle;
+  std::vector<c10::DataPtr> tensors;
+};
 
-// The passed-in tensorpipe message is partial, which just contains
-// necessary information for memory allocation, like payload length
-// and tensor metadata. The returned RPC message doesn't have any
-// data, but would be valid after tensorpipe finishs data transfer.
-TORCH_API Message tensorpipeAllocateMessage(tensorpipe::Message& tpMessage);
+// Convert an RPC message into a TensorPipe message, plus a holder to all the
+// data that must be kept alive while the write is performed asynchronously.
+TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
+tensorpipeSerialize(Message&& rpcMessage);
+
+// Allocate the buffers that will hold the incoming data. They will be managed
+// by the returned holder, which must be kept alive until the asynchronous read
+// has finished. Pointers to these buffers will be stored in-place in the
+// TensorPipe message.
+TORCH_API TensorpipeReadBuffers
+tensorpipeAllocate(tensorpipe::Message& tpMessage);
+
+// Convert a TensorPipe message back into an RPC message. This requires the data
+// to be available and can thus only be performed once the asynchronous read has
+// completed. The holder can be destroyed once this function returns.
+TORCH_API Message tensorpipeDeserialize(
+    tensorpipe::Message&& tpMessage,
+    TensorpipeReadBuffers&& holder);
 
 // Some Tensors are effectively views of larger Tensors, where only a small
 // subset of the Storage data is referenced. This normally is good and avoids
