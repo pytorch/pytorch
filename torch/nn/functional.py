@@ -3843,26 +3843,72 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
 def _pad_circular(input, padding):
     # type: (Tensor, List[int]) -> Tensor
     """
-    Arguments
-        :param input: tensor of shape :math:`(N, C_{\text{in}}, H, [W, D]))`
-        :param padding: (tuple): m-elem tuple where m is the degree of convolution
-    Returns
-        :return: tensor of shape :math:`(N, C_{\text{in}}, [D + 2 * padding[0],
-                 H + 2 * padding[1]], W + 2 * padding[2]))`
-    """
+    Args:
+        input: Tensor that follows the formatting of the input to convolution
+            layers.
+        padding: Tuple with length two times the degree of the convolution. The
+            order of the integers in the tuple are shown in the following
+            example:
 
-    input = torch.cat([input, input[:, :, 0:padding[-1]]], dim=2)
-    input = torch.cat([input[:, :, -(padding[-1] + padding[-2]):-padding[-1]], input], dim=2)
+            For 3D convolutions:
+                padding[-2] is the amount of padding applied to the beginning
+                    of the depth dimension.
+                padding[-1] is the amount of padding applied to the end of the
+                    depth dimension.
+                padding[-4] is the amount of padding applied to the beginning
+                    of the height dimension.
+                padding[-3] is the amount of padding applied to the end of the
+                    height dimension.
+                padding[-6] is the amount of padding applied to the beginning
+                    of the width dimension.
+                padding[-5] is the amount of padding applied to the end of the
+                    width dimension.
+
+    Returns:
+        out: Tensor with padded shape.
+    """
+    shape = input.shape
+    ndim = len(shape[2:])
+
+    # Only supports wrapping around once
+    for a, size in enumerate(shape[2:]):
+        assert padding[-(a*2+1)] <= size
+        assert padding[-(a*2+2)] <= size
+
+    # Get shape of padded array
+    new_shape = shape[:2]
+    for a, size in enumerate(shape[2:]):
+        new_shape += (size + padding[-(a*2+1)] + padding[-(a*2+2)],)
+
+    out = torch.empty(new_shape, dtype=input.dtype, layout=input.layout,
+                      device=input.device)
+
+    # Put original array in padded array
+    if ndim == 1:
+        out[..., padding[-2]:-padding[-1]] = input
+    elif ndim == 2:
+        out[..., padding[-2]:-padding[-1], padding[-4]:-padding[-3]] = input
+    elif ndim == 3:
+        out[..., padding[-2]:-padding[-1], padding[-4]:-padding[-3], padding[-6]:-padding[-5]] = input
+
+    # Pad right side, then left side.
+    # Corners will be written more than once when ndim > 1
+
+    # Pad first conv dim
+    out[:, :, :padding[-2]] = out[:, :, -(padding[-2] + padding[-1]):-padding[-1]]
+    out[:, :, -padding[-1]:] = out[:, :, padding[-2]:(padding[-2] + padding[-1])]
 
     if len(padding) > 2:
-        input = torch.cat([input, input[:, :, :, 0:padding[-3]]], dim=3)
-        input = torch.cat([input[:, :, :, -(padding[-3] + padding[-4]):-padding[-3]], input], dim=3)
+        # Pad second conv dim
+        out[:, :, :, :padding[-4]] = out[:, :, :, -(padding[-4] + padding[-3]):-padding[-3]]
+        out[:, :, :, -padding[-3]:] = out[:, :, :, padding[-4]:(padding[-4] + padding[-3])]
 
     if len(padding) > 4:
-        input = torch.cat([input, input[:, :, :, :, 0:padding[-5]]], dim=4)
-        input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], dim=4)
+        # Pad third conv dim
+        out[:, :, :, :, :padding[-6]] = out[:, :, :, :, -(padding[-6] + padding[-5]):-padding[-5]]
+        out[:, :, :, :, -padding[-5]:] = out[:, :, :, :, padding[-6]:(padding[-6] + padding[-5])]
 
-    return input
+    return out
 
 
 def multi_head_attention_forward(query,                           # type: Tensor
