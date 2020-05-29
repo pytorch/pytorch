@@ -163,7 +163,7 @@ fi
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   # This is needed to work around building onnx in older docker images.
   if [[ $BUILD_ENVIRONMENT == py3.6-devtoolset7-rocmrpm-centos* ]]; then
-    pip install -U pip==18 setuptools==44
+    ${PIP} install -U pip==18 setuptools==44
   fi
   # This is needed to enable ImageInput operator in resnet50_trainer
   build_args+=("USE_OPENCV=ON")
@@ -252,7 +252,7 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  $PYTHON setup.py install --user
+  ${PYTHON} setup.py install --user
 
   report_compile_cache_stats
 fi
@@ -262,7 +262,7 @@ fi
 ###############################################################################
 
 # Install ONNX into a local directory
-pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+${PIP} install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
