@@ -47,7 +47,7 @@ void TensorPipeAgent::collectNames() {
   std::vector<uint8_t> selfNameVector(
       (uint8_t*)selfName.c_str(),
       (uint8_t*)selfName.c_str() + selfName.length());
-  addressStore_->set("names/" + c10::to_string(selfId), selfNameVector);
+  rankToNameStore_.set(c10::to_string(selfId), selfNameVector);
 
   workerIdToInfo_.emplace(selfId, WorkerInfo(selfName, selfId));
   workerNameToInfo_.emplace(selfName, WorkerInfo(selfName, selfId));
@@ -56,7 +56,7 @@ void TensorPipeAgent::collectNames() {
       continue;
     }
     std::vector<uint8_t> workerNameVector =
-        addressStore_->get("names/" + c10::to_string(workerId));
+        rankToNameStore_.get(c10::to_string(workerId));
     std::string workerName(
         (char*)workerNameVector.data(), workerNameVector.size());
 
@@ -72,7 +72,7 @@ void TensorPipeAgent::collectNames() {
 }
 
 TensorPipeAgent::TensorPipeAgent(
-    std::shared_ptr<::c10d::Store> addressStore,
+    const std::shared_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
     int worldSize,
@@ -85,7 +85,8 @@ TensorPipeAgent::TensorPipeAgent(
               (long)(opts.rpcTimeoutSeconds * kToMilliseconds))),
       context_(std::make_shared<tensorpipe::Context>(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
-      addressStore_(std::move(addressStore)),
+      rankToNameStore_("names", store),
+      nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       opts_(std::move(opts)),
       processGroup_(std::move(processGroup)) {
@@ -144,11 +145,11 @@ void TensorPipeAgent::startImpl() {
   // Store our own url.
   const auto address = listener_->url("tcp");
   const std::vector<uint8_t> selfAddrData(address.begin(), address.end());
-  addressStore_->set(workerInfo_.name_, selfAddrData);
+  nameToAddressStore_.set(workerInfo_.name_, selfAddrData);
 
   for (const auto& p : workerNameToInfo_) {
     const auto& name = p.first;
-    auto nodeAddrData = addressStore_->get(name);
+    auto nodeAddrData = nameToAddressStore_.get(name);
     auto nodeAddrStr =
         std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
     workerNameToURL_.insert({name, nodeAddrStr});
@@ -683,7 +684,7 @@ TensorPipeAgent::NetworkDataDict TensorPipeAgent::getNetworkData() {
 NetworkSourceInfo TensorPipeAgent::getNetworkSourceInfo() {
   NetworkSourceInfo info = {
       RpcAgent::getWorkerInfo().id_,
-      addressStore_->get(RpcAgent::getWorkerInfo().name_)};
+      nameToAddressStore_.get(RpcAgent::getWorkerInfo().name_)};
 
   return info;
 }
