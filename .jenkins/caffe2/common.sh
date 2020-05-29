@@ -8,10 +8,8 @@ pytest_reports_dir="${TEST_DIR}/python"
 
 # Figure out which Python to use
 PYTHON="$(which python)"
-PIP="$(which pip)"
 if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
   PYTHON=$(which "python${BASH_REMATCH[1]}")
-  PIP=$(which "pip${BASH_REMATCH[1]}")
 fi
 
 # /usr/local/caffe2 is where the cpp bits are installed to in in cmake-only
