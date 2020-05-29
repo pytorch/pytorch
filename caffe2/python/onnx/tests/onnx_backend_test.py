@@ -110,6 +110,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*gradient.*'  # no support for gradient op in c2-onnx
                      '|test_.*adagrad.*'  # no support for gradient op in c2-onnx
                      '|test_.*loss.*'  # no support for loss op in c2-onnx
+                     '|test_.*adam.*'  # no support for adam op
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
