@@ -172,46 +172,31 @@ void tanh_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-template<typename scalar_t>
-__host__ __device__ static inline scalar_t acosh_wrapper(scalar_t v) {
-  return ::acosh(v);
-}
-
 void acosh_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "acosh_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "atanh_cuda", [&] {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "acosh_cuda", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return acosh_wrapper(a);
+              return ::acosh(a);
       });
     });
   });
-}
-
-template<typename scalar_t>
-__host__ __device__ static inline scalar_t asinh_wrapper(scalar_t v) {
-  return ::asinh(v);
 }
 
 void asinh_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "asinh_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "asinh_cuda", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return asinh_wrapper(a);
+              return ::asinh(a);
       });
     });
   });
-}
-
-template<typename scalar_t>
-__host__ __device__ static inline scalar_t atanh_wrapper(scalar_t v) {
-  return ::atanh(v);
 }
 
 void atanh_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "atanh_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "atanh_cuda", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return atanh_wrapper(a);
+              return ::atanh(a);
       });
     });
   });
