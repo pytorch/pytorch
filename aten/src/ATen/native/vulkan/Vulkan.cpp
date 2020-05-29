@@ -86,13 +86,12 @@ void VContext::createInstance() {
     vkEnumerateInstanceLayerProperties(&layerPresentCount, nullptr);
     std::vector<VkLayerProperties> layerProps(layerPresentCount);
     vkEnumerateInstanceLayerProperties(&layerPresentCount, layerProps.data());
-    std::array<const char*, 6> instanceLayers{
-        "VK_LAYER_GOOGLE_unique_objects",
+    std::array<const char*, 5> instanceLayers{
         "VK_LAYER_GOOGLE_threading",
+        "VK_LAYER_LUNARG_parameter_validation",
         "VK_LAYER_LUNARG_object_tracker",
         "VK_LAYER_LUNARG_core_validation",
-        "VK_LAYER_LUNARG_parameter_validation",
-        "VK_LAYER_KHRONOS_validation",
+        "VK_LAYER_GOOGLE_unique_objects",
     };
 
     for (const auto& wantedLayer : instanceLayers) {

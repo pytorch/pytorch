@@ -25,7 +25,7 @@ namespace native {
 namespace vulkan {
 namespace detail {
 
-static constexpr bool kEnableValidationLayers = true;
+static constexpr bool kEnableValidationLayers = false;
 bool is_available();
 
 class VContext;
