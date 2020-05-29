@@ -428,11 +428,10 @@ class IrParser {
             ptr_op,
             [](const Node* const node,
                std::unordered_map<size_t, CgValue>& value_map) -> void {
-
               auto self = value_map[node->inputs()[0]->unique()];
               auto end = value_map[node->inputs()[1]->unique()];
               auto weight = value_map[node->inputs()[2]->unique()];
-  
+
               auto out = lerp(self, end, weight);
               value_map.emplace(node->output()->unique(), out);
             });
