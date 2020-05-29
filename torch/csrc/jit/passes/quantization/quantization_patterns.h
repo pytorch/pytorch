@@ -35,25 +35,31 @@ std::string getExtraArgList(std::vector<std::string> extra_args) {
 std::string getAtenOpPattern(
     const std::string& graph_header,
     const std::string& op_name,
-    const std::string& extra_arg_list) {
+    const std::vector<std::string>& extra_op_args,
+    bool scalar_args = false) {
+  std::vector<std::string> _extra_op_args = extra_op_args;
   std::string aten_op_pattern = graph_header;
+  if (scalar_args) {
+    for (const auto& extra_arg : _extra_op_args) {
+      aten_op_pattern += R"(
+          )" + extra_arg + "_scalar = aten::item(" + extra_arg + ")";
+    }
+
+    for (size_t i = 0; i < _extra_op_args.size(); ++i) {
+      _extra_op_args[i] = _extra_op_args[i] + "_scalar";
+    }
+  }
+  const auto& extra_op_arg_list = getExtraArgList(_extra_op_args);
   aten_op_pattern += R"(
           %r = )";
-  aten_op_pattern += op_name + "(" + "%a_quant" + extra_arg_list + ")";
+  aten_op_pattern += op_name + "(" + "%a_quant" + extra_op_arg_list + ")";
   aten_op_pattern += R"(
           return (%r) )";
   return aten_op_pattern;
 }
 
-std::string getQuantize(const std::string& value, const std::string& input) {
-  auto input_quant = input + "_quant";
+std::string getQuantize(const std::string& value) {
   std::string quantize_pattern = R"(
-          )" + value + "_scale : float = aten::q_scale(" + input_quant + ")";
-  quantize_pattern += R"(
-          )" + value + "_zero_point : int = aten::q_zero_point(" + input_quant + ")";
-  quantize_pattern += R"(
-          )" + value + "_dtype : int = prim::dtype(" + input_quant + ")";
-  quantize_pattern += R"(
           )" + value + "_float_scalar_type : int = prim::Constant[value=6]()";
   quantize_pattern += R"(
           )" + value + "_none : None = prim::Constant()";
@@ -65,10 +71,10 @@ std::string getQuantize(const std::string& value, const std::string& input) {
   }
   quantize_pattern += ")";
   quantize_pattern += R"(
-          )" + value + "_quant = aten::quantize_per_tensor(" + value + "_tensor";
-  quantize_pattern += ", " + value + "_scale";
-  quantize_pattern += ", " + value + "_zero_point";
-  quantize_pattern += ", " + value + "_dtype)";
+          )" + value + "_quant = aten::quantize_per_tensor(" + value + "_tensor" +
+    getExtraArgList({value + "_scale",
+                     value + "_zero_point",
+                     value + "_dtype"}) + ")";
   return quantize_pattern;
 }
 
@@ -77,17 +83,22 @@ std::string getDequantize(const std::string& value) {
           )" + value + "_dequant = aten::dequantize(" + value + "_quant)";
 }
 
+std::string getItem(const std::string& value) {
+  return R"(
+          )" + value + "_scalar : float = aten::item(" + value + "_dequant)";
+}
+
 // Patterns for the ops that inherit parameters from input
 QuantFusionInfo getInputTensorQParamOpFusionInfo(
     const std::string& op_name,
-    const std::vector<std::string>& extra_args) {
-  const auto& extra_arg_list = getExtraArgList(extra_args);
-  std::string graph_header = "graph(%a_quant" + extra_arg_list + "):";
+    const std::vector<std::string>& extra_op_args) {
+  const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
+  std::string graph_header = "graph(%a_quant" + extra_op_arg_list + "):";
   std::string op_pattern = graph_header;
   op_pattern += R"(
           %a_dequant = aten::dequantize(%a_quant)
           %r = )";
-  op_pattern += op_name + "(" + "%a_dequant" + extra_arg_list + ")";
+  op_pattern += op_name + "(" + "%a_dequant" + extra_op_arg_list + ")";
   // IR pattern common to all ops that inherit qparam from input
   op_pattern += R"(
           %r_scale : float = aten::q_scale(%a_quant)
@@ -97,39 +108,49 @@ QuantFusionInfo getInputTensorQParamOpFusionInfo(
           return (%r_quant) )";
 
   std::string aten_op_pattern =
-      getAtenOpPattern(graph_header, op_name, extra_arg_list);
+      getAtenOpPattern(graph_header, op_name, extra_op_args);
 
   return {op_name, op_pattern, aten_op_pattern};
 }
 
 QuantFusionInfo getClampOpFusionInfo(
     const std::string& op_name,
-    const std::vector<std::string>& extra_args) {
-  const auto& extra_arg_list = getExtraArgList(extra_args);
-  std::string graph_header = "graph(%a_quant" + extra_arg_list + "):";
+    const std::vector<std::string>& extra_op_args) {
+  std::vector<std::string> header_args = extra_op_args;
+  std::vector<std::string> input_qparams =
+    {"_scale", "_zero_point", "_dtype"};
+  for (const auto& arg : extra_op_args) {
+    for (const auto& qparam : input_qparams) {
+      header_args.push_back(arg + qparam);
+    }
+  }
+  for (const auto& qparam : input_qparams) {
+    header_args.push_back("%r" + qparam);
+  }
+  const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
+  const auto& extra_header_arg_list = getExtraArgList(header_args);
+  std::string graph_header = "graph(%a_quant" + extra_header_arg_list + "):";
   std::string op_pattern = graph_header;
-  for (const auto& arg : extra_args) {
-    op_pattern += getQuantize(arg, "%a");
+  for (const auto& arg : extra_op_args) {
+    op_pattern += getQuantize(arg);
     op_pattern += getDequantize(arg);
+    op_pattern += getItem(arg);
   }
   op_pattern += getDequantize("%a");
   op_pattern += R"(
           %r = )";
-  std::vector<std::string> dequantized_args;
-  for (const auto& arg : extra_args) {
-    dequantized_args.push_back(arg + "_dequant");
+  std::vector<std::string> scalar_extra_args;
+  for (const auto& arg : extra_op_args) {
+    scalar_extra_args.push_back(arg + "_scalar");
   }
-  op_pattern += op_name + "(" + "%a_dequant" + getExtraArgList(dequantized_args) + ")";
+  op_pattern += op_name + "(" + "%a_dequant" + getExtraArgList(scalar_extra_args) + ")";
   // IR pattern common to all ops that inherit qparam from input
   op_pattern += R"(
-          %r_scale : float = aten::q_scale(%a_quant)
-          %r_zero_point : int = aten::q_zero_point(%a_quant)
-          %r_dtype : int = prim::dtype(%a_quant)
           %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
           return (%r_quant) )";
 
   std::string aten_op_pattern =
-      getAtenOpPattern(graph_header, op_name, extra_arg_list);
+    getAtenOpPattern(graph_header, op_name, extra_op_args);
 
   return {op_name, op_pattern, aten_op_pattern};
 }
@@ -137,15 +158,15 @@ QuantFusionInfo getClampOpFusionInfo(
 // Patterns for the ops that has fixed quantization parameters
 QuantFusionInfo getFixedQParamOpFusionInfo(
     const std::string& op_name,
-    const std::vector<std::string>& extra_args,
+    const std::vector<std::string>& extra_op_args,
     bool is_symmetric) {
-  const auto& extra_arg_list = getExtraArgList(extra_args);
-  std::string graph_header = "graph(%a_quant" + extra_arg_list + "):";
+  const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
+  std::string graph_header = "graph(%a_quant" + extra_op_arg_list + "):";
   std::string op_pattern = graph_header;
   op_pattern += R"(
           %a_dequant = aten::dequantize(%a_quant)
           %r = )";
-  op_pattern += op_name + "(" + "%a_dequant" + extra_arg_list + ")";
+  op_pattern += op_name + "(" + "%a_dequant" + extra_op_arg_list + ")";
   // IR pattern common to all ops with fixed quantization parameters for
   // asymetric quantization
   std::string asym_fixed_qparam_op_suffix = R"(
@@ -165,7 +186,7 @@ QuantFusionInfo getFixedQParamOpFusionInfo(
       is_symmetric ? sym_fixed_qparam_op_suffix : asym_fixed_qparam_op_suffix;
 
   std::string aten_op_pattern =
-      getAtenOpPattern(graph_header, op_name, extra_arg_list);
+      getAtenOpPattern(graph_header, op_name, extra_op_args);
 
   return {op_name, op_pattern, aten_op_pattern};
 }
@@ -752,9 +773,6 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
   auto clamp =
       getClampOpFusionInfo("aten::clamp", {"%min", "%max"});
 
-  auto clamp_ =
-      getClampOpFusionInfo("aten::clamp_", {"%min", "%max"});
-
   auto hardtanh =
       getClampOpFusionInfo("aten::hardtanh", {"%min", "%max"});
 
@@ -886,7 +904,6 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
       upsample_bilinear2d,
       upsample_trilinear3d,
       clamp,
-      clamp_,
       hardtanh,
       hardtanh_,
       elu,

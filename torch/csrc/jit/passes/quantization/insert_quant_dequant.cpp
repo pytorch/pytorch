@@ -145,6 +145,19 @@ Node* insertQParam(
   return qparam;
 }
 
+Node* insertItem(
+    Graph* graph,
+    Value* tensor,
+    const TypePtr& output_type) {
+  WithInsertPoint ins(tensor->node()->next());
+  Node* n = graph->create(Symbol::aten("item"), {tensor});
+  Value* scalar = n->output();
+  scalar->setDebugName(tensor->debugName() + ".scalar")
+    ->setType(output_type);
+  graph->insertNode(n);
+  return n;
+}
+
 DynamicQuantOps insertChooseQParamQuantDequant(
     Graph* graph,
     Value* original_val,
@@ -340,6 +353,46 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(dynamic_quant_ops, dynamic_quant_replacement);
   rewriter.runOnGraph(graph, filter);
+}
+
+void ReplicateClampScalarArgs(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  std::unordered_set<Node*> scalar_nodes_to_rewrite;;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      for (Value* output : n->outputs()) {
+        if (getClampScalarInputUse(output) &&
+            output->uses().size() > 1) {
+          scalar_nodes_to_rewrite.insert(n);
+        }
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+
+  for (Node* n : scalar_nodes_to_rewrite) {
+    const std::vector<Use> uses = n->output()->uses();
+    for (const auto& use : uses) {
+      Node* user = use.user;
+      WithInsertPoint ins(user);
+      Node* cloned_node = graph->createClone(n, [](Value* v) { return v; });
+      graph->insertNode(cloned_node);
+      user->replaceInput(use.offset, cloned_node->output());
+    }
+  }
+
+  for (Node* n : scalar_nodes_to_rewrite) {
+    n->removeAllInputs();
+  }
+
+  for (Node* n : scalar_nodes_to_rewrite) {
+    n->destroy();
+  }
 }
 
 void checkCalculateQParamsResult(const IValue& qparams) {
@@ -728,6 +781,13 @@ void InsertQuantDeQuantHelper::propagateQParams(
   original_output->replaceAllUsesAfterNodeWith(quant, quantized_output);
   const auto& outputs = insertDeQuantForAllUse(graph, quantized_output, quantized_output);
   for (auto* output : outputs) {
+    if (is_scalar) {
+      // Convert the dequantized Tensor back to Scalar
+      Node* item = insertItem(graph, output, FloatType::get());
+      Value* scalar = item->output();
+      output->replaceAllUsesAfterNodeWith(item, scalar);
+      output = scalar;
+    }
     quantized_values_.insert(output);
   }
 }
@@ -785,8 +845,13 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
         }
         if (isSingleInputGeneralValueAtenFunction(n)) {
           propagateQParams(output, inputs);
-        } else if (getClampScalarInputUse(output).has_value()) {
-          propagateQParams(output, inputs, /* is_scalar = */ true);
+          if (isClamp(n)) {
+            for (size_t i = 1; i <= 2; ++i) {
+              // propagate qparams for min and max scalar arguments
+              // for aten::clamp/aten::hardtanh
+              propagateQParams(n->input(i), inputs, true);
+            }
+          }
         } else if (auto qparams_opt = getFixedQParams(n)) {
           propagateQParams(output, inputs, /* is_scalar = */ false, qparams_opt);
         } else {
@@ -881,6 +946,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
   RemoveRedundantDequantize(graph);
+  ReplicateClampScalarArgs(graph);
   propagateQuantizationOps(graph->block());
 }
 
@@ -1008,7 +1074,7 @@ Module InsertQuantDeQuant(
     const std::string& method_name,
     bool inplace,
     bool is_dynamic) {
-  Module module = inplace ? input_module : input_module.clone();
+  Module module = input_module.clone(inplace);
   InsertQuantDeQuantHelper h;
   h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);

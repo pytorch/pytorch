@@ -39,7 +39,7 @@ TORCH_API void ReplicateDeQuant(std::shared_ptr<Graph>& graph);
 TORCH_API Module InsertQuantDeQuant(
     Module& module,
     const std::string& method_name,
-    bool inplace = false,
+    bool inplace,
     bool is_dynamic = false);
 
 } // namespace jit

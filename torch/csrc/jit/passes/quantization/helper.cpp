@@ -299,12 +299,6 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     }
     return inputs;
   }
-
-  // Special case for hardtanh/clamp since they also quantize their input scalar
-  // based on input Tensor
-  if (const auto& use_opt = getClampScalarInputUse(v)) {
-    return {use_opt.value().user->input(0)};
-  }
   return {};
 }
 
