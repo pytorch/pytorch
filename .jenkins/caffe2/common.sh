@@ -6,6 +6,17 @@ TEST_DIR="$ROOT_DIR/caffe2_tests"
 gtest_reports_dir="${TEST_DIR}/cpp"
 pytest_reports_dir="${TEST_DIR}/python"
 
+# This is needed to work around ROCm using old docker images until
+# the transition to new images is complete.
+if [[ $BUILD_ENVIRONMENT == py3.6-devtoolset7-rocmrpm-centos* ]]; then
+  # this file is sourced multiple times, only install conda the first time
+  if [[ ! -d /opt/conda ]]; then
+    ANACONDA_PYTHON_VERSION=3.6
+    $ROOT_DIR/.circleci/docker/common/install_conda.sh
+  fi
+  export PATH="/opt/conda/bin:${PATH}"
+fi
+
 # Figure out which Python to use
 PYTHON="$(which python)"
 PIP="$(which pip)"
