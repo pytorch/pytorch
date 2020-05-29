@@ -415,7 +415,8 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
-        return self.new_tensor(other) ** self
+        dtype = torch.result_type(other, self)
+        return torch.tensor(other, dtype=dtype, device=self.device) ** self
 
     @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
