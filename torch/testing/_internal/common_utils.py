@@ -625,15 +625,9 @@ class CudaMemoryLeakCheck():
         afters = self.get_cuda_memory_usage()
 
         for i, (before, after) in enumerate(zip(self.befores, afters)):
-            if not TEST_WITH_ROCM:
-                self.testcase.assertEqual(
-                    before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
-                        self.name, after - before, i))
-            else:
-                # TODO: Investigate ROCm memory leaking.
-                if before != after:
-                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
-                        self.name, after - before, i), RuntimeWarning)
+            self.testcase.assertEqual(
+                before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
+                    self.name, after - before, i))
 
 #  "min_satisfying_examples" setting has been deprecated in hypythesis
 #  3.56.0 and removed in hypothesis 4.x
