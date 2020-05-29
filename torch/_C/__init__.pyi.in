@@ -175,4 +175,6 @@ class _TensorBase(object):
     device: _device
     dtype: _dtype
     layout: _layout
+    real: Tensor
+    imag: Tensor
     ${tensor_method_hints}
