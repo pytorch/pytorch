@@ -200,6 +200,9 @@ struct ProfilingRecord {
   }
 
  private:
+
+  Node* in_loop_;
+  std::list<Node*> loops_with_profiled_nodes_;
   ProfileOp* createProfileNode(
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);

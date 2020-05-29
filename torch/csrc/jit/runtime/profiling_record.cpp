@@ -5,9 +5,68 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <ostream>
+#include <torch/csrc/jit/ir/ir_views.h>
 
 namespace torch {
 namespace jit {
+
+static void peelLoop2(Node* n, size_t times) {
+
+  GRAPH_DEBUG("Peeling loop ", getHeader(n));
+  auto graph = n->owningGraph();
+  auto orig_loop = LoopView(n);
+  
+  WithInsertPoint wip(n);
+  auto times_const = graph->insertConstant(static_cast<int64_t>(times));
+  auto min_trip_count = graph->insert(prim::min, {orig_loop.maxTripCount(), times_const}); 
+  
+  auto temp_copy = graph->createClone(n, [](Value* v) {return v;});
+  LoopView temp_loop(temp_copy);
+  temp_copy->addInput(temp_loop.inputCond());
+  auto block_cond_input = temp_loop.bodyBlock()->addInput();
+  block_cond_input->copyMetadata(temp_loop.inputCond());
+  auto cond_output_index = temp_loop.bodyBlock()->registerOutput(temp_loop.nextCond());
+  temp_loop.bodyBlock()->outputs()[cond_output_index]->copyMetadata(temp_loop.nextCond());
+  auto cond_output = temp_copy->addOutput();
+  cond_output->copyMetadata(temp_loop.nextCond());
+
+  auto peeled_copy = graph->createClone(temp_copy, [](Value* v) {return v;});
+  temp_copy->destroy();
+  graph->insertNode(peeled_copy);
+  // only run until the peeled count
+  peeled_copy->replaceInput(0, min_trip_count);
+
+  //remove temp inputs and outputs on the original loop node
+  auto cond_index = peeled_copy->outputs().size() - 1;
+  // orig_loop.bodyBlock()->eraseInput(cond_index);
+  // n->eraseOutput(cond_index);
+  // orig_loop.bodyBlock()->eraseOutput(cond_index);
+  // n->removeInput(cond_index);
+  
+  LoopView new_lv(peeled_copy);
+  // add enough outputs to match the number of outputs from the block
+
+  // update max_count
+  auto new_max_trip_count = graph->insert(aten::sub, {orig_loop.maxTripCount(), min_trip_count});
+
+  // rewire inputs
+  n->replaceInput(0, new_max_trip_count);
+  
+  n->replaceInput(1, peeled_copy->output(cond_index));
+
+  static const size_t LOOP_DEPS_WITH_COND_OFFSET = 2;
+  for (size_t i = 0; i < peeled_copy->outputs().size() - 1 /* leave off the termination condition */; i++) {
+    n->replaceInput(LOOP_DEPS_WITH_COND_OFFSET + i, peeled_copy->output(i));
+  }
+
+  // adjust induction variable
+  {
+    WithInsertPoint peeled_wip(*orig_loop.bodyBlock()->nodes().begin());
+    auto adjusted_iter_counter = graph->insert(aten::add, {min_trip_count, min_trip_count});
+    orig_loop.currentTripCount()->replaceAllUsesWith(adjusted_iter_counter);
+    adjusted_iter_counter->node()->replaceInput(0, orig_loop.currentTripCount());
+  }
+}
 
 bool ShapeSymbolTable::bindSymbolicShapes(
     at::IntArrayRef new_sizes,
@@ -36,7 +95,7 @@ bool ShapeSymbolTable::bindSymbolicShapes(
 }
 
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
-    : profiled_graph_(std::move(g)), profiling_count_(getNumProfiledRuns()) {}
+    : profiled_graph_(std::move(g)), profiling_count_(getNumProfiledRuns()), in_loop_(nullptr) {}
 
 ProfileOp* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,
@@ -157,9 +216,21 @@ void ProfilingRecord::instrumentBlock(Block* block) {
       insertShapeProfile(n, i);
     }
 
+    static const auto PEEL_LOOP = getenv("PEEL_LOOP");
+
+    if (PEEL_LOOP) {
+      if (n->kind() == prim::Loop) {
+        peelLoop2(n, 1);
+      }
+    }
+    // auto old_in_loop_ = in_loop_;
+    // if (n->kind() == prim::Loop) {
+    //   in_loop_ = n;
+    // }
     for (auto b : n->blocks()) {
       instrumentBlock(b);
     }
+    //in_loop_ = old_in_loop_;
   }
 
   // inserting profile nodes on block outputs
