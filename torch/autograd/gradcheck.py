@@ -363,7 +363,7 @@ def gradcheck(
                                               allow_unused=True)
             for gi, i in zip(grads_input, diff_input_list):
                 if gi is not None:
-                    return fail_test('expected undefined input grads when all output grads are undefined')
+                    return fail_test('expected all input grads to be undefined when all output grads are undefined')
 
             # If there are multiple output grads, we should be able to undef one at a time without error
             if len(grads_output) > 1:
@@ -376,6 +376,10 @@ def gradcheck(
                                                       diff_input_list,
                                                       grads_output,
                                                       allow_unused=True)
+                    for gi, i in zip(grads_input, diff_input_list):
+                        if (gi is not None) and (not gi.eq(0).all()):
+                            print(gi)
+                            return fail_test('expected input grads to be zero or undefined when output grads are zero or undefined')
 
     return True
 
