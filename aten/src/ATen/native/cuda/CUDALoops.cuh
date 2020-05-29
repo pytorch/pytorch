@@ -64,6 +64,49 @@ static constexpr int launch_bound2 = 4;
 
 namespace at { namespace native {
 
+// See [NOTE: Complex Operator Unification]
+// std::complex and thrust::complex don't work with some !needs_dynamic_casting optimizations.
+// They always currently map to !needs_dynamic_casting even though we sometimes rely on the ability
+// to reinterpret_cast between these representations.
+// In order to separate these concerns, we have a check for non-c10 complex separately.
+template<typename func_t, int nargs=function_traits<func_t>::arity>
+struct uses_non_c10_complex {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::template arg<nargs - 1>::type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
+
+    return c10::guts::if_constexpr<non_c10_complex>([]() {
+      return true;
+    }, /* else */ []() {
+      return uses_non_c10_complex<func_t, nargs - 1>::check();
+    });
+  }
+};
+
+template<typename func_t>
+struct uses_non_c10_complex<func_t, 0> {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::result_type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
+
+    return c10::guts::if_constexpr<non_c10_complex>([]() {
+      return true;
+    }, /* else */ []() {
+      return false;
+    });
+  }
+};
+
 // NOTE: @zasdfgbnm is currently working on rewriting the gpu loops.
 // Some of the old codes has been moved to namespace legacy, and
 // new codes will be put into namespace modern. These two namespaces
@@ -240,18 +283,21 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
 
   bool contiguous = iter.is_contiguous();
   bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
+  bool non_c10_complex = uses_non_c10_complex<func_t>::check();
 
-  if (contiguous && !dynamic_casting) {
-    modern::launch_vectorized_kernel(numel, f, data);
-    return;
-  }
+  if (!non_c10_complex) {
+    if (contiguous && !dynamic_casting) {
+      modern::launch_vectorized_kernel(numel, f, data);
+      return;
+    }
 
-  if (!dynamic_casting) {
-    // !contiguous
-    auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
-    auto output_offset_calculator = make_output_offset_calculator(iter);
-    modern::launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator);
-    return;
+    if (!dynamic_casting) {
+      // !contiguous
+      auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
+      auto output_offset_calculator = make_output_offset_calculator(iter);
+      modern::launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator);
+      return;
+    }
   }
 
   at::detail::Array<ScalarType, ntensors> dtypes;
@@ -266,7 +312,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       strides[i] = inner_strides[i];
     }
 
-    if (needs_dynamic_casting<func_t>::check(iter)) {
+    // TODO: can non_c10_complex go through the other path?  Need to verify.
+    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         void* out = data[0] + strides[0] * idx;
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
@@ -280,7 +327,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     }
   } else {
     auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
-    if (needs_dynamic_casting<func_t>::check(iter)) {
+    // TODO: can non_c10_complex go through the other path?  Need to verify.
+    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];

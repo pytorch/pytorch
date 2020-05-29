@@ -25,12 +25,12 @@ namespace c10 {
 // Since C++14, all constructors are constexpr in std::complex
 //
 // There are three types of constructors:
-// - initializing from real and imag: 
+// - initializing from real and imag:
 //     `constexpr complex( const T& re = T(), const T& im = T() );`
 // - implicitly-declared copy constructor
 // - converting constructors
 //
-// Converting constructors: 
+// Converting constructors:
 // - std::complex defines converting constructor between float/double/long double,
 //   while we define converting constructor between float/double.
 // - For these converting constructors, upcasting is implicit, downcasting is
@@ -99,18 +99,22 @@ namespace c10 {
 // - real + complex
 //
 // [Operator ==, !=]
-// 
+//
 // Each operator has three versions (taking == as example):
 // - complex == complex
 // - complex == real
 // - real == complex
-// 
+//
 // Some of them are removed on C++20, but we decide to keep them
 //
 // [Operator <<, >>]
 //
 // These are implemented by casting to std::complex
 //
+// [NOTE: Complex Operator Unification]
+// Operators currently use a mix of std::complex, thrust::complex, and c10::complex internally.
+// The end state is that all operators will use c10::complex internally.  Until then, there may
+// be some hacks to support all variants.
 //
 //
 //
