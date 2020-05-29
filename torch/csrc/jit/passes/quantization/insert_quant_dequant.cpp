@@ -963,7 +963,7 @@ Module InsertQuantDeQuant(
     const std::string& method_name,
     bool inplace,
     bool is_dynamic) {
-  Module module = inplace ? input_module : input_module.clone();
+  Module module = input_module.clone(inplace);
   InsertQuantDeQuantHelper h;
   h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);
