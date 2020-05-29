@@ -11,7 +11,7 @@ import unittest
 import itertools
 import warnings
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
+from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, CacheDataset, DataLoader, ConcatDataset, ChainDataset
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
@@ -199,6 +199,32 @@ class CountingIterableDataset(IterableDataset):
     def __len__(self):
         return self.n
 
+class SampleCacheDataset(CacheDataset):
+    def __init__(self):
+        super(SampleCacheDataset, self).__init__()
+        self.data = list(range(10))
+
+    def __len__(self):
+        return len(self.data)
+
+    def get_item(self, idx):
+        return self.data[idx]
+
+    def is_cached(self, idx):
+        return idx in self.cache
+
+class TestCacheDataset(TestCase):
+    dataset = SampleCacheDataset()
+
+    def test_len(self):
+        self.assertEqual(len(self.dataset), 10)
+
+    def test_cache(self):
+        tmp = []
+        for idx in range(len(self.dataset)):
+            self.assertFalse(self.dataset.is_cached(idx))
+            tmp.append(self.dataset[idx])
+            self.assertTrue(self.dataset.is_cached(idx))
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
