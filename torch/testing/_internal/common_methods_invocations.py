@@ -117,7 +117,6 @@ def ident(x):
 def method_tests():
     set_rng_seed(0)
     return [
-        ('acosh', (S, S, S), NO_ARGS, '', (True,)),
         ('acosh', (), NO_ARGS, 'scalar', (True,)),
         ('add', (S, S, S), ((S, S, S),), '', (True,)),
         ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
@@ -128,9 +127,7 @@ def method_tests():
         ('add', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('add', (S, S, S), (3.14,), 'constant', (True,)),
         ('add', (), (3.14,), 'scalar_constant', (True,)),
-        ('asinh', (S, S, S), NO_ARGS, '', (True,)),
         ('asinh', (), NO_ARGS, 'scalar', (True,)),
-        ('atanh', (S, S, S), NO_ARGS, '', (True,)),
         ('atanh', (), NO_ARGS, 'scalar', (True,)),
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
