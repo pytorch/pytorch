@@ -173,9 +173,31 @@ void RequestCallbackImpl::processRpc(
         std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
         {
           py::gil_scoped_acquire acquire;
-          pyFuture =
-              pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())
-                  .cast<std::shared_ptr<jit::PythonFutureWrapper>>();
+          auto result =
+              pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf());
+
+          if (pythonRpcHandler.isException(result) ) {
+            // Hit exception when running the user function.
+            // Not releasing GIL before serialize to avoid an additional
+            // context switch.
+            auto serializedPyObj = pythonRpcHandler.serialize(result);
+            py::gil_scoped_release release;
+            markComplete(
+                std::move(PythonResp(std::move(serializedPyObj))).toMessage());
+            return;
+          }
+
+          try {
+            pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
+          } catch (...) {
+            auto type = result.get_type();
+            throw std::runtime_error(c10::str(
+                "Functions decorated with @rpc.async_function must return a "
+                "torch.futures.Future object, but got ",
+                type.attr("__module__").cast<std::string>(),
+                ".",
+                type.attr("__qualname__").cast<std::string>()));
+          }
         }
         pyFuture->fut->addCallback([msgId = messageId,
                                     responseFuture = responseFuture,

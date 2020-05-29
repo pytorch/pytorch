@@ -340,6 +340,16 @@ def fail_on_fut(fut):
 
 
 @rpc.async_function
+def async_raise_func():
+    raise RuntimeError("Expected error")
+
+
+@rpc.async_function
+def async_wrong_type():
+    return torch.zeros(2, 2)
+
+
+@rpc.async_function
 def async_add(to, x, y):
     return rpc.rpc_async(to, torch.add, args=(x, y))
 
@@ -2720,6 +2730,26 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_future_nested_callback(self):
         self._test_future_cb(add_use_future_nested_cb)
+
+    @dist_init
+    def test_async_function_raise(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected error"):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                async_raise_func
+            )
+
+    @dist_init
+    def test_async_function_wrong_return_type(self):
+        errMsg = (
+            "Functions decorated with @rpc\\.async_function must return a "
+            "torch\\.futures\\.Future object,"
+        )
+        with self.assertRaisesRegex(RuntimeError, errMsg):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                async_wrong_type
+            )
 
     @dist_init
     def test_async_function_simple(self):

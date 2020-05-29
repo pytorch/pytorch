@@ -525,6 +525,8 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
+        is_async_fn = hasattr(func, "_wrapped_async_rpc_function")
+
         if qualified_name is not None:
             fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
@@ -532,7 +534,6 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
                 dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
             )
         else:
-            is_async_fn = hasattr(func, "_wrapped_async_rpc_function")
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
