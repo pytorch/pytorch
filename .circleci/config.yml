@@ -2488,8 +2488,6 @@ workflows:
           resource_class: gpu.medium
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_build
-          requires:
-            - setup
           filters:
             branches:
               only:
@@ -2501,7 +2499,6 @@ workflows:
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_test
           requires:
-            - setup
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_build
           filters:
             branches:
