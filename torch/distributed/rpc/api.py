@@ -528,7 +528,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         is_async_fn = hasattr(func, "_wrapped_async_rpc_function")
 
         if is_async_fn:
-            wrapped = getattr(func, "_wrapped_async_rpc_function")
+            wrapped = func._wrapped_async_rpc_function
             if isinstance(wrapped, torch.jit.ScriptFunction):
                 func = wrapped
 
