@@ -2214,7 +2214,7 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         data = torch.randn(5, 5, dtype=torch.float)
 
         m(data)
-        m = convert_dynamic_script(m)
+        m = convert_dynamic_script(m, debug=True)
 
         assert len(m._modules._c.items()) == 2, \
             'Expected to have two submodule of linear'
