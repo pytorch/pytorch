@@ -320,18 +320,5 @@ Tensor mean_vulkan(
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_vulkan(
-    const Tensor& input,
-    const Tensor& weight,
-    const Tensor& bias,
-    const Tensor& running_mean,
-    const Tensor& running_var,
-    bool train,
-    double momentum,
-    double eps) {
-  Tensor save_mean, save_var;
-  return std::make_tuple(input, save_mean, save_var);
-}
-
 } // namespace native
 } // namespace at

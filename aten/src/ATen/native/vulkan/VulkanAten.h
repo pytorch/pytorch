@@ -41,5 +41,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_vulkan(
     double momentum,
     double eps);
 
+>>>>>>> 1d0da9e3a3... [vulkan] Conv2d with optional clamp
 } // namespace native
 } // namespace at
