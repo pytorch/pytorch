@@ -755,7 +755,6 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
-using namespace torch::autograd;
 
 void checkScopeCallbacks() {
   bool found_function_scope = false;
@@ -1591,6 +1590,32 @@ void testAutogradSymbols() {
   sym = Symbol::fromQualString("custom::test_symbol");
   node = graph.create(sym);
   TORCH_CHECK(!canRunWithAutograd(node));
+}
+
+void testDefaultArgTypeHinting() {
+  const auto text_non_hinted = R"(
+
+def a(x, y=1):
+    print("a1")
+    print("a2")
+    return x
+  )";
+
+  const auto text_hinted = R"(
+
+def a(x, y:int=1):
+    print("a1")
+    print("a2")
+    return x
+  )";
+
+  try {
+    compile(text_non_hinted);
+    ASSERT_TRUE(0);
+  } catch (const std::exception& c) {
+  }
+
+  auto cu = compile(text_hinted);
 }
 
 } // namespace jit
