@@ -1096,7 +1096,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             *inputs, target = data[0]
             outputs[d] = models[d](*inputs)
 
-        # this the option to not check the graph, used when debugging the test
         if check:
             # debug and non-debug option should have the same numerics
             self.assertEqual(outputs[True], outputs[False])
