@@ -338,7 +338,13 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
            containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
-
+        _use_new_zipfile_serialization: saves the object as a zip file rather than a binary file
+    
+    Note:
+        The file extension does not matter while saving the object. The object can be saved using
+        .pt, .pth, .zip or any other extension. You can literally save the object as .py file and 
+        it will work as intented.
+    
     .. warning::
         If you are using Python 2, :func:`torch.save` does NOT support :class:`StringIO.StringIO`
         as a valid file-like object. This is because the write method should return
@@ -353,6 +359,10 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
+        >>> 
+        >>> # Use _use_new_zipfile_serialization and use highest pickle protocol
+        >>> torch.save(x, 'tensor2.pt', pickle_protocol=5, _use_new_zipfile_serialization=True)
+        >>> x = torch.load('tensor2.pt') # Loading process remains same
     """
     _check_dill_version(pickle_module)
 
