@@ -366,7 +366,7 @@ struct TORCH_API Engine {
 
 private:
   // Number of non-reentrant threads
-  std::atomic<uint32_t> non_reentrant_device_thread_count_;
+  volatile uint32_t non_reentrant_device_thread_count_;
   // Destructor will wait for non-reentrant threads to finish
   std::condition_variable non_reentrant_device_thread_condvar_;
   std::mutex non_reentrant_device_thread_mutex_;

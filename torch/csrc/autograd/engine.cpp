@@ -229,7 +229,7 @@ Engine::~Engine() {
     // global object destructors
 #if !defined(_WIN32) || !defined(C10_BUILD_SHARED_LIBS)
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-    while(non_reentrant_device_thread_count_.load() != 0) {
+    while(non_reentrant_device_thread_count_ != 0) {
       non_reentrant_device_thread_condvar_.wait(lk);
     }
 #endif
@@ -239,13 +239,13 @@ Engine::~Engine() {
 
 void Engine::release_workers() {
   std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-  non_reentrant_device_thread_count_.store(0);
+  non_reentrant_device_thread_count_ = 0;
   non_reentrant_device_thread_condvar_.notify_one();
 }
 
 void Engine::increment_non_reentrant_thread_count() {
   std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-  non_reentrant_device_thread_count_.fetch_add(1);
+  non_reentrant_device_thread_count_++;
   non_reentrant_device_thread_condvar_.notify_one();
 }
 
@@ -286,7 +286,7 @@ void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
   // Notify about shutdown
   {
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-    non_reentrant_device_thread_count_.fetch_sub(1);
+    non_reentrant_device_thread_count_--;
     non_reentrant_device_thread_condvar_.notify_one();
   }
 }
@@ -1063,7 +1063,7 @@ auto Engine::start_device_threads() -> void {
   // Wait for the threads to start
   {
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-    while(non_reentrant_device_thread_count_.load() != num_devices) {
+    while(non_reentrant_device_thread_count_ != num_devices) {
       non_reentrant_device_thread_condvar_.wait(lk);
     }
   }
