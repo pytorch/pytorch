@@ -466,12 +466,12 @@ class InsertQuantDeQuantHelper {
   void quantizeTensors(Module& module, Graph* g, Value* self);
 
   // Quantizes two types of general ops(ops that works both for floating point
- //  and quantized Tensors) in this pass
- //  for ops that only manipulates shape, e.g. flatten, quantization
- //  is done by swapping with previous dequantize op
- //  for ops that manipulates values of Tensor, e.g. average pool, quantization
- //  is done by inserting quant/dequant ops after the op
- //
+  // and quantized Tensors) in this pass
+  // for ops that only manipulates shape, e.g. flatten, quantization
+  // is done by swapping with previous dequantize op
+  // for ops that manipulates values of Tensor, e.g. average pool, quantization
+  // is done by inserting quant/dequant ops after the op
+  // also has a special handling of clamp/hardtanh
   void propagateQuantizationOps(Block* block);
 
   // Propagate quantization parameters from other quantized tensors
