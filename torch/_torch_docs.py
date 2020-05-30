@@ -5510,6 +5510,9 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
 
+.. warning:: If batch_size=1, then `squeeze(input)` will also remove the batch
+             dimension, which can lead to unexpected errors.
+             
 Args:
     {input}
     dim (int, optional): if given, the input will be squeezed only in
