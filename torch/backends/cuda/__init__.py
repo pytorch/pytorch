@@ -83,6 +83,17 @@ class cuFFTPlanCacheManager(object):
             return super(cuFFTPlanCacheManager, self).__setattr__(name, value)
 
 
+class cuBLASModule:
+    def __getattr__(self, name):
+        assert name == "use_tf32", "Unknown attribute " + name
+        return torch._C._get_cublas_use_tf32()
+
+    def __setattr__(self, name, value):
+        assert name == "use_tf32", "Unknown attribute " + name
+        return torch._C._set_cublas_use_tf32(value)
+
+
+
 class CUDAModule(object):
     def __init__(self, m):
         self.__dict__ = m.__dict__
@@ -92,6 +103,7 @@ class CUDAModule(object):
         self.__old_mod = m
 
     cufft_plan_cache = cuFFTPlanCacheManager()
+    matmul = cuBLASModule()
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
