@@ -54,9 +54,10 @@ double ProcessGroupAgent::AverageMetricsTracker::computeAverage() {
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
-const ProcessGroupAgent::steady_clock_time_point
-    ProcessGroupAgent::kInfiniteTimeoutTimePoint =
-        std::chrono::time_point<std::chrono::steady_clock>::max();
+using steady_clock_time_point =
+    std::chrono::time_point<std::chrono::steady_clock>;
+const steady_clock_time_point kInfiniteTimeoutTimePoint =
+    std::chrono::time_point<std::chrono::steady_clock>::max();
 const std::string kNumPendingRequests = "agent.num_pending_requests";
 const std::string kThreadPoolSize = "agent.thread_pool_size";
 const std::string kNumIdleThreads = "agent.num_idle_threads";
@@ -373,36 +374,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   // Sending to ourselves: bypass the send logic and enqueue directly
   // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
-    threadPool_.run(std::bind(
-        [this, future](const Message& message) {
-          // Unlike the other cases, need to add a tensor deleter, since the
-          // data outlives the scope of this function. It's shared_ptr<> due
-          // to c++11 lambda capture limitations with unique_ptr<>.
-          std::unique_ptr<std::string> payload;
-          try {
-            payload = std::make_unique<std::string>(
-                wireSerialize(message.payload(), message.tensors()));
-            // only increment sendCounts when the message is indeed added into
-            // local recv.
-            sendCounts_.increment(pg_->getRank());
-          } catch (std::exception& e) {
-            markFutureWithError(message.id(), e.what());
-            return;
-          }
-          const char* data = payload->data();
-          size_t len = payload->length();
-          std::string* delete_when_done = payload.release();
-          enqueueRecv(RecvWork(
-              getWorkerInfo(pg_->getRank()),
-              message.type(),
-              message.id(),
-              torch::from_blob(
-                  (void*)data,
-                  len,
-                  [delete_when_done](void*) { delete delete_when_done; },
-                  {torch::kChar})));
-        },
-        std::move(message)));
+    sendToSelf(std::move(message));
     return future;
   }
 
@@ -479,6 +451,39 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
       set.erase(p);
     }
   }
+}
+
+void ProcessGroupAgent::sendToSelf(Message&& message) {
+  threadPool_.run(std::bind(
+      [this](const Message& message) {
+        // Unlike the other cases, need to add a tensor deleter, since the
+        // data outlives the scope of this function. It's shared_ptr<> due
+        // to c++11 lambda capture limitations with unique_ptr<>.
+        std::unique_ptr<std::string> payload;
+        try {
+          payload = std::make_unique<std::string>(
+              wireSerialize(message.payload(), message.tensors()));
+          // only increment sendCounts when the message is indeed added into
+          // local recv.
+          sendCounts_.increment(pg_->getRank());
+        } catch (std::exception& e) {
+          markFutureWithError(message.id(), e.what());
+          return;
+        }
+        const char* data = payload->data();
+        size_t len = payload->length();
+        std::string* delete_when_done = payload.release();
+        enqueueRecv(RecvWork(
+            getWorkerInfo(pg_->getRank()),
+            message.type(),
+            message.id(),
+            torch::from_blob(
+                (void*)data,
+                len,
+                [delete_when_done](void*) { delete delete_when_done; },
+                {torch::kChar})));
+      },
+      std::move(message)));
 }
 
 void ProcessGroupAgent::enqueueSend(SendWork work) {

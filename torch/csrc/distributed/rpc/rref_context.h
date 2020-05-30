@@ -23,8 +23,9 @@ void TORCH_API confirmPendingUser(
 // It's the callback for finishing creating owner rref, it returned deletedRRef,
 // so that the deletedRRef can be handled under GIL in python_functions.cpp if
 // deletedRRef contains python object.
-c10::intrusive_ptr<RRef> TORCH_API
-finishCreatingOwnerRRef(const FutureMessage& futureMessage);
+c10::intrusive_ptr<RRef> TORCH_API finishCreatingOwnerRRef(
+    const FutureMessage& futureMessage,
+    const RRefId& rrefId);
 } // namespace callback
 
 using torch::utils::Future;
@@ -103,9 +104,12 @@ class TORCH_API RRefContext {
 
   // Returns a Future of the OwnerRRef, which will be marked completed when
   // ``OwnerRRef`` is created. This method is used when the TypePtr is not
-  // available, e.g., when processing to_here().
+  // available, e.g., when processing to_here(). The forceCreated flag can be
+  // used to ensure that the rref is created on the owner, otherwise throw in
+  // cases where the user of this API expects this to return a completed future.
   std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> getOwnerRRef(
-      const RRefId& rrefId);
+      const RRefId& rrefId,
+      bool forceCreated = false);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
   // making a remote call to self, which as for now, still goes through serde
@@ -174,7 +178,7 @@ class TORCH_API RRefContext {
 
   // Retrieve a pending user given the fork ID. Throws if the user has already
   // been confirmed (i.e. is no longer in the pendingUser_ map).
-  c10::intrusive_ptr<RRef>& getPendingUser(const ForkId& forkId);
+  c10::intrusive_ptr<RRef> getPendingUser(const ForkId& forkId);
 
   // Start recroding new pending UserRRefs. All pending UserRRefs introduced
   // after this point will be put into the thread_local userTable_, which will
@@ -289,6 +293,13 @@ class TORCH_API RRefContext {
   //     owner learns about the forked child.
   std::unordered_map<ForkId, c10::intrusive_ptr<RRef>, ForkId::Hash>
       pendingChildren_;
+
+  // The RRef context performs its operations through async RPC requests, in
+  // order to not block the user code. Therefore the RRef context's state may be
+  // lagging a bit behind what it is intended to be, while it waits for these
+  // requests to complete. To allow syncing when needed, we store the count of
+  // these pending requests, so that users can wait for it to reach zero.
+  std::atomic<int64_t> numPendingFutures_{0};
 
   std::mutex destroyedMutex_;
   bool destroyed_;

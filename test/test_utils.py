@@ -14,7 +14,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import skipIfRocm, load_tests, retry, IS_SANDCASTLE
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE
 from urllib.error import HTTPError
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -332,13 +332,17 @@ class TestFFI(TestCase):
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
-    def _run(self, command):
+    def _run(self, command, timeout=30):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
 
         p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
-        output, err = p.communicate()
+        try:
+            output, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            output, err = p.communicate()
         rc = p.returncode
         output = output.decode("ascii")
         err = err.decode("ascii")
@@ -356,11 +360,11 @@ class TestBottleneck(TestCase):
     def _check_run_args(self):
         # Check that this fails due to missing args
         rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py')
-        self.assertEqual(rc, 2, atol=0, message=self._fail_msg('Missing args should error', out + err))
+        self.assertEqual(rc, 2, atol=0, rtol=0, msg=self._fail_msg('Missing args should error', out + err))
 
         # This should succeed
         rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py', '--foo foo --bar bar')
-        self.assertEqual(rc, 0, atol=0, message=self._fail_msg('Should pass args to script', out + err))
+        self.assertEqual(rc, 0, atol=0, rtol=0, msg=self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
         return '{}, output was:\n{}'.format(msg, output)
@@ -404,7 +408,7 @@ class TestBottleneck(TestCase):
     @unittest.skipIf(HAS_CUDA, 'CPU-only test')
     def test_bottleneck_cpu_only(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test.py')
-        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -413,10 +417,9 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @skipIfRocm
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
-        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -571,7 +574,7 @@ class TestHub(TestCase):
     def test_hub_dir(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
-            self.assertEqual(torch.hub._get_torch_home(), dirname)
+            self.assertEqual(torch.hub.get_dir(), dirname)
 
 
 class TestHipify(TestCase):

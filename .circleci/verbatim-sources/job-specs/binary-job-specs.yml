@@ -2,7 +2,7 @@
     <<: *binary_linux_build_params
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - run:
         <<: *binary_checkout
     - run:
@@ -66,7 +66,7 @@
         image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     # TODO: We shouldn't attach the workspace multiple times
     - attach_workspace:
         at: /home/circleci/project
@@ -79,7 +79,7 @@
     - run:
         name: Prepare test code
         no_output_timeout: "1h"
-        command: ~/workspace/.circleci/scripts/binary_linux_test.sh
+        command: .circleci/scripts/binary_linux_test.sh
     - run:
         <<: *binary_run_in_docker
 
@@ -89,7 +89,7 @@
         image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - setup_ci_environment
     - attach_workspace:
@@ -101,7 +101,7 @@
     - run:
         name: Upload
         no_output_timeout: "1h"
-        command: ~/workspace/.circleci/scripts/binary_linux_upload.sh
+        command: .circleci/scripts/binary_linux_upload.sh
 
   # Nighlty build smoke tests defaults
   # These are the second-round smoke tests. These make sure that the binaries are
@@ -171,7 +171,7 @@
       xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - run:
         <<: *binary_checkout
     - run:
@@ -212,7 +212,7 @@
       xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - run:
         <<: *binary_checkout
     - run:
@@ -237,7 +237,6 @@
     steps:
     - attach_workspace:
         at: ~/workspace
-    - attach_scripts
     - checkout
     - run_brew_for_ios_build
     - run:
@@ -265,7 +264,6 @@
     steps:
     - attach_workspace:
         at: ~/workspace
-    - attach_scripts
     - checkout
     - run_brew_for_ios_build
     - run:
@@ -288,7 +286,7 @@
     executor: <<parameters.executor>>
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - run:
         <<: *binary_checkout
     - run:
@@ -316,7 +314,7 @@
         default: "windows-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
-    - attach_scripts
+    - checkout
     - attach_workspace:
         at: c:/users/circleci/project
     - run:
@@ -338,7 +336,9 @@
       - image: continuumio/miniconda
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
+    - attach_workspace:
+        at: /root/workspace
     - run:
         <<: *binary_checkout
     - run:

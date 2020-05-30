@@ -51,6 +51,8 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
 
   // Overrides ProcessGroupAgent's enqueueSend to inject delays.
   void enqueueSend(SendWork work) override;
+  // Override ProcessGroupAgent's sendToSelf to inject delays.
+  void sendToSelf(Message&& message) override;
 
  protected:
   // This function checks the messageTypesToFail_ to determine whether to use

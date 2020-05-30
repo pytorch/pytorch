@@ -17,7 +17,6 @@ constexpr float kDefaultRpcTimeoutSeconds = 60;
 // timeout for RPCs.
 constexpr float kUnsetRpcTimeout = -1;
 constexpr auto kDefaultInitMethod = "env://";
-extern const std::string kRPCErrorPrefix;
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;

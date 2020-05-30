@@ -116,7 +116,9 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     ownerRRefPtr->registerOwnerCreationFuture(fm);
 
     fm->addCallback(
-        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
+        [ownerRRefId = ownerRRefPtr->rrefId()](const FutureMessage& fm) {
+          callback::finishCreatingOwnerRRef(fm, ownerRRefId);
+        });
     return ownerRRefPtr;
   }
 }

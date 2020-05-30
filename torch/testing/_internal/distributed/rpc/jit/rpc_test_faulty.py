@@ -8,7 +8,7 @@ from torch.testing._internal.dist_utils import (
     dist_init,
     get_timeout_error_regex,
     worker_name,
-    wait_until_pending_users_flushed
+    wait_until_pending_futures_and_users_flushed
 )
 from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
     FaultyRpcAgentTestFixture,
@@ -169,7 +169,7 @@ class JitFaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )
-        wait_until_pending_users_flushed()
+        wait_until_pending_futures_and_users_flushed()
         # Call to_here() within a ScriptFunction and ensure it raises
         with self.assertRaisesRegex(RuntimeError, "RRef creation"):
             rref_to_here(rref)
@@ -199,7 +199,7 @@ class JitFaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )
-        wait_until_pending_users_flushed()
+        wait_until_pending_futures_and_users_flushed()
         # Call RPC with RRef arg in JIT, which will go through JIT pickling and
         # ensure error is raised.
         with self.assertRaisesRegex(RuntimeError, "RRef creation"):
@@ -215,7 +215,7 @@ class JitFaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )
-        wait_until_pending_users_flushed()
+        wait_until_pending_futures_and_users_flushed()
         # Call RPC with script function that takes RRef, ensure timeout during pickling
         with self.assertRaisesRegex(RuntimeError, "RRef creation"):
             rpc.rpc_sync(dst_worker, rref_to_here, args=(rref, ))

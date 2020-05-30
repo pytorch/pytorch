@@ -370,12 +370,12 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                                    ``to`` is not successfully processed on this
                                    worker within this timeout, then the next time
                                    there is an attempt to use the RRef (such as
-                                   to_here()), a timeout will be raised indicating
-                                   this failure. A value of 0 indicates an
-                                   infinite timeout, i.e. a timeout error will
+                                   ``to_here()``), a timeout will be raised
+                                   indicating this failure. A value of 0 indicates
+                                   an infinite timeout, i.e. a timeout error will
                                    never be raised. If not provided, the default
                                    value set during initialization or with
-                                   `_set_rpc_timeout` is used.
+                                   ``_set_rpc_timeout`` is used.
 
     Returns:
         A user :class:`~torch.distributed.rpc.RRef` instance to the result

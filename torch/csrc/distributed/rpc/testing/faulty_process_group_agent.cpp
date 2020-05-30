@@ -101,6 +101,16 @@ void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
   ProcessGroupAgent::enqueueSend(std::move(work));
 }
 
+void FaultyProcessGroupAgent::sendToSelf(Message&& message) {
+  float msgDelay = getDelayForMessage(message.type());
+  if (msgDelay != 0) {
+    // Sleep for the specified delay for the message.
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        static_cast<int>(msgDelay * kSecToMsConversion)));
+  }
+  ProcessGroupAgent::sendToSelf(std::move(message));
+}
+
 bool FaultyProcessGroupAgent::shouldFailMessage(MessageType type) const {
   // Return true if the input message type is in the messageTypesToFail_ list
   return (

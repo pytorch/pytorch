@@ -276,7 +276,9 @@ PyRRef pyRemoteBuiltin(
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
     fm->addCallback(
-        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
+        [ownerRRefId = ownerRRef->rrefId()](const FutureMessage& fm) {
+          callback::finishCreatingOwnerRRef(fm, ownerRRefId);
+        });
     return PyRRef(ownerRRef);
   }
 }
@@ -319,13 +321,14 @@ PyRRef pyRemotePythonUdf(
 
     ownerRRef->registerOwnerCreationFuture(fm);
 
-    fm->addCallback([](const FutureMessage& fm) {
-      auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
-      if (deletedRRef && deletedRRef->isPyObj()) {
-        py::gil_scoped_acquire ag;
-        deletedRRef.reset();
-      }
-    });
+    fm->addCallback(
+        [ownerRRefId = ownerRRef->rrefId()](const FutureMessage& fm) {
+          auto deletedRRef = callback::finishCreatingOwnerRRef(fm, ownerRRefId);
+          if (deletedRRef && deletedRRef->isPyObj()) {
+            py::gil_scoped_acquire ag;
+            deletedRRef.reset();
+          }
+        });
     return PyRRef(ownerRRef);
   }
 }

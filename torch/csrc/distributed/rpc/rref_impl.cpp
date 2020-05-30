@@ -231,6 +231,11 @@ RRefForkData UserRRef::fork() const {
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
+  if (this->getTimedOut()) {
+    throw std::runtime_error(
+        "RRef creation via rpc.remote() to self timed out, and it "
+        "is possible that the RRef on the owner node does not exist.");
+  }
   future_->wait();
   if (future_->hasError()) {
     (void)future_->value(); // Throws the error.

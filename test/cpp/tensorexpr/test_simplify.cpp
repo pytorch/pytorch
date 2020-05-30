@@ -3,7 +3,6 @@
 #include "test/cpp/tensorexpr/test_utils.h"
 #include "torch/csrc/jit/tensorexpr/hash_provider.h"
 #include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 
 #include <cmath>
@@ -2036,6 +2035,23 @@ void testSimplifyForCleansUp() {
     IS_NODE_WITH_NAME(Store, for_->body()->front(), store);
     IS_VAR_WITH_NAME(store->flat_index(), "m");
     IS_VAR_WITH_NAME(store->value(), "m");
+  }
+}
+
+void testSimplifyEliminateEmptyFor() {
+  KernelScope kernel_scope;
+
+  {
+    // Flatten many layers around an empty block to an empty block.
+    Stmt* last = new Block({});
+    for (int i = 0; i < 11; ++i) {
+      VarHandle loopVar("loopVar", kInt);
+      last = For::make(loopVar, 0, 10, last);
+    }
+
+    Stmt* simplified = IRSimplifier::simplify(last);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 0);
   }
 }
 
