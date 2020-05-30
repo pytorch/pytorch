@@ -9382,6 +9382,18 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
 
+    def test_ReplicationPad_empty(self, device):
+        for mod, inp in [
+                (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10)),
+                (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10)),
+                (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10))]:
+            mod = mod.to(device)
+            inp = inp.to(device)
+            self._test_module_empty_input(mod, inp, check_size=False)
+            if self.device_type == 'cuda' and self.has_cudnn():
+                with torch.backends.cudnn.flags(enabled=False):
+                    self._test_module_empty_input(mod, inp, check_size=False)
+
     def test_BatchNorm_empty(self, device):
         mod = torch.nn.BatchNorm2d(3).to(device)
         inp = torch.randn(0, 3, 2, 2, device=device)
