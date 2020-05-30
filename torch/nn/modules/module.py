@@ -1020,7 +1020,7 @@ class Module(object):
                 yield name, module
 
     def modules(self):
-        r"""Returns an iterator over all modules in the network.
+        r"""Returns an iterator over all modules in the network including the network module.
 
         Yields:
             Module: a module in the network
