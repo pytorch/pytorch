@@ -627,6 +627,8 @@ Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, Qu
 }
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+  TORCH_CHECK(
+      size.size() == stride.size(), "mismatch in length of strides and shape");
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = detail::make_tensor<TensorImpl>(
       Storage(self.storage()), self.key_set(), self.dtype());
@@ -635,6 +637,8 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
 }
 
 Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+  TORCH_CHECK(
+    size.size() == stride.size(), "mismatch in length of strides and shape");
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(
