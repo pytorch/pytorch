@@ -18,7 +18,7 @@ __host__ __device__ static inline scalar_t acos_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> acos_wrapper(c10::complex<T> v) {
-  return std:::acos(v);
+  return std::acos(v);
 }
 
 void acos_kernel_cuda(TensorIterator& iter) {
@@ -37,7 +37,7 @@ __host__ __device__ static inline scalar_t asin_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> asin_wrapper(c10::complex<T> v) {
-  return std:::asin(v);
+  return std::asin(v);
 }
 
 void asin_kernel_cuda(TensorIterator& iter) {
@@ -56,7 +56,7 @@ __host__ __device__ static inline scalar_t atan_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> atan_wrapper(c10::complex<T> v) {
-  return std:::atan(v);
+  return std::atan(v);
 }
 
 void atan_kernel_cuda(TensorIterator& iter) {
@@ -76,7 +76,7 @@ __host__ __device__ static inline scalar_t sin_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> sin_wrapper(c10::complex<T> v) {
-  return std:::sin(v);
+  return std::sin(v);
 }
 
 void sin_kernel_cuda(TensorIterator& iter) {
@@ -94,7 +94,7 @@ __host__ __device__ static inline scalar_t cos_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> cos_wrapper(c10::complex<T> v) {
-  return std:::cos(v);
+  return std::cos(v);
 }
 
 void cos_kernel_cuda(TensorIterator& iter) {
@@ -113,7 +113,7 @@ __host__ __device__ static inline scalar_t sinh_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> sinh_wrapper(c10::complex<T> v) {
-  return std:::sinh(v);
+  return std::sinh(v);
 }
 
 void sinh_kernel_cuda(TensorIterator& iter) {
@@ -131,7 +131,7 @@ __host__ __device__ static inline scalar_t cosh_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> cosh_wrapper(c10::complex<T> v) {
-  return std:::cosh(v);
+  return std::cosh(v);
 }
 
 void cosh_kernel_cuda(TensorIterator& iter) {
@@ -149,7 +149,7 @@ __host__ __device__ static inline scalar_t tanh_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> tanh_wrapper(c10::complex<T> v) {
-  return std:::tanh(v);
+  return std::tanh(v);
 }
 
 void tanh_kernel_cuda(TensorIterator& iter) {
@@ -169,7 +169,7 @@ __host__ __device__ static inline scalar_t tan_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> tan_wrapper(c10::complex<T> v) {
-  return std:::tan(v);
+  return std::tan(v);
 }
 
 void tan_kernel_cuda(TensorIterator& iter) {
