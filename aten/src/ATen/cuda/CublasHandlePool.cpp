@@ -43,9 +43,9 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
 #if CUDA_VERSION >= 11000
   if (at::globalContext().useTF32CuBLAS()) {
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(*handle, CUBLAS_TF32_TENSOR_OP_MATH));
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
   } else {
-    TORCH_CUDABLAS_CHECK(cublasSetMathMode(*handle, CUBLAS_DEFAULT_MATH));
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   }
 #endif
   return handle;
