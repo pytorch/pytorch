@@ -89,7 +89,7 @@ class TestNamedTensor(TestCase):
             return
         result = op(*args)
         self.assertEqual(result.names, expected_names,
-                         message='Name inference for {} on device {} failed'.format(
+                         msg='Name inference for {} on device {} failed'.format(
                              op.__name__, device))
 
     # TODO(rzou): Some form of this check should be added to self.assertEqual.
@@ -147,8 +147,8 @@ class TestNamedTensor(TestCase):
         prev_none_refcnt = sys.getrefcount(None)
         scope()
         self.assertEqual(sys.getrefcount(None), prev_none_refcnt,
-                         message='Using tensor.names should not change '
-                                 'the refcount of Py_None')
+                         msg='Using tensor.names should not change '
+                             'the refcount of Py_None')
 
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
@@ -162,12 +162,9 @@ class TestNamedTensor(TestCase):
         self.assertTrue(fully_named.has_names())
 
     def test_py3_ellipsis(self):
-        # Need to exec or else flake8 will complain about invalid python 2.
         tensor = torch.randn(2, 3, 5, 7)
-        scope = {'tensor': tensor}
-        code_str = "output = tensor.refine_names('N', ..., 'C')"
-        exec(code_str, globals(), scope)
-        self.assertEqual(scope['output'].names, ['N', None, None, 'C'])
+        output = tensor.refine_names('N', ..., 'C')
+        self.assertEqual(output.names, ['N', None, None, 'C'])
 
     def test_refine_names(self):
         # Unnamed tensor -> Unnamed tensor
@@ -838,7 +835,7 @@ class TestNamedTensor(TestCase):
                 # Get a better error message by catching the error and asserting.
                 raise RuntimeError('{}: {}'.format(testcase.name, err))
             self.assertEqual(out.names, tensor.names,
-                             message=testcase.name)
+                             msg=testcase.name)
 
         def fn(name, *args, **kwargs):
             return [Function(name, lambda t: getattr(torch, name)(t, *args, **kwargs))]
@@ -986,6 +983,13 @@ class TestNamedTensor(TestCase):
                 self.assertEqual(result[1].names, names)
         test_ops(torch.cummax)
         test_ops(torch.cummin)
+
+    def test_logcumsumexp(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.rand(2, 3, names=names)
+            result = torch.logcumsumexp(tensor, 'D')
+            self.assertEqual(result.names, names)
 
     def test_bitwise_not(self):
         for device in torch.testing.get_all_device_types():

@@ -319,7 +319,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Construct a 1-dim 0-size tensor backed by the given storage.
    */
-  TensorImpl(Storage&& storage, DispatchKeySet);
+  TensorImpl(
+      Storage&& storage,
+      DispatchKeySet,
+      const caffe2::TypeMeta& data_type);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
@@ -328,8 +331,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Legacy constructors so I don't have to go update call sites.
   // TODO: When Variable is added, delete these constructors
-  TensorImpl(Storage&& storage, DispatchKey dispatch_key)
-    : TensorImpl(std::move(storage), DispatchKeySet(dispatch_key)) {}
+  TensorImpl(
+      Storage&& storage,
+      DispatchKey dispatch_key,
+      const caffe2::TypeMeta& data_type)
+      : TensorImpl(
+            std::move(storage),
+            DispatchKeySet(dispatch_key),
+            data_type) {}
   TensorImpl(DispatchKey dispatch_key, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl(DispatchKeySet(dispatch_key), data_type, device_opt) {}
 
@@ -449,6 +458,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_mkldnn() const {
     return key_set_.has(DispatchKey::MkldnnCPU);
+  }
+
+  bool is_vulkan() const {
+    return key_set_.has(DispatchKey::Vulkan);
   }
 
   int64_t get_device() const {
@@ -591,7 +604,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     TORCH_CHECK(
-        storage_.IsType<T>(),
+        data_type_.Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",
         caffe2::TypeMeta::TypeName<T>(),
         ", while tensor contains ",
@@ -901,7 +914,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const {
-    auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), key_set_);
+    auto impl = c10::make_intrusive<TensorImpl>(
+        Storage(storage()), key_set_, data_type_);
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -998,7 +1012,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         newDims.end(),
         static_cast<int64_t>(1),
         std::multiplies<int64_t>());
-    if (newNumel * storage_.itemsize() <= storage_.capacity()) {
+    if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       sizes_ = newDims;
       numel_ = newNumel;
       return;
@@ -1059,7 +1073,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         newCapacity.end(),
         static_cast<int64_t>(1),
         std::multiplies<int64_t>());
-    if (newNumel * storage_.itemsize() <= storage_.capacity()) {
+    if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
       return;
     }
     // Old data is discarded
@@ -1098,15 +1112,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // will create the data storage.
       bool reset_tensor = false;
       if (reserved_) {
-        // If tensor is reserved then don't claim its memeory unless capacity()
+        // If tensor is reserved then don't claim its memeory unless nbytes()
         // is smaller than new size
-        reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize();
+        reset_tensor = storage_.nbytes() <
+            (storage_offset_ + numel_) * data_type_.itemsize();
       } else {
-        reset_tensor = storage_.capacity() <
-                (storage_offset_ + numel_) * storage_.itemsize() ||
+        reset_tensor = storage_.nbytes() <
+                (storage_offset_ + numel_) * data_type_.itemsize() ||
             !FLAGS_caffe2_keep_on_shrink ||
-            storage_.capacity() -
-                    (storage_offset_ + numel_) * storage_.itemsize() >
+            storage_.nbytes() -
+                    (storage_offset_ + numel_) * data_type_.itemsize() >
                 static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
@@ -1149,7 +1164,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = Storage::create_legacy(storage_.device(), data_type_);
+    storage_ = Storage::create_legacy(storage_.device());
     storage_offset_ = 0;
   }
 
@@ -1187,7 +1202,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         src.storage_initialized(),
         "Source tensor has no content and has size > 0");
     // Finally, do sharing.
-    /* Since we create new Storage whenever we need to change data_type/capacity
+    /* Since we create new Storage whenever we need to change data_type/nbytes
      * this still keeps the original semantics
      */
     storage_ = src.storage();
@@ -1199,26 +1214,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void ShareExternalPointer(
       DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,
-      size_t capacity) {
+      size_t size_bytes) {
     TORCH_CHECK(
         data_type.id() != caffe2::TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
-    if (!capacity) {
-      capacity = numel_ * data_type.itemsize();
+    if (!size_bytes) {
+      size_bytes = numel_ * data_type.itemsize();
     }
     if (storage_.unique()) {
       storage_.UniqueStorageShareExternalPointer(
-          std::move(data_ptr), data_type, capacity);
+          std::move(data_ptr), size_bytes);
       data_type_ = data_type;
       device_opt_ = storage_.device();
       storage_offset_ = 0;
     } else {
-      int64_t numel = capacity / data_type.itemsize();
       // Create a new Storage
       storage_ = Storage(
-          data_type,
-          numel,
+          Storage::use_byte_size_t(),
+          size_bytes,
           std::move(data_ptr),
           /*allocator=*/nullptr,
           /*resizable=*/false);
@@ -1246,13 +1260,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     } else {
       bool had_special_dtor = data_type_.placementDelete() != nullptr;
       storage_offset_ = 0;
-      if (storage_.unique()) {
-        storage_.set_dtype(meta);
-      } else {
-        if (data_type_ != meta) {
-          storage_ = Storage::create_legacy(storage_.device(), meta);
-        }
-      }
       data_type_ = meta;
       // NB: device is not changed
 
@@ -1261,7 +1268,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // constructor.
       if (numel_ == 0 ||
           (meta.placementNew() == nullptr && !had_special_dtor &&
-           storage_.numel() >= numel_)) {
+           (storage_.nbytes() >= (numel_ * data_type_.itemsize())))) {
         TORCH_INTERNAL_ASSERT(storage_offset_ == 0); // because we just reallocated
         return storage_.data();
       }
@@ -1279,16 +1286,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.placementDelete();
-        auto data_ptr = allocator->allocate(numel_ * storage_.itemsize());
+        auto data_ptr = allocator->allocate(numel_ * data_type_.itemsize());
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
         data_type_.placementNew()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr(
-            allocator->allocate(numel_ * storage_.itemsize()));
+            allocator->allocate(numel_ * data_type_.itemsize()));
       }
-      storage_.set_numel(numel_);
+      storage_.set_nbytes(numel_ * data_type_.itemsize());
       TORCH_INTERNAL_ASSERT(storage_offset_ == 0); // because we just reallocated
       device_opt_ = storage_.device();
       return storage_.data();
@@ -1303,7 +1310,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data() {
-    if (storage_initialized() && storage_.IsType<T>()) {
+    if (storage_initialized() && data_type_.Match<T>()) {
       return static_cast<T*>(storage_.data()) + storage_offset_;
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
@@ -1332,11 +1339,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return data_type_ != caffe2::TypeMeta();
   }
 
-  void set_storage(at::Storage storage) {
+  void set_storage_keep_dtype(at::Storage storage) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_storage ", err_msg_tensor_metadata_change_not_allowed);
     storage_ = std::move(storage);
-    data_type_ = storage_.dtype();
     device_opt_ = storage_.device();
+  }
+
+  void set_storage_and_dtype(
+      at::Storage storage,
+      const caffe2::TypeMeta& data_type) {
+    set_storage_keep_dtype(storage);
+    data_type_ = data_type;
   }
 
   /**

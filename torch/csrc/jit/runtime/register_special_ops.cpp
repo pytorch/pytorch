@@ -250,25 +250,6 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
-    // not currently being generated, here for BC
-    Operator(
-        "aten::list_with_default(int[] list, int[] defaults) -> int[]",
-        [](Stack& stack) {
-          RECORD_FUNCTION("sizes", last(stack, 2));
-
-          auto list = peek(stack, 0, 2).toIntList().copy();
-          auto defaults = peek(stack, 1, 2).toIntVector();
-          drop(stack, 2);
-
-          AT_ASSERT(defaults.size() > list.size());
-
-          // TODO: allow list of optionals to be filled in with defaults
-          // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
-
-          push(stack, std::move(list));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](Stack& stack) {
@@ -300,7 +281,7 @@ RegisterOperators reg({
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)  \
   Operator(                                                                \
-      "aten::tensor(" #operator_type                                       \
+      "aten::tensor." #operator_type "(" #operator_type                    \
       " t, *, ScalarType? dtype=None, Device? device=None"                 \
       ", bool requires_grad=False) -> Tensor",                             \
       [](Stack& stack) {                                                   \
@@ -317,7 +298,7 @@ RegisterOperators reg({
       },                                                                   \
       aliasAnalysisFromSchema()),                                          \
       Operator(                                                            \
-          "aten::as_tensor(" #operator_type                                \
+          "aten::as_tensor." #operator_type "(" #operator_type             \
           " t, *, ScalarType? dtype=None, Device? device=None) -> Tensor", \
           [](Stack& stack) {                                               \
             c_type scalar_val;                                             \

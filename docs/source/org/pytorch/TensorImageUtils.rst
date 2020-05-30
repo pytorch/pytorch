@@ -38,8 +38,8 @@ TORCHVISION_NORM_STD_RGB
 
 Methods
 -------
-bitmapToFloat32Tensor
-^^^^^^^^^^^^^^^^^^^^^
+bitmapToFloat32Tensor(Bitmap, float[], float[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor bitmapToFloat32Tensor(Bitmap bitmap, float[] normMeanRGB, float[] normStdRGB)
    :outertype: TensorImageUtils
@@ -49,8 +49,8 @@ bitmapToFloat32Tensor
    :param normMeanRGB: means for RGB channels normalization, length must equal 3, RGB order
    :param normStdRGB: standard deviation for RGB channels normalization, length must equal 3, RGB order
 
-bitmapToFloat32Tensor
-^^^^^^^^^^^^^^^^^^^^^
+bitmapToFloat32Tensor(Bitmap, int, int, int, int, float[], float[])
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. java:method:: public static Tensor bitmapToFloat32Tensor(Bitmap bitmap, int x, int y, int width, int height, float[] normMeanRGB, float[] normStdRGB)
    :outertype: TensorImageUtils

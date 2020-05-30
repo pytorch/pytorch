@@ -1,5 +1,4 @@
 import torch.distributed.rpc as rpc
-import torch.testing._internal.dist_utils
 import torch.distributed.rpc._testing  # noqa
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -13,6 +12,13 @@ retryable_message_types = ["RREF_FORK_REQUEST",
                            "RREF_USER_DELETE",
                            "CLEANUP_AUTOGRAD_CONTEXT_REQ"]
 
+# The following messages incur the corresponding delay in seconds while being
+# processed in FaultyProcessGroupAgent's enqueueSend() function.
+default_messages_to_delay = {
+    "PYTHON_CALL": 1.5,  # Python UDF
+    "SCRIPT_CALL": 1.5,  # Script/Builtin
+}
+
 class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
     @property
     def rpc_backend(self):
@@ -21,11 +27,13 @@ class FaultyRpcAgentTestFixture(RpcAgentTestFixture):
         ]
 
     @property
-    def rpc_backend_options(self):
-        return rpc.backend_registry.construct_rpc_backend_options(
-            self.rpc_backend,
-            init_method=self.init_method,
-            num_send_recv_threads=8,
-            num_fail_sends=3,
-            messages_to_fail=retryable_message_types,
-        )
+    def retryable_message_types(self):
+        return retryable_message_types
+
+    @property
+    def num_fail_sends(self):
+        return 3
+
+    @property
+    def default_messages_to_delay(self):
+        return default_messages_to_delay

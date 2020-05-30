@@ -63,6 +63,20 @@ struct EnumClassHash {
   }
 };
 
+bool SimpleValue::hasAttr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  auto class_type = value_->type()->cast<ClassType>();
+  if (!class_type) {
+    throw ErrorReport(loc) << "hasattr's first argument must be an object, got "
+                           << value_->type()->python_str() << " instead";
+  }
+
+  return class_type->hasMethod(field) || class_type->hasAttribute(field) ||
+      class_type->hasConstant(field);
+}
+
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
@@ -134,7 +148,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
-    if (auto method = classType->getMethod(field)) {
+    if (auto method = classType->findMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
     if (classType->hasAttribute(field)) {
@@ -554,7 +568,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
-  if (!type_->getMethod("__init__")) {
+  if (!type_->findMethod("__init__")) {
     throw ErrorReport(loc) << "Class " << type_->name()->name()
                            << " does not have an __init__ function defined";
   }

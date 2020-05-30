@@ -15,7 +15,8 @@ import functools
 
 # Testing utils
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    freeze_rng_state, TemporaryFileName, enable_profiling_mode, ProfilingMode, TEST_BAILOUTS
+    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
 # Standard library
 from contextlib import contextmanager
@@ -309,7 +310,7 @@ class JitTestCase(TestCase):
         when executed with normal python, the string frontend, and the AST frontend
         """
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             # normal python
             with self.assertRaisesRegex(exception, regex):
                 script(*inputs)
@@ -352,7 +353,7 @@ class JitTestCase(TestCase):
                     frames_up=1,
                     profiling=ProfilingMode.PROFILING):
         with torch.jit.optimized_execution(optimize):
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 if isinstance(script, str):
                     # Compile the string to a Script function
                     # with enable_profiling_mode():
@@ -629,3 +630,8 @@ def get_module_method(m, module, method):
 def attrs_with_prefix(module, prefix):
     return [x for x, _ in module._modules._c.items()
             if x.startswith(prefix)]
+
+op_alias_mappings = {
+    "absolute" : "abs",
+    "absolute_" : "abs_",
+}

@@ -10,6 +10,9 @@
 #include <ATen/NamedTensorUtils.h>
 #include <torch/library.h>
 
+#ifdef USE_VULKAN
+#include <ATen/native/vulkan/VulkanAten.h>
+#endif
 namespace {
 
 using namespace at;
@@ -78,7 +81,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 // (e.g. XLA) may be supported by overriding copy_ and _copy_from.
 bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP;
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan;
 }
 
 } // namespace
@@ -126,6 +129,12 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
   }
 
+#ifdef USE_VULKAN
+  if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
+    return vulkan_copy_(self, src);
+  }
+#endif
+
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(true);
   iter.add_output(self);
@@ -141,6 +150,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   DeviceType device_type = iter.device_type(0);
   if (iter.device_type(1) == kCUDA) {
     device_type = kCUDA;
+  } else if (iter.device_type(1) == kHIP) {
+    device_type = kHIP;
   }
 
   // TODO: if we need to, we can also enable this path for quantized tensor

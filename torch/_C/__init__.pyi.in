@@ -1,0 +1,180 @@
+# ${generated_comment}
+
+import torch
+from torch import Tensor
+from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload, Iterator, NamedTuple, Sequence, TypeVar, Type
+from torch._six import inf
+
+from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Number
+
+import builtins
+
+from . import _nn as _nn
+from . import _onnx as _onnx
+from . import _VariableFunctions as _VariableFunctions
+
+T = TypeVar('T')
+
+# Defined in torch/csrc/Device.cpp
+class device:
+    type: str
+    index: _int
+
+    @overload
+    def __init__(self, device: Union[_int, str]) -> None: ...
+
+    @overload
+    def __init__(self, type: str, index: _int) -> None: ...
+
+    # TODO: __reduce__
+
+# Defined in torch/csrc/Size.cpp
+class Size(Tuple[_int, ...]):
+    # TODO: numel, __reduce__
+    ...
+
+# Defined in torch/csrc/Dtype.cpp
+class dtype:
+    # TODO: is_floating_point, is_complex, is_Signed, __reduce__
+    ...
+
+# Defined in torch/csrc/TypeInfo.cpp
+class iinfo:
+    bits: _int
+    min: _int
+    max: _int
+
+    def __init__(self, dtype: _dtype) -> None: ...
+
+class finfo:
+    bits: _float
+    min: _float
+    max: _float
+    eps: _float
+    tiny: _float
+
+    @overload
+    def __init__(self, dtype: _dtype) -> None: ...
+
+    @overload
+    def __init__(self) -> None: ...
+
+${dtype_class_hints}
+
+# Defined in torch/csrc/Layout.cpp
+class layout:
+    ...
+
+# Defined in torch/csrc/utils/tensor_layouts.cpp
+strided : layout = ...
+sparse_coo : layout = ...
+
+# Defined in torch/csrc/MemoryFormat.cpp
+class memory_format: ...
+
+# Defined in torch/csrc/utils/tensor_memoryformats.cpp
+contiguous_format: memory_format = ...
+
+# Defined in torch/csrc/QScheme.cpp
+class qscheme: ...
+
+# Defined in torch/csrc/utils/tensor_qschemes.cpp
+per_tensor_affine: qscheme = ...
+
+# Defined in torch/csrc/generic/Storage.cpp
+class Storage: ...
+
+# Defined in torch/csrc/autograd/python_function.cpp
+class _FunctionBase(object):
+    ...
+
+# Defined in torch/csrc/autograd/python_legacy_variable.cpp
+class _LegacyVariableBase(object):
+    def __init__(
+        self,
+        data: Optional[Tensor]=...,
+        requires_grad: Optional[_bool]=...,
+        volatile: Optional[_bool]=...,
+        _grad_fn: Optional[_FunctionBase]=...
+    ) -> None: ...
+
+# Defined in torch/csrc/jit/python/init.cpp
+def _jit_get_operation(op_name: str) -> Callable: ...
+def _jit_pass_optimize_for_mobile(module: 'torch.jit.ScriptModule') -> 'torch.jit.ScriptModule': ...
+
+# Defined in torch/csrc/Module.cpp
+def _init_names(arg: Sequence[Type]) -> None: ...
+def _show_config() -> str: ...
+def _parallel_info() -> str: ...
+def _add_docstr(obj: T, doc_obj: str) -> T: ...
+def _from_dlpack(data: Any) -> Tensor: ...
+def _to_dlpack(data: Tensor) -> Any: ...
+def _set_backcompat_broadcast_warn(arg: _bool) -> None: ...
+def _get_backcompat_broadcast_warn() -> _bool: ...
+def _set_backcompat_keepdim_warn(arg: _bool) -> None: ...
+def _get_backcompat_keepdim_warn() -> _bool: ...
+def _is_xnnpack_enabled() -> _bool: ...
+def _get_mkldnn_enabled() -> _bool: ...
+def _set_mkldnn_enabled(arg: _bool) -> None: ...
+def _set_default_tensor_type(type) -> None: ...  # ick, what a bad legacy API
+def _set_default_dtype(d: _dtype) -> None: ...
+def _initExtension(shm_manager_path: str) -> None: ...
+has_openmp: _bool
+has_mkldnn: _bool
+has_mkl: _bool
+_GLIBCXX_USE_CXX11_ABI: _bool
+
+# Defined in torch/csrc/jit/python/script_init.cpp
+class FileCheck(object):
+    # TODO
+    ...
+
+# Defined in torch/csrc/Generator.cpp
+class Generator(object):
+    device: _device
+    def __init__(self, device: Union[_device, str, None] = None) -> None: ...
+    def get_state(self) -> Tensor: ...
+    def set_state(self, _new_state: Tensor) -> Generator: ...
+    def manual_seed(self, seed: _int) -> Generator: ...
+    def seed(self) -> _int: ...
+    def initial_seed(self) -> _int: ...
+
+# Defined in torch/csrc/utils/init.cpp
+class BenchmarkConfig(object):
+    num_calling_threads: _int
+    num_worker_threads: _int
+    num_warmup_iters: _int
+    num_iters: _int
+    profiler_output_path: str
+
+class BenchmarkExecutionStats(object):
+    latency_avg_ms: _float
+    num_iters: _int
+
+class ThroughputBenchmark(object):
+    def __init__(self, module: Any) -> None: ...
+    def add_input(self, *args: Any, **kwargs: Any) -> None: ...
+    def run_once(self, *args: Any, **kwargs: Any) -> Any: ...
+    def benchmark(self, config: BenchmarkConfig) -> BenchmarkExecutionStats: ...
+
+# IDK if these are actually exposed here, hope they are
+${namedtuple_defs}
+
+# Defined in torch/csrc/generic/Storage.cpp
+${legacy_storage_base_hints}
+
+# TODO: where
+${legacy_class_hints}
+
+# Defined in torch/csrc/autograd/python_variable.cpp
+class _TensorBase(object):
+    requires_grad: _bool
+    shape: Size
+    data: Tensor
+    names: List[str]
+    device: _device
+    dtype: _dtype
+    layout: _layout
+    real: Tensor
+    imag: Tensor
+    ${tensor_method_hints}

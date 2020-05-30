@@ -20,21 +20,16 @@ TEST(TensorIteratorTest, CPUScalar) {
   EXPECT_TRUE(iter.device(2).is_cpu()) << "y should be CPU";
 }
 
-// An operation with a CUDA output and CPU scalar inputs should only
-// keep a single input as a CPU scalar. (Because we only generate
-// specializations in Loops.cuh for a single CPU scalar).
+// Verifies multiple zero-dim CPU inputs are not coerced to CUDA
 TEST(TensorIteratorTest, CPUScalarInputs) {
   if (!at::hasCUDA()) return;
   Tensor out = at::empty({5, 5}, kCUDA);
   auto x = at::ones(1, kCPU).squeeze();
   auto y = at::ones(1, kCPU).squeeze();
-  auto iter = TensorIterator::binary_op(out, x, y);
-  EXPECT_TRUE(iter.device(0).is_cuda()) << "result should be CUDA";
-  EXPECT_TRUE(iter.device(1).is_cpu()) << "x should be CPU";
-  EXPECT_TRUE(iter.device(2).is_cuda()) << "y should be CUDA";
+  ASSERT_ANY_THROW(TensorIterator::binary_op(out, x, y));
 }
 
-// Mixing CPU and CUDA tensors should raise an exception (if neither is a scalar)
+// Mixing CPU and CUDA tensors should raise an exception (if the CPU tensor isn't zero-dim)
 TEST(TensorIteratorTest, MixedDevices) {
   if (!at::hasCUDA()) return;
   Tensor out;
@@ -53,14 +48,14 @@ Tensor random_tensor_for_type(at::ScalarType scalar_type) {
   }
 }
 
-#define UNARY_TEST_ITER_FOR_TYPE(ctype,name)                                  \
-TEST(TensorIteratorTest, SerialLoopUnary_##name) {                            \
-  Tensor out;                                                                 \
-  auto in = random_tensor_for_type(k##name);                                  \
-  auto expected = in.add(1);                                                  \
-  auto iter = TensorIterator::unary_op(out, in);                              \
-  at::native::cpu_serial_kernel(iter, [=](ctype a) -> int { return a + 1; }); \
-  ASSERT_ANY_THROW(out.equal(expected));                                      \
+#define UNARY_TEST_ITER_FOR_TYPE(ctype,name)                                    \
+TEST(TensorIteratorTest, SerialLoopUnary_##name) {                              \
+  Tensor out;                                                                   \
+  auto in = random_tensor_for_type(k##name);                                    \
+  auto expected = in.add(1);                                                    \
+  auto iter = TensorIterator::unary_op(out, in);                                \
+  at::native::cpu_serial_kernel(iter, [=](ctype a) -> ctype { return a + 1; }); \
+  ASSERT_ANY_THROW(out.equal(expected));                                        \
 }
 
 #define NO_OUTPUT_UNARY_TEST_ITER_FOR_TYPE(ctype,name)                         \
@@ -74,15 +69,15 @@ TEST(TensorIteratorTest, SerialLoopUnaryNoOutput_##name) {                     \
   EXPECT_TRUE(acc == in.numel());                                              \
 }
 
-#define BINARY_TEST_ITER_FOR_TYPE(ctype,name)                                          \
-TEST(TensorIteratorTest, SerialLoopBinary_##name) {                                    \
-  Tensor out;                                                                          \
-  auto in1 = random_tensor_for_type(k##name);                                          \
-  auto in2 = random_tensor_for_type(k##name);                                          \
-  auto expected = in1.add(in2);                                                        \
-  auto iter = TensorIterator::binary_op(out, in1, in2);                                \
-  at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b) -> int { return a + b; }); \
-  ASSERT_ANY_THROW(out.equal(expected));                                               \
+#define BINARY_TEST_ITER_FOR_TYPE(ctype,name)                                            \
+TEST(TensorIteratorTest, SerialLoopBinary_##name) {                                      \
+  Tensor out;                                                                            \
+  auto in1 = random_tensor_for_type(k##name);                                            \
+  auto in2 = random_tensor_for_type(k##name);                                            \
+  auto expected = in1.add(in2);                                                          \
+  auto iter = TensorIterator::binary_op(out, in1, in2);                                  \
+  at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b) -> ctype { return a + b; }); \
+  ASSERT_ANY_THROW(out.equal(expected));                                                 \
 }
 
 #define NO_OUTPUT_BINARY_TEST_ITER_FOR_TYPE(ctype,name)                          \
@@ -98,21 +93,21 @@ TEST(TensorIteratorTest, SerialLoopBinaryNoOutput_##name) {                     
   EXPECT_TRUE(acc == in1.numel());                                               \
 }
 
-#define POINTWISE_TEST_ITER_FOR_TYPE(ctype,name)                                                    \
-TEST(TensorIteratorTest, SerialLoopPointwise_##name) {                                              \
-  Tensor out;                                                                                       \
-  auto in1 = random_tensor_for_type(k##name);                                                       \
-  auto in2 = random_tensor_for_type(k##name);                                                       \
-  auto in3 = random_tensor_for_type(k##name);                                                       \
-  auto expected = in1.add(in2).add(in3);                                                            \
-  auto iter = at::TensorIterator();                                                                 \
-  iter.add_output(out);                                                                             \
-  iter.add_input(in1);                                                                              \
-  iter.add_input(in2);                                                                              \
-  iter.add_input(in3);                                                                              \
-  iter.build();                                                                                     \
-  at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b, ctype c) -> int { return a + b + c; }); \
-  ASSERT_ANY_THROW(out.equal(expected));                                                            \
+#define POINTWISE_TEST_ITER_FOR_TYPE(ctype,name)                                                      \
+TEST(TensorIteratorTest, SerialLoopPointwise_##name) {                                                \
+  Tensor out;                                                                                         \
+  auto in1 = random_tensor_for_type(k##name);                                                         \
+  auto in2 = random_tensor_for_type(k##name);                                                         \
+  auto in3 = random_tensor_for_type(k##name);                                                         \
+  auto expected = in1.add(in2).add(in3);                                                              \
+  auto iter = at::TensorIterator();                                                                   \
+  iter.add_output(out);                                                                               \
+  iter.add_input(in1);                                                                                \
+  iter.add_input(in2);                                                                                \
+  iter.add_input(in3);                                                                                \
+  iter.build();                                                                                       \
+  at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b, ctype c) -> ctype { return a + b + c; }); \
+  ASSERT_ANY_THROW(out.equal(expected));                                                              \
 }
 
 #define NO_OUTPUT_POINTWISE_TEST_ITER_FOR_TYPE(ctype,name)                                \
@@ -161,7 +156,7 @@ AT_FORALL_SCALAR_TYPES_AND(Bool, COMPARISON_TEST_ITER_FOR_TYPE)
 TEST(TensorIteratorTest, SerialLoopSingleThread) {
   std::thread::id thread_id = std::this_thread::get_id();
   Tensor out;
-  auto x = at::zeros({50000}, kCPU);
+  auto x = at::zeros({50000}, at::TensorOptions(kCPU).dtype(kInt));
   auto iter = TensorIterator::unary_op(out, x);
   at::native::cpu_serial_kernel(iter, [=](int a) -> int {
     std::thread::id lambda_thread_id = std::this_thread::get_id();

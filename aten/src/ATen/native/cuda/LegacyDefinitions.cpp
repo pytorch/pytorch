@@ -59,14 +59,46 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & 
   }
 }
 
-Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  result.resize_(index.sizes());
-  return legacy::cuda::_th_gather_out(result, self, dim, index);
+Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, Scalar other) {
+  return legacy::cuda::_th_fmod_out(result, self, other);
 }
 
-Tensor gather_cuda(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  Tensor result = at::empty({0}, self.options());
-  return gather_out_cuda(result, self, dim, index, sparse_grad);
+Tensor fmod_cuda(const Tensor & self, Scalar other) {
+  return legacy::cuda::_th_fmod(self, other);
+}
+
+Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  Tensor b_self, b_other;
+  // optimization that codegen used to do; avoids broadcast.
+  if (other.dim() == 0) {
+    return fmod_cuda_out(result, self, other.item());
+  }
+  std::tie(b_self, b_other) = expand_outplace(self, other, "fmod_out");
+  return legacy::cuda::_th_fmod_out(result, b_self, b_other);
+}
+
+Tensor fmod_cuda(const Tensor & self, const Tensor & other) {
+  // optimization that codegen used to do; avoids broadcast.
+  if (other.dim() == 0) {
+    return fmod_cuda(self, other.item());
+  }
+  Tensor b_self, b_other;
+  std::tie(b_self, b_other) = expand_outplace(self, other, "fmod");
+  return legacy::cuda::_th_fmod(b_self, b_other);
+}
+
+Tensor & fmod_cuda_(Tensor & self, Scalar other) {
+  return legacy::cuda::_th_fmod_(self, other);
+}
+
+Tensor & fmod_cuda_(Tensor & self, const Tensor & other) {
+  // optimization that codegen used to do; avoids broadcast.
+  if (other.dim() == 0) {
+    return fmod_cuda_(self, other.item());
+  }
+  Tensor b_other;
+  std::tie(b_other) = expand_inplace(self, other, "fmod_");
+  return legacy::cuda::_th_fmod_(self, b_other);
 }
 
 }} // namespace at::native
