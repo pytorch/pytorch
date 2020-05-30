@@ -77,7 +77,7 @@ void div_kernel(TensorIterator& iter) {
       });
     });
   } else if (isComplexType(iter.dtype())) {
-#ifdef __APPLE__
+// #ifdef __APPLE__
       // Vectorized code fails on MacOS with SIGILL (illegal instruction)
       // for unknown reason. See: https://github.com/pytorch/pytorch/issues/39123
       AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "div_cpu", [&]() {
@@ -86,17 +86,17 @@ void div_kernel(TensorIterator& iter) {
              return a / b;
           });
       });
-#else
-      AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "div_cpu", [&]() {
-        cpu_kernel_vec(iter,
-          [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-             return a / b;
-          },
-          [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-            return a / b;
-          });
-      });
-#endif
+// #else
+//       AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "div_cpu", [&]() {
+//         cpu_kernel_vec(iter,
+//           [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+//              return a / b;
+//           },
+//           [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+//             return a / b;
+//           });
+//       });
+// #endif
     } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
       cpu_kernel_vec(iter,
