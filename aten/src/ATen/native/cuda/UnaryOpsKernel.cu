@@ -50,6 +50,7 @@ __host__ __device__ static inline scalar_t rsqrt_wrapper(scalar_t v) {
 template<typename T>
 __host__ __device__ static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> v) {
   const c10::complex<T> one = c10::complex<T>(1.0, 0);
+  // std::sqrt for c10::complex is overloaded in c10/util/complex_math.h
   return one / std::sqrt(v);
 }
 
