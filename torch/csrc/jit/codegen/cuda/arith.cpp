@@ -180,7 +180,7 @@ TORCH_CUDA_API Val* andOp(Val* v1, Val* v2) {
 
 // REDUCTION OPERATIONS
 
-Val* reductionOp(
+TensorView* reductionOp(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,
@@ -216,14 +216,14 @@ Val* reductionOp(
     uint_axes.push_back((unsigned int)axis);
   }
 
-  Val* out = tv->newForReduction(uint_axes);
+  TensorView* out = tv->newForReduction(uint_axes);
   if (init->getDataType().value() != v1->getDataType().value())
     init = castOp(v1->getDataType().value(), init);
   new ReductionOp(reduction_op_type, init, out, v1);
   return out;
 }
 
-TORCH_CUDA_API Val* sum(Val* v1, const std::vector<int>& axes) {
+TORCH_CUDA_API TensorView* sum(Val* v1, const std::vector<int>& axes) {
   Val* init;
   switch (v1->getDataType().value()) {
     case (DataType::Float):

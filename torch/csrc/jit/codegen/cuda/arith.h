@@ -34,7 +34,7 @@ TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2);
 
 // Perform a reduction operation on v1, initial value for reduction is init,
 // reduces across axes, and reduction operation defined by BinaryOp.
-TORCH_CUDA_API Val* reductionOp(
+TORCH_CUDA_API TensorView* reductionOp(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,
@@ -54,7 +54,7 @@ TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2);
 TORCH_CUDA_API Val* andOp(Val* v1, Val* v2);
 
 // REDUCTION OPERATIONS
-TORCH_CUDA_API Val* sum(Val* v1, const std::vector<int>& reduction_axes);
+TORCH_CUDA_API TensorView* sum(Val* v1, const std::vector<int>& reduction_axes);
 
 // COMPOUND OPERATIONS
 TORCH_CUDA_API Val* add_alpha(Val* v1, Val* v2, Val* s);

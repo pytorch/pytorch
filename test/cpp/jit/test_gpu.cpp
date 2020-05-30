@@ -2096,7 +2096,7 @@ void testGPU_FusionRFactorReplay() {
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
-  TensorView* tv1 = static_cast<TensorView*>(sum(tv0, {1}));
+  TensorView* tv1 = sum(tv0, {1});
   // tv1[I0, R1]
   tv1->split(0, 32);
   // tv1[I0o, I0i{32}, R1]
@@ -2183,8 +2183,7 @@ void testGPU_FusionReduction() {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = static_cast<TensorView*>(
-      reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0));
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -2252,8 +2251,7 @@ void testGPU_FusionReduction2() {
     fusion.addInput(tv0);
 
     // tv1[I0, R1] = tv0[I0, I1]
-    TensorView* tv1 = static_cast<TensorView*>(
-        reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0));
+    TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
 
     fusion.addOutput(tv1);
 
@@ -2331,8 +2329,7 @@ void testGPU_FusionReduction2() {
     fusion.addInput(tv0);
 
     // tv1[I0, R1] = tv0[I0, I1]
-    TensorView* tv1 = static_cast<TensorView*>(
-        reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0));
+    TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
 
     fusion.addOutput(tv1);
 
