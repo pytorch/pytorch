@@ -359,6 +359,11 @@ TORCH_CUDA_API TensorView* andOp(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(andOp, v1, v2);
 }
 
+DEFINE_BINARY_OP_OVERLOADS(andOp)
+
+#undef BINARY_OP_OVERLOADS_FORWARD
+#undef DEFINE_BINARY_OP_OVERLOADS
+
 // REDUCTION OPERATIONS
 
 namespace {
@@ -648,7 +653,7 @@ TORCH_CUDA_API TensorView* where(
   return arithOpOverloads(where, v1, v2, v3);
 }
 
-// TERNARY OPERATIONS
+DEFINE_TERNARY_OP_OVERLOADS(where)
 
 TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
   TORCH_CHECK(
