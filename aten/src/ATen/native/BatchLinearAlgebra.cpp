@@ -12,6 +12,7 @@
 #include <TH/TH.h>  // for USE_LAPACK
 
 #include <vector>
+#include<iostream>
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
@@ -412,9 +413,15 @@ static void apply_lstsq(Tensor& B, Tensor& A) {
   auto work = Work_tensor.data_ptr<scalar_t>();
 
   lapackGels('N', m, n, nrhs, A_data, lda, B_data, ldb, work, lwork, &info);
+
+  if (m < n) {
+    B.resize_({n, nrhs});
+  }
 }
 
 std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
+  TORCH_CHECK(A.size(-1) != 0, "A should not be empty");
+  TORCH_CHECK(B.size(-1) != 0, "B should not be empty");
   TORCH_CHECK(A.dim() == 2, "A should have 1 or 2 "
       "dimensions, but has ", A.dim());
   TORCH_CHECK(B.dim() == 1 || B.dim() == 2, "B should have 1 or 2 "
