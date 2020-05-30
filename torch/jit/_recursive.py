@@ -130,7 +130,6 @@ def infer_concrete_type_builder(nn_module):
             concrete_type_builder.add_attribute(name, attr_type, False, False)
             continue
         if attr_type is not None:
-            assert attr_type.is_interface_type()
             # if the type can be inferred, it should be a module interface type
             sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
         else:
@@ -316,6 +315,8 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
         concrete_type = concrete_type_builder.build()
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
+cached_modules = {}
+
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     """
     Convert an nn.Module to a RecursiveScriptModule.
@@ -325,6 +326,9 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         concrete_type:  The fully initialized ConcreteType of the module.
         stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
     """
+    if nn_module in cached_modules:
+        return cached_modules[nn_module]
+
     cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
     stubs = stubs_fn(nn_module)
 
@@ -422,6 +426,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.COPY_TO_SCRIPT_WRAPPER:
             add_python_attr_to_scripted_model(script_module, nn_module, name)
 
+    cached_modules[nn_module] = script_module
     return script_module
 
 

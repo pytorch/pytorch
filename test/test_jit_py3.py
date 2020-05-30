@@ -1,5 +1,5 @@
 from collections import namedtuple
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
 from torch import jit
@@ -532,6 +532,46 @@ class TestScriptPy3(JitTestCase):
 
         # Check that ignored method is still intact.
         self.assertEqual(inp, n.ignored_method(inp))
+
+    def test_doubly_referenced_submodules(self):
+        """
+        Test that modules can be referenced twice, once as a part of self._modules
+        and another as an attribute (possibly nested inside a container).
+        """
+        class MyModel(nn.ModuleDict):
+            def __init__(self):
+                super().__init__()
+                self.unscripted_layers: List[nn.Module] = []
+                self.scripted_layers: List[nn.Module] = []
+                for i in range(3):
+                    unscripted_layer = nn.Linear(10, 10)
+                    scripted_layer = torch.jit.script(nn.Linear(10, 10))
+                    self.add_module(str(i), unscripted_layer)
+                    self.add_module(str(i + 3), scripted_layer)
+                    self.unscripted_layers.append(unscripted_layer)
+                    self.scripted_layers.append(scripted_layer)
+
+                self.unscripted_layers = tuple(self.unscripted_layers)
+                self.scripted_layers = tuple(self.scripted_layers)
+
+            def forward(self, x):
+                for m in self.unscripted_layers:
+                    x = m.forward(x)
+
+                for n in self.scripted_layers:
+                    x = m.forward(x)
+
+                return x
+
+        input = torch.rand(10)
+
+        # Can't use checkModule here because we need to call forward explicitly.
+        with freeze_rng_state():
+            torch.manual_seed(0)
+            m = MyModel()
+            torch.manual_seed(0)
+            scripted_m = torch.jit.script(MyModel())
+            self.assertEqual(m.forward(input), scripted_m.forward(input))
 
     def test_export_opnames_interface(self):
         global OneTwoModule

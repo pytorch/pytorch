@@ -297,6 +297,28 @@ inline InferredType tryToInferType(py::handle input) {
       TORCH_INTERNAL_ASSERT(class_type);
       return InferredType(class_type);
     }
+
+    // Check if the input is a ScriptModule. If it is, return its JIT
+    // type.
+    auto isModule = py::hasattr(input, "_concrete_type");
+    if (isModule) {
+      auto concrete_type = py::getattr(input, "_concrete_type");
+      auto jit_type = py::getattr(concrete_type, "jit_type");
+      auto type = py::cast<ClassTypePtr>(jit_type);
+      return InferredType(type);
+    }
+
+    // Check if the input is an unscripted Module. Compile it and return the
+    // JIT type of the result.
+    auto module_type = py::module::import("torch").attr("nn").attr("Module");
+    if (py::isinstance(input, module_type)) {
+      auto scripted_module =
+          py::module::import("torch").attr("jit").attr("script")(input);
+      auto concrete_type = py::getattr(scripted_module, "_concrete_type");
+      auto jit_type = py::getattr(concrete_type, "jit_type");
+      auto type = py::cast<ClassTypePtr>(jit_type);
+      return InferredType(type);
+    }
   }
 
   if (py::isinstance<Object>(input)) {
