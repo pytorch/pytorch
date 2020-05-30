@@ -80,7 +80,7 @@ static inline __host__ __device__ typename std::enable_if<!std::is_floating_poin
 #else
 template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
-  return std::pow(base, exp);
+  return ::pow(base, exp);
 }
 template <typename T>
 static inline __host__ __device__ T sqrt_(T x) {
