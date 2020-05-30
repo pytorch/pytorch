@@ -9819,6 +9819,11 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(empty_strided.shape, as_strided.shape)
                 self.assertEqual(empty_strided.stride(), as_strided.stride())
 
+    def test_strided_mismatched_stride_shape(self, device):
+        for shape, strides in [((1,), ()), ((1,2), (1,))]:
+            with self.assertRaisesRegex(RuntimeError,"mismatch in length of strides and shape"):
+                torch.tensor(0.42, device=device).as_strided(shape, strides)
+
     def test_sign(self, device):
         for dtype in torch.testing.get_all_math_dtypes(device):
 
