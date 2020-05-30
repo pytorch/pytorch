@@ -4698,6 +4698,8 @@ converted from angles in radians to degrees.
 
 Args:
     {input}
+
+Keyword arguments:
     {out}
 
 Example::
@@ -4719,6 +4721,8 @@ converted from angles in degrees to radians.
 
 Args:
     {input}
+
+Keyword arguments:
     {out}
 
 Example::

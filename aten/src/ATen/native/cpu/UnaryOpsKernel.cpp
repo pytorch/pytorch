@@ -345,31 +345,6 @@ void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generato
   templates::cpu::normal_kernel(self, mean, std, generator);
 }
 
-
-static void rad2deg_kernel(TensorIterator& iter, const double M_180_PI) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "rad2deg_cpu", [&] {
-        cpu_kernel_vec(
-          iter,
-          [=](scalar_t a) -> scalar_t {
-            return static_cast<scalar_t>(M_180_PI) * a;
-          },
-          [=](Vec256<scalar_t> a) { return a.rad2deg(M_180_PI); }
-        );
-  });
-}
-
-static void deg2rad_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "deg2rad_cpu", [&] {
-        cpu_kernel_vec(
-          iter,
-          [=](scalar_t a) -> scalar_t {
-            return static_cast<scalar_t>(M_PI) * a / static_cast<scalar_t>(180);
-          },
-          [=](Vec256<scalar_t> a) { return a.deg2rad(); }
-        );
-  });
-}
-
 static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::random_from_to_kernel(iter, range, base, generator);
@@ -465,8 +440,6 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(rad2deg_stub, &rad2deg_kernel);
-REGISTER_DISPATCH(deg2rad_stub, &deg2rad_kernel);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);

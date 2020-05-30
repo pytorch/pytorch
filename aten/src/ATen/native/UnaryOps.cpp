@@ -107,14 +107,16 @@ Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
+static Tensor wrapped_scalar_tensor(Scalar scalar) {
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
 
 Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_mem_overlap=*/true);
-  double M_180_PI = 57.29577951308232087679815481410517033240547247;
-  rad2deg_stub(iter.device_type(), iter, M_180_PI);
-  return result;
+  constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
+  return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_180_PI)));
 }
 
 Tensor rad2deg(const Tensor& self) { return unary_op_impl(self, at::rad2deg_out); }
@@ -122,7 +124,8 @@ Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
 Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
-  return unary_op_impl_out(result, self, deg2rad_stub);
+  constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
+  return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
 Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
@@ -506,8 +509,6 @@ DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
 DEFINE_DISPATCH(polygamma_stub);
-DEFINE_DISPATCH(rad2deg_stub);
-DEFINE_DISPATCH(deg2rad_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);

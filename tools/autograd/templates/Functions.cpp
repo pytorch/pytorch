@@ -2618,6 +2618,9 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
 
 } // anonymous namespace
 
+constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
+constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
+
 ${autograd_function_definitions}
 
 }}} // namespace torch::autograd::generated

@@ -41,29 +41,6 @@ void expm1_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void rad2deg_kernel_cuda(TensorIterator& iter, const double M_180_PI) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "rad2deg_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "rad2deg_cuda", [&] {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
-        auto m_180_pi = scalar_t(M_180_PI);
-        return m_180_pi * a;
-      });
-    });
-  });
-}
-
-void deg2rad_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "deg2rad_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "deg2rad_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        auto t180 = scalar_t(180.0);
-        auto pi = scalar_t(M_PI);
-        return pi * a / t180;
-      });
-    });
-  });
-}
-
 // We manually overload rsqrt because std::rsqrt does not work with thrust::complex types.
 template<typename scalar_t>
 __host__ __device__ static inline scalar_t rsqrt_wrapper(scalar_t v) {
@@ -174,8 +151,6 @@ void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
-REGISTER_DISPATCH(rad2deg_stub, &rad2deg_kernel_cuda);
-REGISTER_DISPATCH(deg2rad_stub, &deg2rad_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);

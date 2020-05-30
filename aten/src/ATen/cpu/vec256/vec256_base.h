@@ -412,16 +412,6 @@ public:
   Vec256<T> reciprocal() const {
     return map([](T x) { return (T)(1) / x; });
   }
-  Vec256<T> rad2deg(const double M_180_PI) const {
-    Vec256<T> ret;
-    for (int64_t i = 0; i != size(); i++) {
-      ret[i] = (T)(M_180_PI) * values[i];
-    }
-    return ret;
-  }
-  Vec256<T> deg2rad() const {
-    return map([](T x) { return (T)(M_PI) * x / (T)(180.0); });
-  }
   Vec256<T> rsqrt() const {
     return map([](T x) { return (T)1 / std::sqrt(x); });
   }
