@@ -78,6 +78,8 @@ void div_kernel(TensorIterator& iter) {
     });
   } else if (isComplexType(iter.dtype())) {
 #ifdef __APPLE__
+      // Vectorized code fails on MacOS with SIGILL (illegal instruction)
+      // for unknown reason. See: https://github.com/pytorch/pytorch/issues/39123
       AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "div_cpu", [&]() {
         cpu_kernel(iter,
           [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
