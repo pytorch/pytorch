@@ -38,7 +38,8 @@ def set_printoptions(
         profile: Sane defaults for pretty printing. Can override with any of
             the above options. (any one of `default`, `short`, `full`)
         sci_mode: Enable (True) or disable (False) scientific notation. If
-            None (default) is specified, the value is defined by `_Formatter`
+            None (default=False) is specified, the value is defined by 
+            `torch._tensor_str._Formatter`.
     """
     if profile is not None:
         if profile == "default":
