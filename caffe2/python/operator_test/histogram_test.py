@@ -8,6 +8,7 @@ from hypothesis import given
 
 
 class TestHistogram(hu.HypothesisTestCase):
+    @unittest.skipIf(workspace.has_hip_support, "Histogram is not supported on HIP.")
     @given(rows=st.integers(1, 1000), cols=st.integers(1, 1000), **hu.gcs)
     def test_histogram__device_consistency(self, rows, cols, gc, dc):
         X = np.random.rand(rows, cols)
