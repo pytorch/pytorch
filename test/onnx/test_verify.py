@@ -64,21 +64,6 @@ class TestVerify(TestCase):
         with self.assertRaisesRegex(RuntimeError, "state_dict changed"):
             verify(MyModel(), x, backend)
 
-    def test_modifying_params(self):
-        class MyModel(Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-                self.param = Parameter(torch.tensor([2.0]))
-
-            def forward(self, x):
-                y = x * x
-                self.param.data.add_(1.0)
-                return y
-
-        x = torch.tensor([1, 2])
-        # To keep the unused model parameter, need to set constant folding to False
-        self.assertVerifyExpectFail(MyModel(), x, backend, do_constant_folding=False)
-
     def test_dynamic_model_structure(self):
         class MyModel(Module):
             def __init__(self):
