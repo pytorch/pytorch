@@ -59,7 +59,6 @@ class Int8QuantizeNNPIOp final : public Operator<CPUContext> {
   using Operator<CPUContext>::Operator;
 
   bool RunOnDevice() override {
-    LOG(INFO) << "In int8Quantize op";
     const auto& X = Input(0);
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
     Y->t.ResizeLike(X);
