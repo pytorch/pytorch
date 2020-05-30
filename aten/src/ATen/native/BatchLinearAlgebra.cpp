@@ -375,7 +375,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
@@ -694,7 +694,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -732,7 +732,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -848,7 +848,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
 #ifndef USE_LAPACK
   AT_ERROR("symeig: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto eigvals_data = eigvals.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -934,7 +934,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
 #ifndef USE_LAPACK
   AT_ERROR("svd: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
   auto S_data = S.data_ptr<value_t>();
