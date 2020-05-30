@@ -103,3 +103,4 @@ endif()
 caffe2_binary_target("tutorial_blob.cc")
 
 caffe2_binary_target("dump_operator_names.cc")
+caffe2_binary_target("optimize_for_mobile.cc")
