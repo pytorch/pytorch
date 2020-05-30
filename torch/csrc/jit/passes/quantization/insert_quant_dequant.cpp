@@ -145,15 +145,11 @@ Node* insertQParam(
   return qparam;
 }
 
-Node* insertItem(
-    Graph* graph,
-    Value* tensor,
-    const TypePtr& output_type) {
+Node* insertItem(Graph* graph, Value* tensor, const TypePtr& output_type) {
   WithInsertPoint ins(tensor->node()->next());
   Node* n = graph->create(Symbol::aten("item"), {tensor});
   Value* scalar = n->output();
-  scalar->setDebugName(tensor->debugName() + ".scalar")
-    ->setType(output_type);
+  scalar->setDebugName(tensor->debugName() + ".scalar")->setType(output_type);
   graph->insertNode(n);
   return n;
 }
@@ -357,15 +353,15 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
 
 void ReplicateClampScalarArgs(std::shared_ptr<Graph>& graph) {
   std::stack<Block*> blocks_to_visit;
-  std::unordered_set<Node*> scalar_nodes_to_rewrite;;
+  std::unordered_set<Node*> scalar_nodes_to_rewrite;
+  ;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       for (Value* output : n->outputs()) {
-        if (getClampScalarInputUse(output) &&
-            output->uses().size() > 1) {
+        if (getClampScalarInputUse(output) && output->uses().size() > 1) {
           scalar_nodes_to_rewrite.insert(n);
         }
       }
@@ -479,7 +475,8 @@ class InsertQuantDeQuantHelper {
       Value* original_output,
       const std::vector<Value*>& inputs,
       bool is_scalar = false,
-      const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt = c10::nullopt);
+      const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
+          c10::nullopt);
 
   bool isQuantized(Value* v) {
     return quantized_values_.count(v) != 0;
@@ -736,7 +733,9 @@ void InsertQuantDeQuantHelper::propagateQParams(
   // insert ops after the general op
   Node* quantized_input_node = quantized_input->node();
   // Insert after the node that is later in topological order
-  WithInsertPoint ins(quantized_input_node->isAfter(n) ? quantized_input_node->next() : n->next());
+  WithInsertPoint ins(
+      quantized_input_node->isAfter(n) ? quantized_input_node->next()
+                                       : n->next());
   std::vector<Value*> quant_inputs;
   auto quant_kind = Symbol::aten("quantize_per_tensor");
   if (qparams_opt.has_value()) {
@@ -779,7 +778,8 @@ void InsertQuantDeQuantHelper::propagateQParams(
   // replace uses of original output of the general op with quantized
   // output
   original_output->replaceAllUsesAfterNodeWith(quant, quantized_output);
-  const auto& outputs = insertDeQuantForAllUse(graph, quantized_output, quantized_output);
+  const auto& outputs =
+      insertDeQuantForAllUse(graph, quantized_output, quantized_output);
   for (auto* output : outputs) {
     if (is_scalar) {
       // Convert the dequantized Tensor back to Scalar
@@ -853,7 +853,8 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
             }
           }
         } else if (auto qparams_opt = getFixedQParams(n)) {
-          propagateQParams(output, inputs, /* is_scalar = */ false, qparams_opt);
+          propagateQParams(
+              output, inputs, /* is_scalar = */ false, qparams_opt);
         } else {
           propagateDequantize(output, inputs);
         }

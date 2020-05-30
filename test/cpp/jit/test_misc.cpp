@@ -755,7 +755,6 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
-
 void checkScopeCallbacks() {
   bool found_function_scope = false;
   bool found_method_scope = false;
@@ -1083,10 +1082,11 @@ void testRecordFunction() {
 
   // test set ids
   bool has_ids = false;
-  addGlobalCallback(RecordFunctionCallback(
-      [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
-      [](const RecordFunction&) {})
-      .needsIds(true));
+  addGlobalCallback(
+      RecordFunctionCallback(
+          [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
+          [](const RecordFunction&) {})
+          .needsIds(true));
   { RECORD_USER_SCOPE("test"); }
   TORCH_CHECK(has_ids);
   clearCallbacks();
