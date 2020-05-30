@@ -142,13 +142,16 @@ class TORCH_API DistAutogradContext {
 
 using ContextPtr = std::shared_ptr<DistAutogradContext>;
 
-// This class stores a weak_ptr to the current dist_autograd context in a thread
-// local variable so that a reader can retrieve the context.
+// This class stores a shared_ptr to a DistAutogradContext instance in a
+// thread local variable. The instance is given by the call site. The class
+// doesn't know the current context. It's just a util class.
 class TORCH_API ThreadLocalDistAutogradContext {
  public:
+  // Store 'new_context' to the thread local varaible maintained by this class.
   explicit ThreadLocalDistAutogradContext(ContextPtr&& new_context);
   ~ThreadLocalDistAutogradContext();
 
+  // Retrieve the stored DistAutogradContext instance.
   static ContextPtr getContextPtr();
 
  private:

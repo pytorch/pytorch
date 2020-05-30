@@ -34,10 +34,9 @@ D_OUT = 1
 NUM_TRAINERS = 4
 # Trainers + the master + the remote worker
 WORLD_SIZE = NUM_TRAINERS + 2
-TRAINER_GROUP = "trainer_group"
-TRAINER_RANKS = list(range(1, NUM_TRAINERS + 1))
-REMOTE_WORKER_RANK = NUM_TRAINERS + 1
-MASTER_RANK = 0
+TRAINER_RANKS = list(range(NUM_TRAINERS))
+REMOTE_WORKER_RANK = TRAINER_RANKS[-1] + 1
+MASTER_RANK = REMOTE_WORKER_RANK + 1
 
 
 class DdpMode(enum.Enum):
@@ -311,18 +310,15 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
     def tearDown(self):
         super(TestDdpUnderDistAutograd, self).tearDown()
 
-    @dist_init
     def _remote_worker_process(self):
         process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
         gLogger.info(f"The remote worker is running.")
         dist.destroy_process_group(process_group_for_ddp)
         gLogger.info(f"Exiting remote worker.")
 
-    @dist_init
     def _trainer_process(self, rank: int):
         gLogger.info(f"Running the trainer #{rank}...")
 
-    @dist_init
     def _master_process(self, ddp_mode: DdpMode):
         gLogger.info(f"Running the master process...")
         process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
@@ -394,16 +390,84 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
             raise RuntimeError(f"Unknow process rank: {self.rank}")
 
     @requires_gloo()
+    @dist_init
     def test_backward_no_ddp(self):
         self._do_test(DdpMode.NONE)
 
     @requires_gloo()
+    @dist_init
     def test_backward_ddp_outside(self):
         self._do_test(DdpMode.OUTSIDE)
 
     @requires_gloo()
+    @dist_init
     def test_backward_ddp_inside(self):
         self._do_test(DdpMode.INSIDE)
+
+
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "Skip ASAN as torch + multiprocessing spawn have known issues",
+)
+class TestDdpComparison(MultiProcessTestCase):
+    rpc_backend = rpc.backend_registry.BackendType.PROCESS_GROUP
+    rpc_backend_options = None
+
+    @property
+    def world_size(self) -> int:
+        return NUM_TRAINERS
+
+    def trainer_name(self, rank):
+        # The name has to be consistent with that in 'dist_init' decorator.
+        return f"worker{rank}"
+
+    def setUp(self):
+        super(TestDdpComparison, self).setUp()
+
+        os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
+        os.environ["MASTER_PORT"] = str(MASTER_PORT)
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(TestDdpComparison, self).tearDown()
+
+    @requires_gloo()
+    @dist_init
+    def test_ddp_comparison(self):
+        gLogger.info(f"Running trainer rank: {self.rank}")
+        process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
+        net = nn.Linear(2, 3)
+        ddp_net = DistributedDataParallel(
+            net, process_group=process_group_for_ddp
+        )
+        inputs = torch.rand((3, 2))
+
+        # Use local autograd. The gradients will be in each variable's '.grad'.
+        loss = ddp_net(inputs).norm()
+        loss.backward()
+
+        # Use distributed autograd. The gradients will be in RPC context map.
+        grads_dict = {}
+        with dist_autograd.context() as context_id:
+            loss = ddp_net(inputs).norm()
+            dist_autograd.backward(context_id, [loss])
+            grads_dict = dist_autograd.get_gradients(context_id)
+        gLogger.info(f"Trainer #{self.rank} got grad dict: {grads_dict}")
+        # The gradients should be the same
+        for param in net.parameters():
+            self.assertTrue(
+                param in grads_dict,
+                f"Param {param} is not in dist_auto grad dict {grads_dict}",
+            )
+            grad_diff = grads_dict[param] - param.grad
+            self.assertAlmostEqual(
+                0.0,
+                float(grad_diff.norm()),
+                msg=f"The grads for param {param} are different under local "
+                f"and dist autograd: {param.grad} \n---\n {grads_dict[param]}",
+            )
+
+        dist.destroy_process_group(process_group_for_ddp)
 
 
 if __name__ == "__main__":

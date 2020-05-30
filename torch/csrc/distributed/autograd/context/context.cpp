@@ -227,7 +227,7 @@ void DistAutogradContext::runGradCallbackForVariable(
   if (cb(grad)) {
     std::lock_guard<std::mutex> guard(lock_);
     // Needs to update the grad in the map.
-    accumulatedGrads_.insert(variable, std::move(grad));
+    accumulatedGrads_.insert_or_assign(variable, std::move(grad));
   }
 }
 
