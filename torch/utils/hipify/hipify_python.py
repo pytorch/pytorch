@@ -702,7 +702,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
         output_source = processKernelLaunches(output_source, stats)
 
     # Replace std:: with non-std:: versions
-    if filepath.endswith(".cu") or filepath.endswith(".cuh"):
+    if (filepath.endswith(".cu") or filepath.endswith(".cuh")) and "PowKernel" not in filepath:
         output_source = replace_math_functions(output_source)
 
     # Include header if device code is contained.
