@@ -6,6 +6,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/core/Array.h>
 #include <ATen/ExpandUtils.h>
+#include <THC/THCAtomics.cuh>
 
 namespace at { namespace native {
 
@@ -78,6 +79,14 @@ void index_put_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArra
   });
 }
 
+template <typename scalar_t>
+void index_put_accumulate_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+  gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
+    gpuAtomicAdd((scalar_t*)(out_data + offset), *(scalar_t*)in_data);
+    // *(scalar_t*)(out_data + offset) += *(scalar_t*)in_data;
+  });
+}
+
 static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
@@ -87,11 +96,16 @@ static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayR
 
 
 static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
-  AT_ASSERTM(!accumulate, "index_put does not support accumulate=true");
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_put", [&] {
-    using dtype = OpaqueType<sizeof(scalar_t)>;
-    index_put_kernel_impl<dtype>(iter, index_size, index_stride);
-  });
+  // AT_ASSERTM(!accumulate, "index_put does not support accumulate=true");
+  if (!accumulate)
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_put", [&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      index_put_kernel_impl<dtype>(iter, index_size, index_stride);
+    });
+  else
+    AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_put_accumulate", [&] {
+      index_put_accumulate_kernel_impl<scalar_t>(iter, index_size, index_stride);
+    });
 }
 
 static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {

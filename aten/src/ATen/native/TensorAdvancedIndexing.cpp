@@ -275,12 +275,14 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, 
 
 Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
     TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  /*
   if (accumulate && self.device().type() == kCUDA) {
       TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
       value.device(), " for value tensor");
       index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
       return self;
   }
+  */
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
