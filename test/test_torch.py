@@ -14246,7 +14246,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_memory_format_proparation_rules(self, device):
 
-        contiguous = torch.rand(10, 3, 5, 5, device=device) 
+        contiguous = torch.rand(10, 3, 5, 5, device=device)
         cl = torch.rand(10, 3, 5, 5, device=device).contiguous(memory_format=torch.channels_last)
         ambiguous = torch.rand(10, 3, 1, 1, device=device).contiguous(memory_format=torch.channels_last)
         self.assertTrue(ambiguous.is_contiguous(memory_format=torch.channels_last))
@@ -14255,13 +14255,13 @@ class TestTorchDeviceType(TestCase):
 
         def _test_propagation_rules(self, contiguous, cl, ambiguous, bias):
             options = ((ambiguous, contiguous, torch.contiguous_format),
-                    (ambiguous, cl, torch.channels_last),
-                    (contiguous, ambiguous, torch.contiguous_format),
-                    (contiguous, cl, torch.contiguous_format),
-                    (cl, ambiguous, torch.channels_last),
-                    (cl, contiguous, torch.channels_last),
-                    (bias, cl, torch.channels_last),
-                    (cl, bias, torch.channels_last),)
+                       (ambiguous, cl, torch.channels_last),
+                       (contiguous, ambiguous, torch.contiguous_format),
+                       (contiguous, cl, torch.contiguous_format),
+                       (cl, ambiguous, torch.channels_last),
+                       (cl, contiguous, torch.channels_last),
+                       (bias, cl, torch.channels_last),
+                       (cl, bias, torch.channels_last),)
 
             for a, b, mf in options:
                 result = a + b
