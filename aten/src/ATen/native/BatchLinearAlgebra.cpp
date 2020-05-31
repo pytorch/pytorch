@@ -405,13 +405,15 @@ static void apply_lstsq(Tensor& B, Tensor& A) {
     std::cout << B.data_ptr<scalar_t>()[i] << std::endl;
   }
 
+  if (! B.is_contiguous()) {
+    B = B.contiguous();
+  }
   if (m < n) {
     B.resize_({n, nrhs});
   }
 
   B = cloneBatchedColumnMajor(B);
   A = cloneBatchedColumnMajor(A);
-  
   auto B_data = B.data_ptr<scalar_t>();
   auto A_data = A.data_ptr<scalar_t>();
 
@@ -431,12 +433,13 @@ static void apply_lstsq(Tensor& B, Tensor& A) {
 }
 
 std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
-  TORCH_CHECK(A.size(-1) != 0, "A should not be empty");
-  TORCH_CHECK(B.size(-1) != 0, "B should not be empty");
   TORCH_CHECK(A.dim() == 2, "A should have 1 or 2 "
       "dimensions, but has ", A.dim());
+  TORCH_CHECK(A.size(-1) != 0, "A should not be empty");
   TORCH_CHECK(B.dim() == 1 || B.dim() == 2, "B should have 1 or 2 "
       "dimensions, but has ", B.dim());
+  TORCH_CHECK(B.size(-1) != 0, "B should not be empty");
+  
   TORCH_CHECK(A.size(0) == B.size(0), "Expected A and B to have same size "
       "at dim 0, but A has ", A.size(0), " rows and B has ", B.size(0), " rows");
 
@@ -454,6 +457,14 @@ std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
   });
 
   return std::tuple<Tensor, Tensor>(B_working, A_working);
+}
+
+std::tuple<Tensor&,Tensor&> lstsq_out(Tensor& B_out, Tensor& A_out, const Tensor& B, const Tensor&A) {
+  Tensor A_tmp, B_tmp;
+  std::tie(B_tmp, A_tmp) = native::lstsq(B, A);
+  A_out.resize_as_(A_tmp).copy_(A_tmp);
+  B_out.resize_as_(B_tmp).copy_(B_tmp);
+  return std::tuple<Tensor&, Tensor&>(A_out, B_out);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
