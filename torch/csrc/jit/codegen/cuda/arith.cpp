@@ -131,22 +131,43 @@ TORCH_CUDA_API Val* neg(Val* v) {
   return unaryOp(UnaryOpType::Neg, v);
 }
 
-#define BINARY_OP_OVERLOADS_FORWARD(name) \
-  return static_cast<TensorView*>(        \
-      name(static_cast<Val*>(v1), static_cast<Val*>(v2)))
-
-#define DEFINE_BINARY_OP_OVERLOADS(name)                            \
-  TORCH_CUDA_API TensorView* name(TensorView* v1, Val* v2) {        \
-    BINARY_OP_OVERLOADS_FORWARD(name);                              \
-  }                                                                 \
-  TORCH_CUDA_API TensorView* name(Val* v1, TensorView* v2) {        \
-    BINARY_OP_OVERLOADS_FORWARD(name);                              \
-  }                                                                 \
-  TORCH_CUDA_API TensorView* name(TensorView* v1, TensorView* v2) { \
-    BINARY_OP_OVERLOADS_FORWARD(name);                              \
-  }
-
 // BINARY OPERATIONS
+
+namespace {
+// Helper function to reduce repetitive code
+template <typename T1, typename T2>
+TensorView* arithOpOverloads(Val* (*func)(Val*, Val*), T1* v1, T2* v2) {
+  return static_cast<TensorView*>(
+      func(static_cast<Val*>(v1), static_cast<Val*>(v2)));
+}
+template <typename T1, typename T2>
+TensorView* arithOpOverloads(BinaryOpType type, T1* v1, T2* v2) {
+  return static_cast<TensorView*>(
+      binaryOp(type, static_cast<Val*>(v1), static_cast<Val*>(v2)));
+}
+template <typename T1, typename T2, typename T3>
+TensorView* arithOpOverloads(
+    Val* (*func)(Val*, Val*, Val*),
+    T1* v1,
+    T2* v2,
+    T3* v3) {
+  return static_cast<TensorView*>(func(
+      static_cast<Val*>(v1), static_cast<Val*>(v2), static_cast<Val*>(v3)));
+}
+template <typename T1, typename T2, typename T3, typename T4>
+TensorView* arithOpOverloads(
+    Val* (*func)(Val*, Val*, Val*, Val*),
+    T1* v1,
+    T2* v2,
+    T3* v3,
+    T4* v4) {
+  return static_cast<TensorView*>(func(
+      static_cast<Val*>(v1),
+      static_cast<Val*>(v2),
+      static_cast<Val*>(v3),
+      static_cast<Val*>(v4)));
+}
+} // namespace
 
 TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   Val* out = promoteNew(v1, v2);
@@ -160,71 +181,117 @@ TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   new BinaryOp(type, out, v1, v2);
   return out;
 }
-
 TORCH_CUDA_API TensorView* binaryOp(
     BinaryOpType type,
     TensorView* v1,
     Val* v2) {
-  return static_cast<TensorView*>(
-      binaryOp(type, static_cast<TensorView*>(v1), v2));
+  return arithOpOverloads(type, v1, v2);
 }
 TORCH_CUDA_API TensorView* binaryOp(
     BinaryOpType type,
     Val* v1,
     TensorView* v2) {
-  return static_cast<TensorView*>(
-      binaryOp(type, v1, static_cast<TensorView*>(v2)));
+  return arithOpOverloads(type, v1, v2);
 }
 TORCH_CUDA_API TensorView* binaryOp(
     BinaryOpType type,
     TensorView* v1,
     TensorView* v2) {
-  return static_cast<TensorView*>(binaryOp(
-      type, static_cast<TensorView*>(v1), static_cast<TensorView*>(v2)));
+  return arithOpOverloads(type, v1, v2);
 }
 
+// add
 TORCH_CUDA_API Val* add(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Add, v1, v2);
 }
-
-DEFINE_BINARY_OP_OVERLOADS(add)
-
+TORCH_CUDA_API TensorView* add(TensorView* v1, Val* v2) {
+  return arithOpOverloads(add, v1, v2);
+}
+TORCH_CUDA_API TensorView* add(Val* v1, TensorView* v2) {
+  return arithOpOverloads(add, v1, v2);
+}
+TORCH_CUDA_API TensorView* add(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(add, v1, v2);
+}
+// sub
 TORCH_CUDA_API Val* sub(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Sub, v1, v2);
 }
-
-DEFINE_BINARY_OP_OVERLOADS(sub)
-
+TORCH_CUDA_API TensorView* sub(TensorView* v1, Val* v2) {
+  return arithOpOverloads(sub, v1, v2);
+}
+TORCH_CUDA_API TensorView* sub(Val* v1, TensorView* v2) {
+  return arithOpOverloads(sub, v1, v2);
+}
+TORCH_CUDA_API TensorView* sub(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(sub, v1, v2);
+}
+// mul
 TORCH_CUDA_API Val* mul(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Mul, v1, v2);
 }
-
-DEFINE_BINARY_OP_OVERLOADS(mul)
-
+TORCH_CUDA_API TensorView* mul(TensorView* v1, Val* v2) {
+  return arithOpOverloads(mul, v1, v2);
+}
+TORCH_CUDA_API TensorView* mul(Val* v1, TensorView* v2) {
+  return arithOpOverloads(mul, v1, v2);
+}
+TORCH_CUDA_API TensorView* mul(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(mul, v1, v2);
+}
+// div
 TORCH_CUDA_API Val* div(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Div, v1, v2);
 }
-
-DEFINE_BINARY_OP_OVERLOADS(div)
-
+TORCH_CUDA_API TensorView* div(TensorView* v1, Val* v2) {
+  return arithOpOverloads(div, v1, v2);
+}
+TORCH_CUDA_API TensorView* div(Val* v1, TensorView* v2) {
+  return arithOpOverloads(div, v1, v2);
+}
+TORCH_CUDA_API TensorView* div(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(div, v1, v2);
+}
+// mod
 TORCH_CUDA_API Val* mod(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Mod, v1, v2);
 }
-
-DEFINE_BINARY_OP_OVERLOADS(mod)
-
+TORCH_CUDA_API TensorView* mod(TensorView* v1, Val* v2) {
+  return arithOpOverloads(mod, v1, v2);
+}
+TORCH_CUDA_API TensorView* mod(Val* v1, TensorView* v2) {
+  return arithOpOverloads(mod, v1, v2);
+}
+TORCH_CUDA_API TensorView* mod(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(mod, v1, v2);
+}
+// lt
 TORCH_CUDA_API Val* lt(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::LT, v1, v2);
 }
-
-DEFINE_BINARY_OP_OVERLOADS(lt)
-
+TORCH_CUDA_API TensorView* lt(TensorView* v1, Val* v2) {
+  return arithOpOverloads(lt, v1, v2);
+}
+TORCH_CUDA_API TensorView* lt(Val* v1, TensorView* v2) {
+  return arithOpOverloads(lt, v1, v2);
+}
+TORCH_CUDA_API TensorView* lt(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(lt, v1, v2);
+}
+// ceilDiv
 TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::CeilDiv, v1, v2);
 }
-
-DEFINE_BINARY_OP_OVERLOADS(ceilDiv)
-
+TORCH_CUDA_API TensorView* ceilDiv(TensorView* v1, Val* v2) {
+  return arithOpOverloads(ceilDiv, v1, v2);
+}
+TORCH_CUDA_API TensorView* ceilDiv(Val* v1, TensorView* v2) {
+  return arithOpOverloads(ceilDiv, v1, v2);
+}
+TORCH_CUDA_API TensorView* ceilDiv(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(ceilDiv, v1, v2);
+}
+// andOp
 TORCH_CUDA_API Val* andOp(Val* v1, Val* v2) {
   TORCH_CHECK(
       v1->getDataType().value() == DataType::Bool,
@@ -236,11 +303,15 @@ TORCH_CUDA_API Val* andOp(Val* v1, Val* v2) {
       v2->getDataType().value());
   return binaryOp(BinaryOpType::And, v1, v2);
 }
-
-DEFINE_BINARY_OP_OVERLOADS(andOp)
-
-#undef BINARY_OP_OVERLOADS_FORWARD
-#undef DEFINE_BINARY_OP_OVERLOADS
+TORCH_CUDA_API TensorView* andOp(TensorView* v1, Val* v2) {
+  return arithOpOverloads(andOp, v1, v2);
+}
+TORCH_CUDA_API TensorView* andOp(Val* v1, TensorView* v2) {
+  return arithOpOverloads(andOp, v1, v2);
+}
+TORCH_CUDA_API TensorView* andOp(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(andOp, v1, v2);
+}
 
 // REDUCTION OPERATIONS
 
@@ -308,76 +379,7 @@ TORCH_CUDA_API TensorView* sum(Val* v1, const std::vector<int>& axes) {
 
 // COMPOUND OPERATIONS
 
-#define TERNARY_OP_OVERLOADS_FORWARD(name) \
-  return static_cast<TensorView*>(name(    \
-      static_cast<Val*>(v1), static_cast<Val*>(v2), static_cast<Val*>(v3)))
-#define QUATERNARY_OP_OVERLOADS_FORWARD(name) \
-  return static_cast<TensorView*>(name(       \
-      static_cast<Val*>(v1),                  \
-      static_cast<Val*>(v2),                  \
-      static_cast<Val*>(v3),                  \
-      static_cast<Val*>(v4)))
-
-#define DEFINE_TERNARY_OP_OVERLOADS(name)                                    \
-  TORCH_CUDA_API TensorView* name(TensorView* v1, Val* v2, Val* v3) {        \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }                                                                          \
-  TORCH_CUDA_API TensorView* name(Val* v1, TensorView* v2, Val* v3) {        \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }                                                                          \
-  TORCH_CUDA_API TensorView* name(Val* v1, Val* v2, TensorView* v3) {        \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }                                                                          \
-  TORCH_CUDA_API TensorView* name(TensorView* v1, TensorView* v2, Val* v3) { \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }                                                                          \
-  TORCH_CUDA_API TensorView* name(TensorView* v1, Val* v2, TensorView* v3) { \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }                                                                          \
-  TORCH_CUDA_API TensorView* name(Val* v1, TensorView* v2, TensorView* v3) { \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }                                                                          \
-  TORCH_CUDA_API TensorView* name(                                           \
-      TensorView* v1, TensorView* v2, TensorView* v3) {                      \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }
-#define DEFINE_TERNARY_OP_OVERLOADS2(name)                                   \
-  TORCH_CUDA_API TensorView* name(TensorView* v1, Val* v2, Val* v3) {        \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }                                                                          \
-  TORCH_CUDA_API TensorView* name(Val* v1, TensorView* v2, Val* v3) {        \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }                                                                          \
-  TORCH_CUDA_API TensorView* name(TensorView* v1, TensorView* v2, Val* v3) { \
-    TERNARY_OP_OVERLOADS_FORWARD(name);                                      \
-  }
-#define DEFINE_QUTERNARY_OP_OVERLOADS3(name)                                   \
-  TORCH_CUDA_API TensorView* name(TensorView* v1, Val* v2, Val* v3, Val* v4) { \
-    QUATERNARY_OP_OVERLOADS_FORWARD(name);                                     \
-  }                                                                            \
-  TORCH_CUDA_API TensorView* name(Val* v1, TensorView* v2, Val* v3, Val* v4) { \
-    QUATERNARY_OP_OVERLOADS_FORWARD(name);                                     \
-  }                                                                            \
-  TORCH_CUDA_API TensorView* name(Val* v1, Val* v2, TensorView* v3, Val* v4) { \
-    QUATERNARY_OP_OVERLOADS_FORWARD(name);                                     \
-  }                                                                            \
-  TORCH_CUDA_API TensorView* name(                                             \
-      TensorView* v1, TensorView* v2, Val* v3, Val* v4) {                      \
-    QUATERNARY_OP_OVERLOADS_FORWARD(name);                                     \
-  }                                                                            \
-  TORCH_CUDA_API TensorView* name(                                             \
-      TensorView* v1, Val* v2, TensorView* v3, Val* v4) {                      \
-    QUATERNARY_OP_OVERLOADS_FORWARD(name);                                     \
-  }                                                                            \
-  TORCH_CUDA_API TensorView* name(                                             \
-      Val* v1, TensorView* v2, TensorView* v3, Val* v4) {                      \
-    QUATERNARY_OP_OVERLOADS_FORWARD(name);                                     \
-  }                                                                            \
-  TORCH_CUDA_API TensorView* name(                                             \
-      TensorView* v1, TensorView* v2, TensorView* v3, Val* v4) {               \
-    QUATERNARY_OP_OVERLOADS_FORWARD(name);                                     \
-  }
-
+// add_alpha
 TORCH_CUDA_API Val* add_alpha(Val* v1, Val* v2, Val* s) {
   TORCH_CHECK(
       s->getValType().value() == ValType::Scalar,
@@ -387,9 +389,16 @@ TORCH_CUDA_API Val* add_alpha(Val* v1, Val* v2, Val* s) {
   Val* intrm = binaryOp(BinaryOpType::Mul, v2, s);
   return binaryOp(BinaryOpType::Add, v1, intrm);
 }
-
-DEFINE_TERNARY_OP_OVERLOADS2(add_alpha)
-
+TORCH_CUDA_API TensorView* add_alpha(TensorView* v1, Val* v2, Val* v3) {
+  return arithOpOverloads(add_alpha, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* add_alpha(Val* v1, TensorView* v2, Val* v3) {
+  return arithOpOverloads(add_alpha, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* add_alpha(TensorView* v1, TensorView* v2, Val* v3) {
+  return arithOpOverloads(add_alpha, v1, v2, v3);
+}
+// sub_alpha
 TORCH_CUDA_API Val* sub_alpha(Val* v1, Val* v2, Val* s) {
   TORCH_CHECK(
       s->getValType().value() == ValType::Scalar,
@@ -399,17 +408,46 @@ TORCH_CUDA_API Val* sub_alpha(Val* v1, Val* v2, Val* s) {
   Val* intrm = binaryOp(BinaryOpType::Mul, v2, s);
   return binaryOp(BinaryOpType::Sub, v1, intrm);
 }
-
-DEFINE_TERNARY_OP_OVERLOADS2(sub_alpha)
-
+TORCH_CUDA_API TensorView* sub_alpha(TensorView* v1, Val* v2, Val* v3) {
+  return arithOpOverloads(sub_alpha, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* sub_alpha(Val* v1, TensorView* v2, Val* v3) {
+  return arithOpOverloads(sub_alpha, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* sub_alpha(TensorView* v1, TensorView* v2, Val* v3) {
+  return arithOpOverloads(sub_alpha, v1, v2, v3);
+}
+// lerp
 TORCH_CUDA_API Val* lerp(Val* start, Val* end, Val* weight) {
   Val* intrm1 = binaryOp(BinaryOpType::Sub, end, start);
   Val* intrm2 = binaryOp(BinaryOpType::Mul, weight, intrm1);
   return binaryOp(BinaryOpType::Add, start, intrm2);
 }
-
-DEFINE_TERNARY_OP_OVERLOADS(lerp)
-
+TORCH_CUDA_API TensorView* lerp(TensorView* v1, Val* v2, Val* v3) {
+  return arithOpOverloads(lerp, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* lerp(Val* v1, TensorView* v2, Val* v3) {
+  return arithOpOverloads(lerp, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* lerp(Val* v1, Val* v2, TensorView* v3) {
+  return arithOpOverloads(lerp, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* lerp(TensorView* v1, TensorView* v2, Val* v3) {
+  return arithOpOverloads(lerp, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* lerp(TensorView* v1, Val* v2, TensorView* v3) {
+  return arithOpOverloads(lerp, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* lerp(Val* v1, TensorView* v2, TensorView* v3) {
+  return arithOpOverloads(lerp, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* lerp(
+    TensorView* v1,
+    TensorView* v2,
+    TensorView* v3) {
+  return arithOpOverloads(lerp, v1, v2, v3);
+}
+// addcmul
 TORCH_CUDA_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s) {
   TORCH_CHECK(
       s->getValType().value() == ValType::Scalar,
@@ -420,11 +458,46 @@ TORCH_CUDA_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s) {
   Val* intrm2 = binaryOp(BinaryOpType::Mul, v2, intrm1);
   return binaryOp(BinaryOpType::Add, v1, intrm2);
 }
-
-DEFINE_QUTERNARY_OP_OVERLOADS3(addcmul)
+TORCH_CUDA_API TensorView* addcmul(TensorView* v1, Val* v2, Val* v3, Val* v4) {
+  return arithOpOverloads(addcmul, v1, v2, v3, v4);
+}
+TORCH_CUDA_API TensorView* addcmul(Val* v1, TensorView* v2, Val* v3, Val* v4) {
+  return arithOpOverloads(addcmul, v1, v2, v3, v4);
+}
+TORCH_CUDA_API TensorView* addcmul(Val* v1, Val* v2, TensorView* v3, Val* v4) {
+  return arithOpOverloads(addcmul, v1, v2, v3, v4);
+}
+TORCH_CUDA_API TensorView* addcmul(
+    TensorView* v1,
+    TensorView* v2,
+    Val* v3,
+    Val* v4) {
+  return arithOpOverloads(addcmul, v1, v2, v3, v4);
+}
+TORCH_CUDA_API TensorView* addcmul(
+    TensorView* v1,
+    Val* v2,
+    TensorView* v3,
+    Val* v4) {
+  return arithOpOverloads(addcmul, v1, v2, v3, v4);
+}
+TORCH_CUDA_API TensorView* addcmul(
+    Val* v1,
+    TensorView* v2,
+    TensorView* v3,
+    Val* v4) {
+  return arithOpOverloads(addcmul, v1, v2, v3, v4);
+}
+TORCH_CUDA_API TensorView* addcmul(
+    TensorView* v1,
+    TensorView* v2,
+    TensorView* v3,
+    Val* v4) {
+  return arithOpOverloads(addcmul, v1, v2, v3, v4);
+}
 
 // TERNARY OPERATIONS
-
+// where
 TORCH_CUDA_API Val* where(Val* c, Val* v1, Val* v2) {
   TORCH_CHECK(
       c->getDataType().value() == DataType::Bool,
@@ -435,8 +508,30 @@ TORCH_CUDA_API Val* where(Val* c, Val* v1, Val* v2) {
   new TernaryOp(TernaryOpType::Where, out, c, v1, v2);
   return out;
 }
-
-DEFINE_TERNARY_OP_OVERLOADS(where)
+TORCH_CUDA_API TensorView* where(TensorView* v1, Val* v2, Val* v3) {
+  return arithOpOverloads(where, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* where(Val* v1, TensorView* v2, Val* v3) {
+  return arithOpOverloads(where, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* where(Val* v1, Val* v2, TensorView* v3) {
+  return arithOpOverloads(where, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* where(TensorView* v1, TensorView* v2, Val* v3) {
+  return arithOpOverloads(where, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* where(TensorView* v1, Val* v2, TensorView* v3) {
+  return arithOpOverloads(where, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* where(Val* v1, TensorView* v2, TensorView* v3) {
+  return arithOpOverloads(where, v1, v2, v3);
+}
+TORCH_CUDA_API TensorView* where(
+    TensorView* v1,
+    TensorView* v2,
+    TensorView* v3) {
+  return arithOpOverloads(where, v1, v2, v3);
+}
 
 TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
   TORCH_CHECK(
@@ -481,11 +576,6 @@ TORCH_CUDA_API TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
   return static_cast<TensorView*>(
       clamp(static_cast<Val*>(in), min_val, max_val));
 }
-
-#undef TERNARY_OP_OVERLOADS_FORWARD
-#undef DEFINE_TERNARY_OP_OVERLOADS
-#undef DEFINE_TERNARY_OP_OVERLOADS2
-#undef DEFINE_QUTERNARY_OP_OVERLOADS3
 
 } // namespace fuser
 } // namespace jit
