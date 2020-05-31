@@ -3,6 +3,12 @@
 #include <ATen/cuda/NumericLimits.cuh>
 #include <THC/THCNumerics.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCThrustAllocator.cuh>
+#include <thrust/execution_policy.h>
+#include <thrust/device_ptr.h>
+#include <thrust/scan.h>
+
 
 namespace at { namespace native {
 
@@ -442,12 +448,27 @@ void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, Binar
 }
 
 template<typename scalar_t, typename BinaryFunction>
+void scan_thrust(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  thrust::device_ptr<scalar_t> src_data(self.data_ptr<scalar_t>());
+  thrust::device_ptr<scalar_t> dst_data(result.data_ptr<scalar_t>());
+  ptrdiff_t size = self.numel();
+  thrust::inclusive_scan(
+      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
+      src_data, src_data + size, dst_data,
+      binary_op);
+}
+
+template<typename scalar_t, typename BinaryFunction>
 void scan_dim(const Tensor& self, Tensor& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   Tensor self_ = self.contiguous();
   result = result.contiguous();
-  if (dim == ndim - 1) {
+
+  if (self.numel() == self.size(dim)) {
+    scan_thrust<scalar_t>(self_, result, init, binary_op);
+  } else if (dim == ndim - 1) {
     scan_innermost_dim<scalar_t>(self_, result, init, binary_op);
   } else {
     scan_outer_dim<scalar_t>(self_, result, dim, init, binary_op);
