@@ -14,13 +14,14 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
 from torch.quantization import get_default_qconfig
 
-# torch.quantization._quantize_script
-from torch.quantization._quantize_script import script_qconfig
-from torch.quantization._quantize_script import prepare_script
-from torch.quantization._quantize_script import convert_script
-from torch.quantization._quantize_script import quantize_script
-from torch.quantization._quantize_script import prepare_dynamic_script
-from torch.quantization._quantize_script import quantize_dynamic_script
+# torch.quantization.quantize_script
+from torch.quantization.quantize_script import script_qconfig
+from torch.quantization.quantize_script import prepare_script
+from torch.quantization.quantize_script import convert_script
+from torch.quantization.quantize_script import quantize_script
+from torch.quantization.quantize_script import prepare_dynamic_script
+from torch.quantization.quantize_script import convert_dynamic_script
+from torch.quantization.quantize_script import quantize_dynamic_script
 
 # Testing utils
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
@@ -358,9 +359,8 @@ graph(%input, %weight):
                 return self.conv(x)
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(default_observer())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # for input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # for weight
@@ -385,14 +385,8 @@ graph(%input, %weight):
                 return self.sub(self.conv(x))
 
         m = torch.jit.script(M())
-        qconfig = script_qconfig(default_qconfig)
-
-        qconfig_dict = {
-            'sub.fc': qconfig
-        }
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward",
-                                                                qconfig_dict,
-                                                                False))
+        qconfig_dict = {'sub.fc': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # input and output of sub
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # not quantized
@@ -448,16 +442,16 @@ graph(%input, %weight):
             return [x for x, _ in module._modules._c.items()
                     if x.startswith(prefix)]
 
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        qconfig_dict = {'': default_qconfig}
         m = torch.jit.script(ConvFunctionalReLU())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        m = prepare_script(m, qconfig_dict)
         # observer for weight of conv
         assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
         # observer for input of conv and output of relu
         assert len(attrs_with_prefix(m, '_observer_')) == 2
 
         m = torch.jit.script(ConvReLUModule())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        m = prepare_script(m, qconfig_dict)
         # observer for input of conv and output of relu
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # observer for weight of conv
@@ -466,8 +460,8 @@ graph(%input, %weight):
         assert len(attrs_with_prefix(m.relu, '_observer_')) == 0
 
         m = torch.jit.script(AddReLUModule())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         assert len(attrs_with_prefix(m, '_observer')) == 3
         assert len(attrs_with_prefix(m.relu, '_observer')) == 0
         FileCheck().check('aten::add_') \
@@ -476,8 +470,8 @@ graph(%input, %weight):
                    .run(str(get_forward_graph(m._c)))
 
         m = torch.jit.script(AddFunctionalReLU())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         assert len(attrs_with_prefix(m, '_observer')) == 3
         FileCheck().check('aten::add_') \
                    .check_not('Observer = prim::GetAttr[name="_observer_') \
@@ -495,10 +489,8 @@ graph(%input, %weight):
                 return F.relu(self.conv(x))
 
         m = torch.jit.script(M())
-        qconfig_dict = {
-            '': script_qconfig(default_qconfig)
-        }
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         activation_dtypes = set(obs.getattr('dtype') for x, obs in m._modules._c.items()
                                 if x.startswith('_observer_'))
         weight_dtypes = set(obs.getattr('dtype') for x, obs in m.conv._modules._c.items()
@@ -519,7 +511,7 @@ graph(%input, %weight):
                 return x + y
 
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig}, False)
+        m = prepare_script(m, {'': default_qconfig})
         # 3 for x, y, weight, one for output of each F.conv2d and one for output of add
         assert len(attrs_with_prefix(m, '_observer')) == 6
 
@@ -534,8 +526,8 @@ graph(%input, %weight):
                 return self.conv2(self.conv1(x))
 
         m = torch.jit.script(M())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # conv1 and conv2 shares the same type, we need to
         # make sure we didn't quantize the type twice
         conv1_observers = attrs_with_prefix(m.conv1, '_observer_')
@@ -561,9 +553,9 @@ graph(%input, %weight):
                 x = torch.flatten(x)
                 return x
 
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
@@ -593,9 +585,9 @@ graph(%input, %weight):
                 x = self.conv2(x)
                 return x
 
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 3
         FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
@@ -626,9 +618,9 @@ graph(%input, %weight):
                 x = self.conv2(x)
                 return x
 
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 3
         FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
@@ -668,7 +660,7 @@ graph(%input, %weight):
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig}, inplace=False)
+        m = prepare_script(m, {'': default_qconfig})
         # we want to test that channel_shuffle is going to pass
         # the observed property from the output of conv1 to input of conv2
         # so that we don't insert observers for input of conv2
@@ -700,7 +692,7 @@ graph(%input, %weight):
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig}, inplace=False)
+        m = prepare_script(m, {'': default_qconfig})
         assert len(attrs_with_prefix(m, '_observer_',)) == 3
 
     def test_insert_quant_dequant(self):
@@ -716,15 +708,12 @@ graph(%input, %weight):
             m = torch.jit.script(M())
             observer = default_per_channel_weight_observer.with_args(ch_axis=1) \
                 if is_per_channel else default_observer
-            qconfig = QConfig(activation=observer, weight=observer)
-            qconfig_dict = {
-                '': script_qconfig(qconfig)
-            }
-            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+            qconfig_dict = {'': QConfig(activation=observer, weight=observer)}
+            m = prepare_script(m, qconfig_dict)
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
             m(data)
-            m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
+            m = convert_script(m, debug=True)
             assert len(m._modules._c.items()) == 1, \
                 'Expected to have single submodule of conv'
             # make sure the quantized model is executable
@@ -763,7 +752,7 @@ graph(%input, %weight):
 
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
             m(data)
-            m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
+            m = convert_script(m, debug=True)
             m(data)
             assert m.conv1._c._type() == m.conv2._c._type()
 
@@ -968,7 +957,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         m = torch.jit.script(M()).eval()
-        m = quantize_script(m, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        m = quantize_script(m, qconfig_dict, _test_only_eval_fn, [data])
         # make sure patterns in both branches are fused
         FileCheck().check_count("quantized::conv2d(", 4, exactly=True) \
                    .run(m.graph)
@@ -985,7 +974,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
         # make sure there is only one quantize_per_tensor for input
         # and linear_prepack is folded
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
@@ -1008,7 +997,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=True)
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], debug=True)
         FileCheck().check_not("quantized::conv2d") \
                    .check("aten::conv2d") \
                    .check("aten::avg_pool2d") \
@@ -1127,7 +1116,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     def _test_op_impl(self, module, data, quantized_op, debug=False):
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model = torch.jit.script(module).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
         if debug:
             print(model.graph)
         FileCheck().check(quantized_op) \
@@ -1595,14 +1584,14 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         # quantized cat
         m = torch.jit.script(QuantizedCat()).eval()
-        m = prepare_script(m, {'': default_qconfig}, True)
+        m = prepare_script(m, {'': default_qconfig})
         # four for input and output of conv and one for output of cat
         # this also tests the ListConstruct can preserve the observed property so that
         # torch.cat knows that inputs are observed
         assert len(attrs_with_prefix(m, '_observer_')) == 5
         data = torch.randn(1, 1, 10, 10, dtype=torch.float)
         m(data, data)
-        m = convert_script(m, True)
+        m = convert_script(m)
 
         FileCheck().check_not("aten::cat") \
                    .check("quantized::cat") \
@@ -1610,11 +1599,11 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         # non quantized cat
         m = torch.jit.script(NonQuantizedCat()).eval()
-        m = prepare_script(m, {'': default_qconfig}, True)
+        m = prepare_script(m, {'': default_qconfig})
         assert len(attrs_with_prefix(m, '_observer_')) == 0
         data = torch.randn(1, 1, 10, 10, dtype=torch.float)
         m(data, data)
-        m = convert_script(m, True)
+        m = convert_script(m)
 
         FileCheck().check_not("quantized::cat") \
                    .check("aten::cat") \
@@ -2021,7 +2010,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
             m._c, 'forward', {'': qconfig}, inplace=False))
-        m = convert_script(m, True)
+        m = convert_script(m)
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
         # observers and also successfully fused two quantized::conv2d
@@ -2225,7 +2214,7 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         data = torch.randn(5, 5, dtype=torch.float)
 
         m(data)
-        m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False, True))
+        m = convert_dynamic_script(m, debug=True)
 
         assert len(m._modules._c.items()) == 2, \
             'Expected to have two submodule of linear'

@@ -3057,6 +3057,13 @@ class TestAutograd(TestCase):
         keys = dir(x)
         self.assertIn('shape', keys)
 
+        # real and imag are only implemented for complex tensors.
+        y = torch.randn(10, 10, dtype=torch.cfloat)
+        for key in ['real', 'imag']:
+            self.assertRaises(RuntimeError, lambda: hasattr(x, key))
+            self.assertTrue(hasattr(y, key))
+            keys.remove(key)
+
         for key in keys:
             self.assertTrue(hasattr(x, key))
 
@@ -5554,25 +5561,6 @@ class TestAutogradDeviceType(TestCase):
 
             m = torch.cat((asd, asd))
             m.sum().backward()
-
-
-    @deviceCountAtLeast(2)
-    def test_scalar_different_devices(self, devices):
-        a = torch.rand([], requires_grad=True, device=devices[0])
-        b = torch.rand(10, requires_grad=True, device=devices[1])
-
-        c = b * a
-        c.sum().backward()
-
-
-    @onlyCUDA
-    def test_scalar_different_device_types(self, device):
-        c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
-        c.sum().backward()
-
-        d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
-        d.sum().backward()
-
 
     # NOTE: flaky on ROCm CI
     @skipCUDAIfRocm
