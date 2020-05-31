@@ -101,6 +101,44 @@ class TestIndexing(TestCase):
         self.assertEqual(a[-2], 13)
         self.assertEqual(a[-1], 14)
 
+    @dtypes(torch.bool, torch.int, torch.long, torch.half, torch.float, torch.double)
+    def test_index_put_accumulate(self, device, dtype):
+        # 1d
+        a1 = torch.zeros(3, device=device, dtype=dtype)
+        b1 = a1.index_put([
+            torch.tensor([0, 2], device=device)
+        ], torch.tensor([1., 5.], device=device, dtype=dtype), accumulate=True)
+        self.assertEqual(b1, torch.tensor([1., 0., 5.], device=device, dtype=dtype))
+
+        # 1d broadcasting
+        a2 = torch.zeros(3, device=device, dtype=dtype)
+        b2 = a2.index_put([
+            torch.tensor([0, 2] * 100, device=device)
+        ], torch.tensor(1., device=device, dtype=dtype), accumulate=True)
+        self.assertEqual(b2, torch.tensor([100., 0, 100.], device=device, dtype=dtype))
+
+        # 2d
+        a3 = torch.zeros(2, 3, device=device, dtype=dtype)
+        b3 = a3.index_put([
+            torch.tensor([0, 1, 1, 1, 1], device=device),
+            torch.tensor([1, 0, 2, 0, 0], device=device)
+        ], torch.tensor([1, 2, 3, 4, 5], device=device, dtype=dtype), accumulate=True)
+        self.assertEqual(b3, torch.tensor([
+            [0, 1, 0],
+            [11, 0, 3]
+        ], device=device, dtype=dtype))
+
+        # 2d broadcasting
+        a4 = torch.zeros(2, 3, device=device, dtype=dtype)
+        b4 = a4.index_put([
+            torch.tensor([0, 1, 1, 1, 1], device=device),
+            torch.tensor([1, 0, 2, 0, 0], device=device)
+        ], torch.tensor(1., device=device, dtype=dtype), accumulate=True)
+        self.assertEqual(b4, torch.tensor([
+            [0, 1, 0],
+            [3, 0, 1]
+        ], device=device, dtype=dtype))
+
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
