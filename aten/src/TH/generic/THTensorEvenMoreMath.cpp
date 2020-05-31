@@ -180,14 +180,6 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value)
 
 #if !defined(TH_REAL_IS_BFLOAT16) /* non bfloat16 part*/
 
-accreal THTensor_(sumall)(THTensor *tensor)
-{
-  accreal sum = 0;
-  TH_TENSOR_APPLY_REDUCTION_SUM_PARALLEL(
-    scalar_t, tensor, *tensor_data, sum, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  return sum;
-}
-
 void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   ptrdiff_t i, numel;

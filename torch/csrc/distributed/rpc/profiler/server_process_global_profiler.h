@@ -1,5 +1,7 @@
 #pragma once
 
+#include <shared_mutex>
+
 #include <torch/csrc/autograd/profiler.h>
 
 namespace torch {
@@ -32,33 +34,86 @@ class State {
     return config_;
   }
 
-  void pushProfileRange(thread_event_lists profileRange) {
-    std::unique_lock<std::mutex> lock(profileRangesMutex_);
+  void pushResult(thread_event_lists result) {
+    std::unique_lock<std::mutex> lock(resultsMutex_);
 
     // NB: When a thread wants to push an entry into the this container,
     // main control logic might have exited the process-global profile range.
-    profileRanges_.emplace_back(std::move(profileRange));
+    results_.emplace_back(std::move(result));
   }
 
-  std::vector<thread_event_lists> profileRanges() {
-    std::unique_lock<std::mutex> lock(profileRangesMutex_);
-
-    std::vector<thread_event_lists> results;
-    results.swap(profileRanges_);
-    return results;
-  }
+  std::vector<thread_event_lists> results();
 
  private:
-  // Name it profileRanges_ to emphasize on the fact that each element is the
-  // results of a profile range. In each profile range, there is a
+  // Each result comes from a profile range. In each profile range, there is a
   // "__profiler_start" marker event that all following events calculate time
   // relative to it, so it's required to call
-  // parse_cpu_trace(profileRange) for every profile range.
-  std::mutex profileRangesMutex_;
-  std::vector<thread_event_lists> profileRanges_;
+  // parse_cpu_trace(result) for results of all profile range.
+  std::mutex resultsMutex_;
+  std::vector<thread_event_lists> results_;
   const ProfilerConfig config_ =
       ProfilerConfig(ProfilerState::Disabled, false, false);
 };
+
+class StateStackEntry;
+
+#if defined(__MACH__)
+// Compiler error: 'shared_timed_mutex' is unavailable: introduced in
+// macOS 10.12
+using mutexType = std::mutex;
+// Compiler error: 'shared_lock' is unavailable: introduced in
+// macOS 10.12
+using rLockType = std::unique_lock<std::mutex>;
+using wLockType = std::unique_lock<std::mutex>;
+#else
+using mutexType = std::shared_timed_mutex;
+using rLockType = std::shared_lock<std::shared_timed_mutex>;
+using wLockType = std::unique_lock<std::shared_timed_mutex>;
+#endif
+
+// This is the global stack of ``State``s.
+extern std::shared_ptr<StateStackEntry> currentStateStackEntryPtr;
+extern mutexType currentStateStackEntryMutex;
+
+// This class is used to implement a stack of ``State``s.
+// It has 2 members.
+// One is `prevPtr`, a shared_ptr poiniting to previous elememnt in the
+// stack.
+// The other is ``statePtr``, a shared_ptr pointing to ``State``.
+class StateStackEntry : std::enable_shared_from_this<StateStackEntry> {
+ public:
+  StateStackEntry(
+      std::shared_ptr<StateStackEntry> prevPtr,
+      std::shared_ptr<State> statePtr)
+      : prevPtr_(prevPtr), statePtr_(statePtr) {}
+
+  static void pushRange(std::shared_ptr<State> profilerProcessGlobalStatePtr);
+  static std::shared_ptr<State> popRange();
+
+  static std::shared_ptr<StateStackEntry> current() {
+    rLockType rlock(currentStateStackEntryMutex);
+
+    return currentStateStackEntryPtr;
+  }
+
+  std::shared_ptr<StateStackEntry> prevPtr() const {
+    return prevPtr_;
+  }
+
+  std::shared_ptr<State> statePtr() const {
+    return statePtr_;
+  }
+
+ private:
+  const std::shared_ptr<StateStackEntry> prevPtr_{nullptr};
+  const std::shared_ptr<State> statePtr_{nullptr};
+};
+
+// Push the result to ``State``s of current profile range and recursively outer
+// profile ranges.
+TORCH_API void pushResultRecursive(
+    std::shared_ptr<StateStackEntry> stateStackEntryPtr,
+    thread_event_lists result);
 
 // User-facing API.
 //
@@ -72,16 +127,6 @@ TORCH_API void enableServer(const ProfilerConfig& new_config);
 // after calling this API.
 // This enables all RPC threads running server-side request callbacks.
 TORCH_API std::vector<thread_event_lists> disableServer();
-
-// Internal API.
-//
-// Return a bool indicating whether the server-side process-global profiling is
-// on. All RPC threads running server-side request callbacks queries this.
-TORCH_API bool serverEnabled();
-
-// If server-side process-global profiling is on, use this API to get server
-// process global profiler state to set thread-local profiling state.
-TORCH_API std::shared_ptr<State> serverState();
 
 } // namespace processglobal
 } // namespace profiler

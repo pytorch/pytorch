@@ -740,7 +740,7 @@ class Tensor(torch._C._TensorBase):
                           "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
                           "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
                           "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
-                          "github.com/pytorch/pytorch/pull/30531 for more informations.")
+                          "github.com/pytorch/pytorch/pull/30531 for more informations.", stacklevel=2)
         return self._grad
 
     @grad.setter

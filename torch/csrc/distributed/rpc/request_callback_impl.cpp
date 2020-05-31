@@ -579,21 +579,19 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
          id = request.id()]() {
-          // This cost of pre-request check is minimal thanks to
+          // The cost of pre-request check is minimal thanks to
           // std::shared_lock. The cost is in magnitude
-          // of 10us. If server global profiler is enabled, we futher pay the
-          // cost of thread local profiler state initialization .
-          bool isServerProcessGlobalProfilerEnabled =
-              profiler::processglobal::serverEnabled();
-          std::shared_ptr<profiler::processglobal::State>
-              serverProcessGlobalProfilerStatePtr;
-          if (isServerProcessGlobalProfilerEnabled) {
+          // of 10us.
+          auto serverProcessGlobalProfilerStateStackEntryPtr =
+              profiler::processglobal::StateStackEntry::current();
+          // If server global profiler is enabled, we futher pay the
+          // cost of thread local profiler state initialization.
+          if (serverProcessGlobalProfilerStateStackEntryPtr) {
             // Initialize thread-local profiler state from process-global
             // profiler state.
-            serverProcessGlobalProfilerStatePtr =
-                profiler::processglobal::serverState();
             ::torch::autograd::profiler::enableProfiler(
-                serverProcessGlobalProfilerStatePtr->config());
+                serverProcessGlobalProfilerStateStackEntryPtr->statePtr()
+                    ->config());
           }
 
           try {
@@ -613,13 +611,15 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
           }
 
           // Response message has been sent at this moment, this post-response
-          // work doesn't affect RPC latency.
-          if (isServerProcessGlobalProfilerEnabled) {
+          // work doesn't affect RPC trip time.
+          if (serverProcessGlobalProfilerStateStackEntryPtr) {
             // Restore thread-local profiler state.
             ::torch::autograd::profiler::thread_event_lists event_lists =
                 ::torch::autograd::profiler::disableProfiler();
-            // Put event_lists into the process-global profiler state.
-            serverProcessGlobalProfilerStatePtr->pushProfileRange(event_lists);
+            // Put thread_local event_lists into the process-global profiler
+            // state.
+            profiler::processglobal::pushResultRecursive(
+                serverProcessGlobalProfilerStateStackEntryPtr, event_lists);
           }
         });
   } catch (std::exception& e) {

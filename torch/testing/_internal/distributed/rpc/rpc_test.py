@@ -27,7 +27,7 @@ from torch.testing._internal.dist_utils import (
     get_timeout_error_regex,
     initialize_pg,
     wait_until_node_failure,
-    wait_until_pending_users_flushed,
+    wait_until_pending_futures_and_users_flushed,
     worker_name,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
@@ -317,7 +317,7 @@ def add_use_future_cb(to, x, y, z):
 
 
 def get_events_from_profile(profile_rref):
-    return profile_rref.local_value().function_events
+    return profile_rref.local_value().process_global_function_events
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -980,6 +980,19 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    def _assert_top_level_events(self, process_global_events, expected_top_level_event_names):
+        top_level_event_names = []
+        for thread_local_events in process_global_events:
+            # Get top-level events from all events happened on a thread.
+            last_end_time = 0
+            for event in thread_local_events:
+                event_name = event.name
+                cpu_interval = event.cpu_interval
+                if cpu_interval.start > last_end_time:
+                    top_level_event_names.append(event_name)
+                    last_end_time = cpu_interval.end
+        self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
+
     @dist_init
     def test_server_process_global_profiler(self):
         if self.rank != 0:
@@ -991,26 +1004,22 @@ class RpcTest(RpcAgentTestFixture):
         x = torch.tensor(1)
         y = torch.tensor(2)
 
-        profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
-        profile_rref.rpc_sync().__enter__()
+        outer_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        outer_profile_rref.rpc_sync().__enter__()
         rpc.rpc_sync(dst_worker_name, torch.add, (x, y))
-        profile_rref.rpc_sync().__exit__(None, None, None)
+        inner_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        inner_profile_rref.rpc_sync().__enter__()
+        rpc.rpc_sync(dst_worker_name, torch.sub, (x, y))
+        inner_profile_rref.rpc_sync().__exit__(None, None, None)
+        outer_profile_rref.rpc_sync().__exit__(None, None, None)
 
-        events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (profile_rref,))
+        inner_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (inner_profile_rref,))
+        self._assert_top_level_events(inner_events, ['sub'])
+        outer_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (outer_profile_rref,))
+        self._assert_top_level_events(outer_events, ['add', 'sub'])
 
-        last_end_time = 0
-        top_level_names_iter = iter(['add'])
-        for event in events:
-            event_name = event.name
-            cpu_interval = event.cpu_interval
-            if cpu_interval.start > last_end_time:
-                top_level_name_expected = next(top_level_names_iter)
-                self.assertEqual(event_name, top_level_name_expected)
-                last_end_time = cpu_interval.end
-
-        # Ensures the number of events matches expectation.
-        with self.assertRaisesRegex(StopIteration, ""):
-            next(top_level_names_iter)
+        inner_profile_rref.rpc_sync().key_averages()
+        outer_profile_rref.rpc_sync().key_averages()
 
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
@@ -1847,9 +1856,9 @@ class RpcTest(RpcAgentTestFixture):
         rpc.rpc_sync(worker_name(dst_rank), set_global_rref, args=(rref1,))
 
         # barrier before check 2
+        wait_until_pending_futures_and_users_flushed()
         dist.barrier()
 
-        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
@@ -1873,9 +1882,9 @@ class RpcTest(RpcAgentTestFixture):
         rref3.to_here()
 
         # barrier before check 3
+        wait_until_pending_futures_and_users_flushed()
         dist.barrier()
 
-        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
