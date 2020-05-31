@@ -2,7 +2,6 @@
 #error "c10/util/complex_utils.h is not meant to be individually included. Include c10/util/complex_type.h instead."
 #endif
 
-#include <limits>
 
 namespace c10 {
 
@@ -30,12 +29,5 @@ template <typename T>
 struct scalar_value_type<c10::complex<T>> {
   using type = T;
 };
-
-}
-
-namespace std {
-
-template <typename T>
-class numeric_limits<c10::complex<T>> : public numeric_limits<T>  {};
 
 }
