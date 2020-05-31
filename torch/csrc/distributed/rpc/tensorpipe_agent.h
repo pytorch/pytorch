@@ -1,15 +1,15 @@
 #pragma once
 
-#include <c10/core/thread_pool.h>
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Store.hpp>
-#include <tensorpipe/core/context.h>
-#include <tensorpipe/core/listener.h>
-#include <tensorpipe/core/pipe.h>
-#include <torch/csrc/distributed/rpc/rpc_agent.h>
-
 #include <atomic>
 #include <thread>
+
+#include <tensorpipe/tensorpipe.h>
+
+#include <c10/core/thread_pool.h>
+#include <c10d/PrefixStore.hpp>
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 namespace torch {
 namespace distributed {
@@ -44,7 +44,7 @@ struct AggregatedNetworkData {
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
-      std::shared_ptr<::c10d::Store> addressStore,
+      const std::shared_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
@@ -168,7 +168,8 @@ class TensorPipeAgent : public RpcAgent {
   std::unordered_map<std::string, WorkerInfo> workerNameToInfo_;
   std::unordered_map<std::string, std::string> workerNameToURL_;
 
-  const std::shared_ptr<::c10d::Store> addressStore_;
+  ::c10d::PrefixStore rankToNameStore_;
+  ::c10d::PrefixStore nameToAddressStore_;
   const int worldSize_;
   const TensorPipeRpcBackendOptions opts_;
 
@@ -230,8 +231,7 @@ class TensorPipeAgent : public RpcAgent {
   };
 
   // Map of Time-Series metrics tracked by the RPC Agent
-  std::unordered_map<std::string, std::unique_ptr<TimeSeriesMetricsTracker>>
-      timeSeriesMetrics_;
+  std::unordered_map<std::string, TimeSeriesMetricsTracker> timeSeriesMetrics_;
   // Mutex to guard timeSeriesMetrics_
   std::mutex metricsMutex_;
 

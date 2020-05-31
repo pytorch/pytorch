@@ -1597,40 +1597,45 @@ void test_op(
 void testGPU_FusionUnaryOps() {
   using OpTuple =
       std::tuple<at::Tensor (*)(const at::Tensor&), UnaryOpType, std::string>;
+
+  // [Note: explicit tuple type for uniform initialization list]
+  // Tuple type must be explicitly specified for each uniform initialization
+  // list within the vector to make this code compatible with some old env
+  // which we still need to support. eg. gcc 5.4 + cuda 9.2.
   std::vector<OpTuple> ops{
-      {at::abs, UnaryOpType::Abs, "abs"},
-      {at::acos, UnaryOpType::Acos, "acos"},
-      {at::asin, UnaryOpType::Asin, "asin"},
-      {at::atan, UnaryOpType::Atan, "atan"},
+      OpTuple{at::abs, UnaryOpType::Abs, "abs"},
+      OpTuple{at::acos, UnaryOpType::Acos, "acos"},
+      OpTuple{at::asin, UnaryOpType::Asin, "asin"},
+      OpTuple{at::atan, UnaryOpType::Atan, "atan"},
       // There does not appear to be an appropriate ATen function for atanh
-      //{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
-      {at::ceil, UnaryOpType::Ceil, "ceil"},
-      {at::cos, UnaryOpType::Cos, "cos"},
-      {at::cosh, UnaryOpType::Cosh, "cosh"},
-      {at::erf, UnaryOpType::Erf, "erf"},
-      {at::erfc, UnaryOpType::Erfc, "erfc"},
-      {at::exp, UnaryOpType::Exp, "exp"},
-      {at::expm1, UnaryOpType::Expm1, "expm1"},
-      {at::floor, UnaryOpType::Floor, "floor"},
-      {at::frac, UnaryOpType::Frac, "frac"},
-      {at::gelu, UnaryOpType::Gelu, "gelu"},
-      {at::lgamma, UnaryOpType::Lgamma, "lgamma"},
-      {at::log, UnaryOpType::Log, "log"},
-      {at::log10, UnaryOpType::Log10, "log10"},
-      {at::log1p, UnaryOpType::Log1p, "log1p"},
-      {at::log2, UnaryOpType::Log2, "log2"},
-      {at::neg, UnaryOpType::Neg, "neg"},
-      {at::reciprocal, UnaryOpType::Reciprocal, "reciprocal"},
-      {at::relu, UnaryOpType::Relu, "relu"},
-      {at::round, UnaryOpType::Round, "round"},
-      {at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
-      {at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
-      {at::sin, UnaryOpType::Sin, "sin"},
-      {at::sinh, UnaryOpType::Sinh, "sinh"},
-      {at::sqrt, UnaryOpType::Sqrt, "sqrt"},
-      {at::tan, UnaryOpType::Tan, "tan"},
-      {at::tanh, UnaryOpType::Tanh, "tanh"},
-      {at::trunc, UnaryOpType::Trunc, "trunc"}};
+      // OpTuple{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
+      OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
+      OpTuple{at::cos, UnaryOpType::Cos, "cos"},
+      OpTuple{at::cosh, UnaryOpType::Cosh, "cosh"},
+      OpTuple{at::erf, UnaryOpType::Erf, "erf"},
+      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
+      OpTuple{at::exp, UnaryOpType::Exp, "exp"},
+      OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
+      OpTuple{at::floor, UnaryOpType::Floor, "floor"},
+      OpTuple{at::frac, UnaryOpType::Frac, "frac"},
+      OpTuple{at::gelu, UnaryOpType::Gelu, "gelu"},
+      OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
+      OpTuple{at::log, UnaryOpType::Log, "log"},
+      OpTuple{at::log10, UnaryOpType::Log10, "log10"},
+      OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
+      OpTuple{at::log2, UnaryOpType::Log2, "log2"},
+      OpTuple{at::neg, UnaryOpType::Neg, "neg"},
+      OpTuple{at::reciprocal, UnaryOpType::Reciprocal, "reciprocal"},
+      OpTuple{at::relu, UnaryOpType::Relu, "relu"},
+      OpTuple{at::round, UnaryOpType::Round, "round"},
+      OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
+      OpTuple{at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
+      OpTuple{at::sin, UnaryOpType::Sin, "sin"},
+      OpTuple{at::sinh, UnaryOpType::Sinh, "sinh"},
+      OpTuple{at::sqrt, UnaryOpType::Sqrt, "sqrt"},
+      OpTuple{at::tan, UnaryOpType::Tan, "tan"},
+      OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
+      OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"}};
 
   std::for_each(ops.begin(), ops.end(), [](OpTuple& op) {
     test_op(
@@ -1666,12 +1671,14 @@ void testGPU_FusionUnaryOps() {
 void testGPU_FusionBinaryOps() {
   using AtenFuncSig = at::Tensor (*)(const at::Tensor&, const at::Tensor&);
   using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
-  std::vector<OpTuple> logic_ops{{at::eq, BinaryOpType::Eq, "eq"},
-                                 {at::ge, BinaryOpType::GE, "ge"},
-                                 {at::gt, BinaryOpType::GT, "gt"},
-                                 {at::le, BinaryOpType::LE, "le"},
-                                 {at::lt, BinaryOpType::LT, "lt"},
-                                 {at::ne, BinaryOpType::NE, "ne"}};
+
+  // see [Note: explicit tuple type for uniform initialization list]
+  std::vector<OpTuple> logic_ops{OpTuple{at::eq, BinaryOpType::Eq, "eq"},
+                                 OpTuple{at::ge, BinaryOpType::GE, "ge"},
+                                 OpTuple{at::gt, BinaryOpType::GT, "gt"},
+                                 OpTuple{at::le, BinaryOpType::LE, "le"},
+                                 OpTuple{at::lt, BinaryOpType::LT, "lt"},
+                                 OpTuple{at::ne, BinaryOpType::NE, "ne"}};
 
   std::for_each(logic_ops.begin(), logic_ops.end(), [](OpTuple& op) {
     test_op(
@@ -1693,17 +1700,18 @@ void testGPU_FusionBinaryOps() {
             std::make_pair(ValType::TensorView, DataType::Float)));
   });
 
+  // see [Note: explicit tuple type for uniform initialization list]
   std::vector<OpTuple> math_ops{
-      {at::atan2, BinaryOpType::Atan2, "atan2"},
-      {at::div, BinaryOpType::Div, "div"},
-      {at::fmod, BinaryOpType::Fmod, "fmod"},
-      {at::max, BinaryOpType::Max, "max"},
-      {at::min, BinaryOpType::Min, "min"},
-      {at::mul, BinaryOpType::Mul, "mul"},
-      {at::pow, BinaryOpType::Pow, "pow"},
+      OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
+      OpTuple{at::div, BinaryOpType::Div, "div"},
+      OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
+      OpTuple{at::max, BinaryOpType::Max, "max"},
+      OpTuple{at::min, BinaryOpType::Min, "min"},
+      OpTuple{at::mul, BinaryOpType::Mul, "mul"},
+      OpTuple{at::pow, BinaryOpType::Pow, "pow"},
       // NOTE: Remainder does not match the Aten impl exactly
       // despite using an identical function.
-      {at::remainder, BinaryOpType::Remainder, "remainder"},
+      OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"},
   };
 
   std::for_each(math_ops.begin(), math_ops.end(), [](OpTuple& op) {

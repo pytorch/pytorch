@@ -1079,6 +1079,24 @@ void testRecordFunction() {
     removeCallback(handle);
   });
   t.join();
+  clearCallbacks();
+
+  // test set ids
+  bool has_ids = false;
+  addGlobalCallback(RecordFunctionCallback(
+      [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
+      [](const RecordFunction&) {})
+      .needsIds(true));
+  { RECORD_USER_SCOPE("test"); }
+  TORCH_CHECK(has_ids);
+  clearCallbacks();
+  has_ids = false;
+  addGlobalCallback(RecordFunctionCallback(
+      [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
+      [](const RecordFunction&) {}));
+  { RECORD_USER_SCOPE("test"); }
+  TORCH_CHECK(!has_ids);
+  clearCallbacks();
 }
 
 class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
