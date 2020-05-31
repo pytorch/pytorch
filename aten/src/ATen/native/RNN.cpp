@@ -314,10 +314,10 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
   }
 
   Tensor linear_ih(const Tensor& input_ih) const override {
-    return packed_w_ih->apply_dynamic(input_ih);
+    return packed_w_ih->apply_dynamic(input_ih, /* reduce_range */ true);
   }
   Tensor linear_hh(const Tensor& input_hh) const override {
-    return packed_w_hh->apply_dynamic(input_hh);
+    return packed_w_hh->apply_dynamic(input_hh, /* reduce_range */ true);
   }
 
   const Tensor& b_ih() const override {
