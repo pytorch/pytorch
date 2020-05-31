@@ -390,7 +390,6 @@ std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor
 
 template <typename scalar_t>
 static void apply_lstsq(Tensor& B, Tensor& A) {
-
   // change it into template later on
   int m, n, nrhs, lda, ldb, info, lwork;
   scalar_t wkopt = 0.0;
@@ -401,10 +400,26 @@ static void apply_lstsq(Tensor& B, Tensor& A) {
   info = 0;
   lda = m;
   ldb = (m > n) ? m : n;
+
+  for(int i = 0; i < 8; i++) {
+    std::cout << B.data_ptr<scalar_t>()[i] << std::endl;
+  }
+
+  if (m < n) {
+    B.resize_({n, nrhs});
+  }
+
+  B = cloneBatchedColumnMajor(B);
+  A = cloneBatchedColumnMajor(A);
   
   auto B_data = B.data_ptr<scalar_t>();
   auto A_data = A.data_ptr<scalar_t>();
 
+  std::cout << m << " " << n << std::endl;
+  for(int i = 0; i < 8; i++) {
+    std::cout << B_data[i] << std::endl;
+  }
+  // A_data[3] = 0.0;
   // get info how much space is needed
   lapackGels('N', m, n, nrhs, A_data, lda, B_data, ldb, &wkopt, lwork, &info);
 
@@ -413,10 +428,6 @@ static void apply_lstsq(Tensor& B, Tensor& A) {
   auto work = Work_tensor.data_ptr<scalar_t>();
 
   lapackGels('N', m, n, nrhs, A_data, lda, B_data, ldb, work, lwork, &info);
-
-  if (m < n) {
-    B.resize_({n, nrhs});
-  }
 }
 
 std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
@@ -435,8 +446,9 @@ std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
   }
   // lapackGels is working on column major matrixes
   // Tensors are row major by default
-  Tensor B_working = B.clone().t().contiguous().t();
-  Tensor A_working = A.clone().t().contiguous().t();
+
+  Tensor B_working = B.clone();
+  Tensor A_working = A.clone();
   AT_DISPATCH_FLOATING_TYPES(B.scalar_type(), "lstsq_cpu", [&] {
     apply_lstsq<scalar_t>(B_working, A_working);
   });
