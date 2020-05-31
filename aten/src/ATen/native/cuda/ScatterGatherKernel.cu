@@ -307,8 +307,8 @@ template <
   typename std::enable_if<c10::is_complex_t<scalar_t>::value, int>::type = 0
 >
 inline C10_DEVICE void scatter_add_op(scalar_t* lhs, const scalar_t* rhs) {
-  gpuAtomicAdd(&lhs->storage[0], rhs->storage[0]);
-  gpuAtomicAdd(&lhs->storage[1], rhs->storage[1]);
+  gpuAtomicAdd(&lhs->real_, rhs->real_);
+  gpuAtomicAdd(&lhs->imag_, rhs->imag_);
 }
 
 template <
