@@ -80,7 +80,7 @@ TORCH_API extern mutexType currentStateStackEntryMutex;
 // One is `prevPtr`, a shared_ptr poiniting to previous elememnt in the
 // stack.
 // The other is ``statePtr``, a shared_ptr pointing to ``State``.
-class StateStackEntry : std::enable_shared_from_this<StateStackEntry> {
+class StateStackEntry {
  public:
   StateStackEntry(
       std::shared_ptr<StateStackEntry> prevPtr,
@@ -113,7 +113,7 @@ class StateStackEntry : std::enable_shared_from_this<StateStackEntry> {
 // profile ranges.
 TORCH_API void pushResultRecursive(
     std::shared_ptr<StateStackEntry> stateStackEntryPtr,
-    thread_event_lists result);
+    const thread_event_lists& result);
 
 // User-facing API.
 //

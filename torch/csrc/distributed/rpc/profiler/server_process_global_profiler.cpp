@@ -40,7 +40,7 @@ std::shared_ptr<State> StateStackEntry::popRange() {
 
 void pushResultRecursive(
     std::shared_ptr<StateStackEntry> stateStackEntryPtr,
-    const thread_event_lists result) {
+    const thread_event_lists& result) {
   while (stateStackEntryPtr) {
     // Put event_lists into the process-global profiler state.
     stateStackEntryPtr->statePtr()->pushResult(result);
