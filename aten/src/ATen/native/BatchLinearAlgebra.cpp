@@ -375,6 +375,7 @@ static void apply_eig(Tensor& a, Tensor& re_, Tensor& rv_, bool eigenvectors) {
 
 std::tuple<Tensor, Tensor> eig(const Tensor& self, bool eigenvectors) {
   TORCH_CHECK(self.dim() == 2, "A should be 2 dimensional, but has ", self.dim());
+  TORCH_CHECK(self.size(-1) != 0, "A should not be empty")
   TORCH_CHECK(self.size(0) == self.size(1), "A should be square");
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
