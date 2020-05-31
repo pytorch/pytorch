@@ -83,7 +83,6 @@ template <typename scalar_t>
 void index_put_accumulate_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
     gpuAtomicAdd((scalar_t*)(out_data + offset), *(scalar_t*)in_data);
-    // *(scalar_t*)(out_data + offset) += *(scalar_t*)in_data;
   });
 }
 
@@ -96,13 +95,13 @@ static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayR
 
 
 static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
-  // AT_ASSERTM(!accumulate, "index_put does not support accumulate=true");
   if (!accumulate)
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_put", [&] {
       using dtype = OpaqueType<sizeof(scalar_t)>;
       index_put_kernel_impl<dtype>(iter, index_size, index_stride);
     });
   else
+    // TODO: dispatch to complex when gpuAtomicAdd has complex support
     AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_put_accumulate", [&] {
       index_put_accumulate_kernel_impl<scalar_t>(iter, index_size, index_stride);
     });
