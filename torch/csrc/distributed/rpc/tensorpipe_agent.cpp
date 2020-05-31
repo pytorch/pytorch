@@ -3,26 +3,15 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-#include <tensorpipe/channel/basic/context.h>
-#ifdef TP_ENABLE_CMA
-#include <tensorpipe/channel/cma/context.h>
-#endif
-#ifdef TP_ENABLE_SHM
-#include <tensorpipe/transport/shm/context.h>
-#endif
-#include <tensorpipe/transport/uv/context.h>
-
-#include <arpa/inet.h>
-#include <ifaddrs.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+// An environment variable along the lines of GLOO_ and NCCL_SOCKET_IFNAME that
+// allows the user to specify a device to bind to, instead of binding to the
+// address that the hostname resolves to.
+const std::string kSocketIfnameEnvVar = "TP_SOCKET_IFNAME";
+const std::string kDefaultUvAddress = "127.0.0.1";
 
 constexpr long kToMilliseconds = 1000;
 
@@ -58,7 +47,7 @@ void TensorPipeAgent::collectNames() {
   std::vector<uint8_t> selfNameVector(
       (uint8_t*)selfName.c_str(),
       (uint8_t*)selfName.c_str() + selfName.length());
-  addressStore_->set("names/" + c10::to_string(selfId), selfNameVector);
+  rankToNameStore_.set(c10::to_string(selfId), selfNameVector);
 
   workerIdToInfo_.emplace(selfId, WorkerInfo(selfName, selfId));
   workerNameToInfo_.emplace(selfName, WorkerInfo(selfName, selfId));
@@ -67,7 +56,7 @@ void TensorPipeAgent::collectNames() {
       continue;
     }
     std::vector<uint8_t> workerNameVector =
-        addressStore_->get("names/" + c10::to_string(workerId));
+        rankToNameStore_.get(c10::to_string(workerId));
     std::string workerName(
         (char*)workerNameVector.data(), workerNameVector.size());
 
@@ -83,7 +72,7 @@ void TensorPipeAgent::collectNames() {
 }
 
 TensorPipeAgent::TensorPipeAgent(
-    std::shared_ptr<::c10d::Store> addressStore,
+    const std::shared_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
     int worldSize,
@@ -96,15 +85,15 @@ TensorPipeAgent::TensorPipeAgent(
               (long)(opts.rpcTimeoutSeconds * kToMilliseconds))),
       context_(std::make_shared<tensorpipe::Context>(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
-      addressStore_(std::move(addressStore)),
+      rankToNameStore_("names", store),
+      nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       opts_(std::move(opts)),
       processGroup_(std::move(processGroup)) {
   collectNames();
 
   // Initialize the time-series metrics tracking map
-  timeSeriesMetrics_[kGilAverageWaitTime] =
-      std::make_unique<TimeSeriesMetricsTracker>();
+  timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
 }
 
 TensorPipeAgent::~TensorPipeAgent() {
@@ -112,8 +101,29 @@ TensorPipeAgent::~TensorPipeAgent() {
 }
 
 void TensorPipeAgent::startImpl() {
-  context_->registerTransport(
-      1, "tcp", std::make_shared<tensorpipe::transport::uv::Context>());
+  auto uvContext = std::make_shared<tensorpipe::transport::uv::Context>();
+
+  tensorpipe::Error error;
+  std::string uvAddress;
+  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
+  if (ifnameEnv != nullptr) {
+    std::tie(error, uvAddress) = uvContext->lookupAddrForIface(ifnameEnv);
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for interface "
+                   << ifnameEnv << " (" << error.what() << "), defaulting to "
+                   << kDefaultUvAddress;
+      uvAddress = kDefaultUvAddress;
+    }
+  } else {
+    std::tie(error, uvAddress) = uvContext->lookupAddrForHostname();
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
+                   << error.what() << "), defaulting to " << kDefaultUvAddress;
+      uvAddress = kDefaultUvAddress;
+    }
+  }
+
+  context_->registerTransport(1, "tcp", std::move(uvContext));
 #ifdef TP_ENABLE_SHM
   context_->registerTransport(
       0, "shm", std::make_shared<tensorpipe::transport::shm::Context>());
@@ -125,11 +135,7 @@ void TensorPipeAgent::startImpl() {
       0, "cma", std::make_shared<tensorpipe::channel::cma::Context>());
 #endif
 
-  // TODO: We currently hardcoded localhost as pipes handshake IP address.
-  // Ideally tensorpipe could provide a helper to get IP address for given
-  // device interface or host names, or return the IP address of the default
-  // host name. https://github.com/pytorch/pytorch/issues/36715
-  std::vector<std::string> addresses = {"tcp://" + getDefaultIPAddress()};
+  std::vector<std::string> addresses = {"tcp://" + uvAddress};
 #ifdef TP_ENABLE_SHM
   addresses.push_back(createUniqueShmAddr());
 #endif
@@ -139,11 +145,11 @@ void TensorPipeAgent::startImpl() {
   // Store our own url.
   const auto address = listener_->url("tcp");
   const std::vector<uint8_t> selfAddrData(address.begin(), address.end());
-  addressStore_->set(workerInfo_.name_, selfAddrData);
+  nameToAddressStore_.set(workerInfo_.name_, selfAddrData);
 
   for (const auto& p : workerNameToInfo_) {
     const auto& name = p.first;
-    auto nodeAddrData = addressStore_->get(name);
+    auto nodeAddrData = nameToAddressStore_.get(name);
     auto nodeAddrStr =
         std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
     workerNameToURL_.insert({name, nodeAddrStr});
@@ -163,7 +169,14 @@ void TensorPipeAgent::onListenerAccepted(
     const tensorpipe::Error& error,
     std::shared_ptr<tensorpipe::Pipe>& pipe) {
   if (error) {
-    LOG(WARNING) << "got error from listener: " << error.what();
+    if (error.isOfType<tensorpipe::ListenerClosedError>() &&
+        !rpcAgentRunning_.load()) {
+      // This is expected.
+    } else {
+      LOG(WARNING) << "RPC agent for " << workerInfo_.name_
+                   << " encountered error when accepting incoming pipe: "
+                   << error.what();
+    }
     return;
   }
 
@@ -251,9 +264,14 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   responseMessage.setId(messageId);
   if (!error) {
     pipeWrite(
-        pipe, std::move(responseMessage), [](const tensorpipe::Error& error) {
+        pipe,
+        std::move(responseMessage),
+        [this](const tensorpipe::Error& error) {
           if (error) {
-            LOG(WARNING) << "sending response failed: " << error.what();
+            LOG(WARNING)
+                << "RPC agent for " << workerInfo_.name_
+                << " encountered error when writing outgoing response: "
+                << error.what();
             return;
           }
         });
@@ -261,9 +279,12 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     pipeWrite(
         pipe,
         createExceptionResponse(error->what(), responseMessage.id()),
-        [](const tensorpipe::Error& error) {
+        [this](const tensorpipe::Error& error) {
           if (error) {
-            LOG(WARNING) << "sending error response failed: " << error.what();
+            LOG(WARNING)
+                << "RPC agent for " << workerInfo_.name_
+                << " encountered error when writing outgoing response: "
+                << error.what();
             return;
           }
         });
@@ -275,9 +296,13 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       pipe,
       [this, pipe](
           const tensorpipe::Error& error, Message&& requestMessage) mutable {
-        // TODO: Handle server pipe read error
+        // FIXME Find a way for the client to tell the server they are done with
+        // the pipe and are intentionally shutting it down. Perhaps sending an
+        // empty message?
         if (error) {
-          LOG(WARNING) << "Server read message: " << error.what();
+          LOG(WARNING) << "RPC agent for " << workerInfo_.name_
+                       << " encountered error when reading incoming request: "
+                       << error.what();
           return;
         }
 
@@ -393,7 +418,14 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
       [this, &clientPipe, futureResponseMessage](
           const tensorpipe::Error& error) mutable {
         if (error) {
-          LOG(WARNING) << "client write error: " << error.what();
+          if (error.isOfType<tensorpipe::PipeClosedError>() &&
+              !rpcAgentRunning_.load()) {
+            // This is expected.
+          } else {
+            LOG(WARNING) << "RPC agent for " << workerInfo_.name_
+                         << " encountered error when writing outgoing request: "
+                         << error.what();
+          }
           markFutureWithError(std::move(futureResponseMessage), error.what());
           return;
         }
@@ -403,7 +435,15 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
             [this, &clientPipe](
                 const tensorpipe::Error& error, Message&& responseMessage) {
               if (error) {
-                LOG(WARNING) << "Read response error: " << error.what();
+                if (error.isOfType<tensorpipe::PipeClosedError>() &&
+                    !rpcAgentRunning_.load()) {
+                  // This is expected.
+                } else {
+                  LOG(WARNING)
+                      << "RPC agent for " << workerInfo_.name_
+                      << " encountered error when reading incoming request: "
+                      << error.what();
+                }
                 // We may get garbage content in responseMessage upon error.
                 // Flushing all future messages belonging to this pipe due to
                 // error state.
@@ -621,7 +661,7 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
       // Include the averages for each time series metric. This is just the GIL
       // Wait Time for now.
       auto averageGilWaitTime =
-          timeSeriesMetrics_[kGilAverageWaitTime]->computeAverage();
+          timeSeriesMetrics_[kGilAverageWaitTime].computeAverage();
       lock.unlock();
       metrics[kGilAverageWaitTime] = c10::to_string(averageGilWaitTime);
     }
@@ -633,7 +673,7 @@ std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
 void TensorPipeAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
   std::lock_guard<std::mutex> lock(metricsMutex_);
-  timeSeriesMetrics_[kGilAverageWaitTime]->addData(gilWaitTime.count());
+  timeSeriesMetrics_[kGilAverageWaitTime].addData(gilWaitTime.count());
 }
 
 TensorPipeAgent::NetworkDataDict TensorPipeAgent::getNetworkData() {
@@ -644,7 +684,7 @@ TensorPipeAgent::NetworkDataDict TensorPipeAgent::getNetworkData() {
 NetworkSourceInfo TensorPipeAgent::getNetworkSourceInfo() {
   NetworkSourceInfo info = {
       RpcAgent::getWorkerInfo().id_,
-      addressStore_->get(RpcAgent::getWorkerInfo().name_)};
+      nameToAddressStore_.get(RpcAgent::getWorkerInfo().name_)};
 
   return info;
 }
@@ -666,65 +706,6 @@ void TensorPipeAgent::trackNetworkError(
   networkData_[destWorkerName].numCalls++;
   networkData_[destWorkerName].totalSentBytes += requestSize;
   networkData_[destWorkerName].totalErrors++;
-}
-
-std::string TensorPipeAgent::getDefaultIPAddress() {
-  std::string defaultIP = "127.0.0.1";
-
-  std::array<char, NI_MAXHOST> hostname{};
-  int rv = gethostname(hostname.data(), NI_MAXHOST);
-  if (rv != 0) {
-    LOG(WARNING) << "Unable to get local hostname. Falling back to "
-                 << "bind with " << defaultIP;
-    return defaultIP;
-  }
-
-  struct addrinfo hints {};
-  memset(&hints, 0, sizeof hints);
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_protocol = IPPROTO_TCP;
-  struct addrinfo* servinfo;
-  rv = getaddrinfo(hostname.data(), nullptr, &hints, &servinfo);
-  if (rv != 0) {
-    LOG(WARNING) << "Get address info error: " << gai_strerror(rv)
-                 << ". Falling back to bind with " << defaultIP;
-    return defaultIP;
-  }
-
-  // Loop through all the results and pick up the first we can bind.
-  for (struct addrinfo* p = servinfo; p != nullptr; p = p->ai_next) {
-    int fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-    if (fd == -1) {
-      continue;
-    }
-    int bind_rv = bind(fd, p->ai_addr, p->ai_addrlen);
-    if (bind_rv == -1) {
-      close(fd);
-      continue;
-    }
-    close(fd);
-
-    if (p->ai_family == AF_INET6) {
-      std::string ipv6(INET6_ADDRSTRLEN, '\0');
-      struct sockaddr_in6* h = (struct sockaddr_in6*)p->ai_addr;
-      inet_ntop(AF_INET6, &h->sin6_addr, (char*)ipv6.data(), INET6_ADDRSTRLEN);
-      freeaddrinfo(servinfo);
-      return ipv6;
-    } else if (p->ai_family == AF_INET) {
-      std::string ipv4(INET_ADDRSTRLEN, '\0');
-      struct sockaddr_in* h = (struct sockaddr_in*)p->ai_addr;
-      inet_ntop(AF_INET, &h->sin_addr, (char*)ipv4.data(), INET_ADDRSTRLEN);
-      freeaddrinfo(servinfo);
-      return ipv4;
-    }
-  }
-
-  freeaddrinfo(servinfo);
-
-  LOG(WARNING) << "TensorPipe agent didn't find associated IP address with "
-               << hostname.data() << ". Using " << defaultIP << " to bind";
-  return defaultIP;
 }
 
 void TensorPipeAgent::increaseCallCount(int32_t& count) {

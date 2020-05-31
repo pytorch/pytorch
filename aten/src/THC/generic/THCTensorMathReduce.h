@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathReduce.h"
 #else
 
-THC_API accreal THCTensor_(sumall)(THCState *state, THCTensor *self);
-
 #if !defined(THC_REAL_IS_BOOL)
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)

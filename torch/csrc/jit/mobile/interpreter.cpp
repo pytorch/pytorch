@@ -35,13 +35,16 @@ bool InterpreterState::run(Stack& stack) {
     //    std::cout << std::endl;
     switch (inst.op) {
       case OP: {
-        if (auto debug_info = c10::ThreadLocalDebugInfo::get(
+        if (at::hasGlobalCallbacks()) {
+          if (auto debug_info = c10::ThreadLocalDebugInfo::get(
                 c10::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
-          if (auto* mobile_debug_info =
-                  dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
-            mobile_debug_info->setOpIdx(pc);
+            if (auto* mobile_debug_info =
+                dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
+              mobile_debug_info->setOpIdx(pc);
+            }
           }
         }
+
         // TODO(iliacher): remove the workaround after RecordFunction is in
         // Dispatcher
         bool prev_value = isRecordFunctionEnabled();

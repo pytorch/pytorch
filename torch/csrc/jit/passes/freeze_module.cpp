@@ -463,7 +463,7 @@ Module freeze_module(const Module& module) {
         "attempted to freeze a module that return itself");
   }
 
-  auto moduleClone = module.clone();
+  auto moduleClone = module.clone(true);
   AttributePropagator attrPropagator(moduleClone);
   method = moduleClone.get_method("forward");
   auto graph = method.graph();

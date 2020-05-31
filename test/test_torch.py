@@ -155,7 +155,11 @@ class AbstractTestCases:
                 for name in dir(ns):
                     if name.startswith('_') or name in skipnames:
                         continue
-                    var = getattr(ns, name)
+                    if name in ['real', 'imag']:
+                        y = torch.randn(1, dtype=torch.cfloat)
+                        var = getattr(y, name)
+                    else:
+                        var = getattr(ns, name)
                     if not isinstance(var, checked_types):
                         continue
                     doc = var.__doc__
@@ -5379,6 +5383,72 @@ def add_neg_dim_tests():
 # Device-generic tests. Instantiated below and not run directly.
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.complex64, torch.complex128)
+    def test_abs_angle_complex_to_float(self, device, dtype):
+        # Constructs random complex values
+        from random import random
+        random_vals = []
+        for multiplier in (-1, 1, -10, 10, -100, 100):
+            for _ in range(10):
+                random_vals.append(complex(random() * multiplier, random() * multiplier))
+
+        for vals in (random_vals, []):
+            a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
+            t = torch.tensor(vals, device=device, dtype=dtype)
+
+            for fn_name in ('abs', 'angle'):
+                torch_fn = getattr(torch, fn_name)
+                np_fn = getattr(np, fn_name)
+
+                # Tests function
+                np_result = torch.from_numpy(np_fn(a))
+                torch_result = torch_fn(t).cpu()
+                self.assertEqual(np_result, torch_result, exact_dtype=True)
+
+                # Tests float out
+                float_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+                np_float_out = np_fn(a).astype(torch_to_numpy_dtype_dict[float_dtype])
+                float_out = torch.empty_like(t).float()
+                torch_fn(t, out=float_out)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(torch.from_numpy(np_float_out), float_out.cpu())
+
+                # Tests float out (resized out)
+                float_out = torch.empty(1, device=device, dtype=float_dtype)
+                torch_fn(t, out=float_out)
+                self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
+
+                # Tests complex out
+                np_complex_out = np_fn(a)
+                complex_out = torch.empty_like(t)
+                torch_fn(t, out=complex_out)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
+
+                # Tests complex out (resized out)
+                complex_out = torch.empty(1, device=device, dtype=dtype)
+                torch_fn(t, out=complex_out)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(torch.from_numpy(np_complex_out), complex_out.cpu())
+
+                # Tests long out behavior (expected failure)
+                long_out = torch.empty(0, device=device, dtype=torch.long)
+                with self.assertRaises(RuntimeError):
+                    torch_fn(t, out=long_out)
+
+                # Tests inplace
+                if fn_name == 'abs':
+                    torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
+                    np_fn(a, out=a)
+                    torch_inplace_method(t)
+                    self.assertEqual(torch.from_numpy(a), t.cpu())
+
+                # Note: angle does not have an in-place variant
+                if fn_name == 'angle':
+                    with self.assertRaises(AttributeError):
+                        torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
     # Verifies that the inplace dunders (like idiv) actually are in place
     @onlyOnCPUAndCUDA
@@ -17628,44 +17698,46 @@ class TestViewOps(TestCase):
         return True
 
     @onlyOnCPUAndCUDA
-    def test_real_self(self, device):
-        t = torch.ones((5, 5), device=device)
-        s = torch.real(t)
-        self.assertTrue(s is t)
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    def test_real_imag_noncomplex(self, device, dtype):
+        t = torch.ones((5, 5), dtype=dtype, device=device)
 
-        # TODO: update when the imag attribute is implemented
-        self.assertTrue(not hasattr(t, 'real'))
-
-    # TODO: update after torch.real is implemented for complex tensors
-    @onlyOnCPUAndCUDA
-    def test_real_view(self, device):
-        t = torch.tensor((1 + 1j), device=device)
         with self.assertRaises(RuntimeError):
-            v = torch.real(t)
-            self.assertTrue(self.is_view_of(t, v))
-
-            v[0] = 0
-            self.assertEqual(t.float()[0], v[0])
-            self.assertTrue(t[0] == complex(0, 1))
-
-    def test_imag_noncomplex(self, device):
-        t = torch.ones((5, 5), device=device)
+            torch.real(t)
 
         with self.assertRaises(RuntimeError):
             torch.imag(t)
 
-        # TODO: update when the imag attribute is implemented
-        self.assertTrue(not hasattr(t, 'imag'))
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_complex_dtypes())
+    def test_real_imag_view(self, device, dtype):
+        def compare_with_numpy(contiguous_input=True):
+            t = torch.randn(3, 3, dtype=dtype, device=device)
+            if not contiguous_input:
+                t = t.T
 
-    # TODO: update after torch.imag is implemented for complex tensors
-    def test_imag_complex(self, device):
-        t = torch.tensor((1 + 1j), device=device)
-        with self.assertRaises(RuntimeError):
-            v = torch.imag(t)
-            self.assertTrue(self.is_view_of(t, v))
+            re = t.real
+            exp = torch.from_numpy(t.cpu().numpy().real).to(device=device)
+            self.assertEqual(re, exp)
+            # TODO: update this to use is_view_of() when the autograd code is modified to
+            # correctly handle .real
+            self.assertTrue(t.storage().data_ptr() == re.storage().data_ptr())
 
-            v[0] = 0
-            self.assertTrue(t[0] == complex(1, 0))
+            im = t.imag
+            exp = torch.from_numpy(t.cpu().numpy().imag).to(device=device)
+            self.assertEqual(im, exp)
+            # TODO: update this to use is_view_of() when the autograd code is modified to
+            # correctly handle .imag
+            self.assertTrue(t.storage().data_ptr() == im.storage().data_ptr())
+
+        compare_with_numpy()
+        compare_with_numpy(contiguous_input=False)
+
+        # ensure storage offset is being correctly set
+        a = torch.randn(10, dtype=dtype)
+        self.assertEqual(a[5:].real, a.real[5:])
+        self.assertEqual(a[5:].imag, a.imag[5:])
 
     def test_diagonal_view(self, device):
         t = torch.ones((5, 5), device=device)
@@ -18190,10 +18262,10 @@ tensor_op_tests = [
     ('cummax', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('cummin', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('cummin', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('cumprod', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-4, _types, _cpu_types, False),
-    ('cumprod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-4, _types, _cpu_types, False),
-    ('cumsum', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('cumsum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('cumprod', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-4, _types + _complex_types, _cpu_types, False),
+    ('cumprod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-4, _types + _complex_types, _cpu_types, False),
+    ('cumsum', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
+    ('cumsum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('dim', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('dist', '', _small_2d, lambda t, d: [_small_2d(t, d)], 1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('dist', '3_norm', _small_2d, lambda t, d: [_small_2d(t, d), 3], 1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
