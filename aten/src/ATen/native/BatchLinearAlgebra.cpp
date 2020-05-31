@@ -11,7 +11,7 @@
 #include <TH/TH.h>  // for USE_LAPACK
 
 #include <vector>
-#include <iostream>
+
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
 // linear algebra function uses that routine
@@ -330,7 +330,8 @@ static void apply_eig(Tensor& a, Tensor& re_, Tensor& rv_, bool eigenvectors) {
   scalar_t* mock;
   int64_t i;
 
-  Tensor rv__, re__;
+  Tensor rv__ = at::empty({1}, a.options().dtype());
+  Tensor re__;
 
   n = a.size(0);
   lda = n;
@@ -340,11 +341,9 @@ static void apply_eig(Tensor& a, Tensor& re_, Tensor& rv_, bool eigenvectors) {
 
   ldvr = 1;
   if (jobvr == 'V') {
-    // rv__ = rv_.clone().t().contiguous();
-    // rv_data = v__.data_ptr<scalar_t>();
+    rv__ = rv_.clone().t().contiguous();
     ldvr = n;
   }
-  rv__ = rv_.clone().t().contiguous();
   re__ = re_.clone().contiguous();
 
   lapackGeev('N', jobvr, n, a.data_ptr<scalar_t>(), lda, wr.data_ptr<scalar_t>(), wi.data_ptr<scalar_t>(),
@@ -368,14 +367,16 @@ static void apply_eig(Tensor& a, Tensor& re_, Tensor& rv_, bool eigenvectors) {
   }
 
   if (jobvr == 'V') {
-    rv_ = rv__;
+    rv_ = rv__.t();
   }
 
   re_ = re__;
 }
 
 std::tuple<Tensor, Tensor> eig(const Tensor& self, bool eigenvectors) {
-  std::cout << "siemanko" << std::endl;
+  TORCH_CHECK(self.dim() == 2, "A should be 2 dimensional, but has ", self.dim());
+  TORCH_CHECK(self.size(0) == self.size(1), "A should be square");
+
   auto self_working_copy = cloneBatchedColumnMajor(self);
   int n = self.size(-1);
   auto evalues = at::empty({n, 2}, self.options().dtype());
