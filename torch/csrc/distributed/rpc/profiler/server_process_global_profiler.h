@@ -72,8 +72,8 @@ using wLockType = std::unique_lock<std::shared_timed_mutex>;
 #endif
 
 // This is the global stack of ``State``s.
-extern std::shared_ptr<StateStackEntry> currentStateStackEntryPtr;
-extern mutexType currentStateStackEntryMutex;
+TORCH_API extern std::shared_ptr<StateStackEntry> currentStateStackEntryPtr;
+TORCH_API extern mutexType currentStateStackEntryMutex;
 
 // This class is used to implement a stack of ``State``s.
 // It has 2 members.
