@@ -35,7 +35,10 @@ TORCH_CUDA_API TensorView* unaryOp(UnaryOpType type, TensorView* v1);
 TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2);
 TORCH_CUDA_API TensorView* binaryOp(BinaryOpType type, TensorView* v1, Val* v2);
 TORCH_CUDA_API TensorView* binaryOp(BinaryOpType type, Val* v1, TensorView* v2);
-TORCH_CUDA_API TensorView* binaryOp(BinaryOpType type, TensorView* v1, TensorView* v2);
+TORCH_CUDA_API TensorView* binaryOp(
+    BinaryOpType type,
+    TensorView* v1,
+    TensorView* v2);
 
 // Perform a reduction operation on v1, initial value for reduction is init,
 // reduces across axes, and reduction operation defined by BinaryOp.
@@ -109,19 +112,47 @@ TORCH_CUDA_API Val* lerp(Val* start, Val* end, Val* weight);
 TORCH_CUDA_API TensorView* lerp(TensorView* start, Val* end, Val* weight);
 TORCH_CUDA_API TensorView* lerp(Val* start, TensorView* end, Val* weight);
 TORCH_CUDA_API TensorView* lerp(Val* start, Val* end, TensorView* weight);
-TORCH_CUDA_API TensorView* lerp(TensorView* start, TensorView* end, Val* weight);
-TORCH_CUDA_API TensorView* lerp(TensorView* start, Val* end, TensorView* weight);
-TORCH_CUDA_API TensorView* lerp(Val* start, TensorView* end, TensorView* weight);
-TORCH_CUDA_API TensorView* lerp(TensorView* start, TensorView* end, TensorView* weight);
+TORCH_CUDA_API TensorView* lerp(
+    TensorView* start,
+    TensorView* end,
+    Val* weight);
+TORCH_CUDA_API TensorView* lerp(
+    TensorView* start,
+    Val* end,
+    TensorView* weight);
+TORCH_CUDA_API TensorView* lerp(
+    Val* start,
+    TensorView* end,
+    TensorView* weight);
+TORCH_CUDA_API TensorView* lerp(
+    TensorView* start,
+    TensorView* end,
+    TensorView* weight);
 // addcmul
 TORCH_CUDA_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s);
 TORCH_CUDA_API TensorView* addcmul(TensorView* v1, Val* v2, Val* v3, Val* s);
 TORCH_CUDA_API TensorView* addcmul(Val* v1, TensorView* v2, Val* v3, Val* s);
 TORCH_CUDA_API TensorView* addcmul(Val* v1, Val* v2, TensorView* v3, Val* s);
-TORCH_CUDA_API TensorView* addcmul(TensorView* v1, TensorView* v2, Val* v3, Val* s);
-TORCH_CUDA_API TensorView* addcmul(TensorView* v1, Val* v2, TensorView* v3, Val* s);
-TORCH_CUDA_API TensorView* addcmul(Val* v1, TensorView* v2, TensorView* v3, Val* s);
-TORCH_CUDA_API TensorView* addcmul(TensorView* v1, TensorView* v2, TensorView* v3, Val* s);
+TORCH_CUDA_API TensorView* addcmul(
+    TensorView* v1,
+    TensorView* v2,
+    Val* v3,
+    Val* s);
+TORCH_CUDA_API TensorView* addcmul(
+    TensorView* v1,
+    Val* v2,
+    TensorView* v3,
+    Val* s);
+TORCH_CUDA_API TensorView* addcmul(
+    Val* v1,
+    TensorView* v2,
+    TensorView* v3,
+    Val* s);
+TORCH_CUDA_API TensorView* addcmul(
+    TensorView* v1,
+    TensorView* v2,
+    TensorView* v3,
+    Val* s);
 
 // TERNARY OPERATIONS
 // where
