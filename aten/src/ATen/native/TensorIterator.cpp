@@ -861,10 +861,20 @@ void TensorIterator::analyze_memory_format() {
   bool first_cl3d_and_cont = true;
   for (auto& op : operands_) {
     if (op.tensor.defined() && !op.is_output) {
-      if (first_cl_and_cont &&
+
+      auto cl_ambiguous =
+          (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
+           op.tensor.is_contiguous(MemoryFormat::ChannelsLast)) ||
+          op.tensor.numel() == 1;
+
+      auto cl3d_ambiguous = (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
+              op.tensor.is_contiguous(MemoryFormat::ChannelsLast3d)) ||
+          op.tensor.numel() == 1;
+
+      if (!cl_ambiguous && first_cl_and_cont &&
           op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
         requires_channels_last_output_ = true;
-      } else if (
+      } else if (!cl3d_ambiguous &&
           first_cl3d_and_cont &&
           op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
         requires_channels_last_3d_output_ = true;
@@ -872,10 +882,6 @@ void TensorIterator::analyze_memory_format() {
 
       // Keep checking if first input is arbitrary strided (ex. NC11) or can be
       // broadcasted to anything numel == 1
-      auto cl_ambiguous =
-          (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
-           op.tensor.is_contiguous(MemoryFormat::ChannelsLast)) ||
-          op.tensor.numel() == 1;
       if (first_cl_and_cont && !cl_ambiguous) {
         first_cl_and_cont = false;
       }
@@ -894,9 +900,6 @@ void TensorIterator::analyze_memory_format() {
 
       // Keep checking if first input is arbitrary strided (ex. NC111) or can be
       // broadcasted to anything numel == 1
-      auto cl3d_ambiguous = (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
-              op.tensor.is_contiguous(MemoryFormat::ChannelsLast3d)) ||
-          op.tensor.numel() == 1;
       if (first_cl3d_and_cont && !cl3d_ambiguous) {
         first_cl3d_and_cont = false;
       }

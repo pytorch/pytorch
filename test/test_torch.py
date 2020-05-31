@@ -14110,6 +14110,7 @@ class TestTorchDeviceType(TestCase):
         test_helper((3, 10, 3, 32, 32), 3 * 10 * 3 * 32 * 32, torch.channels_last_3d, device)
 
     def test_memory_format_proparation_rules(self, device):
+
         contiguous = torch.rand(10, 3, 5, 5, device=device) 
         cl = torch.rand(10, 3, 5, 5, device=device).contiguous(memory_format=torch.channels_last)
         ambiguous = torch.rand(10, 3, 1, 1, device=device).contiguous(memory_format=torch.channels_last)
@@ -14117,18 +14118,27 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(ambiguous.is_contiguous(memory_format=torch.contiguous_format))
         bias = torch.rand(1, 1, 1, 1, device=device).contiguous(memory_format=torch.channels_last)
 
-        options = ((ambiguous, contiguous, torch.contiguous_format),
-                   (ambiguous, cl, torch.channels_last),
-                   (contiguous, ambiguous, torch.contiguous_format),
-                   (contiguous, cl, torch.contiguous_format),
-                   (cl, ambiguous, torch.channels_last),
-                   (cl, contiguous, torch.channels_last),
-                   (bias, cl, torch.channels_last),
-                   (cl, bias, torch.channels_last),)
+        def _test_propagation_rules(self, contiguous, cl, ambiguous, bias):
+            options = ((ambiguous, contiguous, torch.contiguous_format),
+                    (ambiguous, cl, torch.channels_last),
+                    (contiguous, ambiguous, torch.contiguous_format),
+                    (contiguous, cl, torch.contiguous_format),
+                    (cl, ambiguous, torch.channels_last),
+                    (cl, contiguous, torch.channels_last),
+                    (bias, cl, torch.channels_last),
+                    (cl, bias, torch.channels_last),)
 
-        for a, b, mf in options:
-            result = a + b
-            self.assertTrue(result.is_contiguous(memory_format=mf))
+            for a, b, mf in options:
+                result = a + b
+                self.assertTrue(result.is_contiguous(memory_format=mf))
+
+        _test_propagation_rules(self, contiguous, cl, ambiguous, bias)
+
+        cl = cl.to(memory_format=torch.channels_last)
+        ambiguous = ambiguous.to(memory_format=torch.channels_last)
+        bias = bias.to(memory_format=torch.channels_last)
+
+        _test_propagation_rules(self, contiguous, cl, ambiguous, bias)
 
     def test_memory_format_empty_like(self, device):
         def test_helper(x, memory_format):
