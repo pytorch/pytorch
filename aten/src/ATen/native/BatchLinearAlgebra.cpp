@@ -11,12 +11,15 @@
 #include <TH/TH.h>  // for USE_LAPACK
 
 #include <vector>
-
+#include <iostream>
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
 // linear algebra function uses that routine
 #ifdef USE_LAPACK
 
+// geev
+extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
+extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
 // gesv
 extern "C" void zgesv_(int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info);
 extern "C" void cgesv_(int *n, int *nrhs, std::complex<float> *a, int *lda, int *ipiv, std::complex<float> *b, int *ldb, int *info);
@@ -92,6 +95,10 @@ namespace native {
 #ifdef USE_LAPACK
 // Define the per-batch functions to be used in the main implementation of the batched
 // linear algebra operations
+
+template<class scalar_t>
+void lapackGeev(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *wr, scalar_t *wi, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int* info);
+
 template<class scalar_t>
 void lapackSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
@@ -126,6 +133,14 @@ void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
 template<class scalar_t>
 void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
+
+template<> void lapackGeev<double>(char jobvl, char jobvr, int n, double *a, int lda, double *wr, double *wi, double* vl, int ldvl, double *vr, int ldvr, double *work, int lwork, int* info) {
+  dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
+
+template<> void lapackGeev<float>(char jobvl, char jobvr, int n, float *a, int lda, float *wr, float *wi, float* vl, int ldvl, float *vr, int ldvr, float *work, int lwork, int* info) {
+  sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
 
 template<> void lapackSolve<std::complex<double>>(int n, int nrhs, std::complex<double> *a, int lda, int *ipiv, std::complex<double> *b, int ldb, int *info) {
   zgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
@@ -302,6 +317,75 @@ template<> void lapackLuSolve<float>(char trans, int n, int nrhs, float *a, int 
 
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
 // in the main helper functions for the linear algebra operations
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~` eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_eig(Tensor& a, Tensor& re_, Tensor& rv_, bool eigenvectors) {
+  char jobvr = eigenvectors ? 'V' : 'N';
+  int n, lda, lwork, info, ldvr;
+  Tensor work, wi, wr;
+  scalar_t wkopt;
+  scalar_t rv_data;
+  scalar_t* mock;
+  int64_t i;
+
+  Tensor rv__, re__;
+
+  n = a.size(0);
+  lda = n;
+
+  wi = at::empty({n}, a.options().dtype());
+  wr = at::empty({n}, a.options().dtype());
+
+  ldvr = 1;
+  if (jobvr == 'V') {
+    // rv__ = rv_.clone().t().contiguous();
+    // rv_data = v__.data_ptr<scalar_t>();
+    ldvr = n;
+  }
+  rv__ = rv_.clone().t().contiguous();
+  re__ = re_.clone().contiguous();
+
+  lapackGeev('N', jobvr, n, a.data_ptr<scalar_t>(), lda, wr.data_ptr<scalar_t>(), wi.data_ptr<scalar_t>(),
+                mock, 1, rv__.data_ptr<scalar_t>(), ldvr, &wkopt, -1, &info);
+  
+  lwork = (int) wkopt;
+  work = at::empty({lwork}, a.options().dtype());
+
+  lapackGeev('N', jobvr, n, a.data_ptr<scalar_t>(), lda, wr.data_ptr<scalar_t>(), wi.data_ptr<scalar_t>(),
+                mock, 1, rv__.data_ptr<scalar_t>(), ldvr, work.data_ptr<scalar_t>(), lwork, &info);
+
+  {
+    scalar_t *re_data = re__.data_ptr<scalar_t>();
+    scalar_t *wi_data = wi.data_ptr<scalar_t>();
+    scalar_t *wr_data = wr.data_ptr<scalar_t>();
+    for (i=0; i<n; i++)
+    {
+      re_data[2*i] = wr_data[i];
+      re_data[2*i+1] = wi_data[i];
+    }
+  }
+
+  if (jobvr == 'V') {
+    rv_ = rv__;
+  }
+
+  re_ = re__;
+}
+
+std::tuple<Tensor, Tensor> eig(const Tensor& self, bool eigenvectors) {
+  std::cout << "siemanko" << std::endl;
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  int n = self.size(-1);
+  auto evalues = at::empty({n, 2}, self.options().dtype());
+  auto evectors = at::empty({n, n}, self.options().dtype());
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cpu", [&] {
+    apply_eig<scalar_t>(self_working_copy, evalues, evectors, eigenvectors);
+  });
+
+  return std::make_pair(evalues, evectors);
+}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
