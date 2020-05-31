@@ -517,7 +517,8 @@ Tensor& nanmean_out_cpu_gpu(Tensor& result, const Tensor& self, IntArrayRef dim,
     if (iter.numel() == 0) {
       result.fill_(std::numeric_limits<double>::quiet_NaN());
     } else {
-      nanmean_stub(iter.device_type(), iter, dim_prod);
+      nansum_stub(iter.device_type(), iter);
+      result = result.div_(dim_prod);
     }
     return result;
   }
