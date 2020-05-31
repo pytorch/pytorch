@@ -674,6 +674,8 @@ TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
 
 TORCH_CUDA_API TensorView* threshold(TensorView* in, Val* thresh, Val* value) {
   return threshold(in->as<Val>(), thresh, value)->as<TensorView>();
+  return static_cast<TensorView*>(
+      threshold(static_cast<Val*>(in), thresh, value));
 }
 
 TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val) {
