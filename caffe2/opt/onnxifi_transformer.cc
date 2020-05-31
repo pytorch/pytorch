@@ -256,6 +256,7 @@ void mergeFp32InputsAndConvertToFp16(
     ops.emplace_back(op);
   }
   pred_net->clear_op();
+  int current_pos = ops.size();
 
   for (const auto& elem : user_inputs_by_partition) {
     const auto& partition = elem.first;
@@ -275,9 +276,8 @@ void mergeFp32InputsAndConvertToFp16(
       total += user_input_map[u].shape.dims(1);
     }
     shape_info.shape.set_dims(1, total);
-    auto* arg = op1.add_arg();
-    arg->set_name("axis");
-    arg->set_i(1);
+    AddArgument("axis", 1, &op1);
+    AddArgument(kNetPos, current_pos++, &op1);
     pred_net->add_op()->CopyFrom(op1);
 
     // TODO: a possible optimization is to fuse the fp16 conversion into Concat
@@ -285,9 +285,8 @@ void mergeFp32InputsAndConvertToFp16(
     op2.set_type("FloatToHalf");
     op2.add_input(partition + "_fp32_input_concated");
     op2.add_output(partition + "_fp16_input_concated");
-    arg = op2.add_arg();
-    arg->set_name("clip");
-    arg->set_i(1);
+    AddArgument("clip", 1, &op2);
+    AddArgument(kNetPos, current_pos++, &op2);
     shape_hints->emplace(partition + "_fp16_input_concated", shape_info);
     pred_net->add_op()->CopyFrom(op2);
 
@@ -306,17 +305,16 @@ void mergeFp32InputsAndConvertToFp16(
           "",
           {partition + "_" + i + "_split_fp16"},
           {partition + "_" + i + "_split"},
-          {}));
+          {MakeArgument<int>(kNetPos, current_pos++)}));
       converts.back().mutable_device_option()->set_node_name(partition);
 
       auto converted_shape = user_input_map[i];
       converted_shape.shape.set_data_type(TensorProto_DataType_FLOAT);
       shape_hints->emplace(partition + "_" + i + "_split", converted_shape);
     }
-    arg = op3.add_arg();
-    arg->set_name("axis");
-    arg->set_i(1);
-    arg = op3.add_arg();
+    AddArgument("axis", 1, &op3);
+    AddArgument(kNetPos, current_pos++, &op3);
+    auto* arg = op3.add_arg();
     arg->set_name("split");
     for (const auto& u : user_inputs) {
       arg->add_ints(user_input_map[u].shape.dims(1));
@@ -327,8 +325,9 @@ void mergeFp32InputsAndConvertToFp16(
     }
 
     for (auto& op : ops) {
-      if (!op.device_option().node_name().empty() &&
-          op.device_option().node_name() == partition) {
+      if ((!op.device_option().node_name().empty() &&
+           op.device_option().node_name() == partition) ||
+          (op.device_option().node_name().empty() && partition == "default")) {
         for (auto& i : *op.mutable_input()) {
           if (user_input_set.count(i)) {
             i = partition + "_" + i + "_split";
@@ -677,7 +676,6 @@ OnnxifiTransformer::~OnnxifiTransformer() {
 
 OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     const std::string& onnx_model_str,
-    const std::unordered_map<std::string, TensorShape>& output_shape_hints,
     const std::unordered_set<std::string>& initialization_list,
     const std::vector<std::string>& external_inputs,
     const std::vector<std::string>& external_outputs,
@@ -735,9 +733,9 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   // Add output size hints
   for (int i = 0; i < op.output_size(); ++i) {
     const auto& o = op.output(i);
-    const auto it = output_shape_hints.find(o);
-    if (it != output_shape_hints.end()) {
-      const auto& shape = it->second;
+    const auto it = shape_hints.find(o);
+    if (it != shape_hints.end()) {
+      const auto& shape = it->second.shape;
       auto* output_shape_hint_arg = op.add_arg();
       output_shape_hint_arg->set_name(c10::str("output_shape_hint_", i));
       output_shape_hint_arg->add_ints(onnxifiDataType(shape.data_type()));
@@ -862,16 +860,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     }
   }
 
-  // Compute output shape hints
-  std::unordered_map<std::string, TensorShape> output_shape_hints;
-  for (const auto& o : onnxifi_net.external_output()) {
-    const auto it = shape_hints.find(o);
-    CAFFE_ENFORCE(
-        it != shape_hints.end(), "Cannot find shape info for output ", o);
-    const auto& shape = it->second.shape;
-    output_shape_hints.emplace(o, shape);
-  }
-
   // Rewrite the net into a dummy in loop test mode
   ShapeInfoMap new_shape_hints;
   if (opts_.loop_test) {
@@ -906,7 +894,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       onnxifi_net.external_output().end());
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
-      output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
@@ -1000,16 +987,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       onnxifi_net_outputs,
       shape_hints_onnx_,
       std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>());
-  std::unordered_map<std::string, TensorShape> output_shape_hints;
   for (const auto& i : io_vec) {
     onnx_model.mutable_graph()->add_output()->CopyFrom(i);
-    const auto it = shape_hints_onnx_.find(i.name());
-    CAFFE_ENFORCE(
-        it != shape_hints_onnx_.end(),
-        "Cannot find shape info for output ",
-        i.name());
-    const auto& shape = it->second;
-    output_shape_hints.emplace(i.name(), shape);
   }
 
   // Convert inputs and figure out weights
@@ -1034,7 +1013,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   onnx_model.SerializeToString(&model_str);
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
-      output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,

@@ -30,6 +30,8 @@ const char* toString(DispatchKey t) {
       return "MSNPU";
     case DispatchKey::XLA:
       return "XLA";
+    case DispatchKey::Vulkan:
+      return "Vulkan";
     case DispatchKey::MkldnnCPU:
       return "MkldnnCPU";
     case DispatchKey::QuantizedCPU:
@@ -38,6 +40,8 @@ const char* toString(DispatchKey t) {
       return "Autograd";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
+    case DispatchKey::Batched:
+      return "Batched";
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
     case DispatchKey::Autocast:

@@ -725,7 +725,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (i * self.world_size) + (i % self.world_size)
                 ]),
                 inputs[i],
-                message=("Mismatch in iteration %d" % i),
+                msg=("Mismatch in iteration %d" % i),
             )
 
     def test_broadcast_stress(self):
@@ -811,7 +811,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     (self.world_size * (self.world_size - 1) / 2)
                 ]),
                 inputs[i],
-                message=("Mismatch in iteration %d" % i),
+                msg=("Mismatch in iteration %d" % i),
             )
 
     def test_allreduce_stress(self):
@@ -886,7 +886,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqualIgnoreType(
                 2 * [torch.tensor([(i * self.world_size) + (self.world_size * (self.world_size - 1) / 2)])],
                 inputs[i],
-                message="Mismatch in interation {}".format(i)
+                msg="Mismatch in interation {}".format(i)
             )
 
     def test_allreduce_coalesced_stress(self):
@@ -1067,7 +1067,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.tensor([iter + root]),
                 outputs[iter][root],
-                message=("Mismatch in iteration %d for rank %d" % (iter, root)),
+                msg=("Mismatch in iteration %d for rank %d" % (iter, root)),
             )
 
     def test_scatter_stress(self):
@@ -1217,7 +1217,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_outputs[iter],
                     outputs[iter],
-                    message=("Mismatch in iteration %d for root %d" % (iter, root))
+                    msg=("Mismatch in iteration %d for root %d" % (iter, root))
                 )
 
     def test_gather_stress(self):
@@ -1318,7 +1318,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 expected_outputs[i],
                 outputs[i],
-                message=("Mismatch in iteration %d" % i),
+                msg=("Mismatch in iteration %d" % i),
             )
 
     def test_allgather_stress(self):
@@ -1446,7 +1446,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         (self.world_size * (self.world_size - 1) / 2)
                     ]),
                     outputs[i],
-                    message=("Mismatch in iteration %d with root rank %d" % (iter, root)),
+                    msg=("Mismatch in iteration %d with root rank %d" % (iter, root)),
                 )
 
     def test_reduce_stress(self):
@@ -2782,7 +2782,8 @@ class ReducerModule(nn.Module):
 @requires_gloo()
 class ReducerTest(TestCase):
     def setUp(self):
-        self.store = c10d.FileStore("/dev/null", 1)
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+        self.store = c10d.FileStore(self.file.name, 1)
         self.process_group = c10d.ProcessGroupGloo(self.store, 0, 1)
 
     def test_single_dtype_single_bucket(self):
@@ -2949,10 +2950,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # Need to skip return code checking for these tests since the child
         # processes don't exit cleanly.
         self.skip_return_code_checks = [
-            self._get_wrapped_func(self.test_nccl_errors_blocking_abort),
-            self._get_wrapped_func(self.test_nccl_errors_blocking_sigkill),
-            self._get_wrapped_func(self.test_nccl_errors_blocking_sigterm),
-            self._get_wrapped_func(self.test_nccl_errors_blocking_nonzero_exit),
+            self.test_nccl_errors_blocking_abort.__wrapped__,
+            self.test_nccl_errors_blocking_sigkill.__wrapped__,
+            self.test_nccl_errors_blocking_sigterm.__wrapped__,
+            self.test_nccl_errors_blocking_nonzero_exit.__wrapped__,
         ]
         self._fork_processes()
 
@@ -2970,15 +2971,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @property
     def world_size(self):
         return 3
-
-    def _get_wrapped_func(self, func):
-        # Get the original function which was wrapped in the decorator.
-        if hasattr(func, '__wrapped__'):
-            # py3 way.
-            return func.__wrapped__
-        else:
-            # py2 way.
-            return func.func_closure[0].cell_contents
 
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))
