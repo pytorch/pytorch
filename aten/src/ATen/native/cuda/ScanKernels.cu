@@ -168,9 +168,8 @@ __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Te
   int num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int>());
 
   dim3 threads(std::min(512, int(num_irows)));
-  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int(threads.x))));
-
   tensor_kernel_scan_outer_dim_with_indices<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
     num_orows, num_irows, row_size, init, binary_op);
@@ -414,7 +413,7 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
   int64_t num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int64_t>());
 
   dim3 threads(std::min(512, int(num_irows)));
-  int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
 
   check_fits_in_unsigned(num_irows, "num_irows");
