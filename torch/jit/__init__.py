@@ -2020,9 +2020,6 @@ class TracedModule(ScriptModule):
         for name in ("_parameters", "_buffers", "_modules"):
             delattr(self, name)
 
-    def forward(self, *args, **kwargs):
-        raise RuntimeError('Trace submodules cannot be called.')
-
     def __getattr__(self, attr):
         if "_actual_script_module" not in self.__dict__:
             return super(TracedModule, self).__getattr__(attr)
