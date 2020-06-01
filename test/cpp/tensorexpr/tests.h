@@ -70,6 +70,8 @@ namespace jit {
   _(ReduceSplitMask)                        \
   _(ReduceSplitNoMask)                      \
   _(ReduceOverSplitMask)                    \
+  _(ReduceSplitRfactor)                     \
+  _(ReduceOverSplitRfactor)                 \
   _(SplitReduceAxis)                        \
   _(SplitNonReduceAxis)                     \
   _(TypeTest01)                             \
@@ -179,6 +181,7 @@ namespace jit {
   _(LoopNestReorderLongStringOfPreOrphans)  \
   _(LoopNestReorderLongStringOfPostOrphans) \
   _(LoopNestReorderLongStringFull)          \
+  _(LoopNestReorderInternalLoopNest)        \
   _(OuterLoopVectorization)                 \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
