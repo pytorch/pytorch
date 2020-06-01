@@ -42,6 +42,7 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
 #include <torch/csrc/jit/passes/quantization/finalize.h>
+#include <torch/csrc/jit/passes/quantization/fusion_passes.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
@@ -179,6 +180,11 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
+          "_jit_pass_fuse_quantized_add_relu",
+          [](std::shared_ptr<Graph>& g) {
+            return FuseQuantizedAddRelu(g); // overload resolution
+          })
+      .def(
           "_jit_pass_insert_observers",
           [](Module& module,
              const std::string& method_name,
@@ -194,7 +200,7 @@ void initJITBindings(PyObject* module) {
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
-          py::arg("inplace") = false,
+          py::arg("inplace"),
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
@@ -206,7 +212,7 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("module"),
           py::arg("method_name"),
-          py::arg("inplace") = false,
+          py::arg("inplace"),
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_prepack_unpack",

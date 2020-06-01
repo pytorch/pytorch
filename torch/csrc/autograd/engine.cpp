@@ -228,9 +228,9 @@ Engine::~Engine() {
     // Because CRT terminates DLL threads before calling
     // global object destructors
 #if !defined(_WIN32) || !defined(C10_BUILD_SHARED_LIBS)
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {
-      non_reentrant_device_thread_finish_.wait(lk);
+      non_reentrant_device_thread_condvar_.wait(lk);
     }
 #endif
   }
@@ -238,12 +238,22 @@ Engine::~Engine() {
 }
 
 void Engine::release_workers() {
-  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
   non_reentrant_device_thread_count_.store(0);
-  non_reentrant_device_thread_finish_.notify_one();
+  non_reentrant_device_thread_condvar_.notify_one();
 }
 
-auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) -> void {
+void Engine::increment_non_reentrant_thread_count() {
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+  non_reentrant_device_thread_count_.fetch_add(1);
+  non_reentrant_device_thread_condvar_.notify_one();
+}
+
+void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
+  if (should_increment) {
+    increment_non_reentrant_thread_count();
+  }
+
   at::init_num_threads();
   // thread_init should only be called by device threads other than CPU_DEVICE
   TORCH_INTERNAL_ASSERT(device != CPU_DEVICE);
@@ -275,9 +285,9 @@ auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
   thread_main(graph_task, /* reentrant_thread */ false);
   // Notify about shutdown
   {
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     non_reentrant_device_thread_count_.fetch_sub(1);
-    non_reentrant_device_thread_finish_.notify_one();
+    non_reentrant_device_thread_condvar_.notify_one();
   }
 }
 
@@ -1046,17 +1056,23 @@ auto Engine::start_device_threads() -> void {
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
-  non_reentrant_device_thread_count_.store(num_devices);
   for (int i = 0; i < num_devices; ++i) {
-    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i]);
+    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
     t.detach();
+  }
+  // Wait for the threads to start
+  {
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+    while(non_reentrant_device_thread_count_.load() != num_devices) {
+      non_reentrant_device_thread_condvar_.wait(lk);
+    }
   }
 }
 
 void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
-  // threads but not enough workers to get to the the new task that will be
+  // threads but not enough workers to get to the new task that will be
   // added
   bool create_thread = (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size());
   thread_pool_shared_->graphtasks_queue_.push(graph_task);

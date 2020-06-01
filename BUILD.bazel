@@ -140,7 +140,7 @@ genrule(
         "aten/src/ATen/TypeDefault.h",
         "aten/src/ATen/TypeDefault.cpp",
         "aten/src/ATen/core/TensorBody.h",
-        "aten/src/ATen/core/TensorMethods.h",
+        "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
     cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)` aten/src/ATen/Declarations.cwrap aten/src/THCUNN/generic/THCUNN.h aten/src/ATen/nn.yaml aten/src/ATen/native/native_functions.yaml",
@@ -290,6 +290,11 @@ filegroup(
 filegroup(
     name = "aten_native_xnnpack",
     srcs = glob(["aten/src/ATen/native/xnnpack/*.cpp"]),
+)
+
+filegroup(
+    name = "aten_native_vulkan_stub",
+    srcs = glob(["aten/src/ATen/native/vulkan/stub/*.cpp"]),
 )
 
 filegroup(
@@ -641,6 +646,7 @@ cc_library(
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
+        ":aten_native_vulkan_stub",
         ":aten_src_ATen_config",
         ":generated_cpp",
     ],
