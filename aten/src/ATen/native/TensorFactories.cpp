@@ -122,13 +122,13 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
-      dtype,
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
       /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::DispatchKey::CPU);
+  auto tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage_impl), at::DispatchKey::CPU, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -332,7 +332,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       for(int64_t i = p_begin; i < p_end; i++)
@@ -953,7 +953,7 @@ template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
   });
   return result;
@@ -984,13 +984,13 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
     size_t size_bytes = my_size * dtype.itemsize();
     auto storage_impl = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
-        dtype,
         size_bytes,
         THMapAllocator::makeDataPtr(
             filename.c_str(), flags, size_bytes, nullptr),
         /*allocator=*/nullptr,
         /*resizable=*/false);
-    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::DispatchKey::CPU);
+    auto tensor = detail::make_tensor<at::TensorImpl>(
+        storage_impl, at::DispatchKey::CPU, dtype);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({my_size});
     return tensor;
 }

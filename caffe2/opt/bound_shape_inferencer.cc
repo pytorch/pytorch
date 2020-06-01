@@ -159,6 +159,8 @@ void BoundShapeInferencer::InferOps(
     InferQuantizationTransformation(op);
   } else if (op.type() == "UnPackRecords") {
     InferUnPackRecords(op);
+  } else if (op.type() == "Tile") {
+    InferTile(op);
   } else {
     InferCommonOp(op);
   }
@@ -169,7 +171,7 @@ void BoundShapeInferencer::InferBoundShapeAndType(
     const ShapeInfoMap& info,
     caffe2::Workspace* ws,
     bool extract_feature_len) {
-  const static std::unordered_set<std::string> unsupported{"Tile"};
+  const static std::unordered_set<std::string> unsupported{};
   Initialize(info, extract_feature_len);
 
   bool inferFinished = false;
@@ -755,6 +757,36 @@ void BoundShapeInferencer::InferUnPackRecords(const OperatorDef& op) {
         output_shapes[i].data_type(),
         false);
   }
+}
+
+void BoundShapeInferencer::InferTile(const OperatorDef& op) {
+  if (op.input_size() > 1) {
+    LOG(WARNING) << "Cannot infer shape for Tile when axis and tils are inputs";
+    return;
+  }
+  const auto it = shape_info_.find(op.input(0));
+  if (it == shape_info_.end()) {
+    LOG(WARNING) << "Cannot find shape info for " << op.input(0)
+                 << ". Skipping " << op.type();
+    return;
+  }
+
+  ArgumentHelper helper(op);
+  const std::int32_t tiles = helper.GetSingleArgument<std::int32_t>("tiles", 1);
+  std::int32_t axis = helper.GetSingleArgument<std::int32_t>("axis", 0);
+  bool dynamic = helper.GetSingleArgument<bool>("dynamic", false);
+  auto ndims = it->second.shape.dims_size();
+  const auto canonical_axis = canonical_axis_index_(axis, ndims);
+  auto shape = it->second.shape;
+  shape.set_dims(
+      canonical_axis,
+      shape.dims(canonical_axis) * (dynamic ? spec_.max_batch_size : tiles));
+  CheckAndSetTensorBoundShape(
+      op.output(0),
+      setDimTypeWithFirst(TensorBoundShape_DimType_BATCH, ndims),
+      ConvertToVec(shape.dims()),
+      it->second.shape.data_type(),
+      false);
 }
 
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
