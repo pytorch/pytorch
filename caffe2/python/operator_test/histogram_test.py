@@ -8,7 +8,7 @@ from hypothesis import given
 
 
 class TestHistogram(hu.HypothesisTestCase):
-    @given(rows=st.integers(1, 1000), cols=st.integers(1, 1000), **hu.gcs)
+    @given(rows=st.integers(1, 1000), cols=st.integers(1, 1000), **hu.gcs_cpu_only)
     def test_histogram__device_consistency(self, rows, cols, gc, dc):
         X = np.random.rand(rows, cols)
         bin_edges = list(np.linspace(-2, 10, num=10000))
