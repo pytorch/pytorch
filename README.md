@@ -172,13 +172,13 @@ conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
 ```
 
 On Linux
-```bash
+```sh
 # Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda102  # or [ magma-cuda101 | magma-cuda100 | magma-cuda92 ] depending on your cuda version
 ```
 
 #### Get the PyTorch Source
-```bash
+```sh
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
@@ -188,13 +188,13 @@ git submodule update --init --recursive
 
 #### Install PyTorch
 On Linux
-```bash
+```sh
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py install
 ```
 
 On macOS
-```bash
+```sh
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
@@ -259,14 +259,14 @@ the following. For example, adjusting the pre-detected directories for CuDNN or 
 with such a step.
 
 On Linux
-```bash
+```sh
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
 On macOS
-```bash
+```sh
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
@@ -278,7 +278,7 @@ ccmake build  # or cmake-gui build
 
 You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
 
-```bash
+```sh
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 ```
 
@@ -293,7 +293,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 The `Dockerfile` is supplied to build images with cuda support and cudnn v7.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default.
-```bash
+```sh
 make -f docker.Makefile
 # images are tagged as docker.io/${your_docker_username}/pytorch
 ```
