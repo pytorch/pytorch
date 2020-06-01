@@ -39,7 +39,7 @@ def _RemoteModule(
     """
         A RemoteModule instance can only be created after RPC initialization.
         It creates a user-specified module on a specified remote node.
-        It behaves like a regular nn.Module except that the ``forward`` method is
+        It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
         It takes care of autograd recording to ensure the backward pass propogates
         gradients back to the corresponding remote module.
@@ -49,7 +49,7 @@ def _RemoteModule(
 
         For example, if ``module_creator`` returns an instace of ``nn.Linear``,
         that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
-        the generated `RemoteModule`` will have 2 methods in signature of
+        the generated ``RemoteModule`` will have 2 methods in signature of
         ``def forward(input: Tensor) -> Tensor:`` and
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
@@ -81,9 +81,9 @@ def _RemoteModule(
 
     Returns:
         A remote module instance which wraps the :class:`~nn.Module` created by the
-        user-provided ``module_creator``, it has a blocking ``forward`` method and an asynchronous
-        ``forward`` that returns a future of the ``forward`` call on the user created
-        remote module.
+        user-provided ``module_creator``, it has a blocking ``forward`` method and an
+        asynchronous ``forward_async`` method that returns a future of the ``forward`` call
+        on the user-provided module on the remote side.
 
     Example::
         Run the following code in two different processes:
@@ -169,7 +169,7 @@ def RemoteModule(
     """
         A RemoteModule instance can only be created after RPC initialization.
         It creates a user-specified module on a specified remote node.
-        It behaves like a regular nn.Module except that the ``forward`` method is
+        It behaves like a regular ``nn.Module`` except that the ``forward`` method is
         executed on the remote node.
         It takes care of autograd recording to ensure the backward pass propogates
         gradients back to the corresponding remote module.
@@ -179,26 +179,26 @@ def RemoteModule(
 
         For example, if ``module_creator`` returns an instace of ``nn.Linear``,
         that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
-        the generated `RemoteModule`` will have 2 methods in signature of
+        the generated ``RemoteModule`` will have 2 methods in signature of
         ``def forward(input: Tensor) -> Tensor:`` and
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
         module_creator (Callable): A ``module_creator`` could be
-                1. A type object that is subclass of ``nn.Module``.
-                    For example,
-                    >>> class MyModule(nn.Module):
-                    >>>     def forward(input):
-                    >>>         return input + 1
-                    >>>
-                    >>> module_creator = MyModule
-                2. A function that returns a instance of ``nn.Module``.
-                    For example,
-                    >>> def module_creator():
-                    >>>     module = MyModule()
-                    >>>     scripted_module = torch.jit.script(module)
-                    >>>     return scripted_module
+            1. A type object that is subclass of ``nn.Module``.
+                For example,
+                >>> class MyModule(nn.Module):
+                >>>     def forward(input):
+                >>>         return input + 1
+                >>>
+                >>> module_creator = MyModule
+            2. A function that returns a instance of ``nn.Module``.
+                For example,
+                >>> def module_creator():
+                >>>     module = MyModule()
+                >>>     scripted_module = torch.jit.script(module)
+                >>>     return scripted_module
         args (Sequence, optional): args to be passed to ``module_creator``.
         kwargs (Dict, optional): kwargs to be passed to ``module_creator``.
         global_unique_name (str, optional): The unique name of the created RemoteModule,
@@ -207,9 +207,9 @@ def RemoteModule(
 
     Returns:
         A remote module instance which wraps the :class:`~nn.Module` created by the
-        user-provided ``module_creator``, it has a blocking ``forward`` method and an asynchronous
-        ``forward`` that returns a future of the ``forward`` call on the user created
-        remote module.
+        user-provided ``module_creator``, it has a blocking ``forward`` method and an
+        asynchronous ``forward_async`` method that returns a future of the ``forward`` call
+        on the user-provided module on the remote side.
 
     Example::
         Run the following code in two different processes:
