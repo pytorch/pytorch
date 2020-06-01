@@ -84,7 +84,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
 };
 
 inline bool isBatched(const Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::BatchedTensorKey);
+  return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::Batched);
 }
 
 // It is unsafe to call this on a Tensor that is not backed by a
