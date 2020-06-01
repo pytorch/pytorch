@@ -6,6 +6,7 @@
 #include "test/cpp/tensorexpr/test_base.h"
 
 #include "test/cpp/tensorexpr/padded_buffer.h"
+#include "torch/csrc/jit/tensorexpr/analysis.h"
 #include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/eval.h"
 #include "torch/csrc/jit/tensorexpr/function.h"
@@ -14,6 +15,8 @@
 #include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
+
+#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
@@ -1103,6 +1106,99 @@ void testReduceOverSplitMask() {
     cg.call({in, out});
     ASSERT_EQ(out[0], 4950);
   }
+}
+
+// Test an rfactor when there are two ReduceOps in the graph due to a
+// splitWithTail.
+void testReduceSplitRfactor() {
+  KernelScope kernel_scope;
+
+  const int M = 2;
+  const int N = 10;
+  const int K = 10;
+  const int SPLIT_FACTOR = 4;
+
+  Buffer b(BufHandle("b", {M, N, K}, kFloat));
+  std::vector<float> in(M * N * K);
+  for (int m = 0; m < M; ++m) {
+    for (int j = 0; j < N * K; ++j) {
+      in[m * N * K + j] = j;
+    }
+  }
+
+  std::vector<float> out(M, -1.f);
+
+  Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+  LoopNest loop({c});
+  std::vector<For*> loops = loop.getLoopStmtsFor(c);
+  For *o, *i, *t;
+  loop.splitWithTail(loops[2], SPLIT_FACTOR, &o, &i, &t);
+
+  auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
+  loop.rfactor(reduces[0], reduces[0]->reduce_args().back());
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {b, c});
+
+  cg.call({in, out});
+  for (int i = 0; i < M; ++i) {
+    ASSERT_EQ(out[0], 4950);
+  }
+}
+
+// Test an rfactor which ends up being eliminated since the total loop size is
+// smaller than the split factor.
+void testReduceOverSplitRfactor() {
+  KernelScope kernel_scope;
+
+  const int N = 10;
+  const int K = 10;
+  const int SPLIT_FACTOR = 16;
+
+  Buffer b(BufHandle("b", {N, K}, kFloat));
+  std::vector<float> in(N * K);
+  for (int j = 0; j < N * K; ++j) {
+    in[j] = j;
+  }
+
+  std::vector<float> out(1, -1.f);
+
+  Tensor* c = Reduce("sum", {}, Sum(), b, {{N, "n"}, {K, "k"}});
+  LoopNest loop({c});
+  std::vector<For*> loops = loop.getLoopStmtsFor(c);
+  For *o, *i, *t;
+  loop.splitWithTail(loops[1], SPLIT_FACTOR, &o, &i, &t);
+
+  auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
+  loop.rfactor(reduces[0], reduces[0]->reduce_args().back());
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {b, c});
+
+  cg.call({in, out});
+  ASSERT_EQ(out[0], 4950);
+
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR to verify the rfactored reduce is eliminated.
+  // TODO: The alloc free should be eliminated here since it is size 0.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: Allocate(tmp_buf, float, {0});
+# CHECK: sum[0] = 0.f;
+# CHECK: for (int n = 0; n < 10; n++) {
+# CHECK:   for (int k_tail = 0; k_tail < 10; k_tail++) {
+# CHECK:     sum[0] = (sum[0]) + (b[k_tail + 10 * n]);
+# CHECK:   }
+# CHECK: }
+# CHECK: Free(tmp_buf);)IR";
+  // TODO: rfactor output is not consistent yet, will fix (@nickg).
+  // torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
 } // namespace jit

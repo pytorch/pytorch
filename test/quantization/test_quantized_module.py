@@ -46,9 +46,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy6 = relu6_module(qx)
 
         self.assertEqual(y_ref, qy.dequantize(),
-                         message="ReLU module API failed")
+                         msg="ReLU module API failed")
         self.assertEqual(y6_ref, qy6.dequantize(),
-                         message="ReLU6 module API failed")
+                         msg="ReLU6 module API failed")
 
 
     @given(
@@ -92,7 +92,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         qlinear.set_weight_bias(W_q, B)
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight(), W_q, atol=1e-5)
+        self.assertEqual(qlinear.weight(), W_q, atol=1e-5, rtol=0)
         W_pack = qlinear._packed_params._packed_params
 
         qlinear.scale = float(scale)
@@ -576,7 +576,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm2d module API failed")
+                         msg="BatchNorm2d module API failed")
 
     def test_batch_norm3d(self):
         """Tests the correctness of the batchnorm3d module.
@@ -594,7 +594,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm3d module API failed")
+                         msg="BatchNorm3d module API failed")
 
     def test_layer_norm(self):
         """Tests the correctness of the layernorm module.
@@ -624,7 +624,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qY = quant_mod(qX)
 
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         msg="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
 
 
@@ -658,7 +658,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Check if the module implementation matches calling the
         # ops directly
-        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack)
+        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack, reduce_range=True)
         self.assertEqual(Z_ref, Z_dq)
 
         # Test serialization of dynamic quantized Linear Module using state_dict
