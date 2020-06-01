@@ -45,7 +45,8 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 S)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
+                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
+                                                        skipCUDAIf)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -559,8 +560,8 @@ class TestAutograd(TestCase):
         z.register_hook(bw_hook)
         z.sum().backward()
 
-        self.assertEqual(counter[0], 1, 'bw_hook not called')
-        self.assertEqual(x.grad, torch.ones(5, 5) * 2, atol=1e-5)
+        self.assertEqual(counter[0], 1, msg='bw_hook not called')
+        self.assertEqual(x.grad, torch.ones(5, 5) * 2, atol=1e-5, rtol=0)
 
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
@@ -1915,7 +1916,18 @@ class TestAutograd(TestCase):
 
     def test_numpy_requires_grad(self):
         x = torch.randn(2, 2, requires_grad=True)
-        self.assertRaisesRegex(RuntimeError, 'requires grad', lambda: x.numpy())
+        err_msg_outputs = r"Can't call numpy\(\) on Tensor that requires grad. Use tensor.detach\(\).numpy\(\) instead."
+        with self.assertRaisesRegex(RuntimeError, err_msg_outputs):
+            x.numpy()
+
+        with torch.no_grad():
+            x.numpy()
+
+        x = torch.randn(2, 2)
+        x.numpy()
+
+        with torch.no_grad():
+            x.numpy()
 
     def test_return_leaf(self):
         class Identity(Function):
@@ -2874,7 +2886,6 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
-    @skipIfRocm
     def test_memory_profiler(self):
         def run_profiler(tensor_creation_fn, metric):
             # collecting allocs / deallocs
@@ -3046,6 +3057,13 @@ class TestAutograd(TestCase):
         keys = dir(x)
         self.assertIn('shape', keys)
 
+        # real and imag are only implemented for complex tensors.
+        y = torch.randn(10, 10, dtype=torch.cfloat)
+        for key in ['real', 'imag']:
+            self.assertRaises(RuntimeError, lambda: hasattr(x, key))
+            self.assertTrue(hasattr(y, key))
+            keys.remove(key)
+
         for key in keys:
             self.assertTrue(hasattr(x, key))
 
@@ -3121,7 +3139,7 @@ class TestAutograd(TestCase):
         self._test_lerp_tensor_weights(lambda t: t)
 
     def test_reduce_dtype(self):
-        def test_reduction(op, has_no_dim):
+        def test_reduction(op, has_no_dim, takes_dtype=True):
             x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
 
             if has_no_dim:
@@ -3132,7 +3150,10 @@ class TestAutograd(TestCase):
 
             gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
             grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
-            grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            if takes_dtype:
+                grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            else:
+                grad2, = torch.autograd.grad([op(x.double(), dim=0)], [x], gi.double())
             self.assertEqual(grad1, grad2)
             self.assertEqual(grad2.dtype, torch.float)
 
@@ -3140,6 +3161,7 @@ class TestAutograd(TestCase):
         test_reduction(torch.prod, True)
         test_reduction(torch.cumsum, False)
         test_reduction(torch.cumprod, False)
+        test_reduction(torch.logcumsumexp, False, takes_dtype=False)
 
     def test_inplace_view_saved_output(self):
         # Test an in-place operation on a view in which the in-place op saves
@@ -5540,25 +5562,6 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-
-    @deviceCountAtLeast(2)
-    def test_scalar_different_devices(self, devices):
-        a = torch.rand([], requires_grad=True, device=devices[0])
-        b = torch.rand(10, requires_grad=True, device=devices[1])
-
-        c = b * a
-        c.sum().backward()
-
-
-    @onlyCUDA
-    def test_scalar_different_device_types(self, device):
-        c = torch.tensor(3.0, device='cpu', requires_grad=True) * torch.rand(2, 2, device=device)
-        c.sum().backward()
-
-        d = torch.tensor(3.0, device=device, requires_grad=True) * torch.rand(2, 2, device='cpu')
-        d.sum().backward()
-
-
     # NOTE: flaky on ROCm CI
     @skipCUDAIfRocm
     def test_sparse_ctor_getter_backward(self, device):
@@ -5789,8 +5792,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(where, [cond, x, y], raise_exception=True)
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
 
-    @skipCUDAIfRocm
-    @unittest.skipIf(IS_WINDOWS, """Test is flaky on Windows:
+    @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
             https://github.com/pytorch/pytorch/issues/34870""")
     def test_ctc_loss(self, device):
         batch_size = 64
@@ -5863,7 +5865,7 @@ class TestAutogradDeviceType(TestCase):
                                                   input_lengths, target_lengths, reduction='none')
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
-        self.assertEqual(grad_cudnn, grad_native, atol=1e-4)
+        self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
     @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_neg_slope(self, device):
@@ -6260,17 +6262,34 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1], [1, 1]])
 
-    @unittest.skip("Wrong Gradient: https://github.com/pytorch/pytorch/issues/38586")
     def test_mv_grad_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
         mat = torch.randn(2, 2, device=device)
-        vec = torch.randn(1, device=device).expand(2).requires_grad_(True)
+        vec = torch.randn(1, device=device).requires_grad_(True)
 
         def fn(vec):
+            # Expand inside the function to make sure the input to
+            # gradcheck does not have overlapping memory
+            vec = vec.expand(2)
             return (mat @ vec).sum()
 
         gradcheck(fn, (vec))
         gradgradcheck(fn, (vec))
+
+    def test_logcumsumexp_large_value(self, device):
+        a = torch.rand(4, 4, 4, dtype=torch.double, requires_grad=True)
+        with torch.no_grad():
+            # Large Number
+            a[0] = 10000
+
+        gradcheck(lambda x: x.logcumsumexp(0), a)
+        gradgradcheck(lambda x: x.logcumsumexp(0), a)
+
+        gradcheck(lambda x: x.logcumsumexp(1), a)
+        gradgradcheck(lambda x: x.logcumsumexp(1), a)
+
+        gradcheck(lambda x: x.logcumsumexp(2), a)
+        gradgradcheck(lambda x: x.logcumsumexp(2), a)
 
 
 class TestMultithreadAutograd(TestCase):

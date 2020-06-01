@@ -8,7 +8,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -27,6 +27,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
@@ -41,6 +42,7 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
 #include <torch/csrc/jit/passes/quantization/finalize.h>
+#include <torch/csrc/jit/passes/quantization/fusion_passes.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
@@ -178,6 +180,11 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
+          "_jit_pass_fuse_quantized_add_relu",
+          [](std::shared_ptr<Graph>& g) {
+            return FuseQuantizedAddRelu(g); // overload resolution
+          })
+      .def(
           "_jit_pass_insert_observers",
           [](Module& module,
              const std::string& method_name,
@@ -193,7 +200,7 @@ void initJITBindings(PyObject* module) {
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
-          py::arg("inplace") = false,
+          py::arg("inplace"),
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
@@ -205,7 +212,7 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("module"),
           py::arg("method_name"),
-          py::arg("inplace") = false,
+          py::arg("inplace"),
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_prepack_unpack",
@@ -375,7 +382,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_fixup_onnx_conditionals", FixupONNXConditionals)
-      .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
+      .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)

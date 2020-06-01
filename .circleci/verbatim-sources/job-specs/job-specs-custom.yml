@@ -2,13 +2,12 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
       # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:1bc00f11-e0f3-4e5c-859f-15937dd938cd"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:209062ef-ab58-422a-b295-36c4eed6e906"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -53,13 +52,12 @@
   pytorch_cpp_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:1bc00f11-e0f3-4e5c-859f-15937dd938cd"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:209062ef-ab58-422a-b295-36c4eed6e906"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -101,8 +99,6 @@
     macos:
       xcode: "9.4.1"
     steps:
-      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_scripts
       - checkout
       - run_brew_for_macos_build
       - run:
@@ -126,14 +122,10 @@
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
 
-            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            cp -a ~/project ~/workspace
-
       - persist_to_workspace:
-          root: ~/workspace
+          root: /Users/distiller/workspace/
           paths:
             - miniconda3
-            - project
 
   pytorch_macos_10_13_py3_test:
     environment:
@@ -141,9 +133,9 @@
     macos:
       xcode: "9.4.1"
     steps:
-      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      # This workspace also carries binaries from the build job
-      - attach_scripts
+      - checkout
+      - attach_workspace:
+          at: ~/workspace
       - run_brew_for_macos_build
       - run:
           name: Test
@@ -151,9 +143,6 @@
           command: |
             set -e
             export IN_CIRCLECI=1
-
-            # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            cp -a ~/workspace/project/. ~/project
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
@@ -163,15 +152,14 @@
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:1bc00f11-e0f3-4e5c-859f-15937dd938cd"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:209062ef-ab58-422a-b295-36c4eed6e906"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_scripts
-    - setup_linux_system_environment
     - checkout
+    - setup_linux_system_environment
     - setup_ci_environment
     - run:
         name: pytorch android gradle build
@@ -205,7 +193,7 @@
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v7a" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-          mkdir ~/workspace/build_android_install_arm_v7a
+          mkdir -p ~/workspace/build_android_install_arm_v7a
           docker cp $id_arm_v7a:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_arm_v7a
 
           # x86_64
@@ -215,7 +203,7 @@
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_64" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-          mkdir ~/workspace/build_android_install_x86_64
+          mkdir -p ~/workspace/build_android_install_x86_64
           docker cp $id_x86_64:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_x86_64
 
           # arm-v8a
@@ -225,7 +213,7 @@
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v8a" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
-          mkdir ~/workspace/build_android_install_arm_v8a
+          mkdir -p ~/workspace/build_android_install_arm_v8a
           docker cp $id_arm_v8a:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_arm_v8a
 
           docker cp ~/workspace/build_android_install_arm_v7a $id_x86_32:/var/lib/jenkins/workspace/build_android_install_arm_v7a
@@ -249,13 +237,13 @@
   pytorch_android_publish_snapshot:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:1bc00f11-e0f3-4e5c-859f-15937dd938cd"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:209062ef-ab58-422a-b295-36c4eed6e906"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - checkout
     - setup_ci_environment
@@ -285,13 +273,13 @@
   pytorch_android_gradle_build-x86_32:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:1bc00f11-e0f3-4e5c-859f-15937dd938cd"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:209062ef-ab58-422a-b295-36c4eed6e906"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_scripts
+    - checkout
     - run:
         name: filter out not PR runs
         no_output_timeout: "5m"
@@ -333,8 +321,6 @@
     macos:
       xcode: "11.2.1"
     steps:
-      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_scripts
       - checkout
       - run_brew_for_ios_build
       - run:
@@ -451,10 +437,8 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
-    - setup_linux_system_environment
     - checkout
+    - setup_linux_system_environment
     - setup_ci_environment
     - run:
         name: Bazel Build
@@ -490,8 +474,7 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -533,13 +516,12 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-test
       # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:1bc00f11-e0f3-4e5c-859f-15937dd938cd"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:209062ef-ab58-422a-b295-36c4eed6e906"
     resource_class: medium
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - setup_ci_environment
     - run:

@@ -5,7 +5,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - checkout
     - optional_merge_target_branch
@@ -67,7 +67,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -239,6 +239,12 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
             .jenkins/pytorch/win-build.sh
+      - persist_to_workspace:
+          root: "C:/w"
+          paths: build-results
+      - store_artifacts:
+          path: C:/w/build-results
+
   pytorch_windows_test:
     <<: *pytorch_windows_params
     parameters:
@@ -272,6 +278,8 @@ jobs:
     executor: <<parameters.executor>>
     steps:
       - checkout
+      - attach_workspace:
+          at: c:/users/circleci/workspace
       - run:
           name: Install VS2017
           command: |

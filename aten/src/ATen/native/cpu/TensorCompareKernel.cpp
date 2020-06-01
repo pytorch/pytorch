@@ -86,7 +86,7 @@ static void min_kernel_impl(
   TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
     "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -123,7 +123,7 @@ static void max_kernel_impl(
   TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
     "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -149,7 +149,7 @@ static void max_kernel_impl(
 }
 
 static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(iter.dtype(), "where_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "where_cpu", [&] {
     if (condition_type == at::ScalarType::Byte) {
       cpu_kernel(
         iter,
