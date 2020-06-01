@@ -10190,7 +10190,7 @@ a")
         self.checkScript(torch_unique, (0,))
 
         def torch_unique_consecutive(dim: Optional[int]):
-            ten = torch.unique(torch.tensor([[1, 3], [2, 3]], dtype=torch.long))
+            ten = torch.unique(torch.tensor([[1, 3], [3, 2], [3, 2], [2, 3]], dtype=torch.long))
             a = torch.unique_consecutive(ten, dim=dim)
             b = torch.unique_consecutive(ten, return_counts=True, dim=dim)
             c = torch.unique_consecutive(ten, return_inverse=True, dim=dim)
