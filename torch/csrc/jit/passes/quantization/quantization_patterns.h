@@ -851,7 +851,7 @@ graph(%packed_params, %a, %reduce_range, %a_dtype):
 
   std::string quantized_linear_dynamic = R"(
 graph(%packed_params, %a, %reduce_range, %a_dtype):
-        %r = quantized::linear_dynamic(%a, %packed_params)
+        %r = quantized::linear_dynamic(%a, %packed_params, %reduce_range)
         return (%r) )";
   return {
       {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
