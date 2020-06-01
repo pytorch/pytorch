@@ -122,9 +122,9 @@ void ComputeInternalGradients(
     const T* X,
     T* ds,
     T* db) {
-  constexpr int64_t K = vec256::Vec256<T>::size();
-  const int64_t inner_size = HxW / K * K;
   at::parallel_for(0, N * C, 1, [=](int64_t start, int64_t end) {
+    constexpr int64_t K = vec256::Vec256<T>::size();
+    const int64_t inner_size = HxW / K * K;
     std::array<T, K> ds_arr;
     std::array<T, K> db_arr;
     for (int64_t i = start; i < end; ++i) {
@@ -166,13 +166,13 @@ void GroupNormInputBackward(
     const T* ds,
     const T* db,
     T* dX) {
-  constexpr int64_t K = vec256::Vec256<T>::size();
   const int64_t G = group;
   const int64_t D = C / G;
   const T s = T(1) / static_cast<T>(D * HxW);
-  const int64_t d = D / K * K;
   const bool gamma_null = (gamma == nullptr);
   at::parallel_for(0, N * G, 1, [=](int64_t start, int64_t end) {
+    constexpr int64_t K = vec256::Vec256<T>::size();
+    const int64_t d = D / K * K;
     std::array<T, K> ds_arr;
     std::array<T, K> db_arr;
     for (int64_t i = start; i < end; ++i) {
