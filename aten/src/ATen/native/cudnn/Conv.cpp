@@ -657,7 +657,13 @@ public:
     if (args.params.dataType == CUDNN_DATA_HALF) {
       perfResults[0].mathType = CUDNN_TENSOR_OP_MATH;
     } else {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
+      if (!at::globalContext().useTF32CuDNN()) {
+        perfResults[0].mathType = CUDNN_FMA_MATH;
+      }
+#else
       perfResults[0].mathType = CUDNN_DEFAULT_MATH;
+#endif
     }
     search::getWorkspaceSize(args, perfResults[0].algo, &(perfResults[0].memory));
     return perfResults;
@@ -832,6 +838,11 @@ void raw_cudnn_convolution_forward_out_32bit(
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
+      if (args.params.dataType == CUDNN_DATA_FLOAT && !at::globalContext().useTF32CuDNN()) {
+        fwdAlgPerf.mathType = CUDNN_FMA_MATH;
+      }
+#endif
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType));
 
       Constant one(dataType, 1);
@@ -967,6 +978,11 @@ void raw_cudnn_convolution_backward_input_out_32bit(
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
+      if (args.params.dataType == CUDNN_DATA_FLOAT && !at::globalContext().useTF32CuDNN()) {
+        fwdAlgPerf.mathType = CUDNN_FMA_MATH;
+      }
+#endif
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdDataAlgPerf.mathType));
 
       Constant one(dataType, 1);
@@ -1128,6 +1144,11 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
+      if (args.params.dataType == CUDNN_DATA_FLOAT && !at::globalContext().useTF32CuDNN()) {
+        fwdAlgPerf.mathType = CUDNN_FMA_MATH;
+      }
+#endif
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdFilterAlgPerf.mathType));
 
       Constant one(dataType, 1);

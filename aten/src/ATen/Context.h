@@ -106,6 +106,8 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool useTF32CuDNN() const;
+  void setUseTF32CuDNN(bool);
   bool useTF32CuBLAS() const;
   void setUseTF32CuBLAS(bool);
   at::QEngine qEngine() const;
@@ -134,6 +136,7 @@ class CAFFE2_API Context {
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
+  bool use_tf32_cudnn = true;
   bool use_tf32_cublas = true;
   bool enabled_mkldnn = true;
   #ifdef C10_MOBILE

@@ -87,29 +87,31 @@ _handles = {}
 verbose = False
 
 
-def set_flags(_enabled, _benchmark, _deterministic, _verbose):
-    global benchmark, deterministic, verbose
+def set_flags(_enabled, _benchmark, _deterministic, _use_tf32, _verbose):
+    global benchmark, deterministic, use_tf32, verbose
     orig_flags = (torch._C._get_cudnn_enabled(),
                   torch._C._get_cudnn_benchmark(),
                   torch._C._get_cudnn_deterministic(),
+                  torch._C._get_cudnn_use_tf32(),
                   verbose)
     verbose = _verbose
     torch._C._set_cudnn_enabled(_enabled)
     torch._C._set_cudnn_benchmark(_benchmark)
     torch._C._set_cudnn_deterministic(_deterministic)
+    torch._C._set_cudnn_use_tf32(_use_tf32)
     return orig_flags
 
 
 @contextmanager
-def flags(enabled=False, benchmark=False, deterministic=False, verbose=False):
+def flags(enabled=False, benchmark=False, deterministic=False, use_tf32=True, verbose=False):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, benchmark, deterministic, verbose)
+        orig_flags = set_flags(enabled, benchmark, deterministic, use_tf32, verbose)
     try:
         yield
     finally:
         # recover the previous values
         with __allow_nonbracketed_mutation():
-            set_flags(orig_flags[0], orig_flags[1], orig_flags[2], orig_flags[3])
+            set_flags(*orig_flags)
 
 
 # The magic here is to allow us to intercept code like this:
@@ -123,6 +125,7 @@ class CudnnModule(PropModule):
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)
     benchmark = ContextProp(torch._C._get_cudnn_benchmark, torch._C._set_cudnn_benchmark)
+    use_tf32 = ContextProp(torch._C._get_cudnn_use_tf32, torch._C._set_cudnn_use_tf32)
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273

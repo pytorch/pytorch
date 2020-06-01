@@ -281,6 +281,7 @@ class TestCuda(TestCase):
         assert_change(0, reset_peak=True)
 
     def test_tf32_flag(self):
+        # cuBLAS
         self.assertTrue(torch.backends.cuda.matmul.use_tf32)
         self.assertEqual(torch._C._get_cublas_use_tf32(), torch.backends.cuda.matmul.use_tf32)
         torch.backends.cuda.matmul.use_tf32 = True
@@ -289,6 +290,15 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.use_tf32 = False
         self.assertEqual(torch._C._get_cublas_use_tf32(), torch.backends.cuda.matmul.use_tf32)
         self.assertFalse(torch.backends.cuda.matmul.use_tf32)
+        # cuDNN
+        self.assertTrue(torch.backends.cudnn.use_tf32)
+        self.assertEqual(torch._C._get_cudnn_use_tf32(), torch.backends.cudnn.use_tf32)
+        torch.backends.cudnn.use_tf32 = True
+        self.assertEqual(torch._C._get_cudnn_use_tf32(), torch.backends.cudnn.use_tf32)
+        self.assertTrue(torch.backends.cudnn.use_tf32)
+        torch.backends.cudnn.use_tf32 = False
+        self.assertEqual(torch._C._get_cudnn_use_tf32(), torch.backends.cudnn.use_tf32)
+        self.assertFalse(torch.backends.cudnn.use_tf32)
 
     def test_memory_stats(self):
         gc.collect()
