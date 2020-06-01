@@ -1266,6 +1266,8 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - attach_workspace:
+        at: /root/workspace
     - run:
         <<: *binary_checkout
     - run:
