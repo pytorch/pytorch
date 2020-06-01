@@ -90,10 +90,10 @@ void div_kernel(TensorIterator& iter) {
           });
       } else {
          cpu_kernel_vec(iter,
-          [](c10::complex<double> a, c10::complex<double> b) __ubsan_ignore_float_divide_by_zero__ -> c10::complex<double> {
+          [](std::complex<double> a, std::complex<double> b) __ubsan_ignore_float_divide_by_zero__ -> std::complex<double> {
              return a / b;
           },
-          [](Vec256<c10::complex<double>> a, Vec256<c10::complex<double>> b) {
+          [](Vec256<std::complex<double>> a, Vec256<std::complex<double>> b) {
             return a / b;
           });
       }
