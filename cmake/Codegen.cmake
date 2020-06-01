@@ -155,7 +155,7 @@ if(INTERN_BUILD_ATEN_OPS)
     set(GEN_ROCM_FLAG --rocm)
   endif()
 
-  set(CUSTOM_BUILD_FLAGS)
+  set(CUSTOM_BUILD_FLAG)
   if(INTERN_BUILD_MOBILE)
     if(USE_VULKAN)
       list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU Vulkan)
@@ -177,8 +177,7 @@ if(INTERN_BUILD_ATEN_OPS)
     )
     separate_arguments(OP_REGISTRATION_WHITELIST)
     message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
-    list(APPEND CUSTOM_BUILD_FLAGS
-      --force_schema_registration
+    list(APPEND CUSTOM_BUILD_FLAG
       --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
   endif()
   if(USE_VULKAN)
@@ -191,7 +190,6 @@ if(INTERN_BUILD_ATEN_OPS)
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_ROCM_FLAG}
       ${cwrap_files}
-      ${CUSTOM_BUILD_FLAGS}
       ${GEN_VULKAN_FLAGS}
   )
 
