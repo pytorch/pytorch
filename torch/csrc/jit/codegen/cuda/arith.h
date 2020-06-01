@@ -50,6 +50,7 @@ TORCH_CUDA_API TensorView* reductionOp(
 
 // UNARY OPERATIONS
 TORCH_CUDA_API Val* neg(Val* v);
+TORCH_CUDA_API TensorView* neg(TensorView* v);
 
 // BINARY OPERATIONS
 // add

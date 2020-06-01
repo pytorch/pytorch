@@ -130,6 +130,9 @@ TORCH_CUDA_API TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
 TORCH_CUDA_API Val* neg(Val* v) {
   return unaryOp(UnaryOpType::Neg, v);
 }
+TORCH_CUDA_API TensorView* neg(TensorView* v) {
+  return unaryOp(UnaryOpType::Neg, v);
+}
 
 // BINARY OPERATIONS
 
