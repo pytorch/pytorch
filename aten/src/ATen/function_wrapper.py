@@ -68,7 +68,13 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 }
 """)
 
-NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
+NATIVE_DISPATCH_DEFINITION_CPU_BACKEND = CodeTemplate("""\
+${return_type} ${type_wrapper_name}(${formals}) {
+    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
+}
+""")
+
+NATIVE_DISPATCH_DEFINITION_GENERIC_BACKEND = CodeTemplate("""\
 ${return_type} ${type_wrapper_name}(${formals}) {
     ${device_init}
     ${device_guard_declaration}
@@ -1469,8 +1475,13 @@ def create_derived(backend_type_env, declarations):
                 option['native_type_method_dispatch'] = native_dispatch
                 option['device_init'] = gen_device_init(option, backend_type_env)
 
-                type_object_definitions.append(
-                    NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
+                if backend in ['CPU', 'SparseCPU', 'QuantizedCPU', 'MkldnnCPU']:
+                    # Omit the device guard entirely in these cases
+                    def_backend = NATIVE_DISPATCH_DEFINITION_CPU_BACKEND
+                else:
+                    def_backend = NATIVE_DISPATCH_DEFINITION_GENERIC_BACKEND
+
+                type_object_definitions.append(def_backend.substitute(env))
 
                 if native_dispatch:
                     if option['use_c10_dispatcher'] == 'full':
