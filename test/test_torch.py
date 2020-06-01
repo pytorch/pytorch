@@ -155,7 +155,11 @@ class AbstractTestCases:
                 for name in dir(ns):
                     if name.startswith('_') or name in skipnames:
                         continue
-                    var = getattr(ns, name)
+                    if name in ['real', 'imag']:
+                        y = torch.randn(1, dtype=torch.cfloat)
+                        var = getattr(y, name)
+                    else:
+                        var = getattr(ns, name)
                     if not isinstance(var, checked_types):
                         continue
                     doc = var.__doc__
@@ -16857,6 +16861,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             a // b
 
     @onlyCPU
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_fmod_zero(self, device, dtype):
+        a = torch.tensor([1, 0], dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
+            a.fmod(a)
+
+    @onlyCPU
     def test_cat_bad_input_sizes(self, device):
         x = torch.randn(2, 1, device=device)
         y = torch.randn(2, 1, 1, device=device)
@@ -17694,44 +17705,46 @@ class TestViewOps(TestCase):
         return True
 
     @onlyOnCPUAndCUDA
-    def test_real_self(self, device):
-        t = torch.ones((5, 5), device=device)
-        s = torch.real(t)
-        self.assertTrue(s is t)
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    def test_real_imag_noncomplex(self, device, dtype):
+        t = torch.ones((5, 5), dtype=dtype, device=device)
 
-        # TODO: update when the imag attribute is implemented
-        self.assertTrue(not hasattr(t, 'real'))
-
-    # TODO: update after torch.real is implemented for complex tensors
-    @onlyOnCPUAndCUDA
-    def test_real_view(self, device):
-        t = torch.tensor((1 + 1j), device=device)
         with self.assertRaises(RuntimeError):
-            v = torch.real(t)
-            self.assertTrue(self.is_view_of(t, v))
-
-            v[0] = 0
-            self.assertEqual(t.float()[0], v[0])
-            self.assertTrue(t[0] == complex(0, 1))
-
-    def test_imag_noncomplex(self, device):
-        t = torch.ones((5, 5), device=device)
+            torch.real(t)
 
         with self.assertRaises(RuntimeError):
             torch.imag(t)
 
-        # TODO: update when the imag attribute is implemented
-        self.assertTrue(not hasattr(t, 'imag'))
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_complex_dtypes())
+    def test_real_imag_view(self, device, dtype):
+        def compare_with_numpy(contiguous_input=True):
+            t = torch.randn(3, 3, dtype=dtype, device=device)
+            if not contiguous_input:
+                t = t.T
 
-    # TODO: update after torch.imag is implemented for complex tensors
-    def test_imag_complex(self, device):
-        t = torch.tensor((1 + 1j), device=device)
-        with self.assertRaises(RuntimeError):
-            v = torch.imag(t)
-            self.assertTrue(self.is_view_of(t, v))
+            re = t.real
+            exp = torch.from_numpy(t.cpu().numpy().real).to(device=device)
+            self.assertEqual(re, exp)
+            # TODO: update this to use is_view_of() when the autograd code is modified to
+            # correctly handle .real
+            self.assertTrue(t.storage().data_ptr() == re.storage().data_ptr())
 
-            v[0] = 0
-            self.assertTrue(t[0] == complex(1, 0))
+            im = t.imag
+            exp = torch.from_numpy(t.cpu().numpy().imag).to(device=device)
+            self.assertEqual(im, exp)
+            # TODO: update this to use is_view_of() when the autograd code is modified to
+            # correctly handle .imag
+            self.assertTrue(t.storage().data_ptr() == im.storage().data_ptr())
+
+        compare_with_numpy()
+        compare_with_numpy(contiguous_input=False)
+
+        # ensure storage offset is being correctly set
+        a = torch.randn(10, dtype=dtype)
+        self.assertEqual(a[5:].real, a.real[5:])
+        self.assertEqual(a[5:].imag, a.imag[5:])
 
     def test_diagonal_view(self, device):
         t = torch.ones((5, 5), device=device)
@@ -18256,10 +18269,10 @@ tensor_op_tests = [
     ('cummax', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('cummin', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
     ('cummin', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('cumprod', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-4, _types, _cpu_types, False),
-    ('cumprod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-4, _types, _cpu_types, False),
-    ('cumsum', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('cumsum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('cumprod', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-4, _types + _complex_types, _cpu_types, False),
+    ('cumprod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-4, _types + _complex_types, _cpu_types, False),
+    ('cumsum', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
+    ('cumsum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('dim', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('dist', '', _small_2d, lambda t, d: [_small_2d(t, d)], 1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('dist', '3_norm', _small_2d, lambda t, d: [_small_2d(t, d), 3], 1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),

@@ -130,7 +130,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         return cuda_model, cuda_input
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
-                       input=None, use_gpu=True, example_outputs=None):
+                       input=None, use_gpu=True, example_outputs=None,
+                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
@@ -152,7 +153,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                       do_constant_folding=False,
                                       opset_version=self.opset_version,
                                       keep_initializers_as_inputs=True,
-                                      add_node_names=False)
+                                      add_node_names=False,
+                                      operator_export_type=operator_export_type)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -162,7 +164,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                        example_outputs=None, do_constant_folding=True):
+                        example_outputs=None, do_constant_folding=True,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         """
         This is what the user facing version will look like
         """
@@ -185,11 +188,13 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                       example_outputs=example_outputs,
                       do_constant_folding=do_constant_folding,
                       opset_version=self.opset_version,
-                      keep_initializers_as_inputs=True)
+                      keep_initializers_as_inputs=True,
+                      operator_export_type=operator_export_type)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                       example_outputs=None, do_constant_folding=True):
+                       example_outputs=None, do_constant_folding=True,
+                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         use_gpu_ = torch.cuda.is_available() and use_gpu
         # NOTE: do_constant_folding is turned on only when model has
         # parameters embedded (which are needed for constant folding),
@@ -199,10 +204,12 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             self.run_actual_test(model, train, batch_size, state_dict, input,
                                  use_gpu=use_gpu_, rtol=rtol, atol=atol,
                                  example_outputs=example_outputs,
-                                 do_constant_folding=do_constant_folding)
+                                 do_constant_folding=do_constant_folding,
+                                 operator_export_type=operator_export_type)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
-                                use_gpu=use_gpu_, example_outputs=example_outputs)
+                                use_gpu=use_gpu_, example_outputs=example_outputs,
+                                operator_export_type=operator_export_type)
 
     def test_linear(self):
         class MyModel(torch.nn.Module):
@@ -1025,14 +1032,16 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 def forward(self, x):
                     return torch.cumsum(x, **params)
             x = torch.randn(*shape)
-            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False,
+                                operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_cosine_similarity(self):
         shape = (100, 128)
         x = torch.randn(*shape)
         y = torch.randn(*shape)
         self.run_model_test(torch.nn.CosineSimilarity(dim=1, eps=1e-6), train=False,
-                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False,
+                            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     @skipIfUnsupportedOpsetVersion([10])
     def test_lstm_constant_folding(self):
@@ -2022,7 +2031,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return torch._dim_arange(input, 1)
 
         x = torch.ones(5, 6)
-        self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
+        self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE,
+                            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_end(self):
@@ -2102,7 +2112,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         model = DirichletModel()
-        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True)
+        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
@@ -2115,7 +2126,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         model = GammaModel()
-        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True)
+        onnxir, _ = do_export(model, x, keep_initializers_as_inputs=True,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
