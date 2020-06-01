@@ -157,7 +157,7 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
 }
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION < 10000)
-#define CUDA92_BUG(x) thrust::complex<T>(x.real(), x.imag())
+#define CUDA92_BUG(x) x.real(), x.imag()
 #else
 #define CUDA92_BUG(x) x
 #endif
