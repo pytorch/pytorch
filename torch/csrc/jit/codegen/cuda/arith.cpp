@@ -9,10 +9,10 @@ namespace fuser {
 
 // Will return a new value of type val with the DataType dtype, if it's a
 // tensorview it will propagate the shape information from val.
-TORCH_CUDA_API Val* newValLike(const Val* const val, DataType dtype) {
+TORCH_CUDA_API Val* newValLike(const Val* val, DataType dtype) {
   switch (val->getValType().value()) {
     case (ValType::TensorView):
-      return static_cast<const TensorView* const>(val)->newForOutput(dtype);
+      return val->as<TensorView>()->newForOutput(dtype);
     case (ValType::NamedScalar):
     case (ValType::Scalar):
       switch (dtype) {
@@ -39,7 +39,7 @@ TORCH_CUDA_API Val* newValLike(const Val* const val, DataType dtype) {
       val->getDataType().value());
 }
 
-TORCH_CUDA_API Val* newValLike(const Val* const val) {
+TORCH_CUDA_API Val* newValLike(const Val* val) {
   return newValLike(val, val->getDataType().value());
 }
 
@@ -112,7 +112,7 @@ TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
 }
 
 TORCH_CUDA_API TensorView* castOp(DataType dtype, TensorView* v1) {
-  return castOp(dtype, static_cast<Val*>(v1))->as<TensorView>();
+  return castOp(dtype, v1->as<Val>())->as<TensorView>();
 }
 
 // UNARY OPERATIONS
@@ -124,7 +124,7 @@ TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1) {
 }
 
 TORCH_CUDA_API TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
-  return unaryOp(type, static_cast<Val*>(v1))->as<TensorView>();
+  return unaryOp(type, v1->as<Val>())->as<TensorView>();
 }
 
 TORCH_CUDA_API Val* neg(Val* v) {
@@ -551,7 +551,7 @@ TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
 }
 
 TORCH_CUDA_API TensorView* threshold(TensorView* in, Val* thresh, Val* value) {
-  return threshold(static_cast<Val*>(in), thresh, value)->as<TensorView>();
+  return threshold(in->as<Val>(), thresh, value)->as<TensorView>();
 }
 
 TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val) {
@@ -572,7 +572,7 @@ TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val) {
 }
 
 TORCH_CUDA_API TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
-  return clamp(static_cast<Val*>(in), min_val, max_val)->as<TensorView>();
+  return clamp(in->as<Val>(), min_val, max_val)->as<TensorView>();
 }
 
 } // namespace fuser
