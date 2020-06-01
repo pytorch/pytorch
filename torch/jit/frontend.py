@@ -265,6 +265,7 @@ class StmtBuilder(Builder):
         ast.Sub: '-',
         ast.Mult: '*',
         ast.Div: '/',
+        ast.Mod: '%',
     }
 
     @staticmethod

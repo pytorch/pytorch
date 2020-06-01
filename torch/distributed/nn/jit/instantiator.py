@@ -1,7 +1,9 @@
 #!/usr/bin/python3
 import importlib
+import logging
 import os
 import pathlib
+import traceback
 
 import torch
 from torch.distributed.nn.jit.templates.instantiated import (
@@ -10,6 +12,9 @@ from torch.distributed.nn.jit.templates.instantiated import (
 from torch.distributed.nn.jit.templates.remote_module_template import (
     REMOTE_MODULE_TEMPLATE,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 _FILE_PREFIX = "_remote_module_"
@@ -58,15 +63,15 @@ def get_arg_return_types_from_interface(module_interface):
 
 def cleanup_generated_modules():
     generated_module_paths = pathlib.Path(INSTANTIATED_TEMPLATE_DIR_PATH).glob(
-        f"{_FILE_PREFIX}.py"
+        f"{_FILE_PREFIX}*.py"
     )
     for file_path in generated_module_paths:
         try:
             print(f"Removing {file_path}")
             assert file_path.is_file(), f"Epect {file_path} to be a file"
             file_path.unlink()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"Failed to remove {file_path}:\n{traceback.format_exc()}")
 
 
 def _write(out_path, text):
