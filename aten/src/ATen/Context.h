@@ -134,7 +134,6 @@ class CAFFE2_API Context {
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
-  bool use_tf32_cudnn = true;
   bool use_tf32_cublas = true;
   bool enabled_mkldnn = true;
   #ifdef C10_MOBILE
