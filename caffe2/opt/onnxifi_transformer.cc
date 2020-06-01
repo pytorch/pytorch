@@ -676,7 +676,6 @@ OnnxifiTransformer::~OnnxifiTransformer() {
 
 OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     const std::string& onnx_model_str,
-    const std::unordered_map<std::string, TensorShape>& output_shape_hints,
     const std::unordered_set<std::string>& initialization_list,
     const std::vector<std::string>& external_inputs,
     const std::vector<std::string>& external_outputs,
@@ -734,9 +733,9 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   // Add output size hints
   for (int i = 0; i < op.output_size(); ++i) {
     const auto& o = op.output(i);
-    const auto it = output_shape_hints.find(o);
-    if (it != output_shape_hints.end()) {
-      const auto& shape = it->second;
+    const auto it = shape_hints.find(o);
+    if (it != shape_hints.end()) {
+      const auto& shape = it->second.shape;
       auto* output_shape_hint_arg = op.add_arg();
       output_shape_hint_arg->set_name(c10::str("output_shape_hint_", i));
       output_shape_hint_arg->add_ints(onnxifiDataType(shape.data_type()));
@@ -861,16 +860,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     }
   }
 
-  // Compute output shape hints
-  std::unordered_map<std::string, TensorShape> output_shape_hints;
-  for (const auto& o : onnxifi_net.external_output()) {
-    const auto it = shape_hints.find(o);
-    CAFFE_ENFORCE(
-        it != shape_hints.end(), "Cannot find shape info for output ", o);
-    const auto& shape = it->second.shape;
-    output_shape_hints.emplace(o, shape);
-  }
-
   // Rewrite the net into a dummy in loop test mode
   ShapeInfoMap new_shape_hints;
   if (opts_.loop_test) {
@@ -905,7 +894,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       onnxifi_net.external_output().end());
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
-      output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
@@ -999,16 +987,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
       onnxifi_net_outputs,
       shape_hints_onnx_,
       std::unordered_map<std::string, ::ONNX_NAMESPACE::TypeProto>());
-  std::unordered_map<std::string, TensorShape> output_shape_hints;
   for (const auto& i : io_vec) {
     onnx_model.mutable_graph()->add_output()->CopyFrom(i);
-    const auto it = shape_hints_onnx_.find(i.name());
-    CAFFE_ENFORCE(
-        it != shape_hints_onnx_.end(),
-        "Cannot find shape info for output ",
-        i.name());
-    const auto& shape = it->second;
-    output_shape_hints.emplace(i.name(), shape);
   }
 
   // Convert inputs and figure out weights
@@ -1033,7 +1013,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   onnx_model.SerializeToString(&model_str);
   auto onnxifi_op = buildOnnxifiOp(
       model_str,
-      output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
