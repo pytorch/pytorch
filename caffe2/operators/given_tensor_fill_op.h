@@ -73,9 +73,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
 
   template <typename Type>
   bool FillWithType(Tensor* output) {
-    DCHECK_EQ(output->numel(), values_.numel())
-        << "output size: " << output->numel()
-        << " given size: " << values_.numel();
+    CAFFE_ENFORCE_EQ(output->numel(), values_.numel());
     auto* data = output->template mutable_data<Type>();
     const Type* values_data = values_.template data<Type>();
     if (output->numel()) {

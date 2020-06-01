@@ -60,6 +60,45 @@
 
 namespace at { namespace native {
 
+// See [NOTE: Complex Operator Unification]
+// std::complex and thrust::complex don't work with some !needs_dynamic_casting optimizations.
+// They always currently map to !needs_dynamic_casting even though we sometimes rely on the ability
+// to reinterpret_cast between these representations.
+// In order to separate these concerns, we have a check for non-c10 complex separately.
+template<typename func_t, int nargs=function_traits<func_t>::arity>
+struct uses_non_c10_complex {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::template arg<nargs - 1>::type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
+
+    return c10::guts::if_constexpr<non_c10_complex>([]() {
+      return true;
+    }, /* else */ []() {
+      return uses_non_c10_complex<func_t, nargs - 1>::check();
+    });
+  }
+};
+
+template<typename func_t>
+struct uses_non_c10_complex<func_t, 0> {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::result_type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
+
+    return non_c10_complex;
+  }
+};
+
 template<typename func_t, typename policy_t>
 __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   using traits = function_traits<func_t>;
@@ -163,7 +202,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   constexpr int ntensors = traits::arity + 1;
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
 
   at::detail::Array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
@@ -174,8 +214,9 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
 
   bool contiguous = iter.is_contiguous();
   bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
+  bool non_c10_complex = uses_non_c10_complex<func_t>::check();
 
-  if (!dynamic_casting) {
+  if (!dynamic_casting && !non_c10_complex) {
     if (contiguous) {
       launch_vectorized_kernel(numel, f, data);
     } else {

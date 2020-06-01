@@ -468,15 +468,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
           py::init<
-              std::shared_ptr<::c10d::Store> /* addressStore */,
+              const std::shared_ptr<::c10d::Store>& /* store */,
               std::string /* selfName */,
               worker_id_t /* selfId */,
               int /* worldSize */,
+              std::shared_ptr<::c10d::ProcessGroup> /* processGroup */,
               TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
           py::arg("store"),
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
+          py::arg("process_group"),
           py::arg("rpc_backend_options"))
       .def(
           "join",
@@ -594,11 +596,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
-         const float rpcTimeoutSeconds,
-         const py::args& args,
-         const py::kwargs& kwargs) {
+         const py::tuple& argsTuple,
+         const py::dict& kwargsDict,
+         const float rpcTimeoutSeconds) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
-            dstWorkerName, qualifiedNameStr, rpcTimeoutSeconds, args, kwargs));
+            dstWorkerName,
+            qualifiedNameStr,
+            argsTuple,
+            kwargsDict,
+            rpcTimeoutSeconds));
       },
       py::call_guard<py::gil_scoped_release>());
 

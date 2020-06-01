@@ -4,12 +4,16 @@ set -ex
 
 install_ubuntu() {
     apt-get update
+    if [[ $UBUNTU_VERSION == 18.04 ]]; then
+      # gpg-agent is not available by default on 18.04
+      apt-get install -y --no-install-recommends gpg-agent
+    fi
     apt-get install -y wget
     apt-get install -y libopenblas-dev
 
     # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
-    apt-get install libc++1
-    apt-get install libc++abi1
+    apt-get install -y libc++1
+    apt-get install -y libc++abi1
 
     DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
     # Add rocm repository
@@ -63,7 +67,7 @@ install_centos() {
                    rocprofiler-dev \
                    roctracer-dev
 }
- 
+
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
   install_ubuntu

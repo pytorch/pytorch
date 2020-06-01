@@ -54,7 +54,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(ScalarTypeType)         \
   _(AnyListType)            \
   _(AnyTupleType)           \
-  _(AnyClassType)           
+  _(AnyClassType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -518,7 +518,8 @@ struct CAFFE2_API TensorType : public Type {
       const VaryingShape<int64_t>& sizes,
       const VaryingShape<int64_t>& strides,
       c10::optional<bool> requires_grad,
-      c10::optional<bool> undefined = false);
+      c10::optional<bool> undefined = false,
+      bool tensor_contiguity = false);
 
   static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
@@ -526,7 +527,8 @@ struct CAFFE2_API TensorType : public Type {
       const VaryingShape<ShapeSymbol>& sizes,
       const VaryingShape<Stride>& stride_,
       c10::optional<bool> requires_grad,
-      c10::optional<bool> undefined = false);
+      c10::optional<bool> undefined = false,
+      bool is_inferred = false);
 
   static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
@@ -660,6 +662,19 @@ struct CAFFE2_API TensorType : public Type {
     return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
   }
 
+  bool isInferredType() const {
+    return is_inferred_;
+  }
+
+  static TensorTypePtr getInferred() {
+    static auto valueInferred = TensorType::create(
+      /*scalar_type=*/{}, /*device=*/{},
+      /*sizes=*/VaryingShape<ShapeSymbol>{},
+      /*stride=*/VaryingShape<Stride>{}, /*requires_grad=*/{},
+      /*undefined=*/false, /*is_inferred=*/true);
+    return valueInferred;
+  }
+
   // this property is used by GuardElimination
   // please see `checkInputs` for more details
   bool isSummarized() const {
@@ -712,7 +727,8 @@ struct CAFFE2_API TensorType : public Type {
 
   static VaryingShape<Stride> computeStrideProps(
       at::IntArrayRef sizes,
-      at::IntArrayRef strides);
+      at::IntArrayRef strides,
+      bool tensor_contiguity = false);
 
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
@@ -731,6 +747,8 @@ struct CAFFE2_API TensorType : public Type {
   // defined and undefined. However, no tensor type starts out with
   // `undefined_` set to `c10::nullopt`
   c10::optional<bool> undefined_;
+  // Represents whether or not this type was inferred.
+  bool is_inferred_ = false;
 };
 
 struct ListType;
@@ -1743,7 +1761,7 @@ struct CAFFE2_API ClassType : public NamedType {
                [&](const ClassAttribute& attr) { return attr.getName() == name; }) !=
         attributes_.cend();
   }
-  
+
   at::ArrayRef<TypePtr> containedTypes() const override {
     return attributeTypes_;
   }
