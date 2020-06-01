@@ -447,9 +447,31 @@ void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, Binar
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+template<typename T>
+struct ROCm_Bug {
+  char bytes[sizeof(T)];
+};
+#endif
+
 template<typename scalar_t, typename BinaryFunction>
 void scan_thrust(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  #ifdef __HIP_PLATFORM_HCC__
+  using rocm_bug_t = ROCm_Bug<scalar_t>;
+  thrust::device_ptr<rocm_bug_t> src_data(reinterpret_cast<rocm_bug_t *>(self.data_ptr<scalar_t>()));
+  thrust::device_ptr<rocm_bug_t> dst_data(reinterpret_cast<rocm_bug_t *>(result.data_ptr<scalar_t>()));
+  ptrdiff_t size = self.numel();
+  auto rocm_bug_binary_op = [=]C10_HOST_DEVICE(const rocm_bug_t a, const rocm_bug_t b) -> rocm_bug_t {
+    auto result = binary_op((*reinterpret_cast<const scalar_t*>(&a)),
+    (*reinterpret_cast<const scalar_t*>(&b)));
+    return *reinterpret_cast<rocm_bug_t *>(&result);
+  };
+  thrust::inclusive_scan(
+      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
+      src_data, src_data + size, dst_data,
+      rocm_bug_binary_op);
+  #else
   thrust::device_ptr<scalar_t> src_data(self.data_ptr<scalar_t>());
   thrust::device_ptr<scalar_t> dst_data(result.data_ptr<scalar_t>());
   ptrdiff_t size = self.numel();
@@ -457,6 +479,7 @@ void scan_thrust(const Tensor& self, Tensor& result, scalar_t init, BinaryFuncti
       thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
       src_data, src_data + size, dst_data,
       binary_op);
+  #endif
 }
 
 template<typename scalar_t, typename BinaryFunction>
@@ -494,7 +517,7 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
     self.scalar_type(), "logcumsumexp_cuda", [&]() {
     scalar_t init = -std::numeric_limits<scalar_t>::infinity();
-    auto log_add_exp = [] __device__ (scalar_t x, scalar_t y) -> scalar_t {
+    auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
       return ::log1p(std::exp(std::min(x, y) - std::max(x, y))) +
           std::max(x, y);
     };
