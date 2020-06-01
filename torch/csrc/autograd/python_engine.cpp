@@ -46,13 +46,17 @@ Engine& PythonEngine::get_python_engine() {
   return engine;
 }
 
-void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) {
+void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
+  // Increment thread usage count before acquiring the GIL
+  if (should_increment) {
+    increment_non_reentrant_thread_count();
+  }
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
   pybind11::gil_scoped_acquire gil;
   pybind11::gil_scoped_release no_gil;
-  Engine::thread_init(device, ready_queue);
+  Engine::thread_init(device, ready_queue, false);
 }
 
 void PythonEngine::thread_on_exception(

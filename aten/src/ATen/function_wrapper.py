@@ -129,7 +129,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
-inline ${return_type} Tensor::${api_name}(${method_formals}) const {
+${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
@@ -165,7 +165,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 """)
 
 # In order to rely on the linker to strip unused ops, it requires us to dispatch statically
-# in Functions.h and TensorMethods.h.
+# in Functions.h and TensorMethods.cpp.
 #
 # NB: The default body also needs to apply a variable guard, as in some
 # situations what we think is a default body actually does have an
@@ -190,6 +190,12 @@ STATIC_DISPATCH_FUNCTION_SWITCH_CASE = CodeTemplate("""\
 case Backend::${backend}:
     ${return_call} ${backend}Type::${type_wrapper_name}(${actuals});
     break;
+""")
+
+IFDEF_BLOCK = CodeTemplate("""\
+#ifdef ${ifdef_guard}
+${content}
+#endif
 """)
 
 # add a native declaration for a native function
@@ -221,7 +227,8 @@ scalar_types = [
     ('ComplexDouble', 'ComplexDouble', 'ComplexDouble', False),
 ]
 
-static_dispatch_backends = ['CPU', 'QuantizedCPU']
+static_dispatch_backends = ['CPU', 'QuantizedCPU', 'Vulkan']
+static_dispatch_backends_ifdef_guard = {'Vulkan' : 'USE_VULKAN'}
 
 
 class NYIError(Exception):
@@ -1059,11 +1066,18 @@ def create_generic(top_env, declarations):
                 # calling code.
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        static_dispatch_function_cases.append(STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
+                        static_dispatch_function_case = STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['method_actuals']))
+                            actuals=option['method_actuals'])
+                        if (backend in static_dispatch_backends_ifdef_guard):
+                            static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
+                                option,
+                                ifdef_guard=static_dispatch_backends_ifdef_guard[backend],
+                                content=static_dispatch_function_case))
+                        else:
+                            static_dispatch_function_cases.append(static_dispatch_function_case)
 
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
@@ -1094,11 +1108,18 @@ def create_generic(top_env, declarations):
                 static_dispatch_function_cases = []
                 for backend in static_dispatch_backends:
                     if backend in type_method_dispatch:
-                        static_dispatch_function_cases.append(STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
+                        static_dispatch_function_case = STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['actuals']))
+                            actuals=option['actuals'])
+                        if (backend in static_dispatch_backends_ifdef_guard):
+                            static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
+                                option,
+                                ifdef_guard=static_dispatch_backends_ifdef_guard[backend],
+                                content=static_dispatch_function_case))
+                        else:
+                            static_dispatch_function_cases.append(static_dispatch_function_case)
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
                     dispatch_key_var_name=dispatch_key_var_name,
