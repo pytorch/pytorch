@@ -8709,7 +8709,7 @@ class TestAddRelu(TestCase):
         b = torch.rand((7, 11))
         a = a.float()
         b = b.float()
-        a = a * -10;
+        a = a * -10
         a = a + 5
         add_res = a + b
         relu_res = torch.relu(add_res)

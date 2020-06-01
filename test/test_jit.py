@@ -679,7 +679,7 @@ class TestJit(JitTestCase):
                 return x
         a = torch.rand((7, 11))
         a = a * -10
-        a = a + 5;
+        a = a + 5
         b = torch.rand((7, 11))
         m = torch.jit.script(M(torch.relu))
         orig_res = m(a, b)
@@ -698,7 +698,7 @@ class TestJit(JitTestCase):
         # add, relu_
         a = torch.rand((7, 11))
         a = a * -10
-        a = a + 5;
+        a = a + 5
         b = torch.rand((7, 11))
         m = torch.jit.script(M(torch.relu_))
         orig_res = m(a, b)
@@ -725,7 +725,7 @@ class TestJit(JitTestCase):
                 return x
         a = torch.rand((7, 11))
         a = a * -10
-        a = a + 5;
+        a = a + 5
         b = torch.rand((7, 11))
         # Because in place add_ will overwrite a
         a_copy = a.clone()
@@ -746,7 +746,7 @@ class TestJit(JitTestCase):
         # add_, relu_
         a = torch.rand((7, 11))
         a = a * -10
-        a = a + 5;
+        a = a + 5
         b = torch.rand((7, 11))
         # Because in place add_ will overwrite a
         a_copy = a.clone()
@@ -775,7 +775,7 @@ class TestJit(JitTestCase):
                 return x
         a = torch.rand((7, 11))
         a = a * -10
-        a = a + 5;
+        a = a + 5
         b = torch.rand((7, 11))
         # Because in place add_ will overwrite a
         a_copy = a.clone()
@@ -796,7 +796,7 @@ class TestJit(JitTestCase):
         # add_, relu_
         a = torch.rand((7, 11))
         a = a * -10
-        a = a + 5;
+        a = a + 5
         b = torch.rand((7, 11))
         # Because in place add_ will overwrite a
         a_copy = a.clone()
