@@ -112,7 +112,7 @@ TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
 }
 
 TORCH_CUDA_API TensorView* castOp(DataType dtype, TensorView* v1) {
-  return static_cast<TensorView*>(castOp(dtype, static_cast<TensorView*>(v1)));
+  return static_cast<TensorView*>(castOp(dtype, static_cast<Val*>(v1)));
 }
 
 // UNARY OPERATIONS
@@ -124,7 +124,7 @@ TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1) {
 }
 
 TORCH_CUDA_API TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
-  return static_cast<TensorView*>(unaryOp(type, static_cast<TensorView*>(v1)));
+  return static_cast<TensorView*>(unaryOp(type, static_cast<Val*>(v1)));
 }
 
 TORCH_CUDA_API Val* neg(Val* v) {
