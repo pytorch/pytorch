@@ -298,7 +298,7 @@
   log_probs: _ctc_loss_backward(grad, log_probs, targets, input_lengths, target_lengths, result0, result1, blank, zero_infinity)
 
 - name: deg2rad(Tensor self) -> Tensor
-  self: grad * Scalar(M_PI_180).to(grad.scalar_type())
+  self: deg2rad_backward(grad)
 
 - name: det(Tensor self) -> Tensor
   self: det_backward(grad, self, result)
@@ -749,7 +749,7 @@
   self: qr_backward(grads, self, some, Q, R)
 
 - name: rad2deg(Tensor self) -> Tensor
-  self: grad * Scalar(M_180_PI).to(grad.scalar_type())
+  self: rad2deg_backward(grad)
 
 - name: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
