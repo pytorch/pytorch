@@ -87,7 +87,6 @@ Tensor isinf(const Tensor &self) {
 
   // Note: a complex value is infinite when either part is infinite
   if (self.is_complex()) {
-    const auto float_type = c10::toValueType(self.scalar_type());
     return at::isinf(at::real(self)).__ior__
           (at::isinf(at::imag(self)));
   }
