@@ -50,7 +50,9 @@ RPCErrorType getRPCErrorType(const FutureMessage& fm) {
   }
 }
 
-std::string makeRPCError(const std::string& rpcErrorStr, RPCErrorType errorType) {
+std::string makeRPCError(
+    const std::string& rpcErrorStr,
+    RPCErrorType errorType) {
   return fmt::format(
       "{}:{}:{}",
       torch::distributed::rpc::kRPCErrorPrefix,

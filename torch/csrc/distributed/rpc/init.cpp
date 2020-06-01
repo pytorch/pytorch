@@ -212,7 +212,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   owner, returns a reference to the local value.
 
                   Arguments:
-                        timeout (Optional, float): Timeout for ``to_here``. If
+                        timeout (float, optional): Timeout for ``to_here``. If
                         the call does not complete within this timeframe, an
                         exception indicating so will be raised. If this argument
                         is not provided, the default RPC timeout (60s) will be

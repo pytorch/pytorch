@@ -805,7 +805,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     for (const auto& timedOutFuture : timedOutFutures) {
       auto errStr =
           fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count());
-      auto err = makeRPCError(std::move(errStr), RPCErrorType::TIMEOUT);
+      auto err = makeRPCError(errStr, RPCErrorType::TIMEOUT);
 
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;

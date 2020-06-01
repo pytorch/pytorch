@@ -39,7 +39,7 @@ c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
         ctx.getOwnerRRef(rrefId, /* ensure created */ true)->constValue();
     auto errorType = getRPCErrorType(futureMessage);
     rref_ptr->handleError(errorType, futureMessage);
-    // OwnerRRefs do not have a forkId, so dont need to assert here.
+    // OwnerRRefs do not have a forkId, so don't need to assert here.
     auto deletedRRef =
         ctx.delForkOfOwner(rref_ptr->rrefId(), rref_ptr->rrefId());
     return deletedRRef;
