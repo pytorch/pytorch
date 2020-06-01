@@ -329,6 +329,7 @@ _(aten, flatten) \
 _(aten, flip) \
 _(aten, floor) \
 _(aten, fmod) \
+_(aten, fmod_) \
 _(aten, frac) \
 _(aten, fractional_max_pool2d) \
 _(aten, fractional_max_pool2d_backward) \
