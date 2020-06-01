@@ -57,8 +57,8 @@ __global__ void test_shared_memory_usable(c10::complex<float> *x, c10::complex<d
   __syncthreads();
   #pragma unroll
   for (int i = 0; i < 5; i++) {
-    x[5 - i] = bufx[i];
-    y[5 - i] = bufy[i];
+    x[4 - i] = bufx[i];
+    y[4 - i] = bufy[i];
   }
 }
 
