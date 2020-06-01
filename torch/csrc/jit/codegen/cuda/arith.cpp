@@ -112,7 +112,7 @@ TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
 }
 
 TORCH_CUDA_API TensorView* castOp(DataType dtype, TensorView* v1) {
-  return static_cast<TensorView*>(castOp(dtype, static_cast<Val*>(v1)));
+  return castOp(dtype, static_cast<Val*>(v1))->as<TensorView>();
 }
 
 // UNARY OPERATIONS
@@ -124,7 +124,7 @@ TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1) {
 }
 
 TORCH_CUDA_API TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
-  return static_cast<TensorView*>(unaryOp(type, static_cast<Val*>(v1)));
+  return unaryOp(type, static_cast<Val*>(v1))->as<TensorView>();
 }
 
 TORCH_CUDA_API Val* neg(Val* v) {
@@ -140,13 +140,13 @@ namespace {
 // Helper function to reduce repetitive code
 template <typename T1, typename T2>
 TensorView* arithOpOverloads(Val* (*func)(Val*, Val*), T1* v1, T2* v2) {
-  return static_cast<TensorView*>(
-      func(static_cast<Val*>(v1), static_cast<Val*>(v2)));
+  return func(v1->template as<Val>(), v2->template as<Val>())
+      ->template as<TensorView>();
 }
 template <typename T1, typename T2>
 TensorView* arithOpOverloads(BinaryOpType type, T1* v1, T2* v2) {
-  return static_cast<TensorView*>(
-      binaryOp(type, static_cast<Val*>(v1), static_cast<Val*>(v2)));
+  return binaryOp(type, v1->template as<Val>(), v2->template as<Val>())
+      ->template as<TensorView>();
 }
 template <typename T1, typename T2, typename T3>
 TensorView* arithOpOverloads(
@@ -154,8 +154,11 @@ TensorView* arithOpOverloads(
     T1* v1,
     T2* v2,
     T3* v3) {
-  return static_cast<TensorView*>(func(
-      static_cast<Val*>(v1), static_cast<Val*>(v2), static_cast<Val*>(v3)));
+  return func(
+             v1->template as<Val>(),
+             v2->template as<Val>(),
+             v3->template as<Val>())
+      ->template as<TensorView>();
 }
 template <typename T1, typename T2, typename T3, typename T4>
 TensorView* arithOpOverloads(
@@ -164,11 +167,12 @@ TensorView* arithOpOverloads(
     T2* v2,
     T3* v3,
     T4* v4) {
-  return static_cast<TensorView*>(func(
-      static_cast<Val*>(v1),
-      static_cast<Val*>(v2),
-      static_cast<Val*>(v3),
-      static_cast<Val*>(v4)));
+  return func(
+             v1->template as<Val>(),
+             v2->template as<Val>(),
+             v3->template as<Val>(),
+             v4->template as<Val>())
+      ->template as<TensorView>();
 }
 } // namespace
 
@@ -547,8 +551,7 @@ TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
 }
 
 TORCH_CUDA_API TensorView* threshold(TensorView* in, Val* thresh, Val* value) {
-  return static_cast<TensorView*>(
-      threshold(static_cast<Val*>(in), thresh, value));
+  return threshold(static_cast<Val*>(in), thresh, value)->as<TensorView>();
 }
 
 TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val) {
@@ -569,8 +572,7 @@ TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val) {
 }
 
 TORCH_CUDA_API TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
-  return static_cast<TensorView*>(
-      clamp(static_cast<Val*>(in), min_val, max_val));
+  return clamp(static_cast<Val*>(in), min_val, max_val)->as<TensorView>();
 }
 
 } // namespace fuser
