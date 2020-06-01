@@ -127,10 +127,10 @@ template<typename T>
 struct alignas(sizeof(T) * 2) complex {
   using value_type = T;
 
-  T real_ = T(0);
-  T imag_ = T(0);
+  T real_;
+  T imag_;
 
-  constexpr complex() = default;
+  constexpr complex(): real_(0), imag_(0) {};
   constexpr complex(const T& re, const T& im = T()): real_(re), imag_(im) {}
   template<typename U>
   explicit constexpr complex(const std::complex<U> &other): complex(other.real(), other.imag()) {}

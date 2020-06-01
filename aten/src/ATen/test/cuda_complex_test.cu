@@ -45,6 +45,23 @@ __global__ void test_reinterpret_cast() {
   assert(zzzz.imag() == double(2));
 }
 
+// __shared__ variables cannot have an initialization as part of their declaration
+__global__ void test_shared_memory_usable(c10::complex<float> *x, c10::complex<double> *y) {
+  __shared__ c10::complex<float> *bufx[5];
+  __shared__ c10::complex<double> *bufy[5];
+  #pragma unroll
+  for (int i = 0; i < 5; i++) {
+    bufx[i] = x[i];
+    bufy[i] = y[i];
+  }
+  __syncthreads();
+  #pragma unroll
+  for (int i = 0; i < 5; i++) {
+    x[5 - i] = bufx[i];
+    y[5 - i] = bufy[i];
+  }
+}
+
 int safeDeviceCount() {
   int count;
   cudaError_t err = cudaGetDeviceCount(&count);
