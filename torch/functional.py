@@ -650,7 +650,8 @@ unique = boolean_dispatch(
 unique.__doc__ = _unique_impl.__doc__
 
 
-def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
+def _unique_consecutive_impl(input, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor, Tensor]
     r"""Eliminates all but the first element from every consecutive group of equivalent elements.
 
     .. note:: This function is different from :func:`torch.unique` in the sense that this function
@@ -705,15 +706,70 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
             return handle_torch_function(
                 unique_consecutive, (input,), input, return_inverse=return_inverse,
                 return_counts=return_counts, dim=dim)
-    output, inverse_indices, counts = _VF.unique_consecutive(
+    return _VF.unique_consecutive(
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
-    if return_inverse and return_counts:
-        return output, inverse_indices, counts
-    if return_inverse:
-        return output, inverse_indices
-    if return_counts:
-        return output, counts
+
+
+def _consecutive_return_counts(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_consecutive_impl(input, sorted, return_inverse, return_counts, dim)
+
+    output, _, counts = _unique_consecutive_impl(input, sorted, return_inverse, return_counts, dim)
+    return output, counts
+
+def _consecutive_return_output(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tensor
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_consecutive_impl(input, sorted, return_inverse, return_counts, dim)
+
+    output, _, _ = _unique_consecutive_impl(input, sorted, return_inverse, return_counts, dim)
     return output
+
+def _consecutive_return_inverse(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return _unique_consecutive_impl(input, sorted, return_inverse, return_counts, dim)
+
+    output, inverse_indices, _ = _unique_consecutive_impl(input, sorted, return_inverse, return_counts, dim)
+    return output, inverse_indices
+
+_consecutive_return_inverse_false = boolean_dispatch(
+    arg_name='return_counts',
+    arg_index=3,
+    default=False,
+    if_true=_return_counts,
+    if_false=_return_output,
+    module_name=__name__,
+    func_name='unique')
+
+_consecutive_return_inverse_true = boolean_dispatch(
+    arg_name='return_counts',
+    arg_index=3,
+    default=False,
+    if_true=_unique_impl,
+    if_false=_return_inverse,
+    module_name=__name__,
+    func_name='unique')
+
+# The return type of unique depends on `return_inverse`, and `return_counts` so in order to
+# resolve the output type in TorchScript we need to statically know the value of both parameters
+
+unique_consecutive = boolean_dispatch(
+    arg_name='return_inverse',
+    arg_index=2,
+    default=False,
+    if_true=_consecutive_return_inverse_true,
+    if_false=_consecutive_return_inverse_false,
+    module_name=__name__,
+    func_name='unique')
+unique_consecutive.__doc__ = _unique_consecutive_impl.__doc__
 
 
 def tensordot(a, b, dims=2):
