@@ -192,7 +192,7 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   THArgCheck((THTensor_nDimensionLegacyAll(src_) == 2), 1, "expected a matrix");
   THCTensor *diag = THCTensor_(new)(state);
   THCTensor_(diag)(state, diag, src_, 0);
-  accreal trace = THCTensor_(sumall)(state, diag);
+  accreal trace = THTensor_wrap(diag).sum().item<accreal>();
   THCTensor_(free)(state, diag);
   return trace;
 }

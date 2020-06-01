@@ -238,7 +238,7 @@ struct TORCH_API Module : public Object {
   // function creates a new `ClassType` and returns a new instance that has the
   // same data as the current instance but with the new type, shared ClassType
   // will be preserved as well
-  Module clone() const;
+  Module clone(bool inplace = false) const;
 
   // Clones the module instance but shares the underlying type with the
   // the current instance, it doesn't create new `ClassType`
@@ -258,7 +258,10 @@ struct TORCH_API Module : public Object {
   }
 
  private:
-  Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
+  Module clone_impl(
+      std::unordered_map<TypePtr, TypePtr>& type_remap,
+      bool inplace,
+      IValue::HashAliasedIValueMap memo) const;
 
   void clone_method(
       const Module& orig,

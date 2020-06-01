@@ -17,13 +17,13 @@ import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from torch._six import inf, nan, container_abcs
 
-from test_torch import _TestTorchMixin
+from test_torch import AbstractTestCases
 
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, \
+    slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -824,18 +824,18 @@ class TestCuda(TestCase):
         self.assertEqual(z.get_device(), x.get_device())
 
     def test_bernoulli(self):
-        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float64, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float16, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float64, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float16, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float32, torch.float64, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float32, torch.float16, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float16, torch.float64, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float16, torch.float16, 'cuda')
         # test that it works with integral tensors
-        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
         # test that it works with bool tensors
-        _TestTorchMixin._test_bernoulli(self, torch.bool, torch.float16, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.bool, torch.float16, 'cuda')
+        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
 
     @unittest.skipIf(torch.cuda.device_count() >= 10, "Loading a cuda:9 tensor")
     def test_load_nonexistent_device(self):
@@ -1063,8 +1063,6 @@ class TestCuda(TestCase):
         self.assertTrue("torch.cuda.Event" in e.__repr__())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    # Note: fails sometimes on the CI, passes on dual gfx906
-    @skipIfRocm
     def test_stream_context(self):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream(device=1)
@@ -1597,7 +1595,7 @@ class TestCuda(TestCase):
 
     @skipIfRocm
     def test_fft_ifft_rfft_irfft(self):
-        _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+        AbstractTestCases._TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         @contextmanager
         def plan_cache_max_size(n, device=None):
@@ -1611,16 +1609,16 @@ class TestCuda(TestCase):
             plan_cache.max_size = original
 
         with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
-            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            AbstractTestCases._TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         with plan_cache_max_size(0):
-            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            AbstractTestCases._TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         torch.backends.cuda.cufft_plan_cache.clear()
 
         # check that stll works after clearing cache
         with plan_cache_max_size(10):
-            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            AbstractTestCases._TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
             torch.backends.cuda.cufft_plan_cache.max_size = -1
@@ -1725,7 +1723,6 @@ class TestCuda(TestCase):
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
@@ -1745,28 +1742,32 @@ class TestCuda(TestCase):
         self.assertEqual(res.cpu(), res_cpu)
 
     def test_tensor_gather(self):
-        _TestTorchMixin._test_gather(self, lambda t: t.cuda(), False)
+        AbstractTestCases._TestTorchMixin._test_gather(self, lambda t: t.cuda(), False)
 
     def test_tensor_scatter(self):
-        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
 
     def test_tensor_scatterAdd(self):
-        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
 
     def test_scatter_add_mult_index_base(self):
-        _TestTorchMixin._test_scatter_add_mult_index_base(self, lambda t: t.cuda())
+        AbstractTestCases._TestTorchMixin._test_scatter_add_mult_index_base(self, lambda t: t.cuda())
 
     def test_tensor_scatterFill(self):
-        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_', True, test_bounds=False)
 
     def test_tensor_scatter_complex(self):
-        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False, test_complex=True)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_', test_bounds=False, test_complex=True)
 
     def test_tensor_scatterAdd_complex(self):
-        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False, test_complex=True)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_add_', test_bounds=False, test_complex=True)
 
     def test_tensor_scatterFill_complex(self):
-        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False, test_complex=True)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_', True, test_bounds=False, test_complex=True)
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
@@ -1837,8 +1838,6 @@ class TestCuda(TestCase):
         a = torch.ones(65536).cuda().half()
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
-    # Note: This test fails on ROCm CI gfx900 but passes on gfx906
-    @skipIfRocm
     # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
         l = []
@@ -2433,7 +2432,6 @@ t2.start()
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
-    @skipIfRocm
     def test_cublas_multiple_threads_same_device(self):
         # Note, these parameters should be very carefully tuned
         # Too small number makes it hard for the racing condition
@@ -2538,7 +2536,6 @@ t2.start()
                     self.assertEqual(results[t].sum().item(),
                                      (2048 - test_iters) * (2048 - test_iters))
 
-    @skipIfRocm
     def test_cusparse_multiple_threads_same_device(self):
         size = 1024
         num_threads = 2

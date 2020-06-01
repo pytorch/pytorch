@@ -64,10 +64,11 @@ class Conf(object):
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase, nightly)
         job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
-        job_def["requires"] = ["setup"]
         if self.smoke:
-            job_def["requires"].append("update_s3_htmls_for_nightlies")
-            job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
+            job_def["requires"] = [
+                "update_s3_htmls_for_nightlies",
+                "update_s3_htmls_for_nightlies_devtoolset7"
+            ]
             job_def["filters"] = {"branches": {"only": "postnightly"}}
         else:
             job_def["filters"] = {
@@ -85,7 +86,7 @@ class Conf(object):
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
             if not self.smoke:
-                job_def["requires"].append(self.gen_build_name("build", nightly))
+                job_def["requires"] = [self.gen_build_name("build", nightly)]
             if not (self.smoke and self.os == "macos") and self.os != "windows":
                 job_def["docker_image"] = self.gen_docker_image()
 
@@ -103,7 +104,9 @@ class Conf(object):
                     job_def["resource_class"] = "gpu.medium"
         if phase == "upload":
             job_def["context"] = "org-member"
-            job_def["requires"] = ["setup", self.gen_build_name(upload_phase_dependency, nightly)]
+            job_def["requires"] = [
+                self.gen_build_name(upload_phase_dependency, nightly)
+            ]
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
