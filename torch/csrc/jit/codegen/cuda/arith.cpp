@@ -134,6 +134,10 @@ TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   return out;
 }
 
+TORCH_CUDA_API Val* neg(Val* v) {
+  return unaryOp(UnaryOpType::Neg, v);
+}
+
 TORCH_CUDA_API Val* add(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Add, v1, v2);
 }

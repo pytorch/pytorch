@@ -186,7 +186,7 @@ struct TORCH_CUDA_API OptInConstDispatch {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
   }
   virtual void handle(const TensorIndex* const) {
-    AT_ERROR("Handle not overriden for TensorIndex.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorIndex.");
   }
   virtual void handle(const Bool* const) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
@@ -201,7 +201,7 @@ struct TORCH_CUDA_API OptInConstDispatch {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
   }
   virtual void handle(const NamedScalar* const) {
-    AT_ERROR("Handle not overriden for NamedScalar.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for NamedScalar.");
   }
 
   // Exprs
@@ -227,13 +227,13 @@ struct TORCH_CUDA_API OptInConstDispatch {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ReductionOp.");
   }
   virtual void handle(const ForLoop* const) {
-    AT_ERROR("Handle not overriden for ForLoop.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ForLoop.");
   }
   virtual void handle(const Allocate* const) {
-    AT_ERROR("Handle not overriden for Allocate.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Allocate.");
   }
   virtual void handle(const IfThenElse* const) {
-    AT_ERROR("Handle not overriden for IfThenElse.");
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IfThenElse.");
   }
 };
 

@@ -277,6 +277,9 @@ struct TORCH_CUDA_API IterDomain : public Val {
     return start_;
   }
   Val* extent() const;
+  Val* rawExtent() const {
+    return extent_;
+  }
 
   IterDomain(const IterDomain& other) = delete;
   IterDomain& operator=(const IterDomain& other) = delete;
@@ -501,9 +504,6 @@ struct TORCH_CUDA_API ForLoop : public Expr {
   bool sameAs(const ForLoop* other) const;
   Expr* parentScope() const noexcept {
     return parent_scope_;
-  }
-  bool hasParentScope() const noexcept {
-    return parent_scope_ == nullptr;
   }
 
  private:

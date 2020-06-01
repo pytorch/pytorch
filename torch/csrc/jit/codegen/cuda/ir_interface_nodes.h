@@ -141,17 +141,17 @@ struct TORCH_CUDA_API Int : public Val {
   Int(Int&& other) = delete;
   Int& operator=(Int&& other) = delete;
 
-  virtual bool isSymbolic() const {
+  bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
-  virtual bool isConst() const {
+  bool isConst() const {
     return maybe_value_.has_value();
   }
-  virtual c10::optional<ScalarType> value() const noexcept {
+  c10::optional<ScalarType> value() const noexcept {
     return maybe_value_;
   }
 
-  virtual bool sameAs(const Int* const other) const;
+  bool sameAs(const Int* const other) const;
 
  private:
   const c10::optional<ScalarType> maybe_value_;

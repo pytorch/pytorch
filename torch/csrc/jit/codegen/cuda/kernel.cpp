@@ -37,10 +37,15 @@ struct ExtractSizeStride {
   std::vector<int64_t> sizes;
   std::vector<int64_t> strides;
 
-  ExtractSizeStride(
+  explicit ExtractSizeStride(
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
     if (broadcasted_size) {
+      // PyTorch follows numpy broadcasting rule.
+      // (https://numpy.org/doc/stable/user/basics.broadcasting.html)
+      //
+      // So in case where the rank of two operators differ, we align them on
+      // the higher dimensions, hence the offset o_dim-b_dim to the index here.
       int b_dim = (int)broadcasted_size->size();
       int o_dim = (int)val.dim();
       TORCH_CHECK(b_dim >= o_dim);
