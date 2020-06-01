@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
@@ -637,6 +638,9 @@ struct to_ir {
     // and run the pass early to avoid jitter. Like conversion to SSA,
     // it only needs to run once.
     CanonicalizeModifiedLoops(graph);
+
+    // Convert Ops to a Normalized Form
+    NormalizeOps(graph);
 
     runCleanupPasses(graph);
   }
@@ -1822,6 +1826,8 @@ struct to_ir {
         return use_inplace_op ? aten::div_ : aten::div;
       case '*':
         return use_inplace_op ? aten::mul_ : aten::mul;
+      case '%':
+        return use_inplace_op ? aten::fmod_ : aten::fmod;
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -1842,6 +1848,8 @@ struct to_ir {
             std::string("__itruediv__"), std::string("__truediv__"));
       case '*':
         return std::make_pair(std::string("__imul__"), std::string("__mul__"));
+      case '%':
+        return std::make_pair(std::string("__imod__"), std::string("__mod__"));
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());

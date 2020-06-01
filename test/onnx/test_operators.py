@@ -21,6 +21,7 @@ import unittest
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
           --produce-onnx-test-data: generate onnx test data
+          --accept: accept onnx updates and overwrite models
 '''
 
 _onnx_test = False  # flag to produce onnx test cases.
@@ -34,7 +35,6 @@ def export_to_pbtxt(model, inputs, *args, **kwargs):
 
 
 def export_to_pb(model, inputs, *args, **kwargs):
-    kwargs['operator_export_type'] = torch.onnx.OperatorExportTypes.ONNX
     f = io.BytesIO()
     with torch.no_grad():
         torch.onnx.export(model, inputs, f, *args, **kwargs)
@@ -597,7 +597,8 @@ class TestOperators(TestCase):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
         offset = torch.tensor([0]).long()
-        self.assertONNX(emb_bag, (input, offset), keep_initializers_as_inputs=True)
+        self.assertONNX(emb_bag, (input, offset), keep_initializers_as_inputs=True,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_implicit_expand(self):
         x = torch.randn(3, 4, requires_grad=True)

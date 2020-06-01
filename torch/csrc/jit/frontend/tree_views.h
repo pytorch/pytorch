@@ -83,6 +83,7 @@ namespace jit {
 //            | Sub()                                                   TK_MINUS_EQ
 //            | Mul()                                                   TK_TIMES_EQ
 //            | Div()                                                   TK_DIV_EQ
+//            | Mod()                                                   TK_MOD_EQ
 //
 
 // Each subclass of TreeView should provide:
@@ -562,6 +563,7 @@ struct AugAssignKind : public TreeView {
       case '-':
       case '*':
       case '/':
+      case '%':
         return;
       default:
         throw ErrorReport(tree) << "is not a valid AugAssignKind";
