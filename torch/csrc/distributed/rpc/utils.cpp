@@ -38,7 +38,7 @@ RPCErrorType getRPCErrorType(const FutureMessage& fm) {
     // Parse the RPCErrorType.
     auto errStartIdx =
         pos + torch::distributed::rpc::kRPCErrorPrefix.size() + 1;
-    auto errEndIdx = err.find(":", errStartIdx);
+    auto errEndIdx = err.find(':', errStartIdx);
     if (errEndIdx == std::string::npos) {
       return RPCErrorType::UNKNOWN_ERROR;
     }
@@ -50,7 +50,7 @@ RPCErrorType getRPCErrorType(const FutureMessage& fm) {
   }
 }
 
-std::string makeRPCError(std::string rpcErrorStr, RPCErrorType errorType) {
+std::string makeRPCError(const std::string& rpcErrorStr, RPCErrorType errorType) {
   return fmt::format(
       "{}:{}:{}",
       torch::distributed::rpc::kRPCErrorPrefix,

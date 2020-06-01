@@ -803,9 +803,9 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     futureCV_.notify_all();
 
     for (const auto& timedOutFuture : timedOutFutures) {
-      auto err = makeRPCError(
-          fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count()),
-          RPCErrorType::TIMEOUT);
+      auto errStr =
+          fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count());
+      auto err = makeRPCError(std::move(errStr), RPCErrorType::TIMEOUT);
 
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;

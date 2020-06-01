@@ -11,7 +11,7 @@ namespace rpc {
 TORCH_API RPCErrorType getRPCErrorType(const FutureMessage& fm);
 // Create an error string given the error description and error type
 TORCH_API std::string makeRPCError(
-    std::string rpcErrorStr,
+    const std::string& rpcErrorStr,
     RPCErrorType errorType);
 
 // Given an RPC message received as a request over the wire, deserialize it into
