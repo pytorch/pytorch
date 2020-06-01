@@ -216,9 +216,22 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
-// TODO: This should be defined but I don't have the environment to properly
-// test it. See e.g., https://github.com/pytorch/pytorch/pull/32719#discussion_r379918384
-#define CUDA_KERNEL_ASSERT(cond)
+#if defined(NDEBUG)
+extern "C" {
+  C10_IMPORT
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
+    __host__ __device__
+#endif // __CUDA_ARCH__
+ void _wassert(
+    wchar_t const* _Message,
+    wchar_t const* _File,
+    unsigned _Line);
+}
+#endif
+#define CUDA_KERNEL_ASSERT(cond)                                                                 \
+  if (C10_UNLIKELY(!(cond))) {                                                                   \
+    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+  }
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {

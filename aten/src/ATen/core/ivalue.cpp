@@ -638,6 +638,10 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
     std::vector<intrusive_ptr<ivalue::Future>> srcs) {
   auto typePtr =
       !srcs.empty() ? srcs[0]->type() : FutureType::create(NoneType::get());
+  // All Futures in the List must have a consistent type (or we fail elsewhere)
+  for (size_t i = 1; i < srcs.size(); ++i) {
+    TORCH_CHECK(typePtr == srcs[i]->type());
+  }
   List<intrusive_ptr<ivalue::Future>> asList(typePtr);
   asList.reserve(srcs.size());
   for (auto&& s : srcs) {

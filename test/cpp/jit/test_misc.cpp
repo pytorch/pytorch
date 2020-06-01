@@ -755,6 +755,7 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
+
 void checkScopeCallbacks() {
   bool found_function_scope = false;
   bool found_method_scope = false;
@@ -1078,6 +1079,24 @@ void testRecordFunction() {
     removeCallback(handle);
   });
   t.join();
+  clearCallbacks();
+
+  // test set ids
+  bool has_ids = false;
+  addGlobalCallback(RecordFunctionCallback(
+      [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
+      [](const RecordFunction&) {})
+      .needsIds(true));
+  { RECORD_USER_SCOPE("test"); }
+  TORCH_CHECK(has_ids);
+  clearCallbacks();
+  has_ids = false;
+  addGlobalCallback(RecordFunctionCallback(
+      [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
+      [](const RecordFunction&) {}));
+  { RECORD_USER_SCOPE("test"); }
+  TORCH_CHECK(!has_ids);
+  clearCallbacks();
 }
 
 class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
@@ -1311,8 +1330,10 @@ graph(%a):
   }
 }
 
-static void
-checkShape(Node* n, std::vector<int64_t> expected, bool prev = true) {
+static void checkShape(
+    Node* n,
+    std::vector<int64_t> expected,
+    bool prev = true) {
   auto profile = (prev) ? n->inputs().at(0)->node() : n;
   auto tp = profile->output()->type();
   auto ptp = tp->expect<TensorType>();
