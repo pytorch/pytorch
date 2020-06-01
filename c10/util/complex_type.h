@@ -127,8 +127,7 @@ template<typename T>
 struct alignas(sizeof(T) * 2) complex {
   using value_type = T;
 
-  T real_;
-  T imag_;
+  T real_, imag_;
 
   constexpr complex(): real_(0), imag_(0) {};
   constexpr complex(const T& re, const T& im = T()): real_(re), imag_(im) {}
