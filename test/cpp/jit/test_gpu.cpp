@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -47,6 +48,64 @@ static void checkIntValue(
 
 // 1. Test cases are void() functions.
 // 2. They start with the prefix `test`
+
+// A few smoke tests for IrGraphGenerator
+// (These tests exercise IrGraphGenerator through a non-trivial IR,
+//  to make sure that it runs w/o crashing. The actual output is not
+//  validated)
+void testGPU_IrGraphGenerator() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Make sure we can handle empty IRs
+  TORCH_CHECK(!IrGraphGenerator::toGraphviz(
+                   &fusion, IrGraphGenerator::DetailLevel::Basic)
+                   .empty());
+
+  // Construct an interesting IR
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = static_cast<TensorView*>(mul(tv0, new Float(-1.0)));
+  TensorView* tv2 = static_cast<TensorView*>(add(tv0, new Float(3.0)));
+  TensorView* tv3 = static_cast<TensorView*>(mul(tv0, new Float(2.5)));
+  TensorView* tv4 = static_cast<TensorView*>(add(tv2, tv1));
+  TensorView* tv5 = static_cast<TensorView*>(add(tv4, tv3));
+  TensorView* tv6 = static_cast<TensorView*>(add(tv0, tv3));
+
+  // Another checkpoint before adding outputs
+  TORCH_CHECK(!IrGraphGenerator::toGraphviz(
+                   &fusion, IrGraphGenerator::DetailLevel::Explicit)
+                   .empty());
+
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv6);
+
+  tv6->merge(0);
+  tv6->split(0, 4);
+  tv6->axis(0)->parallelize(ParallelType::BIDx);
+  tv5->reorder({{-1, 0}});
+  tv0->computeAt(tv3, 1);
+  tv0->computeAt(tv6, 1);
+
+  // Another checkpoint with more node types
+  TORCH_CHECK(!IrGraphGenerator::toGraphviz(
+                   &fusion, IrGraphGenerator::DetailLevel::ComputeOnly)
+                   .empty());
+
+  for (Val* val : fusion.vals()) {
+    if (!fusion.hasInput(val) &&
+        val->getValType().value() == ValType::TensorView) {
+      TensorView* tv = static_cast<TensorView*>(val);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
+    }
+  }
+
+  // Final IR graph
+  TORCH_CHECK(!IrGraphGenerator::toGraphviz(
+                   &fusion, IrGraphGenerator::DetailLevel::Verbose)
+                   .empty());
+}
 
 void testGPU_FusionDispatch() {
   Fusion fusion;
