@@ -17,8 +17,7 @@ class CudaKernelCache {
  public:
   CudaKernelCache() = default;
 
-  at::optional<CudaKernel*> getKernelPtr(
-      const at::ArrayRef<c10::IValue> inputs);
+  at::optional<CudaKernel*> getKernelPtr(const at::ArrayRef<IValue> inputs);
   CudaKernel* allocateKernelInCache(std::unique_ptr<KernelArgsReq>&& args_req);
 
   // private:
