@@ -599,8 +599,8 @@ if(BUILD_TEST OR BUILD_MOBILE_TEST)
   # Without this is cross compiling we end up having to blow build directory
   # and rebuild from scratch.
   if(CMAKE_CROSSCOMPILING)
-    if (COMPILE_HAVE_STD_REGEX)
-      set (RUN_HAVE_STD_REGEX 0 CACHE INTERNAL "Cache RUN_HAVE_STD_REGEX output for cross-compile.")
+    if(COMPILE_HAVE_STD_REGEX)
+      set(RUN_HAVE_STD_REGEX 0 CACHE INTERNAL "Cache RUN_HAVE_STD_REGEX output for cross-compile.")
     endif()
   endif()
 endif()
