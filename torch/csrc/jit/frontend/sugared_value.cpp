@@ -32,14 +32,14 @@ std::shared_ptr<SugaredValue> PrintValue::call(
 static const std::unordered_map<std::string, at::ScalarType>&
 builtin_cast_method_to_scalar_type() {
   static std::unordered_map<std::string, at::ScalarType> mapping = {
-    {"byte", at::kByte},
-    {"char", at::kChar},
-    {"double", at::kDouble},
-    {"float", at::kFloat},
-    {"int", at::kInt},
-    {"long", at::kLong},
-    {"short", at::kShort},
-    {"half", at::kHalf}};
+      {"byte", at::kByte},
+      {"char", at::kChar},
+      {"double", at::kDouble},
+      {"float", at::kFloat},
+      {"int", at::kInt},
+      {"long", at::kLong},
+      {"short", at::kShort},
+      {"half", at::kHalf}};
   return mapping;
 }
 

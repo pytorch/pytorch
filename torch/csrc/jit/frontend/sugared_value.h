@@ -509,8 +509,7 @@ struct TORCH_API CastValue : public BuiltinFunction {
 
 struct TORCH_API TensorCastValue : public SugaredValue {
   TensorCastValue(at::ScalarType type, NamedValue self)
-    : dtype_(type),
-      self_(std::move(self)) {}
+      : dtype_(type), self_(std::move(self)) {}
 
   std::string kind() const override {
     return "Cast";
@@ -523,16 +522,14 @@ struct TORCH_API TensorCastValue : public SugaredValue {
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
     TORCH_INTERNAL_ASSERT(inputs.size() == 0 && attributes.size() == 0);
-    Value *dtype_const = m.graph()->insertConstant(dtype_, loc);
-    std::vector<NamedValue> kwargs {
-      self_,
-      NamedValue(loc, "dtype", dtype_const)
-    };
-    Value *casted_val = m.graph()->insert(
-      /*opname=*/Symbol::fromQualString("aten::to"),
-      /*args=*/inputs,
-      /*kwargs=*/kwargs,
-      /*range=*/loc);
+    Value* dtype_const = m.graph()->insertConstant(dtype_, loc);
+    std::vector<NamedValue> kwargs{self_,
+                                   NamedValue(loc, "dtype", dtype_const)};
+    Value* casted_val = m.graph()->insert(
+        /*opname=*/Symbol::fromQualString("aten::to"),
+        /*args=*/inputs,
+        /*kwargs=*/kwargs,
+        /*range=*/loc);
     return std::make_shared<SimpleValue>(casted_val);
   }
 
