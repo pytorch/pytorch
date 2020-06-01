@@ -145,6 +145,22 @@ Node* insertQParam(
   return qparam;
 }
 
+Node* insertScalarToTensor(Graph* graph, Value* scalar_value) {
+  Node* n = scalar_value->node();
+  WithInsertPoint ins(n->next());
+  Value* float_scalar_type = graph->insertConstant(IValue(c10::kFloat));
+  Value* none = graph->insertConstant(IValue());
+  Node* tensor_node = graph->create(
+      Symbol::aten("scalar_tensor"),
+      {scalar_value, float_scalar_type, none, none, none});
+  Value* tensor_output = tensor_node->output();
+  tensor_output->setDebugName(scalar_value->debugName() + ".tensor");
+  graph->insertNode(tensor_node);
+  // replace original_output with tensor
+  scalar_value->replaceAllUsesAfterNodeWith(tensor_node, tensor_output);
+  return tensor_node;
+}
+
 Node* insertItem(Graph* graph, Value* tensor, const TypePtr& output_type) {
   WithInsertPoint ins(tensor->node()->next());
   Node* n = graph->create(Symbol::aten("item"), {tensor});
@@ -710,18 +726,8 @@ void InsertQuantDeQuantHelper::propagateQParams(
   Graph* graph = n->owningGraph();
   if (is_scalar) {
     // convert Scalar to Tensor
-    WithInsertPoint ins(n->next());
-    Value* float_scalar_type = graph->insertConstant(IValue(c10::kFloat));
-    Value* none = graph->insertConstant(IValue());
-    n = graph->create(
-        Symbol::aten("scalar_tensor"),
-        {original_output, float_scalar_type, none, none, none});
-    Value* tensor_output = n->output();
-    tensor_output->setDebugName(original_output->debugName() + ".tensor");
-    graph->insertNode(n);
-    // replace original_output with tensor
-    original_output->replaceAllUsesAfterNodeWith(n, tensor_output);
-    original_output = tensor_output;
+    n = insertScalarToTensor(graph, original_output);
+    original_output = n->output();
   }
   // for ops like average pool, we'll insert quant dequant after the op
   // We'll assume the tensor is a PerTensorAffine quantized Tensor for
