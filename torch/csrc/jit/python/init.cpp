@@ -746,16 +746,17 @@ void initJITBindings(PyObject* module) {
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
 
-            auto storage = c10::Storage(
+            c10::Storage storage(
                 c10::Storage::use_byte_size_t(),
-                at::CPU(scalar_type).typeMeta(),
                 numel * elementSize(scalar_type),
                 std::move(data),
                 /*allocator=*/nullptr,
                 /*resizable=*/false);
             auto ptr =
                 c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-                    std::move(storage), at::DispatchKeySet());
+                    std::move(storage),
+                    at::DispatchKeySet(),
+                    at::CPU(scalar_type).typeMeta());
             return at::Tensor(std::move(ptr));
           })
       .def("get_all_records", [](PyTorchStreamReader& self) {
