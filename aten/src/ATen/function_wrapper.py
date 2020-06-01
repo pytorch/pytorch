@@ -129,7 +129,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
-inline ${return_type} Tensor::${api_name}(${method_formals}) const {
+${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
@@ -165,7 +165,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 """)
 
 # In order to rely on the linker to strip unused ops, it requires us to dispatch statically
-# in Functions.h and TensorMethods.h.
+# in Functions.h and TensorMethods.cpp.
 #
 # NB: The default body also needs to apply a variable guard, as in some
 # situations what we think is a default body actually does have an

@@ -181,6 +181,7 @@ namespace jit {
   _(LoopNestReorderLongStringOfPreOrphans)  \
   _(LoopNestReorderLongStringOfPostOrphans) \
   _(LoopNestReorderLongStringFull)          \
+  _(LoopNestReorderInternalLoopNest)        \
   _(OuterLoopVectorization)                 \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
