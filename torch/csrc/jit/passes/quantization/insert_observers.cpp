@@ -74,19 +74,26 @@ class ModuleCloneHelper {
    *  but configured with different QConfig
    *  code is copied and modified from
    * https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/api/module.cpp
+   * inplace option means if the copy of the Tensor is deepcopy or not
+   * if inplace is true, the cloned module will share the tensors with
+   * original model instead of deepcopy them
    */
   Module clone(
       const Module& module,
-      const ModuleQConfigMap& module_qconfig_map) {
+      const ModuleQConfigMap& module_qconfig_map,
+      bool inplace = false) {
     std::unordered_map<TypePtr, QConfigTypePtrMap> type_remap;
-    return clone_impl(module, module_qconfig_map, type_remap);
+    IValue::HashAliasedIValueMap memo;
+    return clone_impl(module, module_qconfig_map, type_remap, inplace, memo);
   }
 
  private:
   Module clone_impl(
       const Module& module,
       const ModuleQConfigMap& module_qconfig_map,
-      std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap) {
+      std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap,
+      bool inplace,
+      IValue::HashAliasedIValueMap memo) {
     auto qconfig = module_qconfig_map.at(module._ivalue());
     auto type = module.type();
     // Create a new _ivalue in the same compilation unit.
@@ -115,13 +122,15 @@ class ModuleCloneHelper {
       IValue s = module._ivalue()->getSlot(i);
       if (type->getAttribute(i)->is_module()) {
         const Module& orig = Module(s.toObject());
-        Module cloned = clone_impl(orig, module_qconfig_map, type_remap);
+        Module cloned =
+            clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
         r.register_module(type->getAttributeName(i), cloned);
       } else {
+        // we'll deepcopy the IValue in non inplace option
         r.register_attribute(
             type->getAttributeName(i),
             type->getAttribute(i),
-            s,
+            inplace ? s : s.deepcopy(memo),
             type->is_parameter(i),
             type->is_buffer(i));
       }
@@ -337,10 +346,18 @@ class InsertObserversHelper {
       std::unordered_set<Value*>& block_observed_values);
 
   bool shouldPropagateQuant(
-      Node* n, const std::unordered_set<Value*>& block_observed_values) {
-    return isObserved(n->input(0), block_observed_values);
+      Node* n,
+      const std::unordered_set<Value*>& block_observed_values) {
+    if (isPropagateQuantSingleInputOp(n)) {
+      return isObserved(n->input(0), block_observed_values);
+    } else if (isPropagateQuantBinaryOp(n)) {
+      // either both of the tensor inputs are observed, or the first tensor
+      // tensor input is observed and second input is scalar
+      return isObserved(n->input(0), block_observed_values) &&
+          isObserved(n->input(1), block_observed_values);
+    }
+    return true;
   }
-
 
   void delayObservingValuesInPattern(Graph& graph, const PatternInfo& pattern);
 
@@ -439,7 +456,24 @@ graph(%input, %weight, %bias, %4):
      %first_output = aten::matmul(%input, %weight_t)
      %second_output = aten::add_(%first_output, %bias, %4)
      return (%second_output) )");
-  const PatternInfo aten_add_nn_relu = PatternInfo::parse_from_str(R"(
+
+  const PatternInfo add_nn_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %one = prim::Constant[value=1]()
+     %first_output = aten::add(%a, %b, %one)
+     %second_module = match::module[name="ReLU"](%self)
+     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     return (%second_output) )");
+
+  const PatternInfo add_f_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %inplace):
+     %one = prim::Constant[value=1]()
+     %first_output = aten::add(%a, %b, %one)
+     %relu = prim::Constant[name="relu"]()
+     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )");
+
+  const PatternInfo inplace_add_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b):
      %one = prim::Constant[value=1]()
      %first_output = aten::add_(%a, %b, %one)
@@ -447,7 +481,7 @@ graph(%self, %a, %b):
      %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
      return (%second_output) )");
 
-  const PatternInfo aten_add_f_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo inplace_add_f_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b, %inplace):
      %one = prim::Constant[value=1]()
      %first_output = aten::add_(%a, %b, %one)
@@ -472,11 +506,18 @@ graph(%self, %input, %inplace):
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )");
 
-  const PatternInfo aten_mul_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo mul_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b):
      %first_output = aten::mul(%a, %b)
      %second_module = match::module[name="ReLU"](%self)
      %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     return (%second_output) )");
+
+  const PatternInfo mul_f_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %inplace):
+     %first_output = aten::mul(%a, %b)
+     %relu = prim::Constant[name="relu"]()
+     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
      return (%second_output) )");
 
   const PatternInfo inplace_mul_nn_relu = PatternInfo::parse_from_str(R"(
@@ -484,13 +525,6 @@ graph(%self, %a, %b):
      %first_output = aten::mul_(%a, %b)
      %second_module = match::module[name="ReLU"](%self)
      %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-     return (%second_output) )");
-
-  const PatternInfo aten_mul_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b, %inplace):
-     %first_output = aten::mul(%a, %b)
-     %relu = prim::Constant[name="relu"]()
-     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
      return (%second_output) )");
 
   const PatternInfo inplace_mul_f_relu = PatternInfo::parse_from_str(R"(
@@ -509,13 +543,15 @@ graph(%self, %a, %b, %inplace):
           nn_conv3d_f_relu,
           nn_conv3d_nn_relu,
           matmul_add,
-          aten_add_nn_relu,
-          aten_add_f_relu,
+          add_nn_relu,
+          add_f_relu,
+          inplace_add_nn_relu,
+          inplace_add_f_relu,
           nn_bn_nn_relu,
           nn_bn_f_relu,
-          aten_mul_nn_relu,
+          mul_nn_relu,
+          mul_f_relu,
           inplace_mul_nn_relu,
-          aten_mul_f_relu,
           inplace_mul_f_relu,
   };
 };
@@ -738,8 +774,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   // of the quantizable function.
   if (!is_dynamic_) {
     // Check whether producer is quantizable
-    if ((mayRequireObservation(v) && nodeQuantizable(v->node())) ||
-        isPropagateQuantNode(v->node())) {
+    if (nodeQuantizable(v->node()) || isPropagateQuantNode(v->node())) {
       return true;
     }
   }
@@ -1038,8 +1073,7 @@ InsertObserversHelper::insertObserversFor(
             // aten::cat, we should observe its output only
             // if the input of the node is observed
             if (observer_opt &&
-                (!isPropagateQuantNode(n) ||
-                 shouldPropagateQuant(n, block_observed_values))) {
+                shouldPropagateQuant(n, block_observed_values)) {
               recordObserved(
                   v, *observer_opt, values_to_observe, block_observed_values);
             }
@@ -1104,8 +1138,7 @@ Module InsertObservers(
   ModuleQConfigMap map_before_clone;
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
-  Module module =
-      inplace ? input_module : mh.clone(input_module, map_before_clone);
+  Module module = mh.clone(input_module, map_before_clone, inplace);
   ModuleQConfigMap module_qconfig_map;
   // Since the types are changed after clone, we need to fill
   // the qconfig map again

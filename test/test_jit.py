@@ -24,6 +24,7 @@ from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
+from jit.test_op_normalization import TestOpNormalization  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -46,14 +47,14 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype
+    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
-    RUN_CUDA, RUN_CUDA_MULTI_GPU
+    RUN_CUDA, RUN_CUDA_MULTI_GPU, op_alias_mappings
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
     get_call, script_template, EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
-    get_nn_module_name_from_kwargs, script_method_template
+    get_nn_module_name_from_kwargs, script_method_template, create_traced_fn
 
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
 from torch.testing._internal.common_methods_invocations import method_tests as autograd_method_tests
@@ -350,6 +351,13 @@ class TestJit(JitTestCase):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
         self.checkTrace(f, (x, y))
+
+    def test_inferred_as_tensor(self):
+        with self.assertRaisesRegex(RuntimeError, "Inferred the value for argument 'dim' to be of type 'Tensor' "
+                                                  "because it was not annotated with an explicit type"):
+            @torch.jit.script
+            def dot(points, query, dim):
+                return (points * query).sum(dim)
 
     def test_trace_checking_with_global_name(self):
         class MyClass(torch.nn.Module):
@@ -3736,16 +3744,15 @@ class TestScript(JitTestCase):
                 return 2
 
         with enable_profiling_mode_for_profiling_tests():
-            old_num_runs = torch._C._jit_set_num_profiled_runs(2)
-            test_not_const(torch.rand([1, 2]))
-            test_not_const(torch.rand([2, 2]))
-            test_not_const(torch.rand([3, 2]))
+            with num_profiled_runs(2):
+                test_not_const(torch.rand([1, 2]))
+                test_not_const(torch.rand([2, 2]))
+                test_not_const(torch.rand([3, 2]))
 
-            graph_str = torch.jit.last_executed_optimized_graph()
-            FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
-            FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
+                graph_str = torch.jit.last_executed_optimized_graph()
+                FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
+                FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
 
-        torch._C._jit_set_num_profiled_runs(old_num_runs)
 
     def test_nested_bailouts(self):
         @torch.jit.script
@@ -7389,7 +7396,7 @@ a")
                             continue
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    self.assertEqual(res_python, res_script, message=msg, atol=(1e-4) * max(abs(res_python), res_script))
+                    self.assertEqual(res_python, res_script, msg=msg, atol=(1e-4) * max(abs(res_python), res_script), rtol=0)
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
@@ -7938,8 +7945,8 @@ a")
             message = 'with code `{} {} {}` and t={}'.format(args[0], op, args[1], tensor)
             res1 = cu.func(tensor)
             res2 = scope['func'](tensor)
-            self.assertEqual(res1, res2, message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
-            self.assertEqual(res1.dtype, res2.dtype, message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
+            self.assertEqual(res1, res2, msg=message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
+            self.assertEqual(res1.dtype, res2.dtype, msg=message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
 
         var_int = [2, -2]
         var_float = [1.4321, -1.2]
@@ -8290,7 +8297,7 @@ a")
             self.assertEqual(
                 cu.func(),
                 scope['func'](),
-                "Failed with op: {}, lhs: {}, rhs: {}"
+                msg="Failed with op: {}, lhs: {}, rhs: {}"
                 .format(op, args[0], args[1])
             )
 
@@ -8369,7 +8376,7 @@ a")
             self.assertEqual(
                 cu.func(inp),
                 scope['func'](inp),
-                "Failed with typ: {}"
+                msg="Failed with typ: {}"
                 .format(typ)
             )
 
@@ -15949,7 +15956,6 @@ a")
 
         graph = torch.jit.script(test_multiple).graph
         FileCheck().check_count("prim::If", 3, exactly=True).run(graph)
-        print(torch.jit.script(test_multiple).code)
 
     def test_is_scripting_metacompile(self):
         @torch.jit.script
@@ -17692,34 +17698,6 @@ EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_pool1d_with_indices',
 }
 
-# make a new function where all non-tensor arguments in 'args' have been partially
-# applied, and all tensor arguments remain.
-# used to trace functions when some arguments are not tensors
-def partial_apply_nontensors(fn, args, **kwargs):
-    source = ['t' if isinstance(arg, torch.Tensor) else 's' for arg in args]
-
-    def new_fn(*tensors_):
-        tensors = iter(tensors_)
-        return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
-
-    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
-
-
-# create a trace function from input fn
-def create_traced_fn(self, fn):
-    def traced_fn(*inputs, **kwargs):
-        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
-        # `check_trace` is set to False because check_trace is run with @no_grad
-        # Also, `check_against_reference` already does all the checks
-        # against python function
-        traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
-        self.assertExportImport(traced.graph, inputs_tensors)
-        output = traced(*inputs_tensors)
-        traced_fn.last_graph = traced.graph_for(*inputs_tensors)
-        return output
-    return traced_fn
-
-
 def check_alias_annotation(method_name, args, kwargs):
     formals, tensors, actuals = get_script_args(args)
     call = get_call(method_name, 'method', actuals, kwargs)
@@ -17874,7 +17852,6 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'grid_sample',
 ])
 
-
 def add_autograd_test(
         name,
         self_size,
@@ -17993,7 +17970,7 @@ def add_autograd_test(
 
                 # alias annotation testing
                 if is_inplace and test_name not in EXCLUDE_SCRIPT:
-                    check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable)
+                    check_alias_annotation(op_alias_mappings.get(name, name), (self_variable,) + args_variable, kwargs_variable)
 
             check(name)
             inplace_name = name + '_'
