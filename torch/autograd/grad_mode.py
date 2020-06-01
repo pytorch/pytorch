@@ -68,7 +68,7 @@ class no_grad(_DecoratorContextManager):
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
-        return False
+        return None
 
 
 class enable_grad(_DecoratorContextManager):
@@ -108,7 +108,7 @@ class enable_grad(_DecoratorContextManager):
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
-        return False
+        return None
 
 
 class set_grad_enabled(object):
@@ -157,4 +157,4 @@ class set_grad_enabled(object):
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
-        return False
+        return None
