@@ -2652,7 +2652,7 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
     def _test_remote_message_dropped_pickle(self, dst=None):
         if self.rank != 0:
             return
-        dst_rank = 0 #(self.rank + 1) % self.world_size
+        dst_rank = dst if dst is not None else (self.rank + 1) % self.world_size
         dst_worker = "worker{}".format(dst_rank)
         # Since we fail python_remote_call messages synchronously, the future
         # corresponding to this remote call will be marked with an error when
@@ -2671,6 +2671,9 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
     @dist_init(faulty_messages=["PYTHON_REMOTE_CALL"])
     def test_remote_message_dropped_pickle(self):
         self._test_remote_message_dropped_pickle()
+
+    @dist_init(faulty_messages=["PYTHON_REMOTE_CALL"])
+    def test_remote_message_dropped_pickle_to_self(self):
         self._test_remote_message_dropped_pickle(self.rank)
 
 
