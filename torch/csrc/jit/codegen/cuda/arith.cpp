@@ -416,14 +416,14 @@ TensorView* reductionOp(
   std::vector<unsigned int> uint_axes;
   for (int axis : axes) {
     if (axis < 0)
-      axis += int(tv->nDims());
+      axis += int(v1->nDims());
 
     TORCH_CHECK(
-        axis >= 0 && (unsigned int)axis < tv->nDims(),
+        axis >= 0 && (unsigned int)axis < v1->nDims(),
         "Reduction on invalid axis, recieved: ",
         axis,
         " however tensor view only has ",
-        tv->nDims(),
+        v1->nDims(),
         " dims.");
 
     uint_axes.push_back((unsigned int)axis);
