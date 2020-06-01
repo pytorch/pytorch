@@ -319,46 +319,39 @@ TensorView* reductionOp(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,
-    Val* v1) {
-  TORCH_CHECK(
-      v1->getValType().value() == ValType::TensorView,
-      "Cannot reduce on values that are not TensorViews, but recieved type ",
-      v1->getValType().value());
-
+    TensorView* v1) {
   TORCH_CHECK(
       init->isConstScalar(),
       "Cannot create a reduction operation where the initial value is not a const scalar.");
 
-  TensorView* tv = static_cast<TensorView*>(v1);
-
   TORCH_CHECK(
-      tv->getRootDomain() == tv->domain(),
+      v1->getRootDomain() == v1->domain(),
       "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/reorder/computeAt.");
 
   std::vector<unsigned int> uint_axes;
   for (int axis : axes) {
     if (axis < 0)
-      axis += int(tv->nDims());
+      axis += int(v1->nDims());
 
     TORCH_CHECK(
-        axis >= 0 && (unsigned int)axis < tv->nDims(),
+        axis >= 0 && (unsigned int)axis < v1->nDims(),
         "Reduction on invalid axis, recieved: ",
         axis,
         " however tensor view only has ",
-        tv->nDims(),
+        v1->nDims(),
         " dims.");
 
     uint_axes.push_back((unsigned int)axis);
   }
 
-  TensorView* out = tv->newForReduction(uint_axes);
+  TensorView* out = v1->newForReduction(uint_axes);
   if (init->getDataType().value() != v1->getDataType().value())
     init = castOp(v1->getDataType().value(), init);
   new ReductionOp(reduction_op_type, init, out, v1);
   return out;
 }
 
-TORCH_CUDA_API TensorView* sum(Val* v1, const std::vector<int>& axes) {
+TORCH_CUDA_API TensorView* sum(TensorView* v1, const std::vector<int>& axes) {
   Val* init;
   switch (v1->getDataType().value()) {
     case (DataType::Float):
