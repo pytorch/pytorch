@@ -82,18 +82,18 @@ void div_kernel(TensorIterator& iter) {
       // for unknown reason. See: https://github.com/pytorch/pytorch/issues/39123
       if (iter.dtype() == kComplexFloat) {
         cpu_kernel_vec(iter,
-          [=](std::complex<float> a, std::complex<float> b) __ubsan_ignore_float_divide_by_zero__ -> std::complex<float> {
+          [](std::complex<float> a, std::complex<float> b) __ubsan_ignore_float_divide_by_zero__ -> std::complex<float> {
              return a / b;
           },
-          [=](Vec256<std::complex<float>> a, Vec256<std::complex<float>> b) {
+          [](Vec256<std::complex<float>> a, Vec256<std::complex<float>> b) {
             return a / b;
           });
       } else {
          cpu_kernel_vec(iter,
-          [=](c10::complex<double> a, c10::complex<double> b) __ubsan_ignore_float_divide_by_zero__ -> c10::complex<double> {
+          [](c10::complex<double> a, c10::complex<double> b) __ubsan_ignore_float_divide_by_zero__ -> c10::complex<double> {
              return a / b;
           },
-          [=](Vec256<c10::complex<double>> a, Vec256<c10::complex<double>> b) {
+          [](Vec256<c10::complex<double>> a, Vec256<c10::complex<double>> b) {
             return a / b;
           });
       }
