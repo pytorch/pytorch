@@ -4516,7 +4516,7 @@ class TestAutogradFunctional(TestCase):
     def _assert_interleaved_struct(self, res, base1, base2):
         # base1 and base2 can be Tensors or tuples of Tensors.
         # If they are tuples, res should be a tuple as well.
-        # The indexing works as follow for base1, base2 being
+        # The indexing works as follows for base1, base2 being
         # - tuple, tuple: res[i][j][k][l] = (base1[i][k], base2[j][l])
         # - tuple, Tensor: res[i][k][l] = (base1[i][k], base2[l])
         # - Tensor, tuple: res[i][j][l] = (base1[i], base2[j][l])
