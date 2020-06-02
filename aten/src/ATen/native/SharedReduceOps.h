@@ -390,6 +390,11 @@ struct MinOps :
   public detail::MinMaxReductionOps<detail::LessOrNan<scalar_t>> {
 };
 
+template <typename scalar_t>
+struct MaxOps :
+  public detail::MinMaxReductionOps<detail::GreaterOrNan<scalar_t>> {
+};
+
 }} // namespace at::native
 
 #undef MAX
