@@ -14,7 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import List, Tuple
+from typing import List, Tuple, Iterable
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -945,7 +945,7 @@ class TestClassType(JitTestCase):
                 return self.count
 
             @torch.jit.unused
-            def unused(self, x: int, y: str) -> int:
+            def unused(self, x: int, y: Iterable[int], **kwargs) -> int:
                 a = next(self.items)
                 return a
 
