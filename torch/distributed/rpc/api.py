@@ -396,6 +396,18 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         confirmed by the owner, which can be checked using the
         :meth:`torch.distributed.rpc.RRef.confirmed_by_owner` API.
 
+    .. warning ::
+        Errors such as timeouts for the ``remote`` API are handled on a
+        best-effort basis. This means that when remote calls initiated by
+        ``remote`` fail, such as with a timeout error, we take a best-effort
+        approach to error handling. This means that errors are handled and set
+        on the resulting RRef on an asynchronous basis. If the RRef has not been
+        used by the application before this handling (such as to_here or
+        fork call), then future uses of the ``RRef`` will appropriately raise
+        errors. However, it is possible that the user application will use the
+        ``RRef`` before the errors are handled. In this case, errors may not be
+        raised as they have not yet been handled.
+
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
