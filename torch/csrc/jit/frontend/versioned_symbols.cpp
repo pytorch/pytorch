@@ -65,7 +65,8 @@ struct SymbolRange {
 
 static std::unordered_map<Symbol, SymbolRange> symbol_range_map({
     {Symbol::fromQualString("aten::_test_serialization_subcmul"),
-     {0, 2,
+     {0,
+      2,
       Symbol::fromQualString("upgraders::_test_serialization_subcmul_0_2")}},
     {Symbol::fromQualString("aten::div"),
      {0, 3, Symbol::fromQualString("upgraders::div_0_3")}},
