@@ -2606,7 +2606,6 @@ class RpcTest(RpcAgentTestFixture):
             rpc.rpc_async(dst, raise_func).then(None)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_mark_future_twice(self):
         fut = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),

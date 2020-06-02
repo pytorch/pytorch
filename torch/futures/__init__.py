@@ -7,7 +7,8 @@ import torch
 
 class Future(torch._C.Future):
     r"""
-    Wrapper around a ``torch._C.Future``.
+    Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
+    execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`.
     """
     def __new__(cls):
         return super(Future, cls).__new__(cls)
@@ -17,7 +18,9 @@ class Future(torch._C.Future):
         Block until the value of this ``Future`` is ready.
 
         Return:
-            The value held by this ``Future``.
+            The value held by this ``Future``. If the function (callback or RPC)
+            creating the value thrown an error, this ``wait`` method will also
+            throw the error.
         """
         return super(Future, self).wait()
 
@@ -81,9 +84,9 @@ class Future(torch._C.Future):
             >>>     target=slow_set_future,
             >>>     args=(fut, torch.ones(2) * 3)
             >>> )
-            >>> t.daemon = True
             >>> t.start()
             >>>
             >>> print(fut.wait())  # tensor([3., 3.])
+            >>> t.join()
         """
         super(Future, self).set_result(result)
