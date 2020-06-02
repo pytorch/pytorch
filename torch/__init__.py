@@ -78,7 +78,7 @@ if sys.platform == 'win32':
             os.add_dll_directory(dll_path)
         elif with_load_library_flags:
             res = kernel32.AddDllDirectory(dll_path)
-            if res == 0:
+            if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
                 raise err
@@ -89,20 +89,20 @@ if sys.platform == 'win32':
     for dll in dlls:
         is_loaded = False
         if with_load_library_flags:
-            res = kernel32.LoadLibraryExW(dll, 0, 0x00001100)
+            res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
             last_error = ctypes.get_last_error()
-            if res == 0 and last_error != 126:
+            if res is None and last_error != 126:
                 err = ctypes.WinError(last_error)
                 err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
                 raise err
-            elif res != 0:
+            elif res is not None:
                 is_loaded = True
         if not is_loaded:
             if not path_patched:
                 os.environ['PATH'] = ';'.join(dll_paths + [os.environ['PATH']])
                 path_patched = True
             res = kernel32.LoadLibraryW(dll)
-            if res == 0:
+            if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
                 raise err
