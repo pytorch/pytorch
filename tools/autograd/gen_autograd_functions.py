@@ -195,14 +195,12 @@ def process_function(func):
         formula = derivative['formula']
         var_names = derivative['var_names']
         if len(var_names) == 1:
-            # Seems a bit hacky to check for not_implemented in the formula, but it seems to work fine
+            checks_any_grad_defined = False
             if forward_func_name not in ['cat', 'stack'] and 'not_implemented' not in formula:
-                # TODO: should add the any_variable_defined call outside the
-                #   conditional block it's currently in, because if the op
-                #   has two or more inputs that need grads, any_variable_defined
-                #   gets called twice
-                formula = 'any_variable_defined(grads) ? (' + formula + ') : Tensor()'
-            return DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula)
+                formula = 'any_grad_defined ? (' + formula + ') : Tensor()'
+                checks_any_grad_defined = True
+            return (checks_any_grad_defined,
+                    DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula))
         else:
             if 'grad_input_mask' in formula:
                 masks = ['should_compute_output({{ {}_ix }}),'.format(n) for n in var_names]
@@ -213,14 +211,22 @@ def process_function(func):
             copy_ranges = []
             for i, n in enumerate(var_names):
                 copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i))
-            return DERIVATIVE_MULTI.substitute(
+            return False, DERIVATIVE_MULTI.substitute(
                 idx_ranges=idx_ranges, copy_ranges=copy_ranges,
                 derivative=formula,
                 grad_input_mask=grad_input_mask)
 
     body.extend(unpack)
+    need_any_grad_defined_var = False
     for derivative in func['derivatives']:
-        body.append(emit_derivative(derivative, func['name']))
+        checks_any_grad_defined, derivative_text = emit_derivative(derivative, func['name'])
+        body.append(derivative_text)
+        need_any_grad_defined_var |= checks_any_grad_defined
+    # Since single-output derivative formulas need to check if grads are
+    # defined, only perform the check once, before all the formulas
+    if need_any_grad_defined_var:
+        body.insert(-len(func['derivatives']),
+                    'bool any_grad_defined = any_variable_defined(grads);')
 
     env['body'] = body
     if func['name'] in UNTRACEABLE_FUNCTIONS:
