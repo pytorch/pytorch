@@ -26,11 +26,17 @@ struct OutputReshapeInfo {
 };
 
 struct TensorInfo {
-  TensorInfo() {}
-  TensorInfo(TensorInfo&&) = default;
-  TensorInfo& operator=(TensorInfo&&) = default;
   std::vector<uint64_t> dims;
   uint64_t onnxifi_type;
+  bool quantized;
+  uint32_t quantizationAxis;
+  uint64_t quantizationParams;
+  std::vector<float> scales;
+  std::vector<int32_t> biases;
+  explicit TensorInfo(const TensorProto& t);
+  explicit TensorInfo(const QTensorProto& t);
+  TensorInfo(TensorInfo&&) = default;
+  TensorInfo& operator=(TensorInfo&&) = default;
 };
 } // namespace details
 
@@ -72,20 +78,34 @@ class OnnxifiOp final : public Operator<Context> {
     input_shapes_.resize(input_names_.size());
     output_shapes_.resize(output_names_.size());
     int output_idx = 0;
+    ArgumentHelper helper(operator_def);
+    auto output_shape_info =
+        helper.GetRepeatedArgument<TensorProto>("output_shape_info");
+    auto output_qshape_info =
+        helper.GetRepeatedArgument<QTensorProto>("output_qshape_info");
+    std::unordered_map<std::string, TensorProto> output_shape_map;
+    for (const auto& info : output_shape_info) {
+      output_shape_map.emplace(info.name(), info);
+    }
+    std::unordered_map<std::string, QTensorProto> output_qshape_map;
+    for (const auto& info : output_qshape_info) {
+      output_qshape_map.emplace(info.name(), info);
+    }
     for (const auto& output : output_names_) {
       output_desc_.push_back(onnxTensorDescriptorV1());
       output_desc_.back().name = output.c_str();
 
       // For output, we try to get its output size hint
-      const std::string key = c10::str("output_shape_hint_", output_idx);
-      auto output_shape_hint = this->template GetRepeatedArgument<int>(key);
-      if (!output_shape_hint.empty()) {
-        details::TensorInfo info;
-        info.onnxifi_type = output_shape_hint.front();
-        for (size_t i = 1; i < output_shape_hint.size(); ++i) {
-          info.dims.push_back(output_shape_hint[i]);
+      const auto it = output_shape_map.find(output);
+      if (it != output_shape_map.end()) {
+        output_shape_hints_.emplace(
+            output_idx, details::TensorInfo(it->second));
+      } else {
+        const auto qit = output_qshape_map.find(output);
+        if (qit != output_qshape_map.end()) {
+          output_shape_hints_.emplace(
+              output_idx, details::TensorInfo(qit->second));
         }
-        output_shape_hints_.emplace(output_idx, std::move(info));
       }
       ++output_idx;
     }
@@ -263,9 +283,9 @@ class OnnxifiOp final : public Operator<Context> {
   void getExtFunctionPointers() {
 #ifdef ONNXIFI_ENABLE_EXT
     union {
-       onnxExtensionFunctionPointer p;
-       decltype(onnxSetIOAndRunGraphPointer_) set;
-       decltype(onnxReleaseTraceEventsPointer_) release;
+      onnxExtensionFunctionPointer p;
+      decltype(onnxSetIOAndRunGraphPointer_) set;
+      decltype(onnxReleaseTraceEventsPointer_) release;
     } u;
     if (lib_->onnxGetExtensionFunctionAddress(
             backend_id_, "onnxSetIOAndRunGraphFunction", &u.p) !=
