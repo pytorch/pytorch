@@ -3626,9 +3626,6 @@ workflows:
           filters:
             branches:
               only: postnightly
-    when: << pipeline.parameters.run_binary_tests >>
-  build:
-    jobs:
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2017-14-11-cuda10-cudnn7-py3
           cuda_version: "10"
@@ -3929,6 +3926,9 @@ workflows:
           vc_product: Community
           vc_version: ""
           vc_year: "2019"
+    when: << pipeline.parameters.run_binary_tests >>
+  build:
+    jobs:
       - pytorch_linux_build:
           name: pytorch_linux_xenial_pynightly_build
           filters:

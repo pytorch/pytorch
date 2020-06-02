@@ -81,7 +81,6 @@ class Header(object):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        windows_build_definitions.get_windows_workflows,
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
         cimodel.data.simple.android_gradle.get_workflow_jobs,
@@ -98,6 +97,7 @@ def gen_build_workflows_tree():
     binary_build_functions = [
         binary_build_definitions.get_binary_build_jobs,
         binary_build_definitions.get_binary_smoke_test_jobs,
+        windows_build_definitions.get_windows_workflows,
     ]
 
     return {
