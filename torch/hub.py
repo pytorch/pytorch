@@ -59,7 +59,7 @@ DEFAULT_CACHE_DIR = '~/.cache'
 VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 8192
-hub_dir = None
+_hub_dir = None
 
 
 # Copied from tools/shared/module_loader to be included in torch package
@@ -95,27 +95,11 @@ def _load_attr_from_module(module, func_name):
 
 
 def _get_torch_home():
-    torch_home = hub_dir
-    if torch_home is None:
-        torch_home = os.path.expanduser(
-            os.getenv(ENV_TORCH_HOME,
-                      os.path.join(os.getenv(ENV_XDG_CACHE_HOME,
-                                             DEFAULT_CACHE_DIR), 'torch')))
+    torch_home = os.path.expanduser(
+        os.getenv(ENV_TORCH_HOME,
+                  os.path.join(os.getenv(ENV_XDG_CACHE_HOME,
+                                         DEFAULT_CACHE_DIR), 'torch')))
     return torch_home
-
-
-def _setup_hubdir():
-    global hub_dir
-    # Issue warning to move data if old env is set
-    if os.getenv('TORCH_HUB'):
-        warnings.warn('TORCH_HUB is deprecated, please use env TORCH_HOME instead')
-
-    if hub_dir is None:
-        torch_home = _get_torch_home()
-        hub_dir = os.path.join(torch_home, 'hub')
-
-    if not os.path.exists(hub_dir):
-        os.makedirs(hub_dir)
 
 
 def _parse_repo_info(github):
@@ -129,6 +113,10 @@ def _parse_repo_info(github):
 
 
 def _get_cache_or_reload(github, force_reload, verbose=True):
+    # Setup hub_dir to save downloaded files
+    hub_dir = get_dir()
+    if not os.path.exists(hub_dir):
+        os.makedirs(hub_dir)
     # Parse github repo information
     repo_owner, repo_name, branch = _parse_repo_info(github)
     # Github allows branch name with slash '/',
@@ -235,22 +223,34 @@ def _load_entry_from_hubconf(m, model):
     return func
 
 
-def set_dir(d):
+def get_dir():
     r"""
-    Optionally set hub_dir to a local dir to save downloaded models & weights.
+    Get the Torch Hub cache directory used for storing downloaded models & weights.
 
-    If ``set_dir`` is not called, default path is ``$TORCH_HOME/hub`` where
+    If :func:`~torch.hub.set_dir` is not called, default path is ``$TORCH_HOME/hub`` where
     environment variable ``$TORCH_HOME`` defaults to ``$XDG_CACHE_HOME/torch``.
     ``$XDG_CACHE_HOME`` follows the X Design Group specification of the Linux
     filesytem layout, with a default value ``~/.cache`` if the environment
     variable is not set.
+    """
+    # Issue warning to move data if old env is set
+    if os.getenv('TORCH_HUB'):
+        warnings.warn('TORCH_HUB is deprecated, please use env TORCH_HOME instead')
 
+    if _hub_dir is not None:
+        return _hub_dir
+    return os.path.join(_get_torch_home(), 'hub')
+
+
+def set_dir(d):
+    r"""
+    Optionally set the Torch Hub directory used to save downloaded models & weights.
 
     Args:
         d (string): path to a local folder to save downloaded models & weights.
     """
-    global hub_dir
-    hub_dir = d
+    global _hub_dir
+    _hub_dir = d
 
 
 def list(github, force_reload=False):
@@ -269,9 +269,6 @@ def list(github, force_reload=False):
     Example:
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
-    # Setup hub_dir to save downloaded files
-    _setup_hubdir()
-
     repo_dir = _get_cache_or_reload(github, force_reload, True)
 
     sys.path.insert(0, repo_dir)
@@ -300,9 +297,6 @@ def help(github, model, force_reload=False):
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
-    # Setup hub_dir to save downloaded files
-    _setup_hubdir()
-
     repo_dir = _get_cache_or_reload(github, force_reload, True)
 
     sys.path.insert(0, repo_dir)
@@ -343,9 +337,6 @@ def load(github, model, *args, **kwargs):
     Example:
         >>> model = torch.hub.load('pytorch/vision', 'resnet50', pretrained=True)
     """
-    # Setup hub_dir to save downloaded files
-    _setup_hubdir()
-
     force_reload = kwargs.get('force_reload', False)
     kwargs.pop('force_reload', None)
     verbose = kwargs.get('verbose', True)
@@ -440,10 +431,8 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
 
     If the object is already present in `model_dir`, it's deserialized and
     returned.
-    The default value of `model_dir` is ``$TORCH_HOME/checkpoints`` where
-    environment variable ``$TORCH_HOME`` defaults to ``$XDG_CACHE_HOME/torch``.
-    ``$XDG_CACHE_HOME`` follows the X Design Group specification of the Linux
-    filesytem layout, with a default value ``~/.cache`` if not set.
+    The default value of `model_dir` is ``<hub_dir>/checkpoints`` where
+    `hub_dir` is the directory returned by :func:`~torch.hub.get_dir`.
 
     Args:
         url (string): URL of the object to download
@@ -466,8 +455,8 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
         warnings.warn('TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead')
 
     if model_dir is None:
-        torch_home = _get_torch_home()
-        model_dir = os.path.join(torch_home, 'checkpoints')
+        hub_dir = get_dir()
+        model_dir = os.path.join(hub_dir, 'checkpoints')
 
     try:
         os.makedirs(model_dir)

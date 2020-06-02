@@ -27,6 +27,8 @@ class Linear(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+    # version used in this class is different from the parent class nnq.Linear
+    _version = 4
 
     def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
         super(Linear, self).__init__(in_features, out_features, bias_, dtype=dtype)
@@ -34,12 +36,17 @@ class Linear(nnq.Linear):
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
         # deserialization modules
+        self.version = 4
 
     def forward(self, x):
         # Note that we can handle self.bias == None case.
         if self._packed_params.dtype == torch.qint8:
-            Y = torch.ops.quantized.linear_dynamic(
-                x, self._packed_params._packed_params)
+            if self.version is None or self.version < 4:
+                Y = torch.ops.quantized.linear_dynamic(
+                    x, self._packed_params._packed_params)
+            else:
+                Y = torch.ops.quantized.linear_dynamic(
+                    x, self._packed_params._packed_params, reduce_range=True)
         elif self._packed_params.dtype == torch.float16:
             Y = torch.ops.quantized.linear_dynamic_fp16(
                 x, self._packed_params._packed_params)
@@ -57,6 +64,13 @@ class Linear(nnq.Linear):
         if self._packed_params.dtype == torch.qint8:
             extra_repr_str += ', qscheme={}'.format(self.weight().qscheme())
         return extra_repr_str
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+        self.version = version
+        super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                  missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
     def from_float(cls, mod):
