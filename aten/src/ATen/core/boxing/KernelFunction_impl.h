@@ -77,6 +77,14 @@ inline KernelFunction KernelFunction::makeFallthrough() {
     );
 }
 
+inline KernelFunction KernelFunction::makeNamedNotSupported() {
+    return KernelFunction(
+        nullptr,  // no functor_ object
+        &named_not_supported_kernel,
+        nullptr  // no unboxed function pointer
+    );
+}
+
 template<bool AllowLegacyTypes, class KernelFunctor>
 inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
@@ -161,6 +169,10 @@ inline KernelFunction KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
 }
 
 inline void KernelFunction::setManuallyBoxedKernel_(InternalBoxedKernelFunction* func) {
+    if (boxed_kernel_func_ == &fallthrough_kernel) {
+      // special case no-op
+      return;
+    }
     TORCH_INTERNAL_ASSERT(boxed_kernel_func_ == nullptr, "Tried to set a manually boxed kernel for a kernel that already has a boxed kernel set.");
     TORCH_INTERNAL_ASSERT(unboxed_kernel_func_ != nullptr, "Tried to set a manually boxed kernel for an invalid KernelFunction.");
     boxed_kernel_func_ = func;

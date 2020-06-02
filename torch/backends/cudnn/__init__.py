@@ -84,17 +84,14 @@ def is_acceptable(tensor):
 
 
 _handles = {}
-verbose = False
 
 
-def set_flags(_enabled, _benchmark, _deterministic, _use_tf32, _verbose):
-    global benchmark, deterministic, use_tf32, verbose
+def set_flags(_enabled, _benchmark, _deterministic, _use_tf32):
+    global benchmark, deterministic, use_tf32
     orig_flags = (torch._C._get_cudnn_enabled(),
                   torch._C._get_cudnn_benchmark(),
                   torch._C._get_cudnn_deterministic(),
-                  torch._C._get_cudnn_use_tf32(),
-                  verbose)
-    verbose = _verbose
+                  torch._C._get_cudnn_use_tf32())
     torch._C._set_cudnn_enabled(_enabled)
     torch._C._set_cudnn_benchmark(_benchmark)
     torch._C._set_cudnn_deterministic(_deterministic)
@@ -103,9 +100,9 @@ def set_flags(_enabled, _benchmark, _deterministic, _use_tf32, _verbose):
 
 
 @contextmanager
-def flags(enabled=False, benchmark=False, deterministic=False, use_tf32=True, verbose=False):
+def flags(enabled=False, benchmark=False, deterministic=False, use_tf32=True):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, benchmark, deterministic, use_tf32, verbose)
+        orig_flags = set_flags(enabled, benchmark, deterministic, use_tf32)
     try:
         yield
     finally:
