@@ -156,18 +156,12 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
   }
 }
 
-#if defined(CUDA_VERSION) && (CUDA_VERSION < 10000)
-#define CUDA92_BUG(x) x.real(), x.imag()
-#else
-#define CUDA92_BUG(x) x
-#endif
-
 void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
   if (isComplexType(iter.dtype()) || exp_scalar.isComplex()) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      auto cuda92_bug = exp_scalar.to<scalar_t>();
-      const auto exp = thrust_t(CUDA92_BUG(cuda92_bug));
+      auto cuda101_bug = exp_scalar.to<scalar_t>();
+      const auto exp = thrust_t(c10_internal::cuda101bug_cast_c10_complex_to_thrust_complex(cuda101_bug));
       gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t base) -> thrust_t {
         return complex_pow_(base, exp);
       });
@@ -184,8 +178,6 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     });
   }
 }
-
-#undef CUDA92_BUG
 
 } // anonymous namespace
 
