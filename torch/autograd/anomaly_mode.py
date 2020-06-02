@@ -78,7 +78,6 @@ class detect_anomaly(object):
 
     def __exit__(self, *args: Any) -> None:
         torch.set_anomaly_enabled(self.prev)
-        return None
 
 
 class set_detect_anomaly(object):
@@ -105,4 +104,3 @@ class set_detect_anomaly(object):
 
     def __exit__(self, *args: Any) -> None:
         torch.set_anomaly_enabled(self.prev)
-        return None
