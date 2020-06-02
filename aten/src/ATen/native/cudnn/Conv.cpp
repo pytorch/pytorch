@@ -215,6 +215,7 @@ struct ConvolutionParams
   int dilation[max_dim];
   int64_t groups;
   bool deterministic;
+  bool use_tf32;
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
 };
@@ -228,7 +229,7 @@ void setConvolutionParams(
     ConvolutionParams* params,
     const at::Tensor& input, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool deterministic) {
+    int64_t groups, bool deterministic, bool use_tf32) {
 
   cudnnDataType_t dataType = getCudnnDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
@@ -250,6 +251,7 @@ void setConvolutionParams(
   // CuDNN, but it doesn't seem worth the effort to actually do this.
   params->groups = groups;
   params->deterministic = deterministic;
+  params->use_tf32 = use_tf32;
 }
 
 // Convenience struct for passing around descriptors and data
@@ -820,11 +822,11 @@ void raw_cudnn_convolution_forward_out_32bit(
 
   ConvolutionArgs args{ input, output, weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic);
+  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic, at::globalContext().useTF32CuDNN());
   args.idesc.set(input);
   args.wdesc.set(weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(output);
-  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.use_tf32);
 
   // TODO: when we do legacy group convolution support, we'll repeatedly
   // reinitialize the workspace for each convolution we do.  This is
@@ -838,11 +840,6 @@ void raw_cudnn_convolution_forward_out_32bit(
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
-      if (args.params.dataType == CUDNN_DATA_FLOAT && !at::globalContext().useTF32CuDNN()) {
-        fwdAlgPerf.mathType = CUDNN_FMA_MATH;
-      }
-#endif
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType));
 
       Constant one(dataType, 1);
@@ -965,7 +962,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
 
   ConvolutionArgs args{ grad_input, grad_output, weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic);
+  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic, at::globalContext().useTF32CuDNN());
   args.idesc.set(grad_input);
   args.wdesc.set(weight, 0, grad_output.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
@@ -1131,7 +1128,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
 
   ConvolutionArgs args{ input, grad_output, grad_weight };
   args.handle = getCudnnHandle();
-  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic);
+  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic, at::globalContext().useTF32CuDNN());
   args.idesc.set(input);
   args.wdesc.set(grad_weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
