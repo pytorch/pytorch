@@ -31,8 +31,7 @@ auto UndefinedGrad::apply(variable_list&& inputs) -> variable_list {
   tensor_list outputs;
   outputs.reserve(inputs.size());
   for (auto& var : inputs) {
-    // FIXME: share version counters
-    outputs.emplace_back(var.defined() ? var.tensor_data() : at::Tensor());
+    outputs.emplace_back(var.defined() ? var.clone().tensor_data() : at::Tensor());
   }
   return wrap_outputs(inputs, std::move(outputs), [&](edge_list&& next_edges) {
     return std::make_shared<UndefinedGradBackward>(std::move(next_edges));
