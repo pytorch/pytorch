@@ -864,9 +864,12 @@ TensorTypePtr TensorType::create(
     const VaryingShape<ShapeSymbol>& sizes,
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined) {
-  return TensorTypePtr(new TensorType(
+    c10::optional<bool> undefined,
+    bool is_inferred) {
+    auto pt = TensorTypePtr(new TensorType(
       scalar_type, device, sizes, strides, requires_grad, undefined));
+    pt->is_inferred_ = is_inferred;
+  return pt;
 }
 
 TensorTypePtr TensorType::create(
@@ -971,7 +974,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   AT_ASSERT(numAttributes() == refined_slots.size());
   for (size_t i = 0; i < attributes_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
-    ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER), false,
+    ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER),
     (attributes_[i].getKind() == AttributeKind::BUFFER));
   }
   // Copy methods over
@@ -1152,7 +1155,6 @@ size_t ClassType::addAttribute(
     const std::string& name,
     const TypePtr& type,
     bool is_parameter,
-    bool allow_any,
     bool is_buffer) {
   if (is_parameter && is_buffer){
     TORCH_INTERNAL_ASSERT(false, "Attribute cannot be both a parameter and a buffer!");
@@ -1161,9 +1163,6 @@ size_t ClassType::addAttribute(
   std::string what = is_parameter ? "parameter" : "attribute";
   what += (is_buffer? "buffer" : "not buffer");
   checkNotExist(name, what);
-  if (!allow_any) {
-    checkNoAny(*this, what.c_str(), name, type);
-  }
 
   size_t slot = attributes_.size();
 
