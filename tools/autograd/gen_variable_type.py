@@ -1128,8 +1128,6 @@ def emit_body(declaration):
 
     body = []
 
-    pre_record_trace, post_record_trace = format_trace(declaration)
-    body.append(pre_record_trace)
     declare_returned_variables, tie_return_values, get_return_value = format_return_variables(declaration)
 
     if strategy != 'use_type':
@@ -1154,7 +1152,6 @@ def emit_body(declaration):
         # remove this assert but the code generation will get more elaborate
         assert inplace
         body.append('reset_grad_accumulator(self);')
-    body.append(post_record_trace)
     if not returns_void:
         body.append('return {};'.format(get_return_value))
     return body

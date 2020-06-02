@@ -286,6 +286,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
     )
   endif()
 

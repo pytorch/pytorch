@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 
 #include <ATen/Backtrace.h>
+#include <ATen/TracerMode.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
@@ -815,6 +816,7 @@ const std::shared_ptr<TracingState>& getTracingState() {
 }
 
 void setTracingState(std::shared_ptr<TracingState> state) {
+  at::tracer::impl::set_dispatch_enabled(state != nullptr);
   detail::tracing_state = std::move(state);
 }
 
@@ -967,3 +969,9 @@ void setWarn(warn_fn_type fn) {
 } // namespace tracer
 } // namespace jit
 } // namespace torch
+
+TORCH_LIBRARY_IMPL(_, Tracer, m) {
+  // TODO: register fallback kernel with tracing function from
+  // `torch/csrc/jit/runtime/register_c10_ops.cpp`.
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
