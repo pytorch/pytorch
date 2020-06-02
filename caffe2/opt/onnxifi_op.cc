@@ -164,61 +164,7 @@ void BlobToTensorDescriptor(
   }
 }
 
-uint64_t getOnnxifiDataType(caffe2::TensorProto::DataType t) {
-#define CAFFE2_TO_ONNXIFI_TYPE(x) \
-  case (caffe2::TensorProto::x):  \
-    return ONNXIFI_DATATYPE_##x
-  switch (t) {
-    CAFFE2_TO_ONNXIFI_TYPE(INT8);
-    CAFFE2_TO_ONNXIFI_TYPE(UINT8);
-    CAFFE2_TO_ONNXIFI_TYPE(UINT16);
-    CAFFE2_TO_ONNXIFI_TYPE(INT16);
-    CAFFE2_TO_ONNXIFI_TYPE(INT32);
-    CAFFE2_TO_ONNXIFI_TYPE(INT64);
-    CAFFE2_TO_ONNXIFI_TYPE(FLOAT16);
-    case (caffe2::TensorProto::FLOAT):
-      return ONNXIFI_DATATYPE_FLOAT32;
-    default:
-      LOG(WARNING) << "Unsupported Caffe2 tensor type: " << t;
-      return ONNXIFI_DATATYPE_UNDEFINED;
-  }
-#undef CAFFE2_TO_ONNXIFI_TYPE
-}
-
 } // namespace
-
-namespace details {
-TensorInfo::TensorInfo(const TensorProto& t)
-    : onnxifi_type(getOnnxifiDataType(t.data_type())),
-      quantized(false),
-      quantizationAxis(0),
-      quantizationParams(0) {
-  for (const auto d : t.dims()) {
-    dims.push_back(d);
-  }
-}
-
-TensorInfo::TensorInfo(const QTensorProto& t)
-    : onnxifi_type(getOnnxifiDataType(t.data_type())),
-      quantized(true),
-      quantizationAxis(t.has_axis() ? t.axis() : 0),
-      quantizationParams(t.scales_size() ? t.scales_size() : 1) {
-  for (const auto d : t.dims()) {
-    dims.push_back(d);
-  }
-  if (t.scales_size()) {
-    for (const auto d : t.scales()) {
-      scales.push_back(static_cast<float>(d));
-    }
-    for (const auto d : t.biases()) {
-      biases.push_back(static_cast<int32_t>(d));
-    }
-  } else {
-    scales.push_back(static_cast<float>(t.scale()));
-    biases.push_back(static_cast<int32_t>(t.bias()));
-  }
-}
-} // namespace details
 
 template <>
 std::vector<onnxTensorDescriptorV1>
