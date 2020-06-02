@@ -177,7 +177,7 @@ class TORCH_API RRefContext {
       const c10::intrusive_ptr<RRef>& rref);
 
   // Retrieve a pending user given the fork ID. Throws if the user has already
-  // been confirmed (i.e. is no longer in the pendingUser_ map).
+  // been confirmed (i.e. is no longer in the pendingUsers_ map).
   c10::intrusive_ptr<RRef> getPendingUser(const ForkId& forkId);
 
   // Start recroding new pending UserRRefs. All pending UserRRefs introduced
@@ -205,7 +205,7 @@ class TORCH_API RRefContext {
       const worker_id_t owner,
       const RRefId& rrefId,
       const ForkId& forkId);
-  void delAllUsers(std::chrono::milliseconds timeoutMillis);
+  void delAllUsersAndUnforkedOwners(std::chrono::milliseconds timeoutMillis);
 
   std::unordered_map<std::string, std::string> getDebugInfo();
 

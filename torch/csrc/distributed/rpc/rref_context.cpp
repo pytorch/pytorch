@@ -21,6 +21,15 @@ void confirmPendingUser(
   } else {
     // Handle errors, such as timeouts, by invoking the error handler on the
     // rref.
+    // Note [Best Effort Error handling for Remote calls]:
+    // When remote calls initiated by rpc.remote() fail, such as with a timeout
+    // error, we take a best-effort approach to error handling. We handle errors
+    // when callbacks corresponding to the remote call run, and set the error
+    // information on the RRef. If the RRef has not been used by the application
+    // before this process (such as to_here or fork call), then future uses of
+    // the RRef will appropriately raise errors. However, it is possible that
+    // the user application will use the RRef before the errors are handled. In
+    // this case, errors may not be raised as they have not yet been handled.
     auto rref_ptr = RRefContext::getInstance().getPendingUser(expectedForkId);
     auto errorType = getRPCErrorType(futureMessage);
     rref_ptr->handleError(errorType, futureMessage);
@@ -210,7 +219,8 @@ void RRefContext::delUser(
   confirmedUsers_.erase(forkId);
 }
 
-void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
+void RRefContext::delAllUsersAndUnforkedOwners(
+    std::chrono::milliseconds timeoutMillis) {
   // First, wait for all pending UserRRefs to be confirmed,
   // one kind is pendingUsers_, which are shared from Owner,
   // the other kind pendingChildren_, which are shared from another User.
@@ -383,11 +393,15 @@ RRefForkData RRefContext::prepareChildFork(
     const c10::intrusive_ptr<RRef>& rref) {
   // If we know that rref creation on the owner has timed out, raise it to the
   // user here, otherwise continue with pickling.
-  if (rref->getTimedOut()) {
-    throw std::runtime_error(
-        "RRef creation via rpc.remote() timed out, and it "
-        "is possible that the RRef on the owner node does not exist.");
-  }
+  // if (rref->getTimedOut()) {
+  //   throw std::runtime_error(
+  //       "RRef creation via rpc.remote() timed out, and it "
+  //       "is possible that the RRef on the owner node does not exist.");
+  // }
+  TORCH_CHECK(
+      !rref->getTimedOut(),
+      "RRef creation via rpc.remote() timed out, and it "
+      "is possible that the RRef on the owner node does not exist.");
   auto rrefForkData = rref->fork();
   if (rref->isOwner()) {
     // Note [Early Fork Registration]

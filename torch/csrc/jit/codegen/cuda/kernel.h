@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -30,13 +29,13 @@ namespace cuda {
 // Interfacing object allows kernel to return whether a given input
 // configuration could/should be handled.
 struct KernelArgsReq {
-  virtual bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) = 0;
+  virtual bool matchKernelSize(const at::ArrayRef<IValue> inputs) = 0;
   virtual ~KernelArgsReq() = default;
 };
 
 // naive P-wise kernel only requires same dimensionality for input tensors.
 struct NaivePWKernelArgsReq : KernelArgsReq {
-  bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) override;
+  bool matchKernelSize(const at::ArrayRef<IValue> inputs) override;
   std::vector<int> dims_;
 };
 
@@ -87,13 +86,13 @@ TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel* entry);
 // wraps IO data structure for tensors on host.
 TORCH_CUDA_API void runKernel(
     CudaKernel* entry,
-    const at::ArrayRef<c10::IValue> inputs,
+    const at::ArrayRef<IValue> inputs,
     std::vector<at::Tensor> outputs);
 
 // Facility API to run kernel in tests.
 TORCH_CUDA_API void runTestKernel(
     CudaKernel* entry,
-    const at::ArrayRef<c10::IValue> inputs,
+    const at::ArrayRef<IValue> inputs,
     std::vector<at::Tensor> outputs);
 
 } // namespace cuda

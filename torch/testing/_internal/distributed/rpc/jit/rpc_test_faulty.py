@@ -24,6 +24,7 @@ def two_args_two_kwargs(
 ):
     return first_arg + second_arg + first_kwarg + second_kwarg
 
+
 @torch.jit.script
 def rpc_async_call_remote_torchscript_in_torchscript(
     dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
