@@ -61,23 +61,20 @@ class TORCH_API Future final {
     return std::move(value_);
   }
 
+  // Marks the future complete only if it hasn't been marked completed already.
+  void markCompletedIfNeeded(T value) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (completed_) {
+      LOG(INFO) << "markCompletedIfNeeded skipped since future is already complete.";
+      return;
+    } else {
+      markCompletedInternal(std::move(value), lock);
+    }
+  }
+
   void markCompleted(T value) {
     std::unique_lock<std::mutex> lock(mutex_);
-    TORCH_CHECK(!completed_);
-    // Set value first as completed_ is accessed without lock
-    value_ = std::move(value);
-    completed_ = true;
-
-    // Move callbacks to a vector on the stack so we can access it without
-    // holding a lock
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-    finished_cv_.notify_all();
-    // There is no need to protect callbacks_ with the lock.
-    for (auto& callback : cbs) {
-      callback();
-    }
+    markCompletedInternal(std::move(value), lock);
   }
 
   // Sets error only if the future hasn't been marked completed already.
@@ -151,6 +148,24 @@ class TORCH_API Future final {
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the
     // list. pass value_, error_ for callback to easily check state.
+    for (auto& callback : cbs) {
+      callback();
+    }
+  }
+
+  void markCompletedInternal(T value,
+      std::unique_lock<std::mutex>& lock) {
+    TORCH_CHECK(!completed_);
+    value_ = std::move(value);
+    completed_ = true;
+
+    // Move callbacks to a vector on the stack so we can access it without
+    // holding a lock
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+    finished_cv_.notify_all();
+    // There is no need to protect callbacks_ with the lock.
     for (auto& callback : cbs) {
       callback();
     }
