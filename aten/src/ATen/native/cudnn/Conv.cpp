@@ -659,12 +659,11 @@ public:
     if (args.params.dataType == CUDNN_DATA_HALF) {
       perfResults[0].mathType = CUDNN_TENSOR_OP_MATH;
     } else {
+      perfResults[0].mathType = CUDNN_DEFAULT_MATH;
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
-      if (!at::globalContext().useTF32CuDNN()) {
+      if (!args.params.use_tf32) {
         perfResults[0].mathType = CUDNN_FMA_MATH;
       }
-#else
-      perfResults[0].mathType = CUDNN_DEFAULT_MATH;
 #endif
     }
     search::getWorkspaceSize(args, perfResults[0].algo, &(perfResults[0].memory));
