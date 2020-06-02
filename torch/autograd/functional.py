@@ -328,31 +328,57 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         for forward mode AD in PyTorch at the moment.
     """
 
-    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
-    inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
 
-    if v is not None:
-        _, v = _as_tuple(v, "v", "jvp")
-        v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
-        _validate_v(v, inputs, is_inputs_tuple)
+    if True:
+        is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
+        inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=False)
+
+        if v is not None:
+            _, v = _as_tuple(v, "v", "jvp")
+            v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
+            _validate_v(v, inputs, is_inputs_tuple)
+        else:
+            if len(inputs) != 1 or inputs[0].nelement() != 1:
+                raise RuntimeError("The vector v can only be None if the input to "
+                                   "the user-provided function is a single Tensor "
+                                   "with a single element.")
+            v = (torch.ones_like(inputs[0]),)
+
+        for el_inp, el_v in zip(inputs, v):
+            el_inp.fw_grad = el_v
+
+        outputs = func(*inputs)
+        is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
+
+        grad_res = tuple(out.fw_grad for out in outputs)
+        print(grad_res)
     else:
-        if len(inputs) != 1 or inputs[0].nelement() != 1:
-            raise RuntimeError("The vector v can only be None if the input to "
-                               "the user-provided function is a single Tensor "
-                               "with a single element.")
 
-    outputs = func(*inputs)
-    is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
-    _check_requires_grad(outputs, "outputs", strict=strict)
-    # The backward is linear so the value of grad_outputs is not important as
-    # it won't appear in the double backward graph. We only need to ensure that
-    # it does not contain inf or nan.
-    grad_outputs = tuple(torch.zeros_like(out, requires_grad=True) for out in outputs)
+        is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
+        inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
 
-    grad_inputs = _autograd_grad(outputs, inputs, grad_outputs, create_graph=True)
-    _check_requires_grad(grad_inputs, "grad_inputs", strict=strict)
+        if v is not None:
+            _, v = _as_tuple(v, "v", "jvp")
+            v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
+            _validate_v(v, inputs, is_inputs_tuple)
+        else:
+            if len(inputs) != 1 or inputs[0].nelement() != 1:
+                raise RuntimeError("The vector v can only be None if the input to "
+                                   "the user-provided function is a single Tensor "
+                                   "with a single element.")
 
-    grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph)
+        outputs = func(*inputs)
+        is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
+        _check_requires_grad(outputs, "outputs", strict=strict)
+        # The backward is linear so the value of grad_outputs is not important as
+        # it won't appear in the double backward graph. We only need to ensure that
+        # it does not contain inf or nan.
+        grad_outputs = tuple(torch.zeros_like(out, requires_grad=True) for out in outputs)
+
+        grad_inputs = _autograd_grad(outputs, inputs, grad_outputs, create_graph=True)
+        _check_requires_grad(grad_inputs, "grad_inputs", strict=strict)
+
+        grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph)
 
     jvp = _fill_in_zeros(grad_res, outputs, strict, create_graph, "back_trick")
 

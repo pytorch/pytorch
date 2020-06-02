@@ -385,17 +385,20 @@ FW_DERIVATIVE_CHECK_TEMPLATE = CodeTemplate("""\
 ${req_inp}.fw_grad().defined()\
 """)
 
+FW_DERIVATIVE_DEFINED_TEMPLATE = CodeTemplate("""\
+auto ${inp}_fw_grad = ${inp}.fw_grad().defined() ? ${inp}.fw_grad() : at::zeros_like(${inp});\
+""")
+
 FW_DERIVATIVE_TEMPLATE = CodeTemplate("""\
 if (${if_stmt}) {
+    ${fw_grad_defined}
     auto ${out_arg}_new_fw_grad = ${formula};
     ${out_arg}.set_fw_grad(${out_arg}_new_fw_grad);
-} else if (AnomalyMode::is_enabled() and (${else_stmt})) {
-    std::stringstream ss;
-    ss << "While computing the forward mode for ${fn_name}, ";
-    ss << "only a subset of the inputs had their forward gradient set: ";
-    ss << ${err_msg};
-    throw std::runtime_error(ss.str());
 }
+""")
+
+FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
+TORCH_CHECK(!(${cond}), "Trying to use forward prop with ${name} that does not support it.");
 """)
 
 FACTORY_FUNCTION_NAMES = None
@@ -1188,12 +1191,24 @@ def emit_body(declaration):
                 res = "out"
             else:
                 res = derivative['out_arg']
-            if_stmt = " and ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp) for inp in derivative['required_inputs']])
-            else_stmt = " or ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp) for inp in derivative['required_inputs']])
-            err_msg = """ << " " << """.join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp) for inp in derivative['required_inputs']])
+            if_stmt = " or ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp) for inp in derivative['required_inputs']])
+            fw_grad_defined = "\n".join([FW_DERIVATIVE_DEFINED_TEMPLATE.substitute(inp=inp) for inp in derivative['required_inputs']])
             content.append(FW_DERIVATIVE_TEMPLATE.substitute(if_stmt=if_stmt, formula=derivative['formula'], out_arg=res,
-                else_stmt=else_stmt, fn_name=declaration["api_name"], err_msg=err_msg))
+                                                             fw_grad_defined=fw_grad_defined))
         return content
+
+    def forbid_fw_derivatives():
+        to_check = []
+        for inp in differentiable_inputs:
+            if inp["dynamic_type"] == "Tensor":
+                to_check.append(FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp["name"]))
+            # TODO support Tensorlist here
+
+        if len(to_check) > 0:
+            cond = " or ".join(to_check)
+            return FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, name=name)
+        else:
+            return ""
 
 
     env = {}
@@ -1219,6 +1234,8 @@ def emit_body(declaration):
         body.append(emit_history())
     if requires_fw_derivatives:
         body.extend(emit_fw_derivatives())
+    else:
+        body.append(forbid_fw_derivatives())
     # post_record_trace must appear before save_outputs so that saved outputs
     # have their tracing state saved (that is setup by recordTrace)
     body.append(post_record_trace)

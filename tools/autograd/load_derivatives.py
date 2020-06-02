@@ -197,7 +197,7 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
                     input_name = args_with_derivatives[0]['name']
 
                     def repl(m):
-                        return "{}{}.fw_grad(){}".format(m.group(1), input_name, m.group(2))
+                        return "{}{}_fw_grad{}".format(m.group(1), input_name, m.group(2))
                     fw_formula = re.sub(IDENT_REGEX.format("grad"), repl, backward_formula)
 
                     fw_def['required_inputs'] = arg_names
@@ -219,7 +219,7 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
                             args += ", " + arg_name
 
                         if arg_name in diff_arg_names:
-                            args += ".fw_grad()"
+                            args += "_fw_grad"
 
                     # Only works for functions whose original out-of-place version is implemented in at::
                     fw_formula = "at::{}({})".format(defn_name, args)

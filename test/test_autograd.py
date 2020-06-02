@@ -5816,14 +5816,28 @@ class TestAutogradFunctional(TestCase):
 
     def test_jacobian_match_vjp_jvp(self):
         def foo(x):
-            return x ** 3 + x.sum()
+            print("x", x)
+            print(x.fw_grad)
+            # return x ** 3 + x.sum()
+            x = x ** 3
+            print(x.fw_grad)
+            x = x.sum()
+            print(x.fw_grad)
+            return x
 
         inputs = torch.rand(4)
-        v = torch.rand(4)
+        # v = torch.rand(4)
+        v = torch.ones(4)
 
+        print("jac")
         jac = autogradF.jacobian(foo, inputs)
+        print("jvp")
         jvp = autogradF.jvp(foo, inputs, v)[1]
+        print("vjp")
         vjp = autogradF.vjp(foo, inputs, v)[1]
+        print(jac)
+        print(jvp)
+        print(vjp)
 
         self.assertEqual(jvp, torch.mm(jac, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vjp, torch.mm(v.unsqueeze(0), jac).squeeze(0))
