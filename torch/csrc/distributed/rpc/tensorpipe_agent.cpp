@@ -391,6 +391,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   requestMessage.setId(nextMessageID_++);
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
+  lock.unlock();
+
   futureResponseMessage->futMsg.addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
         this->threadPool_.inThreadPool(),
@@ -413,13 +415,13 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
     auto expirationTime = computeRpcMessageExpiryTime(timeout);
 
     // Add the Future to the right vector in the timeoutMap_
-    auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-    timeoutFuturesVector.emplace_back(futureResponseMessage);
+    {
+      std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+      auto& timeoutFuturesVector = timeoutMap_[expirationTime];
+      timeoutFuturesVector.emplace_back(futureResponseMessage);
+    }
     timeoutThreadCV_.notify_one();
   }
-
-  // Don't need to hold lock while calling tensorpipe API.
-  lock.unlock();
 
   pipeWrite(
       clientPipe.pipe_,
