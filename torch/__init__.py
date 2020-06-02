@@ -90,7 +90,7 @@ if sys.platform == 'win32':
                 err = ctypes.WinError(last_error)
                 err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
                 raise err
-            elif res:
+            elif res is not None:
                 is_loaded = True
         if not is_loaded:
             if not path_patched:
