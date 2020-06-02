@@ -67,7 +67,6 @@ class TestFuture(TestCase):
         for i in range(len(futs)):
             self.assertEqual(futs[i].wait(), torch.ones(2, 2) + i + 1)
 
-
     def _test_error(self, cb, errMsg):
         fut = Future()
         then_fut = fut.then(cb)
@@ -84,14 +83,12 @@ class TestFuture(TestCase):
 
         self._test_error(wrong_arg, "unsupported operand type.*Future.*int")
 
-
     def test_then_no_arg(self):
 
         def no_arg():
             return True
 
         self._test_error(no_arg, "takes 0 positional arguments but 1 was given")
-
 
     def test_then_raise(self):
 
