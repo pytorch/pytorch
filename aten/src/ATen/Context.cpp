@@ -67,12 +67,12 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
-bool Context::useTF32CuDNN() const {
-  return use_tf32_cudnn;
+bool Context::allowTF32CuDNN() const {
+  return allow_tf32_cudnn;
 }
 
-void Context::setUseTF32CuDNN(bool b) {
-  use_tf32_cudnn = b;
+void Context::setAllowTF32CuDNN(bool b) {
+  allow_tf32_cudnn = b;
 }
 
 bool Context::useTF32CuBLAS() const {
