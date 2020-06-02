@@ -350,6 +350,8 @@ def get_testing_overrides():
         torch.log10: lambda input, out=None: -1,
         torch.log1p: lambda input, out=None: -1,
         torch.log2: lambda input, out=None: -1,
+        torch.logaddexp: lambda input, other, out=None: -1,
+        torch.logaddexp2: lambda input, other, out=None: -1,
         torch.logdet: lambda input: -1,
         torch.logical_and: lambda input, other, out=None: -1,
         torch.logical_not: lambda input, out=None: -1,
