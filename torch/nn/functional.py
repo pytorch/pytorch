@@ -2552,13 +2552,13 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
 
 
 def _smooth_l1_loss(input, target, delta=1.):
-    # type: (Tensor, Tensor) -> Tensor
+    # type: (Tensor, Tensor, float) -> Tensor
     t = torch.abs(input - target)
     return torch.where(t < delta, 0.5 * t ** 2, t * delta - (0.5 * delta ** 2))
 
 
 def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean', delta=1.):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, float) -> Tensor
     r"""Function that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
 
