@@ -64,7 +64,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (isIntegralType(result.scalar_type(), /*includeBool=*/ true)) {
     TORCH_CHECK(false,
       "Integer division of tensors using div or / is no longer supported, ",
-      "and in a future release div will perform true division like Python 3. ",
+      "and in a future release div will perform true division as in Python 3. ",
       "Use true_divide or floor_divide (// in Python) instead.");
   }
 

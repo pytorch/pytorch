@@ -78,6 +78,9 @@ def _test_serialization_subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2)
 // division on integer tensors was floor division, not true division.
 
 // Tensor x Tensor
+// NOTE: testing for the tensors being float tensors is sufficient here,
+// because the Torchscript versions this fix applies to (0 through 3)
+// did not support complex tensors.
 auto div_tensor = R"SCRIPT(
 def div_0_3(self: Tensor, other: Tensor) -> Tensor:
   if (self.is_floating_point() or other.is_floating_point()):

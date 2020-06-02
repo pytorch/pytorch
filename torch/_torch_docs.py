@@ -1854,7 +1854,7 @@ returns a new resulting tensor.
 
 .. warning::
     Integer division using div is no longer supported, and in a future release
-    div will perform true division like Python 3. Use :func:`torch.true_divide`
+    div will perform true division as in Python 3. Use :func:`torch.true_divide`
     or :func:`torch.floor_divide` (// in Python), instead.
 
 .. math::

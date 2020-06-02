@@ -81,12 +81,10 @@ class TestSaveLoad(JitTestCase):
     # Helper which returns the result of a function or the exception the
     #   function threw.
     def _try_fn(self, fn, *args, **kwargs):
-        result = None
         try:
-            result = fn(*args, **kwargs)
+            return fn(*args, **kwargs)
         except Exception as e:
-            result = e
-        return result
+            return e
 
     def _verify_no(self, kind, m):
         node_count = sum(kind in str(n) for n in m.graph.nodes())
