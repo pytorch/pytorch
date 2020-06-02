@@ -19,6 +19,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/ComplexHelper.h>
 
 #include <algorithm>
 #include <cmath>
@@ -135,15 +136,21 @@ Tensor angle(const Tensor& self) {
 }
 
 Tensor real(const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "real is not yet implemented for complex tensors.");
-  return self;
+  if (self.is_complex()) {
+    auto float_tensor = at::native::view_complex_as_float(self);
+    return at::select(float_tensor, float_tensor.dim() - 1, 0);
+  } else {
+    TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
+  }
 }
 
 Tensor imag(const Tensor& self) {
-  TORCH_CHECK(false, "imag is not yet implemented.");
-
-  // Note: unreachable
-  return at::zeros_like(self);
+  if (self.is_complex()) {
+    auto float_tensor = at::native::view_complex_as_float(self);
+    return at::select(float_tensor, float_tensor.dim() - 1, 1);
+  } else {
+    TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
+  }
 }
 
 Tensor& copy_real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }

@@ -132,3 +132,24 @@ inline std::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
 
   return std::complex<double>(value.real, value.imag);
 }
+
+inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
+  if (PyFloat_Check(obj)) {
+    return (bool)PyFloat_AS_DOUBLE(obj);
+  }
+
+  if (PyComplex_Check(obj)) {
+    double real_val = PyComplex_RealAsDouble(obj);
+    double imag_val = PyComplex_ImagAsDouble(obj);
+    return !(real_val == 0 && imag_val == 0);
+  }
+
+  int overflow;
+  long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  // No need to check overflow, because when overflow occured, it should
+  // return true in order to keep the same behavior of numpy.
+  return (bool)value;
+}

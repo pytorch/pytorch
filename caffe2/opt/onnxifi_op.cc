@@ -164,7 +164,61 @@ void BlobToTensorDescriptor(
   }
 }
 
+uint64_t getOnnxifiDataType(caffe2::TensorProto::DataType t) {
+#define CAFFE2_TO_ONNXIFI_TYPE(x) \
+  case (caffe2::TensorProto::x):  \
+    return ONNXIFI_DATATYPE_##x
+  switch (t) {
+    CAFFE2_TO_ONNXIFI_TYPE(INT8);
+    CAFFE2_TO_ONNXIFI_TYPE(UINT8);
+    CAFFE2_TO_ONNXIFI_TYPE(UINT16);
+    CAFFE2_TO_ONNXIFI_TYPE(INT16);
+    CAFFE2_TO_ONNXIFI_TYPE(INT32);
+    CAFFE2_TO_ONNXIFI_TYPE(INT64);
+    CAFFE2_TO_ONNXIFI_TYPE(FLOAT16);
+    case (caffe2::TensorProto::FLOAT):
+      return ONNXIFI_DATATYPE_FLOAT32;
+    default:
+      LOG(WARNING) << "Unsupported Caffe2 tensor type: " << t;
+      return ONNXIFI_DATATYPE_UNDEFINED;
+  }
+#undef CAFFE2_TO_ONNXIFI_TYPE
+}
+
 } // namespace
+
+namespace details {
+TensorInfo::TensorInfo(const TensorProto& t)
+    : onnxifi_type(getOnnxifiDataType(t.data_type())),
+      quantized(false),
+      quantizationAxis(0),
+      quantizationParams(0) {
+  for (const auto d : t.dims()) {
+    dims.push_back(d);
+  }
+}
+
+TensorInfo::TensorInfo(const QTensorProto& t)
+    : onnxifi_type(getOnnxifiDataType(t.data_type())),
+      quantized(true),
+      quantizationAxis(t.has_axis() ? t.axis() : 0),
+      quantizationParams(t.scales_size() ? t.scales_size() : 1) {
+  for (const auto d : t.dims()) {
+    dims.push_back(d);
+  }
+  if (t.scales_size()) {
+    for (const auto d : t.scales()) {
+      scales.push_back(static_cast<float>(d));
+    }
+    for (const auto d : t.biases()) {
+      biases.push_back(static_cast<int32_t>(d));
+    }
+  } else {
+    scales.push_back(static_cast<float>(t.scale()));
+    biases.push_back(static_cast<int32_t>(t.bias()));
+  }
+}
+} // namespace details
 
 template <>
 std::vector<onnxTensorDescriptorV1>
@@ -239,10 +293,11 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   // Otherwise, do a pass of shape inference to get the real shapes of the
   // outputs.
   const auto& t = Input(nominal_batch_idx_);
-  const auto dims = t.sizes();
-  const int current_batch_size = dims[0];
   CAFFE_ENFORCE(
       !t.sizes().empty(), input_names_[nominal_batch_idx_], " cannot be empty");
+  const auto dims = t.sizes();
+  const int current_batch_size = dims[0];
+
   if (current_batch_size == max_batch_size_) {
     return max_batch_size_;
   }
@@ -274,7 +329,7 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     input_shape_info_[input_names_[i]] = ShapeInfo(dim_type, std::move(shape));
   }
   bound_shape_inferencer->InferBoundShapeAndType(
-      netdef_, input_shape_info_, nullptr);
+      netdef_, input_shape_info_, nullptr, false);
   const auto& shape_info = bound_shape_inferencer->shape_info();
   for (int i = 0; i < OutputSize(); ++i) {
     const auto it = shape_info.find(output_names_[i]);
@@ -318,7 +373,13 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
 
 template <>
 void OnnxifiOp<CPUContext>::adjustOutputBatchSizes(int current_batch_size) {
-  const auto& output_reshape_info = output_reshape_info_.at(current_batch_size);
+  auto it = output_reshape_info_.find(current_batch_size);
+  CAFFE_ENFORCE(
+      it != output_reshape_info_.end(),
+      "Cannot find current_batch_size ",
+      current_batch_size,
+      " in output_reshape_info_");
+  const auto& output_reshape_info = it->second;
   CPUContext context;
   Tensor tmp(CPU);
   for (int i = 0; i < OutputSize(); ++i) {

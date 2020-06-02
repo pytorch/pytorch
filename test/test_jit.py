@@ -352,6 +352,13 @@ class TestJit(JitTestCase):
 
         self.checkTrace(f, (x, y))
 
+    def test_inferred_as_tensor(self):
+        with self.assertRaisesRegex(RuntimeError, "Inferred the value for argument 'dim' to be of type 'Tensor' "
+                                                  "because it was not annotated with an explicit type"):
+            @torch.jit.script
+            def dot(points, query, dim):
+                return (points * query).sum(dim)
+
     def test_trace_checking_with_global_name(self):
         class MyClass(torch.nn.Module):
             def __init__(self):
@@ -7389,7 +7396,7 @@ a")
                             continue
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    self.assertEqual(res_python, res_script, message=msg, atol=(1e-4) * max(abs(res_python), res_script))
+                    self.assertEqual(res_python, res_script, msg=msg, atol=(1e-4) * max(abs(res_python), res_script), rtol=0)
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
@@ -7938,8 +7945,8 @@ a")
             message = 'with code `{} {} {}` and t={}'.format(args[0], op, args[1], tensor)
             res1 = cu.func(tensor)
             res2 = scope['func'](tensor)
-            self.assertEqual(res1, res2, message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
-            self.assertEqual(res1.dtype, res2.dtype, message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
+            self.assertEqual(res1, res2, msg=message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
+            self.assertEqual(res1.dtype, res2.dtype, msg=message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
 
         var_int = [2, -2]
         var_float = [1.4321, -1.2]
@@ -8290,7 +8297,7 @@ a")
             self.assertEqual(
                 cu.func(),
                 scope['func'](),
-                "Failed with op: {}, lhs: {}, rhs: {}"
+                msg="Failed with op: {}, lhs: {}, rhs: {}"
                 .format(op, args[0], args[1])
             )
 
@@ -8342,17 +8349,6 @@ a")
         self.assertEqual(any_refinement2(3), torch.tensor(3))
         self.assertEqual(any_refinement2(torch.tensor(5)), torch.tensor(5))
 
-    def test_any_in_class_fails(self):
-        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
-            @torch.jit.script
-            class Foo(object):
-                def __init__(self, a):
-                    # type: (Tuple[int,Any]) -> None
-                    self.a = a
-
-                def hi(self):
-                    pass
-
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
@@ -8369,7 +8365,7 @@ a")
             self.assertEqual(
                 cu.func(inp),
                 scope['func'](inp),
-                "Failed with typ: {}"
+                msg="Failed with typ: {}"
                 .format(typ)
             )
 
