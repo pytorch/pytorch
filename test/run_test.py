@@ -573,6 +573,13 @@ def get_dep_modules(test):
             'urllib',
             'json',
             'collections',
+            # Modules below are excluded because they are hitting https://bugs.python.org/issue40350
+            # Trigger AttributeError: 'NoneType' object has no attribute 'is_package'
+            'mpl_toolkits',
+            'google',
+            'onnx',
+            # Triggers RecursionError
+            'mypy'
         ],
     )
     # HACK: some platforms default to ascii, so we can't just run_script :(
