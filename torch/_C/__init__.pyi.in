@@ -209,4 +209,5 @@ class _TensorBase(object):
     layout: _layout
     real: Tensor
     imag: Tensor
+    _version: _bool
     ${tensor_method_hints}
