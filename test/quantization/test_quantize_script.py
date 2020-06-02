@@ -710,7 +710,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         m = torch.jit.script(M()).eval()
         m = prepare_script(m, {'': default_qconfig})
-        # One observer for input and one observer for output
+        # one observer for input and one observer for output
         # no observer for output of quant_prop
         assert len(attrs_with_prefix(m, '_observer_',)) == 2
         # one observer for output of conv for each branch
