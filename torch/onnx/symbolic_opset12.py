@@ -10,10 +10,6 @@ from torch.onnx.symbolic_helper import parse_args, _parse_arg
 
 # This file exports ONNX ops for opset 12
 
-black_listed_operators = [
-    "ArgMin", "ArgMax"
-]
-
 @parse_args('s', 'v')
 def einsum(g, equation, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
