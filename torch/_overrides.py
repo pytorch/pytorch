@@ -733,6 +733,8 @@ def get_testing_overrides():
         Tensor.requires_grad.__get__: lambda self: -1,
         Tensor.shape.__get__: lambda self: -1,
         Tensor.volatile.__get__: lambda self: -1,
+        Tensor.real.__get__: lambda self: -1,
+        Tensor.imag.__get__: lambda self: -1,
         Tensor.__cuda_array_interface__.__get__: lambda self: -1,
         Tensor.type: lambda self, dtype=None, non_blocking=False, **kwargs: -1,
         Tensor._coalesced_: lambda self: -1,
@@ -864,7 +866,7 @@ def get_testing_overrides():
 
         for name in names:
             func = getattr(Tensor, name, None)
-            if func is not None and func not in ret and func not in ignored:
+            if callable(func) and func not in ret and func not in ignored:
                 ret2[func] = v
 
     ret.update(ret2)

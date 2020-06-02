@@ -630,6 +630,9 @@ static PyObject * THPVariable_device(THPVariable* self, void *unused) {
 PyObject *THPVariable_get_real(THPVariable* self, void *unused)
 {
   HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "real");
+  }
   auto& self_ = self->cdata;
   auto real = at::real(self_);
   return THPVariable_Wrap(real);
@@ -639,6 +642,9 @@ PyObject *THPVariable_get_real(THPVariable* self, void *unused)
 PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
 {
   HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "imag");
+  }
   auto& self_ = self->cdata;
   auto imag = at::imag(self_);
   return THPVariable_Wrap(imag);
