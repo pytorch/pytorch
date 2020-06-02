@@ -864,9 +864,12 @@ TensorTypePtr TensorType::create(
     const VaryingShape<ShapeSymbol>& sizes,
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined) {
-  return TensorTypePtr(new TensorType(
+    c10::optional<bool> undefined,
+    bool is_inferred) {
+    auto pt = TensorTypePtr(new TensorType(
       scalar_type, device, sizes, strides, requires_grad, undefined));
+    pt->is_inferred_ = is_inferred;
+  return pt;
 }
 
 TensorTypePtr TensorType::create(
