@@ -582,18 +582,18 @@ void InsertQuantDeQuantHelper::extractAndRunWeightObserver(
     Value* self,
     Node* observer) {
   Value* observed_weight = observer->output();
+  TORCH_CHECK(
+      isWeight(module, observed_weight),
+      "runWeightObserver can only be called on weight tensors");
   Graph* g = observer->owningGraph();
   std::vector<Node*> weight_subgraph;
   remap_values_in_observer_subgraph_.clear();
+
   // If the graph was already visited, return list of relevant nodes directly.
   if (graph_to_subgraph_nodes_.count(g)) {
     weight_subgraph = graph_to_subgraph_nodes_[g];
   } else {
     weight_subgraph.push_back(observer);
-    TORCH_CHECK(
-        isWeight(module, observed_weight),
-        "runWeightObserver can only be called on weight tensors");
-
     Node* n = observer;
     // Values in the subgraph for which producer needs to be found.
     std::unordered_set<Value*> subgraph_node_inputs;
@@ -930,7 +930,6 @@ void InsertQuantDeQuantHelper::run(
   // We only need to register new parameters if the graph has
   // been quantized before
   // TODO: dedup this part with code in quantizeTensors
-
   if (observer_nodes_for_graph_.count(graph.get())) {
     for (auto* n : observer_nodes_for_graph_.at(graph.get())) {
       auto tp = getQSchemeAndQParamVector(module, n);
@@ -984,7 +983,6 @@ void InsertQuantDeQuantHelper::run(
   for (Value* v : input_values) {
     collectObserverNodesAndValueToQuantize(module, v);
   }
-
   GRAPH_DUMP("Before Quantize Tensors:", graph);
   Value* self = graph->inputs()[0];
   quantizeTensors(module, graph.get(), self);
