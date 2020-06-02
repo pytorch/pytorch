@@ -5,7 +5,8 @@ import torch
 import torch.onnx
 from torch.onnx import utils, OperatorExportTypes
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
-from test_pytorch_common import skipIfUnsupportedOpsetVersion, skipIfUnsupportedMinOpsetVersion
+import torch.utils.cpp_extension
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 
 import onnx
 import onnxruntime  # noqa
@@ -56,8 +57,6 @@ class TestUtilityFuns(TestCase):
         assert "Provided key invalid_name2 for dynamic axes is not a valid input/output name" in messages
         assert len(messages) == 2
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
             def forward(self, x):
@@ -114,8 +113,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::ReduceL1"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
             def forward(self, x):
@@ -136,8 +133,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_slice_index_exceeds_dim(self):
         class SliceIndexExceedsDimModule(torch.nn.Module):
             def forward(self, x):
@@ -159,8 +154,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_slice_negative_index(self):
         class SliceNegativeIndexModule(torch.nn.Module):
             def forward(self, x):
@@ -202,8 +195,6 @@ class TestUtilityFuns(TestCase):
         for node in graph.nodes():
             assert node.kind() != "onnx::Gather"
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_unsqueeze(self):
         class UnsqueezeModule(torch.nn.Module):
             def forward(self, x):
@@ -224,8 +215,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_concat(self):
         class ConcatModule(torch.nn.Module):
             def forward(self, x):
@@ -263,8 +252,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
             def __init__(self):
@@ -287,8 +274,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Unsqueeze"
         assert len(list(graph.nodes())) == 3
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_transpose_matmul(self):
         class MatMulNet(torch.nn.Module):
             def __init__(self):
@@ -308,8 +293,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Transpose"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_reshape(self):
         class ReshapeModule(torch.nn.Module):
             def __init__(self, ):
@@ -329,8 +312,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Reshape"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_div(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -350,8 +331,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Div"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_mul(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -371,8 +350,6 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Mul"
         assert len(list(graph.nodes())) == 1
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_add(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -398,8 +375,6 @@ class TestUtilityFuns(TestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(weight, torch.tensor([2, 3, 4, 5, 6]))
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_sub(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -425,8 +400,6 @@ class TestUtilityFuns(TestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(weight, torch.tensor([0, -1, -2, -3, -4]))
 
-    # TODO : enable when constant folding is enabled for opset 12
-    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_sqrt(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -545,9 +518,120 @@ class TestUtilityFuns(TestCase):
         torch.onnx.export(model, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
+        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
         ort_outs = ort_sess.run(None, ort_inputs)
         assert x != ort_outs[0]
+
+    def test_aten_fallthrough(self):
+        # Test aten export of op with no symbolic
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.triu(x)
+
+        x = torch.randn(2, 3, 4)
+        _set_opset_version(self.opset_version)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ),
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+        iter = graph.nodes()
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "aten::triu"
+
+    def test_custom_op_fallthrough(self):
+        # Test custom op
+        op_source = """
+        #include <torch/script.h>
+
+        torch::Tensor custom_add(torch::Tensor self, torch::Tensor other) {
+          return self + other;
+        }
+
+        static auto registry =
+          torch::RegisterOperators("custom_namespace::custom_op", &custom_add);
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="custom_add",
+            cpp_sources=op_source,
+            is_python_module=False,
+            verbose=True,
+        )
+
+        class FooModel(torch.nn.Module):
+            def forward(self, input, other):
+                # Calling custom op
+                return torch.ops.custom_namespace.custom_op(input, other)
+
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        y = torch.randn(2, 3, 4, requires_grad=False)
+        model = FooModel()
+        graph, _, __ = torch.onnx.utils._model_to_graph(model, (x, y),
+                                                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH)
+        iter = graph.nodes()
+        assert next(iter).kind() == "custom_namespace::custom_op"
+
+    def test_onnx_fallthrough(self):
+        # Test aten export of op with symbolic for aten
+        x = torch.randn(100, 128)
+        y = torch.randn(100, 128)
+        model = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+
+        graph, _, __ = utils._model_to_graph(model, (x, y),
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+        iter = graph.nodes()
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "aten::cosine_similarity"
+
+    def test_quantized_fallthrough(self):
+        # Test Quantized op
+        class QModule(torch.nn.Module):
+            def __init__(self):
+                super(QModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                res = self.quant1(x)
+                return self.dequant(res)
+
+        model = QModule()
+        torch.backends.quantized.engine = "qnnpack"
+        pt_inputs = (torch.randn(1, 2, 3, 4))
+        model.qconfig = torch.quantization.default_qconfig
+        q_model = torch.quantization.prepare(model, inplace=False)
+        q_model = torch.quantization.convert(q_model, inplace=False)
+
+        q_model.eval()
+        output = q_model(*pt_inputs)
+
+        graph, _, __ = utils._model_to_graph(q_model, pt_inputs, example_outputs=output,
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+
+        iter = graph.nodes()
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "aten::quantize_per_tensor"
+        assert next(iter).kind() == "aten::dequantize"
+
+    def test_prim_fallthrough(self):
+        # Test prim op
+        class PrimModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if isinstance(x, list):
+                    y = x
+                else:
+                    y = [x]
+                return y
+
+        x = torch.tensor([2])
+        model = PrimModule()
+        output = model(x)
+        graph, _, __ = utils._model_to_graph(model, (x,), example_outputs=output,
+                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+        iter = graph.nodes()
+        assert next(iter).kind() == "prim::ListConstruct"
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training_zero(self):

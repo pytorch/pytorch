@@ -51,9 +51,10 @@ double ProcessGroupAgent::AverageMetricsTracker::computeAverage() {
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
-const ProcessGroupAgent::steady_clock_time_point
-    ProcessGroupAgent::kInfiniteTimeoutTimePoint =
-        std::chrono::time_point<std::chrono::steady_clock>::max();
+using steady_clock_time_point =
+    std::chrono::time_point<std::chrono::steady_clock>;
+const steady_clock_time_point kInfiniteTimeoutTimePoint =
+    std::chrono::time_point<std::chrono::steady_clock>::max();
 const std::string kNumPendingRequests = "agent.num_pending_requests";
 const std::string kThreadPoolSize = "agent.thread_pool_size";
 const std::string kNumIdleThreads = "agent.num_idle_threads";

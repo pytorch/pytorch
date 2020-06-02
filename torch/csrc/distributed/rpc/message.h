@@ -93,6 +93,7 @@ class TORCH_API Message final {
   std::vector<char>&& movePayload() &&;
   std::vector<torch::Tensor>&& moveTensors() &&;
 
+  std::vector<char>& payload();
   const std::vector<char>& payload() const;
   std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
