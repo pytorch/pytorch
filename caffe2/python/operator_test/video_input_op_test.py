@@ -226,6 +226,8 @@ class VideoInputOpTest(unittest.TestCase):
             decode_type=0,
             video_res_type=1,  # use shorter edge
             get_rgb=True,
+            length_rgb=8,
+            short_edge=112,
         )
 
         workspace.RunNetOnce(model.param_init_net)
@@ -272,6 +274,7 @@ class VideoInputOpTest(unittest.TestCase):
             video_res_type=1,  # use shorter edge
             get_rgb=False,
             get_optical_flow=True,
+            short_edge=112,
         )
 
         workspace.RunNetOnce(model.param_init_net)
