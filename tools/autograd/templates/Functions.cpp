@@ -2660,7 +2660,6 @@ infinitely_differentiable_native_group_norm_backward(
   return std::make_tuple(dX, dgamma, dbeta);
 }
 
-// TODO: need to find out what _trilinear does before I can handle grad_out.defined() == false
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
