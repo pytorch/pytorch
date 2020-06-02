@@ -476,22 +476,29 @@ constexpr T imag(const c10::complex<T>& z) {
   return z.imag();
 }
 
-#if defined(CUDA_VERSION) && (CUDA_VERSION < 10000)
-#define CUDA92_BUG(x) thrust::complex<T>(x.real(), x.imag())
+#if defined(__CUDACC__) || defined(__HIPCC__)
+namespace c10_internal {
+  template<typename T>
+  C10_HOST_DEVICE constexpr thrust::complex<T> cuda101bug_cast_c10_complex_to_thrust_complex(const c10::complex<T>& x) {
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 10200)
+    // This is to circumvent a CUDA compilation bug. See https://github.com/pytorch/pytorch/pull/38941 .
+    // When the bug is fixed, we should do static_cast directly.
+    return thrust::complex<T>(x.real(), x.imag());
 #else
-#define CUDA92_BUG(x) x
+    return static_cast<thrust::complex<T>>(x);
+#endif
+  }
+} // namespace c10_internal
 #endif
 
 template<typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return thrust::abs(static_cast<thrust::complex<T>>(CUDA92_BUG(z)));
+  return thrust::abs(c10_internal::cuda101bug_cast_c10_complex_to_thrust_complex(z));
 #else
   return std::abs(static_cast<std::complex<T>>(z));
 #endif
 }
-
-#undef CUDA92_BUG
 
 #ifdef __HIP_PLATFORM_HCC__
 #define ROCm_Bug(x)

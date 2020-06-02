@@ -215,7 +215,7 @@ void GroupNormInputBackward(
 }
 
 template <typename T>
-void GammaBetaBacward(
+void GammaBackward(
     int64_t N,
     int64_t C,
     int64_t group,
@@ -223,23 +223,35 @@ void GammaBetaBacward(
     const T* rstd,
     const T* ds,
     const T* db,
-    T* dgamma,
-    T* dbeta) {
+    T* dgamma) {
   const int64_t G = group;
   const int64_t D = C / G;
   constexpr int64_t K = vec256::Vec256<T>::size();
+  at::parallel_for(0, D, K, [=](int64_t start, int64_t end) {
+    for (int64_t i = 0; i < G; ++i) {
+      std::memset(dgamma + i * D + start, 0, (end - start) * sizeof(T));
+    }
+    for (int64_t i = 0; i < N * G; ++i) {
+      const T* ds_ptr = ds + i * D;
+      const T* db_ptr = db + i * D;
+      const int64_t g = i % G;
+      for (int64_t j = start; j < end; ++j) {
+        const int64_t c = g * D + j;
+        dgamma[c] += (ds_ptr[j] - db_ptr[j] * mean[i]) * rstd[i];
+      }
+    }
+  });
+}
+
+template <typename T>
+void BetaBackward(int64_t N, int64_t C, const T* db, T* dbeta) {
+  constexpr int64_t K = vec256::Vec256<T>::size();
   at::parallel_for(0, C, K, [=](int64_t start, int64_t end) {
+    std::memset(dbeta + start, 0, (end - start) * sizeof(T));
     for (int64_t i = 0; i < N; ++i) {
-      const T* ds_ptr = ds + i * C;
       const T* db_ptr = db + i * C;
       for (int64_t j = start; j < end; ++j) {
-        const int64_t ng = i * G + j / D;
-        if (dgamma != nullptr) {
-          dgamma[j] += (ds_ptr[j] - db_ptr[j] * mean[ng]) * rstd[ng];
-        }
-        if (dbeta != nullptr) {
-          dbeta[j] += db_ptr[j];
-        }
+        dbeta[j] += db_ptr[j];
       }
     }
   });
@@ -295,23 +307,13 @@ void GroupNormBackwardKernelImplInternal(
         db_data,
         dX_data);
   }
-
   if (dgamma_data != nullptr) {
-    std::memset(dgamma_data, 0, C * sizeof(T));
+    GammaBackward<T>(
+        N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
   }
   if (dbeta_data != nullptr) {
-    std::memset(dbeta_data, 0, C * sizeof(T));
+    BetaBackward<T>(N, C, db_data, dbeta_data);
   }
-  GammaBetaBacward<T>(
-      N,
-      C,
-      group,
-      mean_data,
-      rstd_data,
-      ds_data,
-      db_data,
-      dgamma_data,
-      dbeta_data);
 }
 
 void GroupNormBackwardKernelImpl(

@@ -316,6 +316,10 @@ def add_use_future_cb(to, x, y, z):
     return out.result()
 
 
+def get_events_from_profile(profile_rref):
+    return profile_rref.local_value().process_global_function_events
+
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -975,6 +979,47 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.tensor(1),),
             use_record_function=True,
         )
+
+    def _assert_top_level_events(self, process_global_events, expected_top_level_event_names):
+        top_level_event_names = []
+        for thread_local_events in process_global_events:
+            # Get top-level events from all events happened on a thread.
+            last_end_time = 0
+            for event in thread_local_events:
+                event_name = event.name
+                cpu_interval = event.cpu_interval
+                if cpu_interval.start > last_end_time:
+                    top_level_event_names.append(event_name)
+                    last_end_time = cpu_interval.end
+        self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
+
+    @dist_init
+    def test_server_process_global_profiler(self):
+        if self.rank != 0:
+            return
+
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker_name = worker_name(dst_rank)
+
+        x = torch.tensor(1)
+        y = torch.tensor(2)
+
+        outer_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        outer_profile_rref.rpc_sync().__enter__()
+        rpc.rpc_sync(dst_worker_name, torch.add, (x, y))
+        inner_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        inner_profile_rref.rpc_sync().__enter__()
+        rpc.rpc_sync(dst_worker_name, torch.sub, (x, y))
+        inner_profile_rref.rpc_sync().__exit__(None, None, None)
+        outer_profile_rref.rpc_sync().__exit__(None, None, None)
+
+        inner_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (inner_profile_rref,))
+        self._assert_top_level_events(inner_events, ['sub'])
+        outer_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (outer_profile_rref,))
+        self._assert_top_level_events(outer_events, ['add', 'sub'])
+
+        inner_profile_rref.rpc_sync().key_averages()
+        outer_profile_rref.rpc_sync().key_averages()
 
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
