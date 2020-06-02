@@ -797,9 +797,12 @@ static inline void split_batch_dim_to_32bit_out(
 
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-#define ASSERT_CORRECT_PRECISION(use_tf32, math_type) TORCH_INTERNAL_ASSERT(use_tf32 || math_type == CUDNN_FMA_MATH)
+#define ASSERT_CORRECT_PRECISION(math_type)                                   \
+if (args.params.dataType == CUDNN_DATA_FLOAT) {                               \
+  TORCH_INTERNAL_ASSERT(args.params.use_tf32 || math_type == CUDNN_FMA_MATH); \
+}
 #else
-#define ASSERT_CORRECT_PRECISION(use_tf32, math_type)
+#define ASSERT_CORRECT_PRECISION(math_type)
 #endif  //CUDA_VERSION >= 11000
 
 
@@ -846,7 +849,7 @@ void raw_cudnn_convolution_forward_out_32bit(
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
-      ASSERT_CORRECT_PRECISION(args.params.use_tf32, fwdAlgPerf.mathType);
+      ASSERT_CORRECT_PRECISION(fwdAlgPerf.mathType);
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), fwdAlgPerf.mathType));
 
       Constant one(dataType, 1);
@@ -973,7 +976,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   args.idesc.set(grad_input);
   args.wdesc.set(weight, 0, grad_output.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.use_tf32);
 
   AlgoIterator<cudnnConvolutionBwdDataAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionBwdDataAlgoPerf_t &bwdDataAlgPerf){
@@ -982,7 +985,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
-      ASSERT_CORRECT_PRECISION(args.params.use_tf32, fwdAlgPerf.mathType);
+      ASSERT_CORRECT_PRECISION(fwdAlgPerf.mathType);
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdDataAlgPerf.mathType));
 
       Constant one(dataType, 1);
@@ -1135,7 +1138,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
   args.idesc.set(input);
   args.wdesc.set(grad_weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups, args.params.use_tf32);
 
   AlgoIterator<cudnnConvolutionBwdFilterAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionBwdFilterAlgoPerf_t &bwdFilterAlgPerf){
@@ -1144,7 +1147,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
       // See Note [behavior of cudnnFind and cudnnGet]
-      ASSERT_CORRECT_PRECISION(args.params.use_tf32, fwdAlgPerf.mathType);
+      ASSERT_CORRECT_PRECISION(fwdAlgPerf.mathType);
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.mut_desc(), bwdFilterAlgPerf.mathType));
 
       Constant one(dataType, 1);
