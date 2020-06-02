@@ -43,8 +43,4 @@ class Parameter(torch.Tensor):
             (self.data, self.requires_grad, OrderedDict())
         )
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        with DisableTorchFunction():
-            return func(*args, **kwargs)
+    __torch_function__ = None

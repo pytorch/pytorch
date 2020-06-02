@@ -663,10 +663,10 @@ static bool _is_basic_python_type(PyTypeObject *tp)
 
 static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
 {
-  PyTypeObject *tp = Py_TYPE(obj);
   if (THPVariable_CheckExact(obj)) {
       return py::object();
   }
+  PyTypeObject *tp = Py_TYPE(obj);
   if (_is_basic_python_type(tp)) {
     return py::object();
   }
@@ -688,7 +688,7 @@ static auto check_has_torch_function(PyObject* obj) -> bool
     return false;
   }
   py::object method = PyTorch_LookupSpecial(obj, "__torch_function__");
-  if(method.ptr() != nullptr){
+  if(method.ptr() != nullptr && method.ptr() != Py_None){
     return true;
   }
   return false;
