@@ -1,6 +1,4 @@
 import collections
-import sys
-import time
 import unittest
 
 import numpy as np
@@ -54,29 +52,6 @@ class TestOpenMP_ParallelFor(TestCase):
         # If m == 0 it will not be present. Assert it is missing or < 1000.
         self.assertTrue(len(coefs) < 2 or coefs[1] < 1000,
                         msg='memory did not stabilize, {}'.format(str(list(last_rss))))
-
-    @unittest.skipIf(sys.platform == 'win32' or ncores < 5,
-                     "expected speedup not achieved on this platform")
-    def test_time(self):
-        """Make sure setting num_threads = 5 is faster
-        """
-        torch.set_num_threads(self.ncores)
-        start = time.perf_counter()
-        self.func(300)
-        stop = time.perf_counter()
-        n_thread_time = stop - start
-
-        torch.set_num_threads(1)
-        start = time.perf_counter()
-        self.func(300)
-        stop = time.perf_counter()
-        one_thread_time = stop - start
-
-        # in a perfect world the threads would scale 1:n,
-        # but in reality there is about 1 thread worth of overhead for
-        # this smallish task, and leave 20% for wiggle room
-        scale = (n_thread_time * (self.ncores - 1))
-        self.assertTrue(abs(scale - one_thread_time) / one_thread_time < 0.2)
 
     def test_one_thread(self):
         """Make sure there is no memory leak with one thread: issue gh-32284
