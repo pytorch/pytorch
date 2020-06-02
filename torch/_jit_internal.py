@@ -31,7 +31,16 @@ def createResolutionCallbackFromEnv(lookup_base):
         # or `a.b.c.d`. We first look up `torch` or `a` in the function's closed
         # over scope, then proceed to use the looked-up value to go down the
         # chain.
-        if '.' in qualified_name:
+        if '[' in qualified_name:
+            first, last = qualified_name.find('['), qualified_name.rfind(']')
+            base = qualified_name[:first]
+            subexp = qualified_name[first + 1: last]
+
+            # either base or subexp could include '.' or '['
+            base_mod = env(base, module)
+            subexp_mod = env(subexp, module)
+            return base_mod[subexp_mod]
+        elif '.' in qualified_name:
             parts = qualified_name.split('.')
             base = parts[0]
             remainding_pieces = '.'.join(parts[1:])
