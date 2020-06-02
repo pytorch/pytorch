@@ -68,7 +68,7 @@ use cases, but if you are seeing precision issue, try manually turning it off:
 
 .. code:: python
 
-  torch.backends.cuda.matmul.use_tf32 = False  # for matrix multiplications
+  torch.backends.cuda.matmul.allow_tf32 = False  # for matrix multiplications
 
 .. _TensorFloat-32: https://blogs.nvidia.com/blog/2020/05/14/tensorfloat-32-precision-format/
 .. _CUDA 11: https://devblogs.nvidia.com/cuda-11-features-revealed/
