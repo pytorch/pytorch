@@ -7,6 +7,11 @@
 
 version: 2.1
 
+parameters:
+  run_binary_tests:
+    type: boolean
+    default: false
+
 docker_config_defaults: &docker_config_defaults
   user: jenkins
   aws_auth:
@@ -2032,6 +2037,1596 @@ jobs:
 # Workflows
 ##############################################################################
 workflows:
+  binary_builds:
+    jobs:
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_build
+          build_environment: "manywheel 3.6m cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_build
+          build_environment: "manywheel 3.7m cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_build
+          build_environment: "manywheel 3.8m cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_6m_cu92_devtoolset7_nightly_build
+          build_environment: "manywheel 3.6m cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda92"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_build
+          build_environment: "manywheel 3.7m cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda92"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_8m_cu92_devtoolset7_nightly_build
+          build_environment: "manywheel 3.8m cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda92"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build
+          build_environment: "manywheel 3.6m cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_7m_cu101_devtoolset7_nightly_build
+          build_environment: "manywheel 3.7m cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_build
+          build_environment: "manywheel 3.8m cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_6m_cu102_devtoolset7_nightly_build
+          build_environment: "manywheel 3.6m cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_build
+          build_environment: "manywheel 3.7m cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_build
+          build_environment: "manywheel 3.8m cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_conda_3_6_cpu_devtoolset7_nightly_build
+          build_environment: "conda 3.6 cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_7_cpu_devtoolset7_nightly_build
+          build_environment: "conda 3.7 cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_8_cpu_devtoolset7_nightly_build
+          build_environment: "conda 3.8 cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_6_cu92_devtoolset7_nightly_build
+          build_environment: "conda 3.6 cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_7_cu92_devtoolset7_nightly_build
+          build_environment: "conda 3.7 cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_8_cu92_devtoolset7_nightly_build
+          build_environment: "conda 3.8 cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_6_cu101_devtoolset7_nightly_build
+          build_environment: "conda 3.6 cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
+          build_environment: "conda 3.7 cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_8_cu101_devtoolset7_nightly_build
+          build_environment: "conda 3.8 cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_6_cu102_devtoolset7_nightly_build
+          build_environment: "conda 3.6 cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_7_cu102_devtoolset7_nightly_build
+          build_environment: "conda 3.7 cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_8_cu102_devtoolset7_nightly_build
+          build_environment: "conda 3.8 cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cpu devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/manylinux-cuda92"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/manylinux-cuda92"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/manylinux-cuda92"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/manylinux-cuda92"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/manylinux-cuda101"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_build
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_linux_build:
+          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_build
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - binary_mac_build:
+          name: binary_macos_wheel_3_6_cpu_nightly_build
+          build_environment: "wheel 3.6 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
+          name: binary_macos_wheel_3_7_cpu_nightly_build
+          build_environment: "wheel 3.7 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
+          name: binary_macos_wheel_3_8_cpu_nightly_build
+          build_environment: "wheel 3.8 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
+          name: binary_macos_conda_3_6_cpu_nightly_build
+          build_environment: "conda 3.6 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
+          name: binary_macos_conda_3_7_cpu_nightly_build
+          build_environment: "conda 3.7 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
+          name: binary_macos_conda_3_8_cpu_nightly_build
+          build_environment: "conda 3.8 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
+          name: binary_macos_libtorch_3_7_cpu_nightly_build
+          build_environment: "libtorch 3.7 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_6_cpu_nightly_build
+          build_environment: "wheel 3.6 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_7_cpu_nightly_build
+          build_environment: "wheel 3.7 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_8_cpu_nightly_build
+          build_environment: "wheel 3.8 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_6_cu92_nightly_build
+          build_environment: "wheel 3.6 cu92"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_7_cu92_nightly_build
+          build_environment: "wheel 3.7 cu92"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_8_cu92_nightly_build
+          build_environment: "wheel 3.8 cu92"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_6_cu101_nightly_build
+          build_environment: "wheel 3.6 cu101"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_7_cu101_nightly_build
+          build_environment: "wheel 3.7 cu101"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_8_cu101_nightly_build
+          build_environment: "wheel 3.8 cu101"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_6_cu102_nightly_build
+          build_environment: "wheel 3.6 cu102"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_7_cu102_nightly_build
+          build_environment: "wheel 3.7 cu102"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_wheel_3_8_cu102_nightly_build
+          build_environment: "wheel 3.8 cu102"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_6_cpu_nightly_build
+          build_environment: "conda 3.6 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_7_cpu_nightly_build
+          build_environment: "conda 3.7 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_8_cpu_nightly_build
+          build_environment: "conda 3.8 cpu"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_6_cu92_nightly_build
+          build_environment: "conda 3.6 cu92"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_7_cu92_nightly_build
+          build_environment: "conda 3.7 cu92"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_8_cu92_nightly_build
+          build_environment: "conda 3.8 cu92"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_6_cu101_nightly_build
+          build_environment: "conda 3.6 cu101"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_7_cu101_nightly_build
+          build_environment: "conda 3.7 cu101"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_8_cu101_nightly_build
+          build_environment: "conda 3.8 cu101"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_6_cu102_nightly_build
+          build_environment: "conda 3.6 cu102"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_7_cu102_nightly_build
+          build_environment: "conda 3.7 cu102"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_conda_3_8_cu102_nightly_build
+          build_environment: "conda 3.8 cu102"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cpu_debug_nightly_build
+          build_environment: "libtorch 3.7 cpu debug"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cu92_debug_nightly_build
+          build_environment: "libtorch 3.7 cu92 debug"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cu101_debug_nightly_build
+          build_environment: "libtorch 3.7 cu101 debug"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cu102_debug_nightly_build
+          build_environment: "libtorch 3.7 cu102 debug"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cpu_release_nightly_build
+          build_environment: "libtorch 3.7 cpu release"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cu92_release_nightly_build
+          build_environment: "libtorch 3.7 cu92 release"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cu101_release_nightly_build
+          build_environment: "libtorch 3.7 cu101 release"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_windows_build:
+          name: binary_windows_libtorch_3_7_cu102_release_nightly_build
+          build_environment: "libtorch 3.7 cu102 release"
+          filters:
+            branches:
+              only: /.*/
+            tags:
+              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_6m_cpu_devtoolset7_nightly
+          build_environment: "manywheel 3.6m cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda102"
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_7m_cpu_devtoolset7_nightly
+          build_environment: "manywheel 3.7m cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda102"
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_cpu_devtoolset7_nightly
+          build_environment: "manywheel 3.8m cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda102"
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_6m_cu92_devtoolset7_nightly
+          build_environment: "manywheel 3.6m cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda92"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_7m_cu92_devtoolset7_nightly
+          build_environment: "manywheel 3.7m cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda92"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_cu92_devtoolset7_nightly
+          build_environment: "manywheel 3.8m cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda92"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_6m_cu101_devtoolset7_nightly
+          build_environment: "manywheel 3.6m cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda101"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_7m_cu101_devtoolset7_nightly
+          build_environment: "manywheel 3.7m cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda101"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_cu101_devtoolset7_nightly
+          build_environment: "manywheel 3.8m cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda101"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_6m_cu102_devtoolset7_nightly
+          build_environment: "manywheel 3.6m cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_7m_cu102_devtoolset7_nightly
+          build_environment: "manywheel 3.7m cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_cu102_devtoolset7_nightly
+          build_environment: "manywheel 3.8m cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/manylinux-cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_6_cpu_devtoolset7_nightly
+          build_environment: "conda 3.6 cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_7_cpu_devtoolset7_nightly
+          build_environment: "conda 3.7 cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_8_cpu_devtoolset7_nightly
+          build_environment: "conda 3.8 cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_6_cu92_devtoolset7_nightly
+          build_environment: "conda 3.6 cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_7_cu92_devtoolset7_nightly
+          build_environment: "conda 3.7 cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_8_cu92_devtoolset7_nightly
+          build_environment: "conda 3.8 cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_6_cu101_devtoolset7_nightly
+          build_environment: "conda 3.6 cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_7_cu101_devtoolset7_nightly
+          build_environment: "conda 3.7 cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_8_cu101_devtoolset7_nightly
+          build_environment: "conda 3.8 cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_6_cu102_devtoolset7_nightly
+          build_environment: "conda 3.6 cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_7_cu102_devtoolset7_nightly
+          build_environment: "conda 3.7 cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_8_cu102_devtoolset7_nightly
+          build_environment: "conda 3.8 cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cpu devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/manylinux-cuda92"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/manylinux-cuda92"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/manylinux-cuda92"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu92 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/manylinux-cuda92"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/manylinux-cuda101"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/manylinux-cuda101"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/manylinux-cuda101"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu101 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/manylinux-cuda101"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu102 devtoolset7"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/manylinux-cuda102"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "shared-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-with-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps
+          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          libtorch_variant: "static-without-deps"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_mac_test:
+          name: smoke_macos_wheel_3_6_cpu_nightly
+          build_environment: "wheel 3.6 cpu"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+      - smoke_mac_test:
+          name: smoke_macos_wheel_3_7_cpu_nightly
+          build_environment: "wheel 3.7 cpu"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+      - smoke_mac_test:
+          name: smoke_macos_wheel_3_8_cpu_nightly
+          build_environment: "wheel 3.8 cpu"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+      - smoke_mac_test:
+          name: smoke_macos_conda_3_6_cpu_nightly
+          build_environment: "conda 3.6 cpu"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+      - smoke_mac_test:
+          name: smoke_macos_conda_3_7_cpu_nightly
+          build_environment: "conda 3.7 cpu"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+      - smoke_mac_test:
+          name: smoke_macos_conda_3_8_cpu_nightly
+          build_environment: "conda 3.8 cpu"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+      - smoke_mac_test:
+          name: smoke_macos_libtorch_3_7_cpu_nightly
+          build_environment: "libtorch 3.7 cpu"
+          requires:
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+    when: << pipeline.parameters.run_binary_tests >>
   build:
     jobs:
       - pytorch_windows_build:
@@ -2945,1593 +4540,6 @@ workflows:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_6m_cpu_devtoolset7_nightly
-          build_environment: "manywheel 3.6m cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda102"
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_7m_cpu_devtoolset7_nightly
-          build_environment: "manywheel 3.7m cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda102"
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_8m_cpu_devtoolset7_nightly
-          build_environment: "manywheel 3.8m cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda102"
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_6m_cu92_devtoolset7_nightly
-          build_environment: "manywheel 3.6m cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda92"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_7m_cu92_devtoolset7_nightly
-          build_environment: "manywheel 3.7m cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda92"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_8m_cu92_devtoolset7_nightly
-          build_environment: "manywheel 3.8m cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda92"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_6m_cu101_devtoolset7_nightly
-          build_environment: "manywheel 3.6m cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda101"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_7m_cu101_devtoolset7_nightly
-          build_environment: "manywheel 3.7m cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda101"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_8m_cu101_devtoolset7_nightly
-          build_environment: "manywheel 3.8m cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda101"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_6m_cu102_devtoolset7_nightly
-          build_environment: "manywheel 3.6m cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda102"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_7m_cu102_devtoolset7_nightly
-          build_environment: "manywheel 3.7m cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda102"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_manywheel_3_8m_cu102_devtoolset7_nightly
-          build_environment: "manywheel 3.8m cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/manylinux-cuda102"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_6_cpu_devtoolset7_nightly
-          build_environment: "conda 3.6 cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_7_cpu_devtoolset7_nightly
-          build_environment: "conda 3.7 cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_8_cpu_devtoolset7_nightly
-          build_environment: "conda 3.8 cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_6_cu92_devtoolset7_nightly
-          build_environment: "conda 3.6 cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_7_cu92_devtoolset7_nightly
-          build_environment: "conda 3.7 cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_8_cu92_devtoolset7_nightly
-          build_environment: "conda 3.8 cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_6_cu101_devtoolset7_nightly
-          build_environment: "conda 3.6 cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_7_cu101_devtoolset7_nightly
-          build_environment: "conda 3.7 cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_8_cu101_devtoolset7_nightly
-          build_environment: "conda 3.8 cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_6_cu102_devtoolset7_nightly
-          build_environment: "conda 3.6 cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_7_cu102_devtoolset7_nightly
-          build_environment: "conda 3.7 cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_8_cu102_devtoolset7_nightly
-          build_environment: "conda 3.8 cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps
-          build_environment: "libtorch 3.7m cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda92"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps
-          build_environment: "libtorch 3.7m cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-cuda92"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps
-          build_environment: "libtorch 3.7m cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-cuda92"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps
-          build_environment: "libtorch 3.7m cu92 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-cuda92"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps
-          build_environment: "libtorch 3.7m cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda101"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps
-          build_environment: "libtorch 3.7m cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-cuda101"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps
-          build_environment: "libtorch 3.7m cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-cuda101"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps
-          build_environment: "libtorch 3.7m cu101 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-cuda101"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps
-          build_environment: "libtorch 3.7m cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps
-          build_environment: "libtorch 3.7m cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps
-          build_environment: "libtorch 3.7m cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps
-          build_environment: "libtorch 3.7m cu102 devtoolset7"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps
-          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps
-          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps
-          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps
-          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps
-          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps
-          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps
-          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps
-          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps
-          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps
-          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps
-          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps
-          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_mac_test:
-          name: smoke_macos_wheel_3_6_cpu_nightly
-          build_environment: "wheel 3.6 cpu"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-      - smoke_mac_test:
-          name: smoke_macos_wheel_3_7_cpu_nightly
-          build_environment: "wheel 3.7 cpu"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-      - smoke_mac_test:
-          name: smoke_macos_wheel_3_8_cpu_nightly
-          build_environment: "wheel 3.8 cpu"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-      - smoke_mac_test:
-          name: smoke_macos_conda_3_6_cpu_nightly
-          build_environment: "conda 3.6 cpu"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-      - smoke_mac_test:
-          name: smoke_macos_conda_3_7_cpu_nightly
-          build_environment: "conda 3.7 cpu"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-      - smoke_mac_test:
-          name: smoke_macos_conda_3_8_cpu_nightly
-          build_environment: "conda 3.8 cpu"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-      - smoke_mac_test:
-          name: smoke_macos_libtorch_3_7_cpu_nightly
-          build_environment: "libtorch 3.7 cpu"
-          requires:
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_build
-          build_environment: "manywheel 3.6m cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_7m_cpu_devtoolset7_nightly_build
-          build_environment: "manywheel 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_8m_cpu_devtoolset7_nightly_build
-          build_environment: "manywheel 3.8m cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_6m_cu92_devtoolset7_nightly_build
-          build_environment: "manywheel 3.6m cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda92"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_build
-          build_environment: "manywheel 3.7m cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda92"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_8m_cu92_devtoolset7_nightly_build
-          build_environment: "manywheel 3.8m cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda92"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build
-          build_environment: "manywheel 3.6m cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_7m_cu101_devtoolset7_nightly_build
-          build_environment: "manywheel 3.7m cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_build
-          build_environment: "manywheel 3.8m cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_6m_cu102_devtoolset7_nightly_build
-          build_environment: "manywheel 3.6m cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_build
-          build_environment: "manywheel 3.7m cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_build
-          build_environment: "manywheel 3.8m cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_conda_3_6_cpu_devtoolset7_nightly_build
-          build_environment: "conda 3.6 cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_7_cpu_devtoolset7_nightly_build
-          build_environment: "conda 3.7 cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_8_cpu_devtoolset7_nightly_build
-          build_environment: "conda 3.8 cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_6_cu92_devtoolset7_nightly_build
-          build_environment: "conda 3.6 cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_7_cu92_devtoolset7_nightly_build
-          build_environment: "conda 3.7 cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_8_cu92_devtoolset7_nightly_build
-          build_environment: "conda 3.8 cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_6_cu101_devtoolset7_nightly_build
-          build_environment: "conda 3.6 cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
-          build_environment: "conda 3.7 cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_8_cu101_devtoolset7_nightly_build
-          build_environment: "conda 3.8 cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_6_cu102_devtoolset7_nightly_build
-          build_environment: "conda 3.6 cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_7_cu102_devtoolset7_nightly_build
-          build_environment: "conda 3.7 cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_8_cu102_devtoolset7_nightly_build
-          build_environment: "conda 3.8 cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cpu devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda92"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-cuda92"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-cuda92"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu92_devtoolset7_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cu92 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-cuda92"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cu101 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-cuda101"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cu102 devtoolset7"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-cuda102"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_linux_build:
-          name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
-      - binary_mac_build:
-          name: binary_macos_wheel_3_6_cpu_nightly_build
-          build_environment: "wheel 3.6 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
-          name: binary_macos_wheel_3_7_cpu_nightly_build
-          build_environment: "wheel 3.7 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
-          name: binary_macos_wheel_3_8_cpu_nightly_build
-          build_environment: "wheel 3.8 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
-          name: binary_macos_conda_3_6_cpu_nightly_build
-          build_environment: "conda 3.6 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
-          name: binary_macos_conda_3_7_cpu_nightly_build
-          build_environment: "conda 3.7 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
-          name: binary_macos_conda_3_8_cpu_nightly_build
-          build_environment: "conda 3.8 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
-          name: binary_macos_libtorch_3_7_cpu_nightly_build
-          build_environment: "libtorch 3.7 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_6_cpu_nightly_build
-          build_environment: "wheel 3.6 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_7_cpu_nightly_build
-          build_environment: "wheel 3.7 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_8_cpu_nightly_build
-          build_environment: "wheel 3.8 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_6_cu92_nightly_build
-          build_environment: "wheel 3.6 cu92"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_7_cu92_nightly_build
-          build_environment: "wheel 3.7 cu92"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_8_cu92_nightly_build
-          build_environment: "wheel 3.8 cu92"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_6_cu101_nightly_build
-          build_environment: "wheel 3.6 cu101"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_7_cu101_nightly_build
-          build_environment: "wheel 3.7 cu101"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_8_cu101_nightly_build
-          build_environment: "wheel 3.8 cu101"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_6_cu102_nightly_build
-          build_environment: "wheel 3.6 cu102"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_7_cu102_nightly_build
-          build_environment: "wheel 3.7 cu102"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_8_cu102_nightly_build
-          build_environment: "wheel 3.8 cu102"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_6_cpu_nightly_build
-          build_environment: "conda 3.6 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_7_cpu_nightly_build
-          build_environment: "conda 3.7 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_8_cpu_nightly_build
-          build_environment: "conda 3.8 cpu"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_6_cu92_nightly_build
-          build_environment: "conda 3.6 cu92"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_7_cu92_nightly_build
-          build_environment: "conda 3.7 cu92"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_8_cu92_nightly_build
-          build_environment: "conda 3.8 cu92"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_6_cu101_nightly_build
-          build_environment: "conda 3.6 cu101"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_7_cu101_nightly_build
-          build_environment: "conda 3.7 cu101"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_8_cu101_nightly_build
-          build_environment: "conda 3.8 cu101"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_6_cu102_nightly_build
-          build_environment: "conda 3.6 cu102"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_7_cu102_nightly_build
-          build_environment: "conda 3.7 cu102"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_8_cu102_nightly_build
-          build_environment: "conda 3.8 cu102"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cpu_debug_nightly_build
-          build_environment: "libtorch 3.7 cpu debug"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cu92_debug_nightly_build
-          build_environment: "libtorch 3.7 cu92 debug"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cu101_debug_nightly_build
-          build_environment: "libtorch 3.7 cu101 debug"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cu102_debug_nightly_build
-          build_environment: "libtorch 3.7 cu102 debug"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cpu_release_nightly_build
-          build_environment: "libtorch 3.7 cpu release"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cu92_release_nightly_build
-          build_environment: "libtorch 3.7 cu92 release"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cu101_release_nightly_build
-          build_environment: "libtorch 3.7 cu101 release"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_libtorch_3_7_cu102_release_nightly_build
-          build_environment: "libtorch 3.7 cu102 release"
-          filters:
-            branches:
-              only: nightly
-            tags:
-              only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_ios_build:
           build_environment: libtorch-ios-11.2.1-nightly-x86_64-build
           context: org-member
@@ -4613,7 +4621,7 @@ workflows:
           build_environment: "manywheel 3.6m cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4624,7 +4632,7 @@ workflows:
           build_environment: "manywheel 3.7m cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4635,7 +4643,7 @@ workflows:
           build_environment: "manywheel 3.8m cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4646,7 +4654,7 @@ workflows:
           build_environment: "manywheel 3.6m cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4659,7 +4667,7 @@ workflows:
           build_environment: "manywheel 3.7m cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4672,7 +4680,7 @@ workflows:
           build_environment: "manywheel 3.8m cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4685,7 +4693,7 @@ workflows:
           build_environment: "manywheel 3.6m cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4698,7 +4706,7 @@ workflows:
           build_environment: "manywheel 3.7m cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4711,7 +4719,7 @@ workflows:
           build_environment: "manywheel 3.8m cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4724,7 +4732,7 @@ workflows:
           build_environment: "manywheel 3.6m cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4737,7 +4745,7 @@ workflows:
           build_environment: "manywheel 3.7m cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4750,7 +4758,7 @@ workflows:
           build_environment: "manywheel 3.8m cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4763,7 +4771,7 @@ workflows:
           build_environment: "conda 3.6 cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4774,7 +4782,7 @@ workflows:
           build_environment: "conda 3.7 cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4785,7 +4793,7 @@ workflows:
           build_environment: "conda 3.8 cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4796,7 +4804,7 @@ workflows:
           build_environment: "conda 3.6 cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4809,7 +4817,7 @@ workflows:
           build_environment: "conda 3.7 cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4822,7 +4830,7 @@ workflows:
           build_environment: "conda 3.8 cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4835,7 +4843,7 @@ workflows:
           build_environment: "conda 3.6 cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4848,7 +4856,7 @@ workflows:
           build_environment: "conda 3.7 cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4861,7 +4869,7 @@ workflows:
           build_environment: "conda 3.8 cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4874,7 +4882,7 @@ workflows:
           build_environment: "conda 3.6 cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4887,7 +4895,7 @@ workflows:
           build_environment: "conda 3.7 cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4900,7 +4908,7 @@ workflows:
           build_environment: "conda 3.8 cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -4913,7 +4921,7 @@ workflows:
           build_environment: "libtorch 3.7m cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4925,7 +4933,7 @@ workflows:
           build_environment: "libtorch 3.7m cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4937,7 +4945,7 @@ workflows:
           build_environment: "libtorch 3.7m cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -4949,7 +4957,7 @@ workflows:
           build_environment: "libtorch 3.7m cpu devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -4961,7 +4969,7 @@ workflows:
           build_environment: "libtorch 3.7m cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -4975,7 +4983,7 @@ workflows:
           build_environment: "libtorch 3.7m cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -4989,7 +4997,7 @@ workflows:
           build_environment: "libtorch 3.7m cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5003,7 +5011,7 @@ workflows:
           build_environment: "libtorch 3.7m cu92 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5017,7 +5025,7 @@ workflows:
           build_environment: "libtorch 3.7m cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5031,7 +5039,7 @@ workflows:
           build_environment: "libtorch 3.7m cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5045,7 +5053,7 @@ workflows:
           build_environment: "libtorch 3.7m cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5059,7 +5067,7 @@ workflows:
           build_environment: "libtorch 3.7m cu101 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5073,7 +5081,7 @@ workflows:
           build_environment: "libtorch 3.7m cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5087,7 +5095,7 @@ workflows:
           build_environment: "libtorch 3.7m cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5101,7 +5109,7 @@ workflows:
           build_environment: "libtorch 3.7m cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5115,7 +5123,7 @@ workflows:
           build_environment: "libtorch 3.7m cu102 devtoolset7"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5129,7 +5137,7 @@ workflows:
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5141,7 +5149,7 @@ workflows:
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5153,7 +5161,7 @@ workflows:
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5165,7 +5173,7 @@ workflows:
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5177,7 +5185,7 @@ workflows:
           build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5191,7 +5199,7 @@ workflows:
           build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5205,7 +5213,7 @@ workflows:
           build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5219,7 +5227,7 @@ workflows:
           build_environment: "libtorch 3.7m cu92 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5233,7 +5241,7 @@ workflows:
           build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5247,7 +5255,7 @@ workflows:
           build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5261,7 +5269,7 @@ workflows:
           build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5275,7 +5283,7 @@ workflows:
           build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5289,7 +5297,7 @@ workflows:
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
@@ -5303,7 +5311,7 @@ workflows:
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
@@ -5317,7 +5325,7 @@ workflows:
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
@@ -5331,7 +5339,7 @@ workflows:
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
@@ -5345,7 +5353,7 @@ workflows:
           build_environment: "wheel 3.6 cpu"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5355,7 +5363,7 @@ workflows:
           build_environment: "wheel 3.7 cpu"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5365,7 +5373,7 @@ workflows:
           build_environment: "wheel 3.8 cpu"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5375,7 +5383,7 @@ workflows:
           build_environment: "wheel 3.6 cu92"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5386,7 +5394,7 @@ workflows:
           build_environment: "wheel 3.7 cu92"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5397,7 +5405,7 @@ workflows:
           build_environment: "wheel 3.8 cu92"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5408,7 +5416,7 @@ workflows:
           build_environment: "wheel 3.6 cu101"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5419,7 +5427,7 @@ workflows:
           build_environment: "wheel 3.7 cu101"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5430,7 +5438,7 @@ workflows:
           build_environment: "wheel 3.8 cu101"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5441,7 +5449,7 @@ workflows:
           build_environment: "wheel 3.6 cu102"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5452,7 +5460,7 @@ workflows:
           build_environment: "wheel 3.7 cu102"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5463,7 +5471,7 @@ workflows:
           build_environment: "wheel 3.8 cu102"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5474,7 +5482,7 @@ workflows:
           build_environment: "conda 3.6 cpu"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5484,7 +5492,7 @@ workflows:
           build_environment: "conda 3.7 cpu"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5494,7 +5502,7 @@ workflows:
           build_environment: "conda 3.8 cpu"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5504,7 +5512,7 @@ workflows:
           build_environment: "conda 3.6 cu92"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5515,7 +5523,7 @@ workflows:
           build_environment: "conda 3.7 cu92"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5526,7 +5534,7 @@ workflows:
           build_environment: "conda 3.8 cu92"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5537,7 +5545,7 @@ workflows:
           build_environment: "conda 3.6 cu101"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5548,7 +5556,7 @@ workflows:
           build_environment: "conda 3.7 cu101"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5559,7 +5567,7 @@ workflows:
           build_environment: "conda 3.8 cu101"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5570,7 +5578,7 @@ workflows:
           build_environment: "conda 3.6 cu102"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5581,7 +5589,7 @@ workflows:
           build_environment: "conda 3.7 cu102"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5592,7 +5600,7 @@ workflows:
           build_environment: "conda 3.8 cu102"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5603,7 +5611,7 @@ workflows:
           build_environment: "libtorch 3.7 cpu debug"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5613,7 +5621,7 @@ workflows:
           build_environment: "libtorch 3.7 cu92 debug"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5624,7 +5632,7 @@ workflows:
           build_environment: "libtorch 3.7 cu101 debug"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5635,7 +5643,7 @@ workflows:
           build_environment: "libtorch 3.7 cu102 debug"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5646,7 +5654,7 @@ workflows:
           build_environment: "libtorch 3.7 cpu release"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5656,7 +5664,7 @@ workflows:
           build_environment: "libtorch 3.7 cu92 release"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5667,7 +5675,7 @@ workflows:
           build_environment: "libtorch 3.7 cu101 release"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
@@ -5678,7 +5686,7 @@ workflows:
           build_environment: "libtorch 3.7 cu102 release"
           filters:
             branches:
-              only: nightly
+              only: /.*/
             tags:
               only: /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
