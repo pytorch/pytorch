@@ -27,7 +27,10 @@ from torch.quantization.quantize_script import quantize_dynamic_script
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 from torch.testing._internal.common_quantized import override_qengines
 
-from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_quantization import (
+    QuantizationTestCase,
+    skipIfNoFBGEMM,
+)
 
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
@@ -1943,6 +1946,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         FileCheck().check_not("aten::layer_norm") \
                    .run(m.graph)
 
+    @skipIfNoFBGEMM
     def test_clamp(self):
         class M(torch.nn.Module):
             def __init__(self):
