@@ -42,7 +42,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
 #if CUDA_VERSION >= 11000
-  if (at::globalContext().useTF32CuBLAS()) {
+  if (at::globalContext().allowTF32CuBLAS()) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));

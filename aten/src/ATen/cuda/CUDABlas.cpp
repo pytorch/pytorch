@@ -205,8 +205,9 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5) {
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
-    // On CUDA 11, tensor core will be automatically used with default math type,
-    // so there is no need to change the math type.
+    // On Cuda 11, tensor cores are allowed by default for FP16 inputs if the math mode is
+    // CUBLAS_DEFAULT_MATH or CUBLAS_TF32_TENSOR_OP_MATH, so there's no need to change
+    // the math mode locally.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
 #endif  // CUDA_VERSION < 11000
     TORCH_CUDABLAS_CHECK(cublasGemmEx(
@@ -230,8 +231,9 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         CUDA_R_32F,
         CUBLAS_GEMM_DFALT_TENSOR_OP));
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
-    // On CUDA 11, tensor core will be automatically used with default math type,
-    // so there is no need to change the math type.
+    // On Cuda 11, tensor cores are allowed by default for FP16 inputs if the math mode is
+    // CUBLAS_DEFAULT_MATH or CUBLAS_TF32_TENSOR_OP_MATH, so there's no need to change
+    // the math mode locally.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 #endif  // CUDA_VERSION < 11000
   } else {

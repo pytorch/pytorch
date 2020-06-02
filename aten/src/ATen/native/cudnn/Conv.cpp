@@ -797,8 +797,8 @@ static inline void split_batch_dim_to_32bit_out(
 
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-#define ASSERT_CORRECT_PRECISION(math_type)                                   \
-if (args.params.dataType == CUDNN_DATA_FLOAT) {                               \
+#define ASSERT_CORRECT_PRECISION(math_type)                                     \
+if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 \
   TORCH_INTERNAL_ASSERT(args.params.allow_tf32 || math_type == CUDNN_FMA_MATH); \
 }
 #else
