@@ -19,7 +19,7 @@ randn_like = torch.randn_like
 # Helper function that returns True when the dtype is an integral dtype,
 # False otherwise.
 # TODO: implement numpy-like issubdtype
-def is_integral(dtype):
+def is_integral(dtype: torch.dtype) -> bool:
     # Skip complex/quantized types
     dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
     return dtype in dtypes and not dtype.is_floating_point
@@ -198,7 +198,7 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: bool
 
     return _helper(a, b, " ")
 
-def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=''):
+def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg='') -> None:
     if not isinstance(actual, torch.Tensor):
         actual = torch.tensor(actual)
     if not isinstance(expected, torch.Tensor):
@@ -222,7 +222,7 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=
 
     raise AssertionError(msg)
 
-def make_non_contiguous(tensor):
+def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     if tensor.numel() <= 1:  # can't make non-contiguous
         return tensor.clone()
     osize = list(tensor.size())
@@ -251,7 +251,7 @@ def make_non_contiguous(tensor):
     return input.data
 
 
-def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, include_complex=True):
+def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, include_complex=True) -> List[torch.dtype]:
     dtypes = get_all_int_dtypes() + get_all_fp_dtypes(include_half=include_half, include_bfloat16=include_bfloat16)
     if include_bool:
         dtypes.append(torch.bool)
@@ -260,20 +260,20 @@ def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, 
     return dtypes
 
 
-def get_all_math_dtypes(device):
+def get_all_math_dtypes(device) -> List[torch.dtype]:
     return get_all_int_dtypes() + get_all_fp_dtypes(include_half=device.startswith('cuda'),
                                                     include_bfloat16=False) + get_all_complex_dtypes()
 
 
-def get_all_complex_dtypes():
+def get_all_complex_dtypes() -> List[torch.dtype]:
     return [torch.complex64, torch.complex128]
 
 
-def get_all_int_dtypes():
+def get_all_int_dtypes() -> List[torch.dtype]:
     return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
 
 
-def get_all_fp_dtypes(include_half=True, include_bfloat16=True):
+def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dtype]:
     dtypes = [torch.float32, torch.float64]
     if include_half:
         dtypes.append(torch.float16)
