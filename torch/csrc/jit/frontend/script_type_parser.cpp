@@ -162,22 +162,21 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
 
 TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   if (expr.kind() == TK_SUBSCRIPT) {
+
     if (resolver_) {
-      if (auto typePtr = resolver_->resolveType("List[torch.jit.Future[int]]", expr.range())) {
+      if (auto typePtr =
+              resolver_->resolveType(expr.range().text(), expr.range())) {
         return typePtr;
-      } else {
-        throw ErrorReport(expr) << "Failed to resolve type (FUTURE)'";
       }
-    } else {
-      auto subscript = Subscript(expr);
-      auto value_name = parseBaseTypeName(subscript.value());
-      if (!value_name) {
-        throw ErrorReport(subscript.value().range())
-            << "Subscripted type must be a type identifier";
-      }
-      return subscriptToType(*value_name, subscript);
     }
 
+    auto subscript = Subscript(expr);
+    auto value_name = parseBaseTypeName(subscript.value());
+    if (!value_name) {
+      throw ErrorReport(subscript.value().range())
+          << "Subscripted type must be a type identifier";
+    }
+    return subscriptToType(*value_name, subscript);
 
   } else if (auto name = parseBaseTypeName(expr)) {
     auto itr = string_to_type_lut().find(*name);
