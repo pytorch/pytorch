@@ -1770,7 +1770,6 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       const TypePtr& type,
       bool is_parameter = false,
-      bool allow_any = false,
       bool is_buffer = false);
 
   // [Internal Only] Remove attribute from the ClassType,
@@ -1787,11 +1786,10 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       TypePtr ty,
       bool is_parameter = false,
-      bool allow_any = false,
       bool is_buffer = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter, allow_any, is_buffer);
+      return addAttribute(name, ty, is_parameter, is_buffer);
     }
 
     TORCH_CHECK(
