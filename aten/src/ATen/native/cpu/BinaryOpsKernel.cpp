@@ -66,6 +66,16 @@ void mul_kernel(TensorIterator& iter) {
   }
 }
 
+// c10::complex fails on MacOS with SIGILL (illegal instruction)
+// for unknown reason. See: https://github.com/pytorch/pytorch/issues/39123
+// I don't know what is the reason, but looks like a compiler bug
+//  -- @zasdfgbnm
+#ifdef __APPLE__
+#define AT_DISPATCH_COMPLEX_TYPES_MAC_STD AT_DISPATCH_STD_COMPLEX_TYPES
+#else
+#define AT_DISPATCH_COMPLEX_TYPES_MAC_STD AT_DISPATCH_COMPLEX_TYPES
+#endif
+
 void div_kernel(TensorIterator& iter) {
   if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
@@ -77,47 +87,25 @@ void div_kernel(TensorIterator& iter) {
       });
     });
   } else if (isComplexType(iter.dtype())) {
-// #ifdef __APPLE__
-      // Vectorized code fails on MacOS with SIGILL (illegal instruction)
-      // for unknown reason. See: https://github.com/pytorch/pytorch/issues/39123
-      if (iter.dtype() == kComplexFloat) {
+      AT_DISPATCH_COMPLEX_TYPES_MAC_STD(iter.dtype(), "div_cpu", [&]() {
         cpu_kernel_vec(iter,
-          [](std::complex<float> a, std::complex<float> b) __ubsan_ignore_float_divide_by_zero__ -> std::complex<float> {
+          [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
              return a / b;
           },
-          [](Vec256<std::complex<float>> a, Vec256<std::complex<float>> b) {
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
             return a / b;
           });
-      } else {
-         cpu_kernel_vec(iter,
-          [](std::complex<double> a, std::complex<double> b) __ubsan_ignore_float_divide_by_zero__ -> std::complex<double> {
-             return a / b;
-          },
-          [](Vec256<std::complex<double>> a, Vec256<std::complex<double>> b) {
-            return a / b;
-          });
-      }
-// #else
-//       AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "div_cpu", [&]() {
-//         cpu_kernel_vec(iter,
-//           [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-//              return a / b;
-//           },
-//           [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-//             return a / b;
-//           });
-//       });
-// #endif
+      });
     } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
-      cpu_kernel_vec(iter,
-        [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-           return a / b;
-        },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-          return a / b;
-        });
-    });
+      AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "div_cpu", [&]() {
+        cpu_kernel_vec(iter,
+          [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+            return a / b;
+          },
+          [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a / b;
+          });
+      });
   }
 }
 
