@@ -84,16 +84,13 @@ def is_acceptable(tensor):
 
 
 _handles = {}
-verbose = False
 
 
-def set_flags(_enabled, _benchmark, _deterministic, _verbose):
-    global benchmark, deterministic, verbose
+def set_flags(_enabled, _benchmark, _deterministic):
+    global benchmark, deterministic
     orig_flags = (torch._C._get_cudnn_enabled(),
                   torch._C._get_cudnn_benchmark(),
-                  torch._C._get_cudnn_deterministic(),
-                  verbose)
-    verbose = _verbose
+                  torch._C._get_cudnn_deterministic())
     torch._C._set_cudnn_enabled(_enabled)
     torch._C._set_cudnn_benchmark(_benchmark)
     torch._C._set_cudnn_deterministic(_deterministic)
@@ -101,15 +98,15 @@ def set_flags(_enabled, _benchmark, _deterministic, _verbose):
 
 
 @contextmanager
-def flags(enabled=False, benchmark=False, deterministic=False, verbose=False):
+def flags(enabled=False, benchmark=False, deterministic=False):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, benchmark, deterministic, verbose)
+        orig_flags = set_flags(enabled, benchmark, deterministic)
     try:
         yield
     finally:
         # recover the previous values
         with __allow_nonbracketed_mutation():
-            set_flags(orig_flags[0], orig_flags[1], orig_flags[2], orig_flags[3])
+            set_flags(orig_flags[0], orig_flags[1], orig_flags[2])
 
 
 # The magic here is to allow us to intercept code like this:
