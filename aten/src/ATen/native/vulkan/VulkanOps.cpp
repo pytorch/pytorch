@@ -27,7 +27,6 @@ void upsample_nearest2d(
     float scaleH,
     float scaleW) {
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   int64_t C = _N * _C;
   struct ConstBlock {
     int32_t IW;
@@ -90,7 +89,6 @@ void add(
   auto W = sizes[3];
 
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
     int32_t W;
     int32_t H;
@@ -606,7 +604,6 @@ void clamp(
   auto C_4 = UP_DIV(C, 4);
 
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
     int32_t W;
     int32_t H;
@@ -661,15 +658,11 @@ void addmm(
   auto m2Sizes = m2.sizes();
   TORCH_INTERNAL_ASSERT(m1Sizes.size() == 2);
   TORCH_INTERNAL_ASSERT(m2Sizes.size() == 2);
-  uint32_t m1H = m1Sizes[0];
   uint32_t m1W = m1Sizes[1];
   uint32_t m1C = 1;
-  uint32_t m1C_4 = UP_DIV(m1C, 4);
 
   uint32_t m2H = m2Sizes[0];
-  uint32_t m2W = m2Sizes[1];
   uint32_t m2C = 1;
-  uint32_t m2C_4 = UP_DIV(m2C, 4);
 
   uint32_t OH = m1Sizes[0];
   uint32_t OW = m2Sizes[1];
@@ -681,13 +674,7 @@ void addmm(
   uint32_t C_4 = UP_DIV(C, 4);
   uint32_t K = m1W;
 
-  auto tSizes = t.sizes();
-  uint32_t TH = tSizes[0];
-  uint32_t TW = tSizes[1];
-  uint32_t TC = 1;
-
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
 
   struct ConstBlock {
     int32_t OW;
@@ -748,7 +735,6 @@ void mean(VulkanTensor& output, const VulkanTensor& input) {
   auto C_4 = UP_DIV(N * C, 4);
 
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
     int32_t W;
     int32_t H;

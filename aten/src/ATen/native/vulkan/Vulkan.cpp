@@ -102,7 +102,6 @@ void VContext::createInstance() {
     };
 
     for (const auto& wantedLayer : instanceLayers) {
-      bool found = false;
       for (const auto& presentLayer : layerProps) {
         if (strcmp(wantedLayer, presentLayer.layerName) == 0) {
           enabledValidationLayers_.push_back(wantedLayer);
@@ -984,7 +983,6 @@ ComputeUnit& ComputeUnitFactory::get(
 // VBuffer <-> VImage
 void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
     int32_t w;
     int32_t h;
@@ -1042,7 +1040,6 @@ void copy_image_to_buffer(
     VBuffer& buffer,
     bool addBufferMemoryBarrierForHost) {
   auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
   TORCH_INTERNAL_ASSERT(
       buffer.sizeBytes() >= image.capacityBytes(),
       "VulkanBuffer's capacity is less than VulkanImage capacity to copy from");
