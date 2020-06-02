@@ -38,7 +38,7 @@ TORCH_API Module InsertObservers(
     Module& module,
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
-    bool inplace = false,
+    bool inplace,
     bool is_dynamic = false);
 
 } // namespace jit
