@@ -744,8 +744,12 @@ private:
       const std::string& contextualNamespace, Value* V) {
     std::vector<std::string> schemaStrs;
     extractStringValue(V, [&](const std::string& str) {
+      // NB: when using TORCH_SELECTIVE_NAME, we will conventionally provide
+      // the ENTIRE string (namespace included).  If this occurs, we MUST NOT
+      // use the contextual namespace.  Fortunately, it's easy to tell if
+      // a namespace is included: a double colon will be present.
       const std::string& schemaStr =
-          contextualNamespace.empty() ? str : contextualNamespace + str;
+          (contextualNamespace.empty() || str.find("::") != std::string::npos) ? str : contextualNamespace + str;
       if (FunctionSchemaPatternLoc.pattern->match(schemaStr)) {
         schemaStrs.push_back(schemaStr);
       }

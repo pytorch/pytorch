@@ -2,6 +2,7 @@
 
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/op_registration/op_whitelist.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -202,6 +203,46 @@ namespace detail {
 
   class TorchLibraryInit;
 
+} // namespace detail
+
+// Note [Selective build]
+// ~~~~~~~~~~~~~~~~~~~~~~
+// In some settings, especially mobile, it is important to avoid compiling any
+// references to functions that you aren't actually going to use, so that they
+// can be eliminated by the linker.  We call this capability "selective build".
+//
+// A very easy way to implement selective build which results in a lot of
+// boilerplate is to just add ifdef's around every registration call, but this
+// means you have to write a lot of extra lines of code at every registration
+// site, and it also means you have to define some munging scheme to map
+// operators to macros.
+//
+// Instead of doing this, we have a different mechanism centered around the
+// concept of a SelectiveName.  A selective name is like a const char* string,
+// except it also carries at compile time a boolean saying whether or not a
+// registration should actually happen or not.  We then have extra overloads which
+// bypass registration entirely if a selective name is disabled.  We do a
+// constexpr test to see if a operator should be enabled or not; this is
+// currently implemented in ATen/core/op_registration/op_whitelist.h
+
+namespace detail {
+
+  // A SelectiveName is like a const char*, except that it also comes
+  // with a type brand that says whether or not the name is enabled or
+  // not.  If a name is disabled, then (at compile time) we DON'T generate
+  // a registration call for it.  This class is not intended to be called
+  // directly; use TORCH_SELECTIVE_NAME macro below to create it.
+  template <bool enabled>
+  class SelectiveName {
+  public:
+    constexpr SelectiveName(const char* name) : name_(name) {}
+    constexpr operator const char*() { return name_; }
+  private:
+    const char* name_;
+  };
+
+#define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveName<c10::op_whitelist_check(n)>(n)
+
 }
 
 // This is the "handle" by which functions defined in TORCH_LIBRARY
@@ -293,8 +334,8 @@ public:
   // implementations for a single operator at different dispatch keys
   // (see torch::dispatch).  Implementations must have a corresponding
   // declaration (from def), otherwise they are invalid.
-  template <typename Func>
-  Library& impl(const char* name, Func&& raw_f) & {
+  template <typename Name, typename Func>
+  Library& impl(Name name, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
     return _impl(name, std::move(f));
   }
@@ -302,8 +343,8 @@ public:
   // Convenience overload for directly specifying the dispatch key.  Dispatch
   // can validly be either DeviceType or DispatchKey; check torch::dispatch for
   // the canonical list of accepted overloads.
-  template <typename Dispatch, typename Func>
-  Library& impl(const char* name, Dispatch&& key, Func&& raw_f) & {
+  template <typename Name, typename Dispatch, typename Func>
+  Library& impl(Name name, Dispatch&& key, Func&& raw_f) & {
     return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
   }
 
@@ -313,10 +354,20 @@ public:
   //
   // TODO: Remove this overload once the makeUnboxedOnly incidence rate
   // goes way down
-  template <typename Func>
-  Library& impl_UNBOXED(const char* name, Func* raw_f) & {
+  template <typename Name, typename Func>
+  Library& impl_UNBOXED(Name name, Func* raw_f) & {
     return impl(name, CppFunction::makeUnboxedOnly(raw_f));
   }
+
+  // These overloads cover cases when a SelectiveName (see Note [Selective build])
+  // has been disabled at compile time.  In that case, don't generate any code
+  // referencing the passed in functions at all.
+  template <typename Func>
+  Library& impl(detail::SelectiveName<false>, Func&& raw_f) & { return *this; }
+  template <typename Dispatch, typename Func>
+  Library& impl(detail::SelectiveName<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
+  template <typename Func>
+  Library& impl_UNBOXED(detail::SelectiveName<false> name, Func* raw_f) & { return *this; }
 
   // Register a fallback implementation for all operators which will be used
   // if there is not a specific implementation for an operator available.

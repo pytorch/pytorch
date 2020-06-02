@@ -94,12 +94,13 @@ m.def("${unqual_schema_string}");
 # NB: Specifiction of the namespace is handled by the enclosing
 # TORCH_LIBRARY macro invocation
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}",
+m.impl(TORCH_SELECTIVE_NAME("${operator_name_with_overload}"),
        torch::CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}));
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_name});
+m.impl(TORCH_SELECTIVE_NAME("${operator_name_with_overload}"),
+       &TypeDefault::${type_wrapper_name});
 """)
 
 # NB: In the ordinary, TypeDerived code generation work flow, specification
@@ -110,14 +111,14 @@ m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_nam
 # the torch::dispatch specification here is important!  See
 # Note [Redundancy in registration code is OK] for how we handle redundant info.
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}",
+m.impl(TORCH_SELECTIVE_NAME("${operator_name_with_overload}"),
        torch::dispatch(DispatchKey::${Backend},
                        torch::CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name}))
 );
 """)
 
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}",
+m.impl(TORCH_SELECTIVE_NAME("${operator_name_with_overload}"),
        torch::dispatch(DispatchKey::${Backend},
                        &${Type}::${type_wrapper_name})
 );

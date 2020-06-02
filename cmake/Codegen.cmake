@@ -165,9 +165,11 @@ if(INTERN_BUILD_ATEN_OPS)
       --op-dependency "${OP_DEPENDENCY}"
       --root-ops "${SELECTED_OP_LIST}"
       OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
+      OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    separate_arguments(OP_REGISTRATION_WHITELIST)
     message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+    separate_arguments(OP_REGISTRATION_WHITELIST)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DTORCH_OPERATOR_WHITELIST=\"${OP_REGISTRATION_WHITELIST}\"")
   endif()
   if(USE_VULKAN)
     set(GEN_VULKAN_FLAGS --vulkan)
