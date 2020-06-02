@@ -13,6 +13,13 @@ endif()
 if(NOT TRACE_ENABLED)
   message(STATUS "TRACE_ENABLED OFF")
 endif()
+set(USE_VULKAN OFF)
+if(DEFINED ENV{USE_VULKAN})
+  if($ENV{USE_VULKAN} STREQUAL "1")
+    message(STATUS "USE_VULKAN ON")
+    set(USE_VULKAN ON)
+  endif()
+endif()
 
 set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
 
@@ -69,8 +76,14 @@ set(fbjni_BUILD_DIR ${CMAKE_BINARY_DIR}/fbjni/${BUILD_SUBDIR})
 
 add_subdirectory(${fbjni_DIR} ${fbjni_BUILD_DIR})
 
-if(ANDROID_ABI)
+# ---[ Vulkan deps
+if(USE_VULKAN)
+  set(Vulkan_LIBS)
+  set(Vulkan_INCLUDES)
+  include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/VulkanDependencies.cmake)
+endif()
 
+if(ANDROID_ABI)
   function(import_static_lib name)
     add_library(${name} STATIC IMPORTED)
     set_property(
@@ -89,8 +102,8 @@ if(ANDROID_ABI)
   import_static_lib(libcpuinfo)
   import_static_lib(libclog)
 
-    # Link most things statically on Android.
-  target_link_libraries(pytorch_jni
+  # Link most things statically on Android.
+  set(pytorch_jni_LIBS
       fbjni
       -Wl,--gc-sections
       -Wl,--whole-archive
@@ -105,11 +118,9 @@ if(ANDROID_ABI)
       libcpuinfo
       libclog
   )
-
 else()
-
   # Prefer dynamic linking on the host
-  target_link_libraries(pytorch_jni
+  set(pytorch_jni_LIBS
       fbjni
       torch
       torch_cpu
@@ -120,5 +131,10 @@ else()
       cpuinfo
       clog
   )
-
 endif()
+
+if(USE_VULKAN)
+  list(APPEND pytorch_jni_LIBS ${Vulkan_LIBS})
+endif()
+
+target_link_libraries(pytorch_jni ${pytorch_jni_LIBS})

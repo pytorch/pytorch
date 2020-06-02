@@ -285,6 +285,13 @@ class TORCH_API RRefContext {
   std::unordered_map<ForkId, c10::intrusive_ptr<RRef>, ForkId::Hash>
       pendingChildren_;
 
+  // The RRef context performs its operations through async RPC requests, in
+  // order to not block the user code. Therefore the RRef context's state may be
+  // lagging a bit behind what it is intended to be, while it waits for these
+  // requests to complete. To allow syncing when needed, we store the count of
+  // these pending requests, so that users can wait for it to reach zero.
+  std::atomic<int64_t> numPendingFutures_{0};
+
   std::mutex destroyedMutex_;
   bool destroyed_;
 
