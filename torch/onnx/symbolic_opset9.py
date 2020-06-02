@@ -561,25 +561,38 @@ def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
 
-    dims = [sym_help._get_const(dim, 'i', 'dim')]
+    squeeze_dim = sym_help._get_const(dim, 'i', 'dim')
     # Handle negative dims
-    for i, dim in enumerate(dims):
-        if dim < 0:
-            rank = self.type().dim()
-            if rank:
-                warnings.warn("ONNX export squeeze with negative axis " + str(dim) +
-                              " might cause the onnx model to be incorrect. " +
-                              "Negative axis is not supported in ONNX. " +
-                              "Axis is converted to " + str(dim + rank) +
-                              " based on input shape at export time. " +
-                              "Passing an tensor of different rank in execution will be incorrect.")
-                dims[i] += rank
-            else:
-                return _unimplemented('squeeze', 'negative axis with unknown input rank')
+    if squeeze_dim < 0:
+        rank = self.type().dim()
+        if rank:
+            warnings.warn("ONNX export squeeze with negative axis " + str(squeeze_dim) +
+                          " might cause the onnx model to be incorrect. " +
+                          "Negative axis is not supported in ONNX. " +
+                          "Axis is converted to " + str(squeeze_dim + rank) +
+                          " based on input shape at export time. " +
+                          "Passing an tensor of different rank in execution will be incorrect.")
+            squeeze_dim += rank
+        else:
+            return _unimplemented('squeeze', 'negative axis with unknown input rank')
 
-    warnings.warn("Opset version 9 does not support squeezing on dimensions of shape greater than 1." + 
-                  " It is recommended to use opset version 11 or higher to export this model.")
-    return g.op("Squeeze", self, axes_i=dims)
+    input_shape = self.type().sizes()
+    if input_shape is None:
+        warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + " on an input with unknown shape. " +
+                      "Note that if the size of dimension " + str(squeeze_dim) + " of the input is not 1, the ONNX model will return an error." +
+                      "Opset version 11 supports squeezing on non-singleton dimensions, it is recommended to export this model using " +
+                      "opset version 11 or higher.")
+        return g.op("Squeeze", self, axes_i=[squeeze_dim])
+    if input_shape[squeeze_dim] > 1:
+        warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". The size of this dimension in the given " +
+                      "input is " + str(input_shape[squeeze_dim]) + ". The model will be exported without the squeeze node. If the model is " +
+                      "intended to be used with different input shapes than the shapes passed at export time, please use opset version 11 to " +
+                      "export the model.")
+        return self
+
+    warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". If the model is intended to be used with " +
+                  "different input shapes than the shapes passed at export time, please use opset version 11 to export the model.")
+    return g.op("Squeeze", self, axes_i=[squeeze_dim])
 
 def prelu(g, self, weight):
     if self.isCompleteTensor():
