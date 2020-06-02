@@ -136,24 +136,52 @@ static inline void upsample_3d_shape_check(
   }
 }
 
+// NOTE [ Nearest neighbor upsampling kernel implementation ]
+//
+// The nearest neighbor upsampling kernel implementation is symmetrical as
+// expected. We launch kernels with threads mapping to destination tensors where
+// kernels write data to, each thread reads data from the source tensor, this
+// means:
+// 1. In the forward kernel,
+//      src_xxx refers to properties of input tensors;
+//      dst_xxx refers to properties of output tensors;
+//      scale_factor is the ratio of src_size to dst_size;
+// 2. In the backward kernel,
+//      src_xxx refers to properties of grad_output tensors;
+//      dst_xxx refers to properties of grad_input tensors;
+//      scale_factor is the ratio of src_size to dst_size;
+//
+// Because of this, we need to take the reciprocal of the scale defined by
+// upsample layer during forward path. The motivation is to avoid slow
+// division in the kernel code, so we can use faster multiplication instead.
+// This is not necessary during backward path, since the scale_factor is already
+// the reciprocal of corresponding scale_factor used in the forward path due to
+// the swap of source and destination tensor.
+//
+// Similarly, since the mapping from grad_input to grad_output during backward
+// is the reverse of the mapping of output to input, we need to have opposite
+// mapping functions to compute the source index.
+
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename accscalar_t>
 __host__ __forceinline__ static accscalar_t compute_scales_value(
     const c10::optional<double> scale,
-    int64_t input_size,
-    int64_t output_size) {
+    int64_t src_size,
+    int64_t dst_size) {
   // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
   return (scale.has_value() && scale.value() > 0.) ? (accscalar_t)(1.0 / scale.value())
-                                                   : (accscalar_t)input_size / output_size;
+                                                   : (accscalar_t)src_size / dst_size;
 }
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename accscalar_t>
 __host__ __forceinline__ static accscalar_t compute_scales_value_backwards(
     const c10::optional<double> scale,
-    int64_t input_size,
-    int64_t output_size) {
+    int64_t src_size,
+    int64_t dst_size) {
   // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
   return (scale.has_value() && scale.value() > 0.) ? (accscalar_t)scale.value()
-                                                   : (accscalar_t)input_size / output_size;
+                                                   : (accscalar_t)src_size / dst_size;
 }
 
 template <typename accscalar_t>
@@ -188,12 +216,23 @@ __device__ __forceinline__ static accscalar_t area_pixel_compute_source_index(
   }
 }
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
     const float scale,
     int dst_index,
     int input_size) {
   const int src_index =
       min(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
+  return src_index;
+}
+
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
+__device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
+    const float scale,
+    int dst_index,
+    int output_size) {
+  const int src_index =
+      static_cast<int>(ceilf(dst_index * scale));
   return src_index;
 }
 
