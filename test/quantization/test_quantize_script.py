@@ -27,7 +27,10 @@ from torch.quantization.quantize_script import quantize_dynamic_script
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 from torch.testing._internal.common_quantized import override_qengines
 
-from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_quantization import (
+    QuantizationTestCase,
+    skipIfNoFBGEMM,
+)
 
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
@@ -1266,9 +1269,35 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         checker.run(model.graph)
         checker.run(model_functional.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
+    def test_quantized_add_alpha(self):
+        """ Test quant fusion for multiple aten::add using same
+        constant alpha as the third argument
+        """
+        class QuantizedAdd(torch.nn.Module):
+            def __init__(self):
+                super(QuantizedAdd, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                z = x + y
+                w = y + z
+                return z + w
+
+        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        m = QuantizedAdd()
+        m = self._test_op_impl(m, data, "quantized::add")
+        FileCheck().check_count("quantized::add", 3, exactly=True)
+        FileCheck().check_not("aten::add") \
+                   .check_not("aten::add_") \
+                   .run(m.graph)
+
+    @skipIfNoFBGEMM
     def test_quantized_add(self):
         class QuantizedAdd(torch.nn.Module):
             def __init__(self):
