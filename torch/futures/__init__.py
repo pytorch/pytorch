@@ -9,7 +9,7 @@ class Future(torch._C.Future):
     r"""
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
-    also exposes a set of APIs to add callback functions and setting results.
+    also exposes a set of APIs to add callback functions and set results.
 
     .. warning::
         The ``torch.futures.Future`` is experimental and subject to change.
@@ -21,10 +21,10 @@ class Future(torch._C.Future):
         r"""
         Block until the value of this ``Future`` is ready.
 
-        Return:
+        Returns:
             The value held by this ``Future``. If the function (callback or RPC)
-            creating the value thrown an error, this ``wait`` method will also
-            throw the error.
+            creating the value has thrown an error, this ``wait`` method will
+            also throw an error.
         """
         return super(Future, self).wait()
 
@@ -37,11 +37,11 @@ class Future(torch._C.Future):
         this ``Future``. The callback function can use the ``Future.wait()`` API
         to get the value.
 
-        Argument:
+        Arguments:
             callback(``Callable``): a ``Callable`` that takes this ``Future`` as
                                     the only argument.
 
-        Return:
+        Returns:
             A new ``Future`` object that holds the return value of the
             ``callback`` and will be marked as completed when the given
             ``callback`` finishes.
