@@ -20,21 +20,16 @@ TEST(TensorIteratorTest, CPUScalar) {
   EXPECT_TRUE(iter.device(2).is_cpu()) << "y should be CPU";
 }
 
-// An operation with a CUDA output and CPU scalar inputs should only
-// keep a single input as a CPU scalar. (Because we only generate
-// specializations in Loops.cuh for a single CPU scalar).
+// Verifies multiple zero-dim CPU inputs are not coerced to CUDA
 TEST(TensorIteratorTest, CPUScalarInputs) {
   if (!at::hasCUDA()) return;
   Tensor out = at::empty({5, 5}, kCUDA);
   auto x = at::ones(1, kCPU).squeeze();
   auto y = at::ones(1, kCPU).squeeze();
-  auto iter = TensorIterator::binary_op(out, x, y);
-  EXPECT_TRUE(iter.device(0).is_cuda()) << "result should be CUDA";
-  EXPECT_TRUE(iter.device(1).is_cpu()) << "x should be CPU";
-  EXPECT_TRUE(iter.device(2).is_cuda()) << "y should be CUDA";
+  ASSERT_ANY_THROW(TensorIterator::binary_op(out, x, y));
 }
 
-// Mixing CPU and CUDA tensors should raise an exception (if neither is a scalar)
+// Mixing CPU and CUDA tensors should raise an exception (if the CPU tensor isn't zero-dim)
 TEST(TensorIteratorTest, MixedDevices) {
   if (!at::hasCUDA()) return;
   Tensor out;
@@ -161,7 +156,7 @@ AT_FORALL_SCALAR_TYPES_AND(Bool, COMPARISON_TEST_ITER_FOR_TYPE)
 TEST(TensorIteratorTest, SerialLoopSingleThread) {
   std::thread::id thread_id = std::this_thread::get_id();
   Tensor out;
-  auto x = at::zeros({50000}, kCPU);
+  auto x = at::zeros({50000}, at::TensorOptions(kCPU).dtype(kInt));
   auto iter = TensorIterator::unary_op(out, x);
   at::native::cpu_serial_kernel(iter, [=](int a) -> int {
     std::thread::id lambda_thread_id = std::this_thread::get_id();

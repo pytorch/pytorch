@@ -47,7 +47,7 @@ class SmoketestJob:
         props_dict = {
             "build_environment": " ".join(self.build_env_parts),
             "name": self.job_name,
-            "requires": ["setup"] + self.requires,
+            "requires": self.requires,
         }
 
         if self.docker_image:

@@ -352,6 +352,13 @@ class TestJit(JitTestCase):
 
         self.checkTrace(f, (x, y))
 
+    def test_inferred_as_tensor(self):
+        with self.assertRaisesRegex(RuntimeError, "Inferred the value for argument 'dim' to be of type 'Tensor' "
+                                                  "because it was not annotated with an explicit type"):
+            @torch.jit.script
+            def dot(points, query, dim):
+                return (points * query).sum(dim)
+
     def test_trace_checking_with_global_name(self):
         class MyClass(torch.nn.Module):
             def __init__(self):
@@ -8341,17 +8348,6 @@ a")
 
         self.assertEqual(any_refinement2(3), torch.tensor(3))
         self.assertEqual(any_refinement2(torch.tensor(5)), torch.tensor(5))
-
-    def test_any_in_class_fails(self):
-        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
-            @torch.jit.script
-            class Foo(object):
-                def __init__(self, a):
-                    # type: (Tuple[int,Any]) -> None
-                    self.a = a
-
-                def hi(self):
-                    pass
 
     def test_isinstance(self):
         # test isinstance operator for static type checking
