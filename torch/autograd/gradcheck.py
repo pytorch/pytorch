@@ -359,7 +359,9 @@ def gradcheck(
                                                   allow_unused=True)
                 for gi, i in zip(grads_input, diff_input_list):
                     if (gi is not None) and (not gi.eq(0).all()):
-                        return fail_test('expected all input grads to be undefined or zero when all output grads are undefined or zero')
+                        return fail_test((
+                            'expected all input grads to be undefined or zero when all output'
+                            ' grads are undefined or zero'))
                 return True
 
             # All backward functions must work properly if all output grads are undefined
@@ -370,8 +372,8 @@ def gradcheck(
                 for undef_grad_idx in range(len(output)):
                     output_to_check = _differentiable_outputs(func(*tupled_inputs))
                     outputs_to_check.append([
-                        torch._C._functions.UndefinedGrad()(o) if idx == undef_grad_idx else o for idx, o in enumerate(output_to_check)
-                    ])
+                        torch._C._functions.UndefinedGrad()(o) if idx == undef_grad_idx else o
+                        for idx, o in enumerate(output_to_check)])
 
             for output_to_check in outputs_to_check:
                 if not check_undefined_grad_support(output_to_check):
