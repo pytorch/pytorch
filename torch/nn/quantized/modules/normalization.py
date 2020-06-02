@@ -89,44 +89,7 @@ class LayerNorm(torch.nn.LayerNorm):
         return new_mod
 
 class GroupNorm(torch.nn.GroupNorm):
-    r"""Applies Group Normalization over a mini-batch of inputs as described in
-    the paper `Group Normalization <https://arxiv.org/abs/1803.08494>`__
-
-    .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
-
-    The input channels are separated into :attr:`num_groups` groups, each containing
-    ``num_channels / num_groups`` channels. The mean and standard-deviation are calculated
-    separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
-    per-channel affine transform parameter vectors of size :attr:`num_channels` if
-    :attr:`affine` is ``True``.
-
-    This layer uses statistics computed from input data in both training and
-    evaluation modes.
-
-    Args:
-        num_groups (int): number of groups to separate the channels into
-        num_channels (int): number of channels expected in input
-        eps: a value added to the denominator for numerical stability. Default: 1e-5
-        affine: a boolean value that when set to ``True``, this module
-            has learnable per-channel affine parameters initialized to ones (for weights)
-            and zeros (for biases). Default: ``True``.
-
-    Shape:
-        - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
-        - Output: :math:`(N, C, *)` (same shape as input)
-
-    Examples::
-
-        >>> input = torch.randn(20, 6, 10, 10)
-        >>> # Separate 6 channels into 3 groups
-        >>> m = nn.GroupNorm(3, 6)
-        >>> # Separate 6 channels into 6 groups (equivalent with InstanceNorm)
-        >>> m = nn.GroupNorm(6, 6)
-        >>> # Put all 6 channels into a single group (equivalent with LayerNorm)
-        >>> m = nn.GroupNorm(1, 6)
-        >>> # Activating the module
-        >>> output = m(input)
+    r"""This is the quantized version of `torch.nn.GroupNorm`.
     """
     __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
 
