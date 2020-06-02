@@ -9,7 +9,6 @@ import os
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 
-# import caffe2.python.hypothesis_test_util as hu
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -180,8 +179,7 @@ class UnaryOpTest(serial.SerializedTestCase):
 
 
 class ReluTest(serial.SerializedTestCase):
-    @given(#inputs=hu.tensors(n=1, min_dim=1, max_dim=3, dtype=np.float32),
-           seed=st.integers(0, 65534))
+    @given(seed=st.integers(0, 65534))
     def relu_test(self, inputs, gc, dc, seed):
         np.random.seed(seed)
         inputs = np.random.rand(1).astype(np.float32)
