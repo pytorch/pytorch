@@ -844,17 +844,23 @@ void initJITBindings(PyObject* module) {
           // Intentionally not releasing GIL
           &PythonFutureWrapper::markCompleted)
       .def(
-          "__getstate__",
-          [](const PythonFutureWrapper& /* unused */) {
-            TORCH_CHECK(false, "Can not pickle torch.futures.Future");
-          },
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "__setstate__",
-          [](const PythonFutureWrapper& /* unused */,
-             const py::tuple& /* unused */) {
-            TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
-          },
+          py::pickle(
+              /* __getstate__ */
+              [](const PythonFutureWrapper& /* unused */) {
+                TORCH_CHECK(false, "Can not pickle torch.futures.Future");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy Pybind API's
+                // requirement.
+                return py::make_tuple();
+              },
+              /* __setstate__ */
+              [](const py::tuple& /* unused */) { // NOLINT
+                TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy PyBind's API
+                // requirement.
+                return nullptr;
+              }),
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
