@@ -134,9 +134,21 @@ def doAutodiffCheck(testname):
         'test_nn_gumbel_softmax',
         'test_nn_multilabel_soft_margin_loss',
         'test_nn_batch_norm',
+        'test_nn_max_pool2d_with_indices',
         # AutogradJitGenerated
         'test___rdiv___constant',
         'test___rdiv___scalar_constant',
+        'test_split_cpu',
+        'test_split_dim_cpu',
+        'test_split_dim_neg0_cpu',
+        'test_split_size_list_cpu',
+        'test_split_size_list_dim_cpu',
+        'test_split_size_list_dim_neg0_cpu',
+        'test_split_with_sizes_cpu',
+        'test_split_with_sizes_dim_cpu',
+        'test_split_with_sizes_dim_neg0_cpu',
+        'test_split_with_sizes_size_0_cpu',
+        'test_nn_max_pool2d_with_indices',
     ]
 
     if testname in test_exceptions:
@@ -6251,6 +6263,8 @@ a")
                     grads_ref = torch.autograd.grad(output_ref.sum(), (x, y))
                     self.assertEqual(grads, grads_ref)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY,
+                     "Profiling executor will be using different heuristics for constructing differentiable graphs")
     def test_unbind(self):
         with enable_profiling_mode_for_profiling_tests():
             @torch.jit.script
@@ -6264,13 +6278,11 @@ a")
                 outputs = func(x, y, profile_and_replay=True)
                 outputs_ref = torch.unbind(x, dim=y)
                 self.assertEqual(outputs, outputs_ref)
+                self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
 
-                if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-                    self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
-
-                    grad = torch.autograd.grad(_sum_of_list(outputs), x)
-                    grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
-                    self.assertEqual(grad, grad_ref)
+                grad = torch.autograd.grad(_sum_of_list(outputs), x)
+                grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
+                self.assertEqual(grad, grad_ref)
 
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING,
