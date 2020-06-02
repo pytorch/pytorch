@@ -14,11 +14,12 @@
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 #include <ATen/native/vulkan/glsl.h>
-#define GLSL_SPV(name) name##_glsl
+#define GLSL_SPV(name) #name, name##_glsl
 #else
 #include <ATen/native/vulkan/spv.h>
-#define GLSL_SPV(name) name##_spv, name##_spv_len
+#define GLSL_SPV(name) #name, name##_spv, name##_spv_len
 #endif
+#include <ATen/native/vulkan/VulkanCommon.h>
 
 namespace at {
 namespace native {
@@ -139,6 +140,7 @@ class VulkanTensor final {
   std::shared_ptr<Impl> impl_;
 };
 
+class ComputeUnitFactory;
 class VContext final {
  public:
   VContext(bool enableValidationLayers);
@@ -163,6 +165,9 @@ class VContext final {
   inline VkQueue queue() const {
     return queue_;
   }
+  ComputeUnitFactory& computeUnitFactory() const {
+    return *(computeUnitFactory_.get());
+  }
 
  private:
   void createInstance();
@@ -180,6 +185,7 @@ class VContext final {
   uint32_t queueFamilyIndex_;
   bool enableValidationLayers_;
   VkCommandPool commandPool_;
+  std::unique_ptr<ComputeUnitFactory> computeUnitFactory_;
 };
 
 class VBuffer final {
@@ -389,18 +395,22 @@ class ComputeUnit final {
 #ifdef USE_VULKAN_SHADERC_RUNTIME
   ComputeUnit(
       const char* glslSrc,
+      VkPipelineCache pipelineCache,
       const VkDescriptorSetLayout& descrSetLayout,
-      WorkGroupSize& workGroupSize) {
-    createComputePipelineCompile(glslSrc, descrSetLayout, workGroupSize);
+      WorkGroupSize workGroupSize) {
+    createComputePipelineCompile(
+        glslSrc, pipelineCache, descrSetLayout, workGroupSize);
   }
 #else
   ComputeUnit(
       const uint32_t* spvCode,
       const unsigned int spvCodeSize,
+      VkPipelineCache pipelineCache,
       const VkDescriptorSetLayout& descrSetLayout,
-      WorkGroupSize& workGroupSize) {
+      WorkGroupSize workGroupSize) {
     const auto codeSize = spvCodeSize;
-    createComputePipeline(spvCode, codeSize, descrSetLayout, workGroupSize);
+    createComputePipeline(
+        spvCode, codeSize, pipelineCache, descrSetLayout, workGroupSize);
   }
 #endif
 
@@ -413,14 +423,16 @@ class ComputeUnit final {
   void createComputePipeline(
       const uint32_t* code,
       const uint32_t codeSize,
+      VkPipelineCache pipelineCache,
       const VkDescriptorSetLayout& descrSetLayout,
-      WorkGroupSize& workGroupSize);
+      WorkGroupSize workGroupSize);
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
   void createComputePipelineCompile(
       std::string glslSrc,
+      VkPipelineCache pipelineCache,
       const VkDescriptorSetLayout& descrSetLayout,
-      WorkGroupSize& workGroupSize);
+      WorkGroupSize workGroupSize);
 #endif
 
   void createCommandBuffer(VkDescriptorSet& descriptorSet);
@@ -449,6 +461,40 @@ class ComputeUnit final {
   VkPipeline pipeline_;
   VkPipelineLayout pipelineLayout_;
   VkShaderModule computeShaderModule_;
+};
+
+class ComputeUnitFactory {
+ public:
+  ComputeUnitFactory(const VkDevice& device);
+  ~ComputeUnitFactory();
+  ComputeUnitFactory(const ComputeUnitFactory&) = default;
+  ComputeUnitFactory& operator=(const ComputeUnitFactory&) = default;
+  ComputeUnitFactory(ComputeUnitFactory&&) = default;
+  ComputeUnitFactory& operator=(ComputeUnitFactory&&) = default;
+
+#ifdef USE_VULKAN_SHADERC_RUNTIME
+  ComputeUnit& get(
+      const char* key,
+      const char* glslSrc,
+      const VkDescriptorSetLayout& descrSetLayout,
+      WorkGroupSize workGroupSize);
+#else
+  ComputeUnit& get(
+      const char* key,
+      const uint32_t* code,
+      const uint32_t codeSize,
+      const VkDescriptorSetLayout& descrSetLayout,
+      WorkGroupSize& workGroupSize);
+#endif
+ private:
+  std::string getCacheKey(const char* key, WorkGroupSize& workGroupSize);
+  ComputeUnit& get(
+      const std::string& cacheKey,
+      std::function<std::shared_ptr<ComputeUnit>()> factoryFn);
+
+  VkDevice device_;
+  VkPipelineCache pipelineCache_;
+  std::map<std::string, std::shared_ptr<ComputeUnit>> computeUnits_;
 };
 
 std::ostream& operator<<(std::ostream& s, const WorkGroupSize& workGroupSize);
