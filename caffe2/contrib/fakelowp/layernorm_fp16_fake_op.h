@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <algorithm>
 #include <array>
@@ -19,10 +19,12 @@
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
 namespace caffe2 {
+  using namespace std;
 
-class LayerNormFakeFp16Op : public Operator<CPUContext> {
+template <class Context>
+class LayerNormFakeFp16Op final : public Operator<Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CPUContext);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   template <class... Args>
   explicit LayerNormFakeFp16Op(Args&&... args)
@@ -33,8 +35,8 @@ class LayerNormFakeFp16Op : public Operator<CPUContext> {
   ~LayerNormFakeFp16Op() noexcept override {}
 
   bool RunOnDevice() override {
-    return true;
-    // return DispatchHelper<InputTypes>::call(this, Input(DATA));
+//    return true;
+    return DoRunWithType<float>();
   }
 
   template <typename T>
@@ -76,18 +78,17 @@ class LayerNormFakeFp16Op : public Operator<CPUContext> {
          sigma_data,
          &context_);
 
-
-
     return true;
   }
+
+ protected:
+  INPUT_TAGS(INPUT);
+  OUTPUT_TAGS(OUTPUT, MEAN, STD);
 
  private:
   const int axis_;
   const float epsilon_;
   const bool elementwise_affine_;
-
-  INPUT_TAGS(INPUT);
-  OUTPUT_TAGS(OUTPUT, MEAN, STD);
 };
 
 } // namespace caffe2
