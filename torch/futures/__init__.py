@@ -8,7 +8,11 @@ import torch
 class Future(torch._C.Future):
     r"""
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
-    execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`.
+    execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
+    also exposes a set of APIs to add callback functions and setting results.
+
+    .. warning::
+        The ``torch.futures.Future`` is experimental and subject to change.
     """
     def __new__(cls):
         return super(Future, cls).__new__(cls)
