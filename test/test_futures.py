@@ -25,10 +25,10 @@ class TestFuture(TestCase):
         f = Future()
 
         t = threading.Thread(target=slow_set_future, args=(f, torch.ones(2, 2)))
-        t.daemon = True
         t.start()
 
         self.assertEqual(f.wait(), torch.ones(2, 2))
+        t.join()
 
     def test_mark_future_twice(self):
         fut = Future()
