@@ -40,7 +40,49 @@ REGISTER_CPU_OPERATOR(
         float,
         float,
         int,
-        rowwise_adagrad_update_inlined>);
+        rowwise_adagrad_update_inlined,
+        /*is_mean=*/false>);
+
+OPERATOR_SCHEMA(RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient)
+    .NumInputs(6)
+    .NumOutputs(2)
+    .EnforceOneToOneInplace()
+    .SetDoc(R"DOC(
+
+Fused operator of
+SparseLengthsIndicesInGradientMeanGradient (gradient of SparseLengthsMean) +
+RowWiseSparseAdagrad.
+
+Given inputs (param, moment, indices, grad, lr), runs the row-wise sparse
+AdaGrad update on (param, grad, moment[indices], lr), and returns (new_param,
+new_moment) as in the dense case. Additional input (lengths) is for fused
+SparseLengthsMeanGradient operator.
+
+)DOC")
+    .Input(0, "param", "Parameters to be updated")
+    .Input(1, "moment", "Moment history")
+    .Input(
+        2,
+        "indices",
+        "Integer vector containing indices of the first dimension of param for the slices that are being updated")
+    .Input(3, "grad", "Gradient computed")
+    .Input(4, "lr", "learning rate")
+    .Input(
+        5,
+        "lengths",
+        "Non negative vector with sum of elements equal to indices length")
+    .Output(0, "output_param", "Updated parameters")
+    .Output(1, "output_moment", "Updated moment")
+    .Arg("epsilon", "Default 1e-5");
+
+REGISTER_CPU_OPERATOR(
+    RowWiseSparseAdagradFusedWithSparseLengthsMeanGradient,
+    RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp<
+        float,
+        float,
+        int,
+        rowwise_adagrad_update_inlined,
+        /*is_mean=*/true>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagradFusedWithSparseLengthsSumGradient,
