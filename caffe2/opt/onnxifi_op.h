@@ -51,7 +51,10 @@ class OnnxifiOp final : public Operator<Context> {
             this->template GetSingleArgument<int>("max_batch_size", 0)),
         max_seq_size_(this->template GetSingleArgument<int>("max_seq_size", 0)),
         nominal_batch_idx_(
-            this->template GetSingleArgument<int>("nominal_batch_idx", 0)) {
+            this->template GetSingleArgument<int>("nominal_batch_idx", 0)),
+        adjust_quantized_offset_(this->template GetSingleArgument<int>(
+            "adjust_quantized_offset",
+            128)) {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
@@ -77,6 +80,7 @@ class OnnxifiOp final : public Operator<Context> {
     all_scales_.reserve(ws->Blobs().size());
     input_shapes_.resize(input_names_.size());
     output_shapes_.resize(output_names_.size());
+    quantized_outputs_.resize(output_names_.size(), false);
     int output_idx = 0;
     ArgumentHelper helper(operator_def);
     auto output_shape_info =
@@ -91,6 +95,7 @@ class OnnxifiOp final : public Operator<Context> {
     for (const auto& info : output_qshape_info) {
       output_qshape_map.emplace(info.name(), info);
     }
+    bool has_quantized_output = false;
     for (const auto& output : output_names_) {
       output_desc_.push_back(onnxTensorDescriptorV1());
       output_desc_.back().name = output.c_str();
@@ -105,9 +110,14 @@ class OnnxifiOp final : public Operator<Context> {
         if (qit != output_qshape_map.end()) {
           output_shape_hints_.emplace(
               output_idx, details::TensorInfo(qit->second));
+          quantized_outputs_[output_idx] = true;
+          has_quantized_output = true;
         }
       }
       ++output_idx;
+    }
+    if (!has_quantized_output) {
+      adjust_quantized_offset_ = 0;
     }
 
     // Get output resizing hints
@@ -149,18 +159,7 @@ class OnnxifiOp final : public Operator<Context> {
   }
 #endif
  private:
-  uint64_t SetOutputShapeAndType(int output_idx, std::vector<size_t>* dims) {
-    uint64_t type = ONNXIFI_DATATYPE_FLOAT32;
-    const auto it = output_shape_hints_.find(output_idx);
-    if (it != output_shape_hints_.end()) {
-      std::copy(
-          it->second.dims.begin(),
-          it->second.dims.end(),
-          std::back_inserter(*dims));
-      type = it->second.onnxifi_type;
-    }
-    return type;
-  }
+  void setOutputShapeAndType(int output_idx);
 
   void buildPropertyList(
       const OperatorDef& /* unused */,
@@ -388,6 +387,9 @@ class OnnxifiOp final : public Operator<Context> {
   std::vector<c10::SmallVector<uint64_t, 4>> input_shapes_;
   std::vector<c10::SmallVector<uint64_t, 4>> output_shapes_;
 
+  // Indicate if i-th output is a quantized tensor
+  std::vector<bool> quantized_outputs_;
+
   // A cache vector to avoid repeated reallocation. The existence of this is not
   // ideal, which is purely due to the factor that we use int64_t for c2::tensor
   // dim but uint64_t for onnxDesciptor dim. Maybe we should just use int64_t
@@ -409,6 +411,8 @@ class OnnxifiOp final : public Operator<Context> {
 
   // Whether we enable tracing in one run of inference
   bool enable_tracing_{false};
+
+  uint8_t adjust_quantized_offset_{0};
 };
 
 } // namespace caffe2
