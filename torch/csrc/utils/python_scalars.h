@@ -22,7 +22,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
     case at::kDouble: *(double*)data = THPUtils_unpackDouble(obj); break;
     case at::kComplexFloat: *(std::complex<float>*)data = (std::complex<float>)THPUtils_unpackComplexDouble(obj); break;
     case at::kComplexDouble: *(std::complex<double>*)data = THPUtils_unpackComplexDouble(obj); break;
-    case at::kBool: *(bool*)data = (bool)THPUtils_unpackLong(obj); break;
+    case at::kBool: *(bool*)data = THPUtils_unpackNumberAsBool(obj); break;
     case at::kBFloat16:
       *(at::BFloat16*)data = at::convert<at::BFloat16, double>(THPUtils_unpackDouble(obj));
       break;
