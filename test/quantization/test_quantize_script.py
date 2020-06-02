@@ -2148,7 +2148,6 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
 
         m = torch.jit.script(M())
         m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-
         # for input of FC for dynamic quant
         assert len(attrs_with_prefix(m, '_observer_')) == 1
         # for weight
@@ -2212,14 +2211,11 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
 
         m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
         data = torch.randn(5, 5, dtype=torch.float)
-
-        m(data)
         m = convert_dynamic_script(m, debug=True)
 
         assert len(m._modules._c.items()) == 2, \
             'Expected to have two submodule of linear'
 
-        m(data)
         quant_func = "aten::quantize_per_tensor"
 
         # quantizing activations
@@ -2244,10 +2240,9 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
             def forward(self, x):
                 return self.fc(x)
 
-        data = torch.rand((1, 5), dtype=torch.float)
         qconfig_dict = {'': default_dynamic_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_dynamic_script(model, qconfig_dict, data)
+        model = quantize_dynamic_script(model, qconfig_dict)
         FileCheck().check("quantized::linear_dynamic") \
                    .run(model.graph)
 
@@ -2262,9 +2257,8 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc1(x)
 
         m = torch.jit.script(M())
-        data = torch.randn((1, 5), dtype=torch.float)
         qconfig_dict = {'' : default_dynamic_qconfig}
-        model = quantize_dynamic_script(m, qconfig_dict, data)
+        model = quantize_dynamic_script(m, qconfig_dict)
         # add op is not dynamically quantized.
         FileCheck().check("aten::add") \
                    .check("quantized::linear_dynamic") \
@@ -2282,10 +2276,9 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc(x), size1, size2
 
         model = torch.jit.script(M()).eval()
-        data = torch.rand((1, 5), dtype=torch.float)
         qconfig_dict = {'': default_dynamic_qconfig}
 
-        model = quantize_dynamic_script(model, qconfig_dict, [data])
+        model = quantize_dynamic_script(model, qconfig_dict)
         FileCheck().check("quantized::linear_dynamic") \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
