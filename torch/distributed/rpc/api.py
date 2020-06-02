@@ -27,6 +27,7 @@ from . import (
     _set_and_start_rpc_agent,
     backend_registry,
 )
+
 from .internal import (
     PythonUDF,
     RPCExecMode,
@@ -292,18 +293,6 @@ def _init_rpc_backend(
     _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
 
     _set_and_start_rpc_agent(rpc_agent)
-
-
-def async_function(fn):
-    r"""
-    Wrapper of a function indicating that the return value of the function is
-    guranteed to be a ``torch.futures.Future``.
-    """
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        return fn(*args, **kwargs)
-    wrapper._wrapped_async_rpc_function = fn
-    return wrapper
 
 
 @_require_initialized

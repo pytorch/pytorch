@@ -343,22 +343,22 @@ def fail_on_fut(fut):
     pass
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 def async_raise_func():
     raise RuntimeError("Expected error")
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 def async_wrong_type():
     return torch.zeros(2, 2)
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 def async_add(to, x, y):
     return rpc.rpc_async(to, torch.add, args=(x, y))
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 def async_add_with_future_ctor(to, x, y, z):
     fut = torch.futures.Future()
     rpc.rpc_async(to, torch.add, args=(x, y)).then(
@@ -367,14 +367,14 @@ def async_add_with_future_ctor(to, x, y, z):
     return fut
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 def async_add_chained(to, x, y, z):
     return rpc.rpc_async(to, torch.add, args=(x, y)).then(
         lambda fut: fut.wait() + z
     )
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 def async_add_chained_multi(to, x, num, step):
     fut = rpc.rpc_async(to, torch.add, args=(x, 0))
     for _ in range(num):
@@ -382,14 +382,14 @@ def async_add_chained_multi(to, x, num, step):
     return fut
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 def async_add_nested(to, x, y, z):
     return rpc.rpc_async(to, async_add, args=(to, x, y)).then(
         lambda fut: fut.wait() + z
     )
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 def async_add_multi_fanout(to, x, num, step):
     futs = []
     for i in range(num):
