@@ -223,6 +223,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     grad_fn->src_device = src.device();
   }
   {
+    // TODO: move tracing logic into TraceTypeManual.cpp
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.copy_(src_, non_blocking);
@@ -253,6 +254,7 @@ Tensor& resize_(
   }
 #endif
   {
+    // TODO: move tracing logic into TraceTypeManual.cpp
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.resize_(size, std::move(optional_memory_format));
@@ -276,6 +278,7 @@ Tensor& resize_as_(
   }
 #endif
   {
+    // TODO: move tracing logic into TraceTypeManual.cpp
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     at::resize_as_(self_, the_template_, std::move(optional_memory_format));

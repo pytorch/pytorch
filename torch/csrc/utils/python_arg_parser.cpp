@@ -839,7 +839,6 @@ at::Tensor PythonArgs::tensor_slow(int i) {
         Py_TYPE(obj)->tp_name);
   }
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
-  at::AutoNonVariableTypeMode guard;
 
   at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
