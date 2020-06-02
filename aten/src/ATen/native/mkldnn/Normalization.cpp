@@ -62,7 +62,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   } else {
     AT_ASSERTM(input.dim() == 4 || input.dim() == 5,
                "mkldnn_batch_norm: currently mkldnn only support 2d and 3d batchnorm");
-    ideep::batch_normalization_forward_inference::compute<AllocForMKLDNN>(
+    ideep::batch_normalization_forward_inference::compute(
         x, m, v, w, b, y, eps);
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(y), input.options()),

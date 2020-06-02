@@ -12,9 +12,8 @@ namespace tensorexpr {
 template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
-  for (int i = 0; i < t->function()->ndim(); i++) {
-    sizes.push_back(
-        dynamic_cast<const IntImm*>(t->function()->dim(i))->value());
+  for (size_t i = 0; i < t->buf()->ndim(); i++) {
+    sizes.push_back(dynamic_cast<const IntImm*>(t->buf()->dim(i))->value());
   }
   return sizes;
 }
@@ -43,7 +42,7 @@ inline std::vector<ExprHandle> computeIndicesToBroadcast(
   return bcast;
 }
 
-class TensorExprKernel {
+class TORCH_API TensorExprKernel {
  public:
   explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
@@ -52,6 +51,8 @@ class TensorExprKernel {
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
   }
+
+  Stmt* getCodeGenStmt();
 
  private:
   enum BackendType {
@@ -70,7 +71,7 @@ class TensorExprKernel {
   template <typename T, typename T1>
   ExprHandle broadcast(const T& t, const std::vector<T1>& axes) {
     return t->call(computeIndicesToBroadcast(
-        axes, ExprVectorToExprHandleVector(t->function()->dims())));
+        axes, ExprVectorToExprHandleVector(t->buf()->dims())));
   }
 
   template <typename T, typename T1>
@@ -154,21 +155,19 @@ class TensorExprKernel {
 
   Tensor* computeValue(const torch::jit::Value* v);
 
-  void lowerToBackend(BackendType backendType);
+  void flattenTensors(BackendType backendType);
+  Stmt* generateStmt(BackendType backendType);
+  std::vector<CodeGen::BufferArg> prepareBufferArgs();
 
-  void pickAndCheckBackendType(const at::ArrayRef<IValue>& inputs);
+  std::string getCodeGenName(BackendType backendType);
 
-  void codeGenRun(const std::vector<CodeGen::CallArg>& runArgs);
+  std::vector<CodeGen::CallArg> prepareRunArgs(
+      const at::ArrayRef<IValue>& inputs,
+      std::vector<at::Tensor>& outputs);
+  BackendType inferBackendTypeFromDevice(at::Device device);
+  at::Device pickDeviceType(const at::ArrayRef<torch::jit::Value*>& inputs);
 
   void bindInput(const torch::jit::Value* input);
-
-  ExprHandle createInputIndexExpr(
-      const Buffer& buffer,
-      const std::vector<VarHandle>& axes,
-      const c10::VaryingShape& sizes,
-      const c10::VaryingStrides& strides,
-      const c10::VaryingStrides& contiguity,
-      const std::unordered_map<int64_t, VarHandle>& sizeVars);
 
  private:
   struct ShapeArg {
@@ -208,12 +207,12 @@ class TensorExprKernel {
   int64_t nInputs_ = 0;
   std::vector<KernelArg> kernelArgs_;
   std::vector<Tensor*> tensorOutputs_;
+  std::vector<Tensor*> flatTensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
-  std::unordered_map<size_t, std::unique_ptr<CodeGen>> codegenCache_;
-  KernelArena kernelArena_;
-  BackendType backendType_ = BackendType::kUninitialized;
+  std::unique_ptr<CodeGen> codegen_;
   at::Device device_ = at::kCPU;
+  KernelArena kernelArena_;
   std::vector<TypePtr> inputTypes_;
   std::shared_ptr<Graph> graph_;
   Code code_;
@@ -225,6 +224,8 @@ class TensorExprKernel {
 TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
+TORCH_API bool fallbackAllowed();
+TORCH_API bool setFallbackAllowed(bool value);
 
 } // namespace tensorexpr
 } // namespace jit

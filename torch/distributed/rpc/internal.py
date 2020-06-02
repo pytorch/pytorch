@@ -14,7 +14,6 @@ import torch.distributed as dist
 # objects
 _thread_local_tensor_tables = threading.local()
 
-
 class RPCExecMode(Enum):
     SYNC = "sync"
     ASYNC = "async"
@@ -32,12 +31,8 @@ class _InternalRPCPickler:
     """
 
     def __init__(self):
-        # python2 does not have dispatch_table, add "if torch._six.PY3" condition,
-        # as _InternalRPCPickler still got build in python2 even
-        # we skipped python 2 tests for rpc_test
-        if torch._six.PY3:
-            self._dispatch_table = copyreg.dispatch_table.copy()
-            self._dispatch_table[torch.Tensor] = self._tensor_reducer
+        self._dispatch_table = copyreg.dispatch_table.copy()
+        self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
     @classmethod
     def _tensor_receiver(cls, tensor_index):
@@ -161,6 +156,28 @@ def _run_function(python_udf):
 def _handle_exception(result):
     if isinstance(result, RemoteException):
         raise result.exception_type(result.msg)
+
+def _build_rpc_profiling_key(exec_type, func_name, current_worker_name, dst_worker_name):
+    """
+    Builds the key that RPC calls are profiled with using the autograd profiler.
+    This will be the name of the corresponding Event recorded in the profiler.
+
+    Arguments:
+        exec_type (RPCExecMode): Type of RPC/RRef call
+        func_name (str): Name of function being profiled.
+        current_worker_name (str): Name of current worker.
+        dst_worker_name (str): Name of the destination worker.
+
+    Returns:
+        String representing profiling key
+    """
+    profile_key = "rpc_{rpc_type}#{func_name}({current_worker} -> {dst_worker})".format(
+        rpc_type=exec_type.value,
+        func_name=func_name,
+        current_worker=current_worker_name,
+        dst_worker=dst_worker_name,
+    )
+    return profile_key
 
 
 def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):

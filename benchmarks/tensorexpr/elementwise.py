@@ -2,6 +2,7 @@ from . import benchmark
 import itertools
 import numpy as np
 import torch
+import scipy.special
 
 # A template class for elementwise operations.
 # A derived class will override the class instance to customize its behavior.
@@ -95,7 +96,7 @@ class ElementBench(benchmark.Benchmark):
 
     @staticmethod
     def default_configs():
-        return [[1 << 27]]
+        return [[1 << 25]]
 
 
 def register_element_ops():
@@ -114,7 +115,7 @@ def register_element_ops():
     ]
 
     unary_op_list = [
-        ["erf", lambda x: torch.erf(x), lambda x: np.erf(x)],
+        ["erf", lambda x: torch.erf(x), lambda x: scipy.special.erf(x)],
         ["exp", lambda x: torch.exp(x), lambda x: np.exp(x)],
         ["sin", lambda x: torch.sin(x), lambda x: np.sin(x)],
         ["cos", lambda x: torch.cos(x), lambda x: np.cos(x)],

@@ -1,6 +1,21 @@
 #ifndef THC_TENSOR_TOPK_CUH
 #define THC_TENSOR_TOPK_CUH
 
+#include <THC/THC.h>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCTensorMath.h>
+#include <THC/THCAsmUtils.cuh>
+#include <THC/THCScanUtils.cuh>
+#include <THC/THCTensorTypeUtils.cuh>
+#include <THC/THCTensorMathReduce.cuh>
+#include <ATen/WrapDimUtils.h>
+#include <algorithm> // for std::min
+
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#include <thrust/system/cuda/execution_policy.h>
+#endif
+
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 

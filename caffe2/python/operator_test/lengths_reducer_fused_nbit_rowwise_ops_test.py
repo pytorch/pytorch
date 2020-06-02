@@ -275,6 +275,28 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
         )
         net.Proto().op.extend([op])
 
+        op = core.CreateOperator(
+            "SparseLengthsSumSparseLookup",
+            ["indices", "lengths", "mapping_table"] + (["weights"] if weighted else []),
+            ["new_indices", "new_lengths"] + (["new_weights"] if weighted else []),
+        )
+        net.Proto().op.extend([op])
+        inputs = (
+            ["pruned_quantized_data"]
+            + (["new_weights"] if weighted else [])
+            + ["new_indices", "new_lengths"]
+        )
+        op = core.CreateOperator(
+            "SparseLengths"
+            + ("Weighted" if weighted else "")
+            + "SumFused"
+            + str(bit_rate)
+            + "BitRowwise",
+            inputs,
+            "sum_split",
+        )
+        net.Proto().op.extend([op])
+
         workspace.FeedBlob("quantized_data", quantized_data)
         workspace.FeedBlob("pruned_quantized_data", pruned_quantized_data)
         workspace.FeedBlob("weights", weights)
@@ -286,8 +308,10 @@ class TestLengthsReducerOpsFusedNBitRowwise(hu.HypothesisTestCase):
 
         sum_reference = workspace.FetchBlob("sum_reference")
         sum_pruned = workspace.FetchBlob("sum_pruned")
+        sum_split = workspace.FetchBlob("sum_split")
 
         np.testing.assert_array_equal(sum_reference, sum_pruned)
+        np.testing.assert_array_equal(sum_reference, sum_split)
 
     @given(
         num_rows=st.integers(1, 20),

@@ -1,5 +1,8 @@
-import torch
 import copy
+from typing import Optional
+
+import torch
+from torch import Tensor
 from .. import functional as F
 from .module import Module
 from .activation import MultiheadAttention
@@ -89,14 +92,15 @@ class Transformer(Module):
             - tgt_key_padding_mask: :math:`(N, T)`.
             - memory_key_padding_mask: :math:`(N, S)`.
 
-            Note: [src/tgt/memory]_mask should be filled with
-            float('-inf') for the masked positions and float(0.0) else. These masks
-            ensure that predictions for position i depend only on the unmasked positions
-            j and are applied identically for each sequence in a batch.
-            [src/tgt/memory]_key_padding_mask should be a ByteTensor where True values are positions
-            that should be masked with float('-inf') and False values will be unchanged.
-            This mask ensures that no information will be taken from position i if
-            it is masked, and has a separate mask for each sequence in a batch.
+            Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
+            positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
+            while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+            are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
+            is provided, it will be added to the attention weight. 
+            [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
+            the attention. If a ByteTensor is provided, the non-zero positions will be ignored while the zero
+            positions will be unchanged. If a BoolTensor is provided, the positions with the
+            value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
 
             - output: :math:`(T, N, E)`.
 

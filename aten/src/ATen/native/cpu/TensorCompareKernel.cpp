@@ -30,23 +30,26 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
   if (0 == result.numel()) {
     result.resize_(self_sizes);
   } else {
-    result = result.reshape(self_sizes);
+    //error out if result cannot be viewed as desired size
+    auto result_view = result.view(self_sizes);
+    result.set_(result_view);
   }
   if (0 == indice.numel()) {
     indice.resize_(self_sizes);
   } else {
-    indice = indice.reshape(self_sizes);
+    auto indices_view = indice.view(self_sizes);
+    indice.set_(indices_view);
   }
 
-  Tensor self_restrided = restride_dim(self, dim, self_sizes);
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
   auto iter = TensorIterator();
   iter.dont_compute_common_dtype();
   iter.dont_resize_outputs();
+  iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
   iter.add_output(result);
   iter.add_output(indice);
-  iter.add_input(self_restrided);
+  iter.add_input(self);
   iter.build();
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -84,7 +87,7 @@ static void min_kernel_impl(
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        using value_t = typename ztype<scalar_t>::value_t;
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t min_number = self_data[0];
         int64_t index = 0;
@@ -118,7 +121,7 @@ static void max_kernel_impl(
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        using value_t = typename ztype<scalar_t>::value_t;
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
         value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t max_number = self_data[0];
         int64_t index = 0;

@@ -63,6 +63,13 @@ OPERATOR_SCHEMA(StumpFunc)
     .NumOutputs(1)
     .Input(0, "X", "tensor of float")
     .Output(0, "Y", "tensor of float")
+    .TensorInferenceFunction([](const OperatorDef&,
+                                const vector<TensorShape>& input_types) {
+      vector<TensorShape> out(1);
+      out.at(0) = input_types.at(0);
+      out.at(0).set_data_type(TensorProto_DataType::TensorProto_DataType_FLOAT);
+      return out;
+    })
     .SetDoc(R"DOC(
 Converts each input element into either high_ or low_value
 based on the given threshold.
@@ -92,4 +99,4 @@ Split the elements and return the indices based on the given threshold.
 
 NO_GRADIENT(StumpFuncIndex);
 
-} // caffe2
+} // namespace caffe2

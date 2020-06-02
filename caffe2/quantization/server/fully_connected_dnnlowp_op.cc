@@ -904,6 +904,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
   return true;
 }
 
+template class FullyConnectedDNNLowPOp<uint8_t>;
+
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP,

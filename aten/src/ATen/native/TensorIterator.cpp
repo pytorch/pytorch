@@ -4,6 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/MemoryOverlap.h>
 
 namespace at {
 
@@ -72,17 +73,15 @@ void TensorIterator::reorder_dimensions() {
   permute_dimensions(perm_);
 }
 
+// Returns the first non-CPU device, if present, or the CPU
+// if all operands are on the CPU.
 Device compute_device(at::ArrayRef<OperandInfo> operands) {
   for (auto& op : operands) {
-    if (!op.tensor.defined()) continue;
-    if (op.tensor.dim() == 0) continue;
-    return op.tensor.device();
+    if (op.tensor.defined() && !op.tensor.device().is_cpu()) {
+      return op.tensor.device();
+    }
   }
-  for (auto& op : operands) {
-    if (!op.tensor.defined()) continue;
-    if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number()) continue;
-    return op.tensor.device();
-  }
+
   return kCPU;
 }
 
@@ -235,15 +234,14 @@ void TensorIterator::compute_types() {
       }
     }
 
+    // Checks for tensors on the wrong device
     if (op.tensor.defined() && op.device != op.tensor.device()) {
       if (op.is_output) {
         TORCH_CHECK(false, "output with device ", op.tensor.device(),
-                  " doesn't match the desired device ", op.device);
-      } else if (op.tensor.dim() == 0) {
-        op.tensor = op.tensor.to(op.options());
+                    " doesn't match the desired device ", op.device);
       } else {
         TORCH_CHECK(false, "expected device ", op.device,
-                  " but got device ", op.tensor.device());
+                    " but got device ", op.tensor.device());
       }
     }
   }
@@ -638,7 +636,7 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   for (auto& op : operands_) {
     op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
   }
-  if (size == 1) {
+  if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
   }
 }
@@ -713,7 +711,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   return iter;
 }
 
-TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
+TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a, bool promote) {
   TORCH_INTERNAL_ASSERT(out1.defined());
   TORCH_INTERNAL_ASSERT(out2.defined());
   TORCH_CHECK((!a.is_cuda() && !out1.is_cuda() && !out2.is_cuda()) || (a.device() == out1.device() && out1.device() == out2.device()),
@@ -729,7 +727,11 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   iter.add_output(out1);
   iter.add_output(out2);
   iter.add_input(a);
-  iter.promote_gpu_output_dtypes_ = true;
+  if (promote) {
+    iter.promote_gpu_output_dtypes_ = true;
+  } else {
+    iter.dont_compute_common_dtype();
+  }
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
   iter.build();
@@ -768,6 +770,8 @@ void TensorIterator::check_mem_overlaps() {
 }
 
 void TensorIterator::compute_shape() {
+  if (static_shape_) return;
+
   all_ops_same_shape_ = true;
   bool has_scalars = false;
   bool has_tensors = false;
@@ -824,7 +828,7 @@ void TensorIterator::compute_shape() {
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
-      auto original_shape = op.tensor.sizes();
+      IntArrayRef original_shape = static_shape_ ? shape_ : op.tensor.sizes();
       auto original_stride = op.tensor.strides();
       auto element_size_in_bytes = op.tensor.element_size();
       auto offset = ndim() - original_shape.size();
@@ -1074,7 +1078,11 @@ void TensorIterator::build() {
   }
 
   // zero out offsets
-  view_offsets_ = DimVector(ndim(), 0);
+  // If the tensor is a scalar, we leave room for it
+  // So index translations in reduction can access
+  // a valid value for the offset
+  int64_t ndim_offsets = (ndim() ? ndim() : 1);
+  view_offsets_ = DimVector(ndim_offsets, 0);
 }
 
 SplitUntil32Bit TensorIterator::with_32bit_indexing() const {

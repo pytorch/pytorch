@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -78,17 +80,6 @@ void IRVisitor::visit(const Cast* v) {
   v->src_value()->accept(this);
 }
 void IRVisitor::visit(const Var* v) {}
-void IRVisitor::visit(const Let* v) {
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-}
-
-void IRVisitor::visit(const LetStmt* v) {
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-}
 
 void IRVisitor::visit(const Ramp* v) {
   v->base()->accept(this);
@@ -96,20 +87,40 @@ void IRVisitor::visit(const Ramp* v) {
 }
 
 void IRVisitor::visit(const Load* v) {
-  v->base_handle()->accept(this);
-  v->index()->accept(this);
+  v->buf()->accept(this);
+  for (const Expr* ind : v->indices()) {
+    ind->accept(this);
+  }
   v->mask()->accept(this);
 }
 
-void IRVisitor::visit(const Store* v) {
+void IRVisitor::visit(const Buf* v) {
   v->base_handle()->accept(this);
-  v->index()->accept(this);
+}
+
+void IRVisitor::visit(const Store* v) {
+  v->buf()->accept(this);
+  for (const Expr* ind : v->indices()) {
+    ind->accept(this);
+  }
   v->value()->accept(this);
   v->mask()->accept(this);
 }
 
+void IRVisitor::visit(const AtomicAdd* v) {
+  v->buf()->accept(this);
+  for (const Expr* ind : v->indices()) {
+    ind->accept(this);
+  }
+  v->value()->accept(this);
+}
+
 void IRVisitor::visit(const Block* v) {
-  for (Stmt* s : v->stmts()) {
+  for (const auto& pair : v->varBindings()) {
+    pair.first->accept(this);
+    pair.second->accept(this);
+  }
+  for (Stmt* s : *v) {
     s->accept(this);
   }
 }
@@ -150,8 +161,7 @@ void IRVisitor::visit(const FunctionCall* v) {
 }
 
 void IRVisitor::visit(const Allocate* v) {
-  const Var* buffer_var = v->buffer_var();
-  buffer_var->accept(this);
+  v->buffer_var()->accept(this);
   std::vector<const Expr*> dims = v->dims();
   for (const Expr* dim : dims) {
     dim->accept(this);
@@ -159,8 +169,7 @@ void IRVisitor::visit(const Allocate* v) {
 }
 
 void IRVisitor::visit(const Free* v) {
-  const Var* buffer_var = v->buffer_var();
-  buffer_var->accept(this);
+  v->buffer_var()->accept(this);
 }
 
 void IRVisitor::visit(const Cond* v) {
@@ -176,10 +185,35 @@ void IRVisitor::visit(const Cond* v) {
   }
 }
 
-void IRVisitor::visit(const LinearForm* v) {
-  v->getA()->accept(this);
-  v->getX()->accept(this);
-  v->getB()->accept(this);
+void IRVisitor::visit(const Term* v) {
+  v->scalar()->accept(this);
+  for (auto* t : v->variables()) {
+    t->accept(this);
+  }
+}
+
+void IRVisitor::visit(const Polynomial* v) {
+  v->scalar()->accept(this);
+  for (auto* t : v->variables()) {
+    t->accept(this);
+  }
+}
+
+void IRVisitor::visit(const RoundOff* v) {
+  v->lhs()->accept(this);
+  v->rhs()->accept(this);
+}
+
+void IRVisitor::visit(const ReduceOp* v) {
+  v->accumulator()->accept(this);
+  v->body().node()->accept(this);
+
+  for (auto* e : v->output_args()) {
+    e->accept(this);
+  }
+  for (auto* r : v->reduce_args()) {
+    r->accept(this);
+  }
 }
 
 } // namespace tensorexpr

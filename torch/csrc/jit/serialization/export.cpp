@@ -1,12 +1,15 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/autograd/symbolic.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/onnx/onnx.h>
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/serialization/import_export_helpers.h>
 
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
@@ -613,6 +616,13 @@ GraphEncoder::GraphEncoder(
     validateGraph(graph, operator_export_type);
   }
 
+  if (use_external_data_format) {
+    TORCH_CHECK(
+        !onnx_file_path.empty(),
+        "For large model export, f in torch.onnx.export must be a non-empty string "
+        "specifying the location of the model.");
+  }
+
   auto* imp = model_proto_.add_opset_import();
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
@@ -954,6 +964,11 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       add_node_names,
       use_external_data_format,
       onnx_file_path);
+  const size_t proto_size = graph_encoder.get_model_proto().ByteSizeLong();
+  TORCH_CHECK(
+      proto_size <= INT_MAX,
+      "Exporting model exceed maximum protobuf size of 2GB. "
+      "Please call torch.onnx.export with use_external_data_format=True.");
   return std::make_tuple(
       graph_encoder.get_model_proto().SerializeAsString(),
       graph_encoder.get_raw_data_export_map());
@@ -966,34 +981,6 @@ void check_onnx_proto(const std::string& proto_string) {
     return;
   }
   onnx::checker::check_model(model);
-}
-
-namespace {
-void export_opnames(const Module& m, std::set<std::string>& opnames) {
-  for (const auto& method : m.get_methods()) {
-    const auto& func = method.function();
-    for (const auto& node : func.graph()->nodes()) {
-      auto schema = node->maybeSchema();
-      if (schema) {
-        auto opname = schema->operator_name();
-        std::string namestr = opname.name;
-        if (!opname.overload_name.empty()) {
-          namestr += "." + opname.overload_name;
-        }
-        opnames.emplace(namestr);
-      }
-    }
-  }
-  for (const auto& sub_m : m.children()) {
-    export_opnames(sub_m, opnames);
-  }
-}
-} // namespace
-
-std::vector<std::string> export_opnames(const Module& m) {
-  std::set<std::string> names;
-  export_opnames(m, names);
-  return std::vector<std::string>(names.begin(), names.end());
 }
 
 } // namespace jit

@@ -13,11 +13,6 @@ namespace jit {
 
 using ::c10::IValue;
 
-thread_local bool add_type_tags = false;
-bool getTypeTags() {
-  return add_type_tags;
-}
-
 // Protocol 2 is the highest that can be decoded by Python 2
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
@@ -101,12 +96,16 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
       // and serialize them properly for class/interface polymorphism
       memorized_class_types_->emplace_back(type);
     }
-    pushGlobal(type->name()->prefix(), type->name()->name());
+    auto type_name = type->name().value();
+    if (type_renamer_) {
+      type_name = type_renamer_(type);
+    }
+    pushGlobal(type_name.prefix(), type_name.name());
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
-      Function* getstate = type->getMethod("__getstate__");
-      pushIValue((*getstate)({obj}));
+      Function& getstate = type->getMethod("__getstate__");
+      pushIValue(getstate({obj}));
     } else {
       push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
       push<PickleOpCode>(PickleOpCode::MARK);
@@ -290,7 +289,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // location
   pushString(tensor.device().str());
   // size
-  pushInt(tensor.storage().size());
+  pushInt(tensor.storage().nbytes() / tensor.element_size());
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
@@ -489,42 +488,38 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
 // ivalue to the stack as a string so we can preserve type tags across
 // serialization
 void Pickler::startTypeTag() {
-  if (getTypeTags()) {
-    pushGlobal("torch.jit._pickle", "restore_type_tag");
-  }
+  pushGlobal("torch.jit._pickle", "restore_type_tag");
 }
 
 // See startTypeTag
 void Pickler::endTypeTag(const IValue& ivalue) {
-  if (getTypeTags()) {
-    TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
+  TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
 
-    // Push the dict type
-    TORCH_INTERNAL_ASSERT(ivalue.type());
-    pushString(ivalue.type()->python_str());
+  // Push the dict type
+  TORCH_INTERNAL_ASSERT(ivalue.type());
+  pushString(ivalue.type()->python_str());
 
-    // Pop the dict and type into a tuple
-    push<PickleOpCode>(PickleOpCode::TUPLE2);
+  // Pop the dict and type into a tuple
+  push<PickleOpCode>(PickleOpCode::TUPLE2);
 
-    // Call function via reduce
-    push<PickleOpCode>(PickleOpCode::REDUCE);
-  }
+  // Call function via reduce
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushDict(const IValue& ivalue) {
-  auto dict_items = iterationOrder(ivalue.toGenericDict());
+  auto dict = ivalue.toGenericDict();
 
   startTypeTag();
 
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
-  if (dict_items.size() >= 0) {
+  if (dict.size() >= 0) {
     push<PickleOpCode>(PickleOpCode::MARK);
 
     // Sort the dict for deterministic keys
-    for (const auto& pair : dict_items) {
-      pushIValue(pair.first);
-      pushIValue(pair.second);
+    for (const auto& entry : dict) {
+      pushIValue(entry.key());
+      pushIValue(entry.value());
     }
 
     push<PickleOpCode>(PickleOpCode::SETITEMS);
@@ -598,23 +593,24 @@ void Pickler::pushTuple(const IValue& ivalue) {
 WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
   WriteableTensorData result;
   result.tensor_ = tensor;
-  result.size_ = tensor.element_size() * tensor.storage().size();
+  result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() == at::DeviceType::CUDA) {
+  if (tensor.storage().device_type() == DeviceType::CUDA) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.
-    result.tensor_ = at::empty({0}, tensor.options())
-                         .set_(
-                             tensor.storage(),
-                             /* storage_offset = */ 0,
-                             /* size = */
-                             {static_cast<int64_t>(tensor.storage().size())},
-                             /* stride = */ {1})
-                         .cpu();
+    result.tensor_ =
+        at::empty({0}, tensor.options())
+            .set_(
+                tensor.storage(),
+                /* storage_offset = */ 0,
+                /* size = */
+                {static_cast<int64_t>(
+                    tensor.storage().nbytes() / tensor.element_size())},
+                /* stride = */ {1})
+            .cpu();
     TORCH_CHECK(
-        result.tensor_.element_size() * result.tensor_.storage().size() ==
-            result.size_,
+        result.tensor_.storage().nbytes() == result.size_,
         "Storage tensor size did not match record size");
   }
   return result;
@@ -622,7 +618,7 @@ WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
 
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   // Check that the schemas for __getstate__ and __setstate__ are correct
-  auto getstate = cls->getMethod("__getstate__");
+  auto getstate = cls->findMethod("__getstate__");
   if (getstate == nullptr) {
     return false;
   }
@@ -642,7 +638,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
 
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
-  auto setstate = cls->getMethod("__setstate__");
+  auto setstate = cls->findMethod("__setstate__");
   if (!setstate) {
     return false;
   }

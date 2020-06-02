@@ -109,51 +109,13 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
+    if (isNamedTupleClass(obj)) {
+      return registerNamedTuple(obj, loc);
+    }
+
     auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
         py::module::import("torch.jit").attr("_qualified_name")(obj)));
 
-    if (isNamedTupleClass(obj)) {
-      // Currently don't support default values
-      if (py::hasattr(obj, "_field_defaults")) {
-        auto default_dict = py::cast<std::map<std::string, py::object>>(
-            py::getattr(obj, "_field_defaults"));
-        if (default_dict.size()) {
-          std::string error_msg =
-              "Default values are currently not supported"
-              " on NamedTuple fields in TorchScript. Fields "
-              "with default values: [";
-          bool first = true;
-          for (const auto& kv : default_dict) {
-            if (!first) {
-              error_msg += ", ";
-            }
-            error_msg += kv.first;
-          }
-          error_msg += "]";
-          throw ErrorReport(loc) << error_msg;
-        }
-      }
-
-      py::object props = py::module::import("torch.jit")
-                             .attr("_get_named_tuple_properties")(obj);
-      std::string unqualName;
-      std::vector<std::string> fields;
-      std::vector<TypePtr> annotations;
-      std::tie(unqualName, fields, annotations) = py::cast<
-          std::tuple<std::string, decltype(fields), decltype(annotations)>>(
-          props);
-
-      auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
-      if (auto type = get_python_cu()->get_type(qualifiedName)) {
-        TORCH_CHECK(
-            type->isSubtypeOf(tt),
-            "Can't to redefine NamedTuple: ",
-            tt->python_str());
-        return type;
-      }
-      get_python_cu()->register_type(tt);
-      return tt;
-    }
     return get_python_cu()->get_type(qualifiedName);
   }
 
@@ -295,9 +257,15 @@ FunctionSchema getSchemaWithNameAndDefaults(
       checkMutableFunctionDefault(range, arg, it->second);
       c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
       if (!value) {
-        throw ErrorReport(range)
-            << "Expected a default value of type " << arg.type()->python_str()
-            << " on parameter \"" << arg.name() << "\"";
+        ErrorReport error(range);
+        error << "Expected a default value of type " << arg.type()->python_str()
+              << " on parameter \"" << arg.name() << "\".";
+        if (arg.is_inferred_type()) {
+          error << "Because \"" << arg.name()
+                << "\" was not annotated with an explicit type "
+                << "it is assumed to be type 'Tensor'.";
+        }
+        throw error;
       }
       new_args.emplace_back(
           arg.name(), arg.type(), arg.N(), *value, arg.kwarg_only());
@@ -472,6 +440,17 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
   auto s_iter = stack.begin();
   for (auto v : input_values) {
     AT_ASSERT(s_iter != stack.end());
+    // Leave packed param types alone. This is needed for downstream passes
+    // (like alias analysis) to work properly. This will be unpacked later
+    // in unpackQuantizedWeights.
+    if (auto named_type = v->type()->cast<c10::NamedType>()) {
+      if (auto qualname = named_type->name()) {
+        if (getCustomClass(qualname->qualifiedName())) {
+          s_iter++;
+          continue;
+        }
+      }
+    }
     if (v->type()->kind() == TupleType::Kind) {
       AT_ASSERT(v->node()->kind() == prim::Param);
       v->setType(getTupleTensorType(s_iter, stack.end(), v->type(), complete));
@@ -556,7 +535,11 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       visited.emplace(item.a.internalToPointer());
     }
     if (*unshapedType(item.a.type()) != *unshapedType(item.b.type())) {
-      return false;
+      // Since named types are saved and loaded in the test suite, we cannot
+      // expect them to be equal. We should still check their slots however.
+      if (!item.a.type()->cast<c10::NamedType>()) {
+        return false;
+      }
     }
     // check tags for objects that contain subobjects
     if (item.a.isObject()) {
@@ -691,6 +674,21 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
+static constexpr const char* magic_method_names[] = {
+    "__lt__",      "__le__",      "__eq__",        "__ne__",
+    "__ge__",      "__gt__",      "__not__",       "__abs__",
+    "__add__",     "__and__",     "__floordiv__",  "__index__",
+    "__inv__",     "__invert__",  "__lshift__",    "__mod__",
+    "__mul__",     "__matmul__",  "__neg__",       "__or__",
+    "__pos__",     "__pow__",     "__rshift__",    "__sub__",
+    "__truediv__", "__xor__",     "__concat__",    "__contains__",
+    "__delitem__", "__getitem__", "__setitem__",   "__iadd__",
+    "__iand__",    "__iconcat__", "__ifloordiv__", "__ilshift__",
+    "__imod__",    "__imul__",    "__imatmul__",   "__ior__",
+    "__ipow__",    "__irshift__", "__isub__",      "__itruediv__",
+    "__ixor__",    "__str__",     "__len__",
+};
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -701,112 +699,150 @@ void initJitScriptBindings(PyObject* module) {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
 
-  py::class_<Object>(m, "ScriptObject")
-      .def("_type", [](Module& m) { return m.type(); })
-      .def(
-          "_get_method",
-          [](Object& self, const std::string& name) -> Method {
-            return self.get_method(name);
-          },
-          py::keep_alive<0, 1>())
-      .def(
-          "setattr",
-          [](Object& self, const std::string& name, py::object value) {
-            if (self.type()->hasConstant(name)) {
-              TORCH_CHECK(
-                  false,
-                  "Can't set constant '",
-                  name,
-                  "' which has value:",
-                  self.type()->getConstant(name));
-            }
-            TypePtr type = self.type()->getAttribute(name);
-            auto ivalue = toIValue(std::move(value), type);
-            self.setattr(name, ivalue);
-          })
-      .def(
-          "getattr",
-          [](Object& self, const std::string& name) {
-            return toPyObject(self.attr(name));
-          })
-      .def(
-          "__getattr__",
-          [](Object& self, const std::string& name) {
-            if (auto method = self.find_method(name)) {
-              return py::cast(*method);
-            }
-            return toPyObject(self.attr(name));
-          })
-      .def(
-          "hasattr",
-          [](Object& self, const std::string& name) {
-            return self.hasattr(name);
-          })
-      .def(
-          "_has_method",
-          [](Object& self, const std::string& name) {
-            return bool(self.find_method(name));
-          })
-      .def(
-          "_method_names",
-          [](Object& self) {
-            return fmap(self.get_methods(), [](const Method& method) {
-              return method.name();
-            });
-          })
-      .def(py::pickle(
-          [](const Object& self)
-              -> std::tuple<py::object, std::string> { // __getstate__
-            if (auto getstate_method = self.find_method("__getstate__")) {
-              auto object_state = toPyObject((*getstate_method)(Stack{}));
-              TORCH_INTERNAL_ASSERT(self.type()->name());
-              return std::make_tuple(
-                  object_state, self.type()->name()->qualifiedName());
-            }
-            std::stringstream err;
-            err << "Tried to serialize object ";
-            if (auto qualname = self.type()->name()) {
-              err << qualname->qualifiedName() << " ";
-            }
-            err << "which does not have a __getstate__ method defined!";
-            throw std::runtime_error(err.str());
-          },
-          [](std::tuple<py::object, std::string> state_tup) -> Object {
-            py::object state;
-            std::string qualname;
-            std::tie(state, qualname) = state_tup;
-            auto class_type = getCustomClass(qualname);
-            TORCH_CHECK(
-                class_type,
-                "Tried to deserialize class ",
-                qualname,
-                " which is not known to the runtime. "
-                "If this is a custom C++ class, make "
-                "sure the appropriate code is linked.");
+  auto object_class =
+      py::class_<Object>(m, "ScriptObject")
+          .def("_type", [](Module& m) { return m.type(); })
+          .def(
+              "_get_method",
+              [](Object& self, const std::string& name) -> Method {
+                return self.get_method(name);
+              },
+              py::keep_alive<0, 1>())
+          .def(
+              "setattr",
+              [](Object& self, const std::string& name, py::object value) {
+                if (self.type()->hasConstant(name)) {
+                  TORCH_CHECK(
+                      false,
+                      "Can't set constant '",
+                      name,
+                      "' which has value:",
+                      self.type()->getConstant(name));
+                }
+                TypePtr type = self.type()->getAttribute(name);
+                auto ivalue = toIValue(std::move(value), type);
+                self.setattr(name, ivalue);
+              })
+          .def(
+              "getattr",
+              [](Object& self, const std::string& name) {
+                return toPyObject(self.attr(name));
+              })
+          .def(
+              "__getattr__",
+              [](Object& self, const std::string& name) -> py::object {
+                if (name == "__qualname__") {
+                  return py::cast(self.type()->name()->name());
+                }
+                if (auto method = self.find_method(name)) {
+                  return py::cast(*method);
+                }
+                return toPyObject(self.attr(name));
+              })
+          .def(
+              "hasattr",
+              [](Object& self, const std::string& name) {
+                return self.hasattr(name);
+              })
+          .def(
+              "_has_method",
+              [](Object& self, const std::string& name) {
+                return bool(self.find_method(name));
+              })
+          .def(
+              "_method_names",
+              [](Object& self) {
+                return fmap(self.get_methods(), [](const Method& method) {
+                  return method.name();
+                });
+              })
+          .def(py::pickle(
+              [](const Object& self)
+                  -> std::tuple<py::object, std::string> { // __getstate__
+                if (auto getstate_method = self.find_method("__getstate__")) {
+                  auto object_state = toPyObject((*getstate_method)(Stack{}));
+                  TORCH_INTERNAL_ASSERT(self.type()->name());
+                  return std::make_tuple(
+                      object_state, self.type()->name()->qualifiedName());
+                }
+                std::stringstream err;
+                err << "Tried to serialize object ";
+                if (auto qualname = self.type()->name()) {
+                  err << qualname->qualifiedName() << " ";
+                }
+                err << "which does not have a __getstate__ method defined!";
+                throw std::runtime_error(err.str());
+              },
+              [](std::tuple<py::object, std::string> state_tup) -> Object {
+                py::object state;
+                std::string qualname;
+                std::tie(state, qualname) = state_tup;
+                auto class_type = getCustomClass(qualname);
+                TORCH_CHECK(
+                    class_type,
+                    "Tried to deserialize class ",
+                    qualname,
+                    " which is not known to the runtime. "
+                    "If this is a custom C++ class, make "
+                    "sure the appropriate code is linked.");
 
-            auto self = Object(c10::ivalue::Object::create(
-                c10::StrongTypePtr(
-                    std::shared_ptr<torch::jit::CompilationUnit>(), class_type),
-                1));
-            if (auto setstate_method = self.find_method("__setstate__")) {
-              auto setstate_schema = setstate_method->function().getSchema();
-              TORCH_INTERNAL_ASSERT(
-                  setstate_schema.arguments().size() == 2,
-                  "__setstate__ method for class ",
-                  class_type->python_str(),
-                  " must have exactly 2 arguments!");
-              auto state_type = setstate_schema.arguments().at(1).type();
-              (*setstate_method)(Stack{toIValue(state, state_type)});
-              return self;
+                auto self = Object(c10::ivalue::Object::create(
+                    c10::StrongTypePtr(
+                        std::shared_ptr<torch::jit::CompilationUnit>(),
+                        class_type),
+                    1));
+                if (auto setstate_method = self.find_method("__setstate__")) {
+                  auto setstate_schema =
+                      setstate_method->function().getSchema();
+                  TORCH_INTERNAL_ASSERT(
+                      setstate_schema.arguments().size() == 2,
+                      "__setstate__ method for class ",
+                      class_type->python_str(),
+                      " must have exactly 2 arguments!");
+                  auto state_type = setstate_schema.arguments().at(1).type();
+                  (*setstate_method)(Stack{toIValue(state, state_type)});
+                  return self;
+                }
+                std::stringstream err;
+                err << "Tried to deserialize object ";
+                if (auto qualname = class_type->name()) {
+                  err << qualname->qualifiedName() << " ";
+                }
+                err << "which does not have a __setstate__ method defined!";
+                throw std::runtime_error(err.str());
+              }));
+
+  // Special case __str__ to make sure we can print Objects/Modules regardless
+  // of if the user defined a __str__
+  using MagicMethodImplType = std::function<py::object(
+      const Object& self, py::args args, py::kwargs kwargs)>;
+  std::unordered_map<std::string, MagicMethodImplType> special_magic_methods{
+      {"__str__",
+       [](const Object& self, py::args args, py::kwargs kwargs) -> py::object {
+         auto method = self.find_method("__str__");
+         if (!method) {
+           return py::str("ScriptObject");
+         }
+         return invokeScriptMethodFromPython(
+             *method, std::move(args), std::move(kwargs));
+       }}};
+
+  for (const char* mm_name : magic_method_names) {
+    if (special_magic_methods.count(mm_name)) {
+      object_class.def(mm_name, special_magic_methods[mm_name]);
+    } else {
+      object_class.def(
+          mm_name,
+          [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
+            auto method = self.find_method(mm_name);
+            if (!method) {
+              throw NotImplementedError();
             }
-            std::stringstream err;
-            err << "Tried to deserialize object ";
-            if (auto qualname = class_type->name()) {
-              err << qualname->qualifiedName() << " ";
-            }
-            err << "which does not have a __setstate__ method defined!";
-            throw std::runtime_error(err.str());
-          }));
+            return invokeScriptMethodFromPython(
+                *method, std::move(args), std::move(kwargs));
+          });
+    }
+  }
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
@@ -886,12 +922,21 @@ void initJitScriptBindings(PyObject* module) {
             didFinishEmitModule(m);
           })
       .def(
+          "_register_attribute",
+          [](Module& m,
+             const std::string& name,
+             TypePtr type,
+             py::handle value) {
+            m.register_attribute(name, type, toIValue(value, type));
+          })
+      .def(
           "_create_method_from_trace",
           [](Module& self,
              const std::string& name,
              py::function func,
              py::tuple input_tuple,
              py::function var_lookup_fn,
+             bool strict,
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
@@ -899,7 +944,12 @@ void initJitScriptBindings(PyObject* module) {
 
             std::shared_ptr<Graph> graph =
                 std::get<0>(tracer::createGraphByTracing(
-                    func, typed_inputs, var_lookup_fn, force_outplace, &self));
+                    func,
+                    typed_inputs,
+                    var_lookup_fn,
+                    strict,
+                    force_outplace,
+                    &self));
             const auto method_name = QualifiedName(*self.type()->name(), name);
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
@@ -911,13 +961,33 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps, false);
+            PythonPrint pp(tensors, deps);
             pp.printNamedType(self.type());
             return pp.str();
           })
+      .def_property_readonly(
+          "code_with_constants",
+          [](Module& self) {
+            std::vector<at::Tensor> tensors;
+            std::vector<c10::NamedTypePtr> deps;
+            PythonPrint pp(tensors, deps);
+            pp.printNamedType(self.type());
+            std::map<std::string, at::Tensor> consts;
+            int i = 0;
+            for (auto const& tensor : tensors) {
+              consts["c" + std::to_string(i)] = tensor;
+              i += 1;
+            }
+            return std::make_tuple(pp.str(), consts);
+          })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
-      .def("_clone_instance", &Module::clone_instance);
+      .def("_clone_instance", &Module::clone_instance)
+      .def("copy", &Module::copy)
+      .def("deepcopy", &Module::deepcopy)
+      .def_property_readonly("qualified_name", [](const Module& self) {
+        return self.type()->name()->qualifiedName();
+      });
 
   slot_dict_impl<detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<detail::BufferPolicy>::bind(m, "BufferDict");
@@ -1011,7 +1081,8 @@ void initJitScriptBindings(PyObject* module) {
           [](const StrongFunctionPtr& self) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            PythonPrint pp(tensors, deps, false);
+
+            PythonPrint pp(tensors, deps);
             pp.printFunction(*self.function_);
             return pp.str();
           })
@@ -1050,12 +1121,27 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
-      .def_property_readonly("code", [](Method& self) {
+      .def_property_readonly(
+          "code",
+          [](Method& self) {
+            std::vector<at::Tensor> tensors;
+            std::vector<c10::NamedTypePtr> deps;
+            PythonPrint pp(tensors, deps);
+            pp.printMethod(self.function());
+            return pp.str();
+          })
+      .def_property_readonly("code_with_constants", [](Method& self) {
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> deps;
-        PythonPrint pp(tensors, deps, false);
+        PythonPrint pp(tensors, deps);
         pp.printMethod(self.function());
-        return pp.str();
+        std::map<std::string, at::Tensor> consts;
+        int i = 0;
+        for (auto const& tensor : tensors) {
+          consts["c" + std::to_string(i)] = tensor;
+          i += 1;
+        }
+        return std::make_tuple(pp.str(), consts);
       });
   m.def(
       "_jit_script_compile",
@@ -1099,10 +1185,12 @@ void initJitScriptBindings(PyObject* module) {
          py::function func,
          py::tuple input_tuple,
          py::function var_lookup_fn,
+         bool strict,
          bool force_outplace) {
         auto typed_inputs = toTraceableStack(input_tuple);
         std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
-            func, typed_inputs, var_lookup_fn, force_outplace));
+            func, typed_inputs, var_lookup_fn, strict, force_outplace));
+
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
         auto result = cu->create_function(
@@ -1154,6 +1242,10 @@ void initJitScriptBindings(PyObject* module) {
             pythonResolver(std::move(rcb)),
             is_module);
       });
+
+  py::class_<torch::jit::ErrorReport::CallStack>(
+      m, "CallStack", py::dynamic_attr())
+      .def(py::init<const std::string&, const SourceRange&>());
 
   m.def("_parse_source_def", [](const std::string& src) {
     Parser p(std::make_shared<Source>(src));

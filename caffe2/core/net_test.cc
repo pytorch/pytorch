@@ -787,8 +787,13 @@ TEST(NetTest, PendingOpsAndNetFailure) {
   Workspace ws;
   std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
 
-  // net is not stuck and returns false
-  ASSERT_FALSE(net->Run());
+  try {
+    // net is not stuck and returns false
+    ASSERT_FALSE(net->Run());
+  } catch (const caffe2::AsyncNetCancelled&) {
+    // Cancellation exception is fine since if the ops run concurrently the
+    // NotFinishingOp may be cancelled with an exception.
+  }
 }
 
 class AsyncErrorOp final : public Operator<CPUContext> {

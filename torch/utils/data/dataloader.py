@@ -74,11 +74,13 @@ class DataLoader(object):
             (default: ``1``).
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: ``False``).
-        sampler (Sampler, optional): defines the strategy to draw samples from
-            the dataset. If specified, :attr:`shuffle` must be ``False``.
-        batch_sampler (Sampler, optional): like :attr:`sampler`, but returns a batch of
-            indices at a time. Mutually exclusive with :attr:`batch_size`,
-            :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
+        sampler (Sampler or Iterable, optional): defines the strategy to draw
+            samples from the dataset. Can be any ``Iterable`` with ``__len__``
+            implemented. If specified, :attr:`shuffle` must not be specified.
+        batch_sampler (Sampler or Iterable, optional): like :attr:`sampler`, but
+            returns a batch of indices at a time. Mutually exclusive with
+            :attr:`batch_size`, :attr:`shuffle`, :attr:`sampler`,
+            and :attr:`drop_last`.
         num_workers (int, optional): how many subprocesses to use for data
             loading. ``0`` means that the data will be loaded in the main process.
             (default: ``0``)
@@ -255,9 +257,9 @@ class DataLoader(object):
                     multiprocessing_context = multiprocessing.get_context(multiprocessing_context)
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
-                    raise ValueError(('multiprocessing_context option should be a valid context '
-                                      'object or a string specifying the start method, but got '
-                                      'multiprocessing_context={}').format(multiprocessing_context))
+                    raise TypeError(('multiprocessing_context option should be a valid context '
+                                     'object or a string specifying the start method, but got '
+                                     'multiprocessing_context={}').format(multiprocessing_context))
             else:
                 raise ValueError(('multiprocessing_context can only be used with '
                                   'multi-process loading (num_workers > 0), but got '
@@ -311,6 +313,12 @@ class DataLoader(object):
             # `DataLoader`, save the returned value in `self._len_called`, and warn
             # if the iterator ends up yielding more than this number of samples.
             length = self._IterableDataset_len_called = len(self.dataset)
+            if self.batch_size is not None:
+                from math import ceil
+                if self.drop_last:
+                    length = length // self.batch_size
+                else:
+                    length = ceil(length / self.batch_size)
             return length
         else:
             return len(self._index_sampler)
@@ -774,7 +782,122 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
             if isinstance(e, queue.Empty):
                 return (False, None)
+            import tempfile
+            import errno
+            try:
+                # Raise an exception if we are this close to the FDs limit.
+                # Apparently, trying to open only one file is not a sufficient
+                # test.
+                # See NOTE [ DataLoader on Linux and open files limit ]
+                fds_limit_margin = 10
+                fs = [tempfile.NamedTemporaryFile() for i in range(fds_limit_margin)]
+            except OSError as e:
+                if e.errno == errno.EMFILE:
+                    raise RuntimeError(
+                        "Too many open files. Communication with the"
+                        " workers is no longer possible. Please increase the"
+                        " limit using `ulimit -n` in the shell or change the"
+                        " sharing strategy by calling"
+                        " `torch.multiprocessing.set_sharing_strategy('file_system')`"
+                        " at the beginning of your code")
             raise
+
+# NOTE [ DataLoader on Linux and open files limit ]
+#
+# On Linux when DataLoader is used with multiprocessing we pass the data between
+# the root process and the workers through SHM files. We remove those files from
+# the filesystem as soon as they are created and keep them alive by
+# passing around their file descriptors through AF_UNIX sockets. (See
+# docs/source/multiprocessing.rst and 'Multiprocessing Technical Notes` in
+# the wiki (https://github.com/pytorch/pytorch/wiki).)
+#
+# This sometimes leads us to exceeding the open files limit. When that happens,
+# and the offending file descriptor is coming over a socket, the `socket` Python
+# package silently strips the file descriptor from the message, setting only the
+# `MSG_CTRUNC` flag (which might be a bit misleading since the manpage says that
+# it _indicates that some control data were discarded due to lack of space in
+# the buffer for ancillary data_). This might reflect the C implementation of
+# AF_UNIX sockets.
+#
+# This behaviour can be reproduced with the script and instructions at the
+# bottom of this note.
+#
+# When that happens, the standard Python `multiprocessing` (and not
+# `torch.multiprocessing`) raises a `RuntimeError: received 0 items of ancdata`
+#
+# Sometimes, instead of the FD being stripped, you may get an `OSError:
+# Too many open files`, both in the script below and in DataLoader. However,
+# this is rare and seems to be nondeterministic.
+#
+#
+#   #!/usr/bin/env python3
+#   import sys
+#   import socket
+#   import os
+#   import array
+#   import shutil
+#   import socket
+#
+#
+#   if len(sys.argv) != 4:
+#       print("Usage: ", sys.argv[0], " tmp_dirname iteration (send|recv)")
+#       sys.exit(1)
+#
+#   if __name__ == '__main__':
+#       dirname = sys.argv[1]
+#       sock_path = dirname + "/sock"
+#       iterations = int(sys.argv[2])
+#       def dummy_path(i):
+#           return dirname + "/" + str(i) + ".dummy"
+#
+#
+#       if sys.argv[3] == 'send':
+#           while not os.path.exists(sock_path):
+#               pass
+#           client = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+#           client.connect(sock_path)
+#           for i in range(iterations):
+#               fd = os.open(dummy_path(i), os.O_WRONLY | os.O_CREAT)
+#               ancdata = array.array('i', [fd])
+#               msg = bytes([i % 256])
+#               print("Sending fd ", fd, " (iteration #", i, ")")
+#               client.sendmsg([msg], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, ancdata)])
+#
+#
+#       else:
+#           assert sys.argv[3] == 'recv'
+#
+#           if os.path.exists(dirname):
+#               raise Exception("Directory exists")
+#
+#           os.mkdir(dirname)
+#
+#           print("Opening socket...")
+#           server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+#           server.bind(sock_path)
+#
+#           print("Listening...")
+#           for i in range(iterations):
+#               a = array.array('i')
+#               msg, ancdata, flags, addr = server.recvmsg(1, socket.CMSG_SPACE(a.itemsize))
+#               assert(len(ancdata) == 1)
+#               cmsg_level, cmsg_type, cmsg_data = ancdata[0]
+#               a.frombytes(cmsg_data)
+#               print("Received fd ", a[0], " (iteration #", i, ")")
+#
+#           shutil.rmtree(dirname)
+#
+# Steps to reproduce:
+#
+# 1. Run two shells and set lower file descriptor limit in the receiving one:
+# (shell1) ulimit -n 1020
+# (shell2) ulimit -n 1022
+#
+# 2. Run the script above with the `recv` option in the first shell
+# (shell1) ./test_socket.py sock_tmp 1017 recv
+#
+# 3. Run the script with the `send` option in the second shell:
+# (shell2) ./test_socket.py sock_tmp 1017 send
 
     def _get_data(self):
         # Fetches data from `self._data_queue`.

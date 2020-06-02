@@ -9,6 +9,7 @@ from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
 from .categorical import Categorical
+from .cauchy import Cauchy
 from .continuous_bernoulli import ContinuousBernoulli
 from .dirichlet import Dirichlet
 from .distribution import Distribution
@@ -796,3 +797,11 @@ def _kl_independent_independent(p, q):
         raise NotImplementedError
     result = kl_divergence(p.base_dist, q.base_dist)
     return _sum_rightmost(result, p.reinterpreted_batch_ndims)
+
+
+@register_kl(Cauchy, Cauchy)
+def _kl_cauchy_cauchy(p, q):
+    # From https://arxiv.org/abs/1905.10965
+    t1 = ((p.scale + q.scale).pow(2) + (p.loc - q.loc).pow(2)).log()
+    t2 = (4 * p.scale * q.scale).log()
+    return t1 - t2

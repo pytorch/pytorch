@@ -75,11 +75,10 @@ class TestCppExtensionAOT(common.TestCase):
         # `True`. This *should* mean that on Python 3, the produced shared
         # library does not have an ABI suffix like
         # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
-        # On Python 2 there is no ABI suffix anyway.
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
-        self.assertEqual(len(matches), 1, str(matches))
-        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", str(matches))
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", msg=str(matches))
 
     def test_optional(self):
         has_value = cpp_extension.function_taking_optional(torch.ones(5))
@@ -89,10 +88,6 @@ class TestCppExtensionAOT(common.TestCase):
 
 
 class TestMSNPUTensor(common.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        msnpu_extension.init_msnpu_extension()
-
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
@@ -143,6 +138,10 @@ class TestMSNPUTensor(common.TestCase):
 
 
 class TestRNGExtension(common.TestCase):
+
+    def setUp(self):
+        super(TestRNGExtension, self).setUp()
+        rng_extension.registerOps()
 
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)

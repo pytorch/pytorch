@@ -6,7 +6,7 @@
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/script.h>
 #include "caffe2/serialize/read_adapter_interface.h"
@@ -18,6 +18,8 @@
 #include <android/asset_manager_jni.h>
 #include <android/log.h>
 #endif
+
+using namespace torch::autograd::profiler;
 
 namespace pytorch_jni {
 
@@ -85,12 +87,13 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
 #ifdef TRACE_ENABLED
-  static void onFunctionEnter(
-      const torch::autograd::profiler::RecordFunction& fn) {
+  static bool onFunctionEnter(
+      const at::RecordFunction& fn) {
     Trace::beginSection(fn.name().str());
+    return true;
   }
 
-  static void onFunctionExit(const torch::autograd::profiler::RecordFunction&) {
+  static void onFunctionExit(const at::RecordFunction&) {
     Trace::endSection();
   }
 #endif
@@ -109,11 +112,10 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
 #endif
 
 #ifdef TRACE_ENABLED
-    torch::autograd::profiler::pushCallback(
+    at::addGlobalCallback(at::RecordFunctionCallback(
         &onFunctionEnter,
-        &onFunctionExit,
-        /* need_inputs */ false,
-        /* sampled */ false);
+        &onFunctionExit)
+      .scopes({RecordScope::FUNCTION, RecordScope::USER_SCOPE}));
 #endif
   }
 

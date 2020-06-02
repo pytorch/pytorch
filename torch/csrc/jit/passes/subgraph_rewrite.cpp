@@ -120,6 +120,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
   for (auto n : nodes_to_delete_) {
     n->destroy();
   }
+  nodes_to_delete_.clear();
 }
 
 bool SubgraphRewriter::overlapsWithPreviousMatches(const Match* match) {

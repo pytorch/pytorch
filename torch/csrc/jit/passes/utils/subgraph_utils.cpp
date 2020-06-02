@@ -118,7 +118,23 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   WithInsertPoint guard(*subgraph->nodes().begin());
   std::unordered_set<Value*> closedValues =
       closedOverValues(toMerge, inputsMap);
-  for (auto input : closedValues) {
+
+  // There are currently downstream usage that relies on a fixed ordering
+  // of graph inputs. TODO: remove
+  std::vector<Value*> orderedClosedValues;
+  std::unordered_set<Value*> orderedSeenValues;
+  for (Value* input : toMerge->inputs()) {
+    orderedClosedValues.push_back(input);
+    orderedSeenValues.insert(input);
+  }
+  for (Value* closedValue : closedValues) {
+    if (!orderedSeenValues.count(closedValue)) {
+      orderedClosedValues.push_back(closedValue);
+      orderedSeenValues.insert(closedValue);
+    }
+  }
+
+  for (auto input : orderedClosedValues) {
     if (inputsMap.count(input) == 0) {
       // Clone constants inside the subgraph instead of referencing them, to
       // enable more optimizations

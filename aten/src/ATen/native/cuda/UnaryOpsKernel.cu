@@ -25,6 +25,14 @@ void bitwise_not_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void exp_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exp_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::exp(a);
+    });
+  });
+}
+
 void expm1_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "expm1_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -67,10 +75,12 @@ __host__ __device__ static inline thrust::complex<T> sqrt_wrapper(thrust::comple
 }
 
 void sqrt_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "sqrt_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
-      return sqrt_wrapper(a);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "sqrt_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sqrt_cuda", [&] {
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+        return sqrt_wrapper(a);
+      });
     });
   });
 }
@@ -86,6 +96,22 @@ void sigmoid_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void erf_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erf_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::erf(a);
+    });
+  });
+}
+
+void erfc_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfc_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::erfc(a);
+    });
+  });
+}
+
 void erfinv_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfinv_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -94,10 +120,44 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_cuda", [&]() {
+    auto lower = min_value.to<scalar_t>();
+    auto upper = max_value.to<scalar_t>();
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      return (v < lower) ? lower : (v > upper ? upper : v);
+    });
+  });
+}
+
+void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_min_cuda", [&]() {
+    auto lower = min_value.to<scalar_t>();
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      return v < lower ? lower : v;
+    });
+  });
+}
+
+void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_max_cuda", [&]() {
+    auto upper = max_value.to<scalar_t>();
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      return v > upper ? upper : v;
+    });
+  });
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
+REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);
+REGISTER_DISPATCH(erf_stub, &erf_kernel_cuda);
+REGISTER_DISPATCH(erfc_stub, &erfc_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
+REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
+REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
 }}

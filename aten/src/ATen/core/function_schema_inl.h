@@ -68,8 +68,7 @@ inline bool Argument::isBackwardCompatibleWith(
       return false;
     }
     if (rhs->default_value().has_value() &&
-        !detail::defaultValueEquals_(lhs->default_value(),
-                                     rhs->default_value())) {
+        lhs->default_value() != rhs->default_value()) {
       return false;
     }
     return true;

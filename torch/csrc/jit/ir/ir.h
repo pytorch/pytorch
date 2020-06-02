@@ -32,6 +32,7 @@ using pyobj_list = std::vector<THPObjectPtr>;
 
 namespace torch {
 namespace jit {
+class AliasDb;
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -161,6 +162,8 @@ struct Value {
  public:
   Value* setType(TypePtr type);
   TORCH_API void inferTypeFrom(const at::Tensor& output);
+  TORCH_API void inferTypeFrom(
+      const c10::intrusive_ptr<c10::ivalue::Object>& output);
   const TypePtr& type() const {
     AT_ASSERT(type_ != nullptr);
     return type_;
@@ -329,6 +332,16 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
+
+  Node* copyMetadata(Node* from) {
+    this->setSourceRange(from->sourceRange());
+    this->setScope(from->scope());
+    if (auto cs = from->callstack()) {
+      this->setCallStack(*cs);
+    }
+    return this;
+  }
+
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
@@ -1231,6 +1244,7 @@ struct Graph {
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
+  friend void Lint(const AliasDb* db);
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);
@@ -1367,7 +1381,10 @@ TORCH_API std::vector<Value*> insertGraph(
  * This asserts that the number of outputs of the original node and the
  * graph are the same.
  */
-TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee);
+TORCH_API std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    Function* callee,
+    bool use_graph = true);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.

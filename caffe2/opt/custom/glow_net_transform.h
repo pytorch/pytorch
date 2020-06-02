@@ -31,7 +31,8 @@ void onnxifi(
     bool use_onnx,
     size_t max_batch_size = 0,
     size_t max_seq_size = 0,
-    bool load_model_by_blob = false);
+    bool load_model_by_blob = false,
+    bool predictor_net_ssa_rewritten = false);
 
 std::unordered_set<int> ParseNetPositionList(const std::string& str);
 std::unordered_set<std::string> ParseBlackListOps(const std::string& str);

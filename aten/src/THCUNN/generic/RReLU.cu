@@ -3,7 +3,7 @@
 #else
 
 #include <THCUNN/common.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 
 void THNN_(RReLU_updateOutput)(
            THCState *state,
@@ -14,10 +14,10 @@ void THNN_(RReLU_updateOutput)(
            double upper,
            bool train,
            bool inplace,
-           at::Generator generator)
+           c10::optional<at::Generator> generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  auto gen = at::get_generator_or_default<at::CUDAGenerator>(generator, at::cuda::detail::getDefaultCUDAGenerator());
+  auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(generator, at::cuda::detail::getDefaultCUDAGenerator());
   if (train)
   {
     input = THCTensor_(newContiguous)(state, input);

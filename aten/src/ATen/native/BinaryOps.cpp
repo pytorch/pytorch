@@ -36,6 +36,8 @@ DEFINE_DISPATCH(max_elementwise_stub);
 DEFINE_DISPATCH(min_elementwise_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(fmod_scalar_stub);
+DEFINE_DISPATCH(logaddexp_stub);
+DEFINE_DISPATCH(logaddexp2_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -659,6 +661,8 @@ Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self
 Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
 Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "max is not yet implemented for complex tensors.");
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
   TORCH_CHECK(self.dtype() == other.dtype(),
@@ -669,6 +673,8 @@ Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor max(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "max is not yet implemented for complex tensors.");
   Tensor result = at::empty(0, self.options());
   return at::max_out(result, self, other);
 }
@@ -676,6 +682,8 @@ Tensor max(const Tensor& self, const Tensor& other) {
 Tensor& max_(Tensor& self, const Tensor& other) { return at::max_out(self, self, other); }
 
 Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "min is not yet implemented for complex tensors.");
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
   TORCH_CHECK(self.dtype() == other.dtype(),
@@ -686,6 +694,8 @@ Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor min(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
+  TORCH_CHECK(!other.is_complex(), "min is not yet implemented for complex tensors.");
   Tensor result = at::empty(0, self.options());
   return at::min_out(result, self, other);
 }
@@ -734,6 +744,28 @@ Tensor& fmod_(Tensor& self, Scalar other) {
   return at::fmod_out(self, self, other);
 }
 
+Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  logaddexp_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logaddexp(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logaddexp_out(result, self, other);
+}
+
+Tensor& logaddexp2_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  logaddexp2_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logaddexp2(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logaddexp2_out(result, self, other);
+}
+
 Tensor true_divide(const Tensor& self, Scalar divisor) {
   return self.true_divide(wrapped_scalar_tensor(divisor)); // redispatch!
 }
@@ -741,5 +773,12 @@ Tensor true_divide(const Tensor& self, Scalar divisor) {
 Tensor& true_divide_(Tensor& self, Scalar divisor) {
   return self.true_divide_(wrapped_scalar_tensor(divisor)); // redispatch!
 }
+
+// Note: this function is only for testing.
+// It is undocumented and should not be used outside of tests.
+Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
+  return self - (other * alpha);
+}
+
 
 }}  // at::native

@@ -48,7 +48,7 @@ def main():
     NUM_REPEATS = args.nreps
     NUM_REPEAT_OF_REPEATS = args.nrepreps
 
-    types = [torch.Tensor, SubTensor, WithTorchFunction, SubWithTorchFunction]
+    types = torch.Tensor, SubTensor, WithTorchFunction, SubWithTorchFunction
 
     for t in types:
         tensor_1 = t(1)
@@ -56,9 +56,9 @@ def main():
 
         bench_min, bench_std = bench(tensor_1, tensor_2)
         print(
-            "Type {0} had a minimum time of {1} μs"
-            " and a standard deviation of {2} μs.".format(
-                t.__name__, (10 ** 6) * bench_min, (10 ** 6) * bench_std,
+            "Type {0} had a minimum time of {1} us"
+            " and a standard deviation of {2} us.".format(
+                t.__name__, (10 ** 6 * bench_min), (10 ** 6) * bench_std
             )
         )
 

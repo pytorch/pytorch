@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
@@ -29,8 +29,8 @@
 
 namespace at { namespace native {
 
-void normal_kernel(Tensor& self, double mean, double std, Generator gen) {
-  auto generator = get_generator_or_default<CUDAGenerator>(gen, cuda::detail::getDefaultCUDAGenerator());
+void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::normal_kernel(self, mean, std, generator);
 }
 

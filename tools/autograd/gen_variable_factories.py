@@ -42,7 +42,7 @@ def fully_qualified_type(argument_type):
     return maybe_optional_type(qualified_type, opt_match)
 
 
-def gen_variable_factories(out, declarations, template_path, disable_autograd=False, disable_trace=False):
+def gen_variable_factories(out, declarations, template_path, disable_autograd=False):
     function_definitions = []
     for decl in declarations:
         has_tensor_options = any(a["simple_type"] == "TensorOptions" for a in decl["arguments"])
@@ -53,7 +53,6 @@ def gen_variable_factories(out, declarations, template_path, disable_autograd=Fa
                     decl,
                     has_tensor_options,
                     disable_autograd=disable_autograd,
-                    disable_trace=disable_trace
                 )
             )
     write(out,
@@ -62,7 +61,7 @@ def gen_variable_factories(out, declarations, template_path, disable_autograd=Fa
           {"function_definitions": function_definitions})
 
 
-def process_function(decl, has_tensor_options, disable_autograd, disable_trace):
+def process_function(decl, has_tensor_options, disable_autograd):
     formals = []
     actuals = []
     for argument in decl["arguments"]:
@@ -76,7 +75,7 @@ def process_function(decl, has_tensor_options, disable_autograd, disable_trace):
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
 
     if not disable_autograd:
-        pre_record_trace, post_record_trace = format_trace(decl, disable_trace)
+        pre_record_trace, post_record_trace = format_trace(decl)
     else:
         pre_record_trace, post_record_trace = '', ''
 

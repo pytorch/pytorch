@@ -40,18 +40,12 @@ class CAFFE2_API Tensor final {
  public:
   Tensor() : impl_() {}
 
-  // caffe2::Tensor is explicitly marked as moveable-only because before
-  // the refactoring the class used to be a value type and a lot of user code
-  // is written this way. With PyTorch unification, caffe2::Tensor actually
-  // has semantics of a shared_ptr now (via intrusive_ptr). However, to prevent
-  // accidental mistakes when changing legacy code we keep caffe2::Tensor
-  // to have movable semantics.
-  //
-  // If you need to get a pointer to the same Tensor instance (not to be
-  // confused with shared storage), `UnsafeSharedInstance` can be used. It has
-  // the same behavior as `at::Tensor a = b`.
-  Tensor(const Tensor&) = delete;
-  Tensor& operator=(const Tensor&) = delete;
+  Tensor(const Tensor& t) : impl_(t.impl_) {}
+  Tensor& operator=(const Tensor& t) {
+    impl_ = t.impl_;
+    return *this;
+  }
+
   Tensor(Tensor&&) = default;
   Tensor& operator=(Tensor&&) = default;
 
@@ -75,9 +69,9 @@ class CAFFE2_API Tensor final {
    */
   explicit Tensor(at::Device device)
       : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-            Storage::create_legacy(device, TypeMeta()),
-            c10::computeDispatchKey(at::device(device).layout(at::kStrided)))) {
-  }
+            Storage::create_legacy(device),
+            c10::computeDispatchKey(at::device(device).layout(at::kStrided)),
+            TypeMeta())) {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -159,7 +153,7 @@ class CAFFE2_API Tensor final {
         storage_initialized(),
         "Cloning a tensor that has no content and has size > 0");
     // set_storage already sets data_type_ of TensorImpl
-    x.impl_->set_storage(storage());
+    x.impl_->set_storage_and_dtype(storage(), impl_->dtype());
     x.impl_->set_storage_offset(impl_->storage_offset());
     x.impl_->set_sizes_and_strides(sizes(), strides());
     return x;
@@ -266,8 +260,8 @@ class CAFFE2_API Tensor final {
    */
   string DebugString() const {
     std::stringstream ss;
-    ss << "A Tensor of item size " << impl_->storage().itemsize()
-       << " and type " << impl_->dtype().name() << " and dimension (";
+    ss << "A Tensor of item size " << impl_->dtype().itemsize() << " and type "
+       << impl_->dtype().name() << " and dimension (";
     for (int d : impl_->sizes()) {
       ss << d << ",";
     }
@@ -408,7 +402,7 @@ class CAFFE2_API Tensor final {
    * Return the number of bytes each item takes in the tensor.
    */
   inline size_t itemsize() const {
-    return impl_->storage().itemsize();
+    return impl_->dtype().itemsize();
   }
 
   /**
@@ -469,7 +463,7 @@ class CAFFE2_API Tensor final {
    */
   template <typename T>
   inline bool IsType() const {
-    return impl_->storage().IsType<T>();
+    return impl_->dtype().Match<T>();
   }
 
   /**

@@ -3,34 +3,39 @@
 
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIteratorDynamicCasting.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 
 namespace at { namespace native {
 
-constexpr int num_threads = C10_WARP_SIZE * 2;
-constexpr int thread_work_size = 4;
-constexpr int block_work_size = thread_work_size * num_threads;
+#define NUM_THREADS (C10_WARP_SIZE * 2)
+#define THREAD_WORK_SIZE 4
+#define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
 
-// `needs_dynamic_casting` compares the types expected by iterator
-// (i.e. dtypes of the operands) with the actual type of the arguments
-// of func_t
-template<typename func_t, int nargs=function_traits<func_t>::arity>
-struct needs_dynamic_casting {
-  static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
-    if (iter.dtype(nargs) != c10::impl::CPPTypeToScalarType<typename traits::template arg<nargs - 1>::type>::value) {
-      return true;
-    }
-    return needs_dynamic_casting<func_t, nargs - 1>::check(iter);
-  }
-};
+constexpr int num_threads = NUM_THREADS;
+constexpr int thread_work_size = THREAD_WORK_SIZE;
+constexpr int block_work_size = BLOCK_WORK_SIZE;
 
-template<typename func_t>
-struct needs_dynamic_casting<func_t, 0> {
-  static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
-    return iter.dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::result_type>::value;
+template<int N>
+static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
+  // array size can not be 0, this happens when N == 0
+  constexpr int array_size = std::max<int>(N, 1);
+  TORCH_INTERNAL_ASSERT(N == iter.ntensors() - 1);
+  std::array<const int64_t*, array_size> strides;
+  int64_t element_sizes[array_size];
+  for (int i = 0; i < N; i++) {
+    strides[i] = iter.strides(i + 1).data();
+    element_sizes[i] = iter.element_size(i + 1);
   }
-};
+  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
+}
+
+static OffsetCalculator<1> make_output_offset_calculator(const TensorIterator& iter) {
+  std::array<const int64_t*, 1> strides;
+  strides[0] = iter.strides(0).data();
+  int64_t element_size = iter.element_size(0);
+  return OffsetCalculator<1>(iter.ndim(), iter.shape().data(), strides.data(), &element_size);
+}
 
 }}  // namespace at::native
 

@@ -233,3 +233,4 @@ F::pad|Yes|No
 F::interpolate|Yes|No
 F::grid_sample|Yes|No
 F::affine_grid|Yes|No
+F::sample_functional|Yes|No

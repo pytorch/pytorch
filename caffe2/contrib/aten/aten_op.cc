@@ -3,6 +3,21 @@
 
 namespace caffe2 {
 
+namespace internal {
+at::Tensor index_with_uint8_handling(
+    const at::Tensor& self,
+    at::TensorList indices) {
+  // Support BC only for the simplest case of mask indexing
+  if (indices.size() == 1 && indices[0].scalar_type() == at::kByte) {
+    TORCH_WARN(
+        "Indexing with uint8 mask tensor in ATenOp is now deprecated,"
+        " please use a bool mask instead.");
+    return at::index(self, {indices[0].to(at::kBool)});
+  }
+  return at::index(self, indices);
+}
+} // namespace internal
+
 REGISTER_CPU_OPERATOR(ATen, ATenOp<CPUContext>);
 template <>
 at::Backend ATenOp<CPUContext>::backend() const {

@@ -508,6 +508,9 @@ TEST(CustomAutogradTest, Reentrant) {
   ASSERT_VARIABLE_EQ(x.grad(), y_data);
 }
 
+
+// NOTE: If this fails for apparently unrelated reasons in TSAN be aware of
+// the TSAN limit on mutex: https://github.com/google/sanitizers/issues/950
 TEST(CustomAutogradTest, DeepReentrant) {
   struct DeepReenter : public Function<DeepReenter> {
     static Variable forward(AutogradContext *ctx, Variable x) {

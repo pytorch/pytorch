@@ -1,8 +1,8 @@
 #pragma once
 
+#include <fbgemm/FbgemmConvert.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/fb/fbgemm/fbgemm_fp16/include/fbgemm/FbgemmFloat16.h"
 #include "caffe2/perfkernels/typed_axpy.h"
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);

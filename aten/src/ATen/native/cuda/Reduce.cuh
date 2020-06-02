@@ -10,6 +10,7 @@
 #include <THC/THCGeneral.hpp>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <functional>
@@ -20,6 +21,16 @@
 #include <thrust/tuple.h>
 
 namespace at { namespace native {
+
+#ifdef __HIP_PLATFORM_HCC__
+template<typename T, int size>
+struct ROCm_Bug {
+  char bytes[sizeof(T) * size];
+  __device__ T& operator[](int i) {
+    return *reinterpret_cast<T *>(&bytes[i * sizeof(T)]);
+  }
+};
+#endif
 
 using at::detail::Array;
 
@@ -62,6 +73,7 @@ struct ReduceConfig {
   static constexpr int CTA = 2;
 
   static constexpr int MAX_NUM_THREADS = 512;
+  static constexpr int vec_size = 4;
 
   ReduceConfig(int element_size_bytes, int num_outputs, int num_inputs)
     : element_size_bytes(element_size_bytes)
@@ -80,6 +92,8 @@ struct ReduceConfig {
   int block_width;
   int block_height;
   int num_threads;
+
+  bool vectorize = false;
 
   void set_block_dimension(int64_t dim0, int64_t dim1) {
     int dim0_pow2 = dim0 < MAX_NUM_THREADS ? static_cast<int>(last_pow2(dim0)) : MAX_NUM_THREADS;
@@ -126,6 +140,11 @@ struct ReduceConfig {
     return output_idx < num_outputs &&
       (!should_block_x_reduce() || threadIdx.x == 0) &&
       (!should_block_y_reduce() || threadIdx.y == 0);
+  }
+
+  C10_DEVICE bool should_reduce_tail() const {
+    return (!should_block_y_reduce() || threadIdx.y == 0) &&
+      (!should_global_reduce() || blockIdx.y == 0);
   }
 
   C10_HOST_DEVICE int input_idx() const {
@@ -222,24 +241,6 @@ static OffsetCalculator<1, index_t> make_input_calculator(const TensorIterator& 
   return OffsetCalculator<1, index_t>(num_reduce_dims, iter.shape().data(), strides.data());
 }
 
-template <int vt, typename index_t, typename func_t>
-__device__ void strided_iterate(func_t f, index_t begin, index_t end, index_t stride) {
-  if (begin + (vt - 1) * stride < end) {
-    #pragma unroll
-    for (index_t i = 0; i < vt; i++) {
-      f(i, begin + i * stride);
-    }
-  } else {
-    #pragma unroll
-    for (index_t i = 0; i < vt; i++) {
-      index_t idx = begin + i * stride;
-      if (idx < end) {
-        f(i, idx);
-      }
-    }
-  }
-}
-
 template <typename out_scalar_t, typename func_t>
 struct func_wrapper_t {
   using arg_t = typename binary_function_traits<func_t>::arg1_t;
@@ -284,6 +285,8 @@ struct ReduceOp {
     && std::is_convertible<out_scalar_t, arg_t>::value;
 
   static constexpr float acc_buffer_multiplier = (float)sizeof(arg_t) / sizeof(out_scalar_t);
+
+  static constexpr int vec_size = ReduceConfig::vec_size;
 
   ops_t ops;
   arg_t ident;
@@ -341,9 +344,10 @@ struct ReduceOp {
     auto base_offsets = output_calc.get(output_idx);
 
     arg_t value = ident;
+
     if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
-      auto input_slice = (const char*)src + base_offsets[1];
-      value = thread_reduce((const scalar_t*)input_slice);
+      const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets[1]);
+      value = thread_reduce(input_slice);
     }
 
     if (config.should_block_y_reduce()) {
@@ -392,38 +396,151 @@ struct ReduceOp {
   }
 
   C10_DEVICE arg_t thread_reduce(const scalar_t* data) const {
+    if (config.vectorize) {
+      // reduce at the header of input_slice where memory is not aligned,
+      // so that thread_reduce will have an aligned memory to work on.
+      return vectorized_thread_reduce_impl(data);
+    } else {
+      index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
+      bool is_contiguous = (input_calc.dims == 1 && element_stride == 1);
+      if (is_contiguous) {
+        return thread_reduce_impl(data, [](index_t idx) { return idx; });
+      } else if (input_calc.dims == 1) {
+        return thread_reduce_impl(data, [&](index_t idx) { return idx * element_stride; });
+      } else {
+        return thread_reduce_impl(data, [&](index_t idx) { return input_calc.get(idx)[0] / sizeof(scalar_t); });
+      }
+    }
+  }
+
+  C10_DEVICE arg_t vectorized_thread_reduce_impl(const scalar_t* data) const {
+    index_t end = config.num_inputs;
+
+    // Handle the head of input slice where data is not aligned
+    arg_t value = ident;
+    constexpr int align_bytes = alignof(at::native::memory::aligned_vector<scalar_t, vec_size>);
+    constexpr int align_elements = align_bytes / sizeof(scalar_t);
+    int shift = ((uint64_t)data) % align_bytes / sizeof(scalar_t);
+    if (shift > 0) {
+      data -= shift;
+      end += shift;
+      if(threadIdx.x >= shift && threadIdx.x < align_elements && config.should_reduce_tail()){
+        value = ops.reduce(value, data[threadIdx.x], threadIdx.x - shift);
+      }
+      end -= align_elements;
+      data += align_elements;
+      shift = align_elements - shift;
+    }
+
+    // Do the vectorized reduction
+    using load_t = at::native::memory::aligned_vector<scalar_t, vec_size>;
+
     index_t idx = config.input_idx();
+    const index_t stride = config.step_input;
+
     // Multiple accumulators to remove dependency between unrolled loops.
+#ifndef __HIP_PLATFORM_HCC__
+    arg_t value_list[vec_size];
+#else
+    ROCm_Bug<arg_t, vec_size> value_list;
+#endif
+    value_list[0] = value;
+    #pragma unroll
+    for (int i = 1; i < vec_size; i++) {
+      value_list[i] = ident;
+    }
+
+#ifndef __HIP_PLATFORM_HCC__
+    scalar_t values[vec_size];
+#else
+    ROCm_Bug<scalar_t, vec_size> values;
+#endif
+    load_t *values_vector = reinterpret_cast<load_t*>(&values[0]);
+
+    while (idx * vec_size + vec_size - 1 < end) {
+      *values_vector = reinterpret_cast<const load_t*>(data)[idx];
+      #pragma unroll
+      for (index_t i = 0; i < vec_size; i++) {
+        value_list[i] = ops.reduce(value_list[i], values[i], shift + idx * vec_size + i);
+      }
+      idx += stride;
+    }
+
+    // tail
+    index_t tail_start = end - end % vec_size;
+    if (config.should_reduce_tail()) {
+      int idx = tail_start + threadIdx.x;
+      if (idx < end) {
+        value_list[0] = ops.reduce(value_list[0], data[idx], idx + shift);
+      }
+    }
+
+    // combine accumulators
+    #pragma unroll
+    for (int i = 1; i < vec_size; i++) {
+      value_list[0] = ops.combine(value_list[0], value_list[i]);
+    }
+    return value_list[0];
+  }
+
+  template<typename offset_calc_t>
+  C10_DEVICE arg_t thread_reduce_impl(const scalar_t* data, offset_calc_t calc) const {
+    index_t idx = config.input_idx();
+    const index_t end = config.num_inputs;
+    const index_t stride = config.step_input;
+
+    // Multiple accumulators to remove dependency between unrolled loops.
+
+#ifndef __HIP_PLATFORM_HCC__
     arg_t value_list[vt0];
+#else
+    ROCm_Bug<arg_t, vt0> value_list;
+#endif
+
     #pragma unroll
     for (int i = 0; i < vt0; i++) {
       value_list[i] = ident;
     }
-    index_t end = config.num_inputs;
-    index_t stride = config.step_input;
-    index_t element_stride = input_calc.strides_[0][0] / sizeof(scalar_t);
 
-    // Reducing layers of function calls so compiler could do proper loop unroll
-    // that exposes instruction level parallelism.
-    while (idx < config.num_inputs) {
-      // load input
-      Array<scalar_t, vt0> values;
-      if (input_calc.dims == 1) {
-        strided_iterate<vt0>([&](index_t i, index_t idx) {
-          values[i] = data[idx * element_stride];
-        }, idx, end, stride);
-      } else {
-        strided_iterate<vt0>([&](index_t i, index_t idx) {
-          values[i] = data[input_calc.get(idx)[0] / sizeof(scalar_t)];
-        }, idx, end, stride);
+#ifndef __HIP_PLATFORM_HCC__
+    scalar_t values[vt0];
+#else
+    ROCm_Bug<scalar_t, vt0> values;
+#endif
+
+    while (idx + (vt0 - 1) * stride < end) {
+      #pragma unroll
+      for (index_t i = 0; i < vt0; i++) {
+        values[i] = data[calc(idx + i * stride)];
       }
-      // compute
-      strided_iterate<vt0, index_t>([&](index_t i, index_t idx) {
-        value_list[i] = ops.reduce(value_list[i], values[i], idx);
-      }, idx, config.num_inputs, config.step_input);
-      // step offset
-      idx += config.step_input * vt0;
+      #pragma unroll
+      for (index_t i = 0; i < vt0; i++) {
+        value_list[i] = ops.reduce(value_list[i], values[i], idx + i * stride);
+      }
+      idx += stride * vt0;
     }
+
+    // tail
+    int idx_ = idx;
+    #pragma unroll
+    for (index_t i = 0; i < vt0; i++) {
+      if (idx >= end) {
+        break;
+      }
+      values[i] = data[calc(idx)];
+      idx += stride;
+    }
+    idx = idx_;
+    #pragma unroll
+    for (index_t i = 0; i < vt0; i++) {
+      if (idx >= end) {
+        break;
+      }
+      value_list[i] = ops.reduce(value_list[i], values[i], idx);
+      idx += stride;
+    }
+
+    // combine accumulators
     #pragma unroll
     for (int i = 1; i < vt0; i++) {
       value_list[0] = ops.combine(value_list[0], value_list[i]);
@@ -545,6 +662,19 @@ struct ReduceOp {
       *res1 = thrust::get<1>(x);
     }
   }
+  template<class T1, class T2>
+  C10_DEVICE void set_results(const thrust::pair<T1, T2> x, const index_t base_offset) const {
+    if (noutputs >= 1) {
+      auto res0 = (T1*)((char*)dst[0] + base_offset);
+      *res0 = x.first;
+    }
+    if (noutputs >= 2) {
+      // base offset is computed assuming element size being sizeof(T1), so we need to make a
+      // correction to obtain the correct base offset
+      auto res1 = (T2*) ((char *) dst[1] + base_offset / sizeof(T1) * sizeof(T2));
+      *res1 = x.second;
+    }
+  }
 
   C10_DEVICE void set_results_to_output(arg_t value, index_t base_offset) const {
     assert(final_output);
@@ -632,7 +762,8 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-struct AccumulationBuffer {
+class AccumulationBuffer {
+ public:
   AccumulationBuffer() {}
 
   AccumulationBuffer(size_t acc_t_size, size_t out_t_size, char* out_ptr, int64_t size) {
@@ -653,17 +784,17 @@ struct AccumulationBuffer {
   }
 
   char* get_acc_slice(char* out_ptr) {
-    if (numerator_ == -1 || acc_ptr_ == nullptr) {
+    if (acc_ptr_ == nullptr) {
       return nullptr;
     }
     return acc_ptr_ + ((out_ptr - out_ptr_) * numerator_ / denominator_);
   }
 
+ private:
   char* acc_ptr_ = nullptr;
   char* out_ptr_ = nullptr;
-  float size_factor_ = -1;
-  size_t numerator_ = -1;
-  size_t denominator_ = -1;
+  size_t numerator_;
+  size_t denominator_;
   at::DataPtr buffer_;
 };
 
@@ -738,6 +869,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   // tensor. This grants the best possible memory accessing pattern, given that
   // for non-contiguous tensor with space in between, we cannot have perfect
   // memory coalescing.
+  int64_t fastest_moving_stride;
   bool reduction_on_fastest_striding_dimension =
       (iter.num_reduce_dims() == iter.ndim()) ||
       (iter.strides(/*arg=*/input_index)[0] <
@@ -754,12 +886,25 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     //   2. block.y now max out to num_outputs.
     dim0 = iter.shape()[0];
     dim1 = num_outputs;
+    fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
   } else {
     // Map block.x to the fastest non reducing dimension. It implies:
     //   1. block_x_reduce is turned off.
     //   2. block.y now max out to inputs_per_output.
     dim0 = iter.shape()[iter.num_reduce_dims()];
     dim1 = inputs_per_output;
+    fastest_moving_stride = iter.strides(/*arg=*/input_index)[iter.num_reduce_dims()];
+  }
+
+  // if the fastest moving dimension is contiguous and large enough, we do vectorized
+  // load for better performance. Note that if vt0 < ReduceConfig::vec_size, then this
+  // means the register pressure could be high, in such case, we should avoid vectorization.
+  // We only vectorize 1D reduction
+  if (fastest_moving_stride == sizeof(scalar_t) && dim0 > 128 && vt0 >= ReduceConfig::vec_size) {
+    // TODO: vectorization on output is not supported yet
+    if (reduction_on_fastest_striding_dimension && iter.num_reduce_dims() == 1) {
+      config.vectorize = true;
+    }
   }
 
   // Adjust block_width and block_height
@@ -788,15 +933,29 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  if (config.input_mult[1] != 0 && config.values_per_thread() >= 256 && num_outputs <= 4096) {
+  constexpr int min_values_per_thread = 16;
+  constexpr int max_values_per_thread = 256;
+  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / (block_width * block_height);
+  const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const int target_grid_size = num_mp * blocks_per_sm;
+  int grid = config.grid().x;
+  if (config.input_mult[1] != 0 && config.values_per_thread() >= max_values_per_thread && grid <= target_grid_size) {
     // Divide the input across thread-blocks if the amount of work per-thread
     // is large enough and the size of the output is small enough. This will
     // require a reduction using global memory.
-    config.ctas_per_output = div_up(config.values_per_thread(), 16);
-    if (config.ctas_per_output > 65535) {
-      config.ctas_per_output = 65535;
+    // If we decide to split input across blocks, as long as we can get enough
+    // number of blocks (`target_grid_size`) to balance SM, we should still
+    // make the number of values per thread large for best performance.
+    int ctas_per_output1 = div_up(target_grid_size, grid);
+    int ctas_per_output2 = div_up(config.values_per_thread(), min_values_per_thread);
+    int ctas_per_output3 = div_up(config.values_per_thread(), max_values_per_thread);
+    // We want the minimum of ctas_per_output1 and ctas_per_output2, so that each thread can have
+    // a large number of values to deal with. But we don't want values_per_thread to be larger than
+    // max_values_per_thread
+    config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
+    if (config.ctas_per_output > 1) {
+      config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
-    config.input_mult[2] = config.split_input(config.ctas_per_output);
   }
 
   at::DataPtr buffer;

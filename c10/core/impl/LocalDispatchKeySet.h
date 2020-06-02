@@ -8,12 +8,12 @@
 // This manages two thread-local DispatchKeySets:
 //
 //  - The included type set, which adds a tensor type for consideration
-//    in dispatch.  (For example, you might add ProfilingTensorId to
+//    in dispatch.  (For example, you might add Profiling to
 //    the included type set to turn on profiling on all tensor operations.)
 //
 //  - The excluded type set, which disqualifies a tensor type from dispatch.
 //    (For example, after redispatching on variable, we disqualify
-//    VariableTensorId so we don't attempt to handle variable again.)
+//    Autograd so we don't attempt to handle variable again.)
 //    (Exclusion wins over inclusion.)
 //
 // NB: Originally, I implemented the excluded type set as storing the inverted
@@ -55,6 +55,9 @@ struct C10_API LocalDispatchKeySet {
 };
 
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
+
+// Internal, use ThreadLocalStateGuard
+C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
 
 // RAII API for manipulating the thread-local dispatch state.
 

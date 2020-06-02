@@ -27,8 +27,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
 
 class Cast;
 class Var;
-class Let;
-class LetStmt;
+class Buf;
 class Ramp;
 class Load;
 class For;
@@ -45,7 +44,11 @@ class Allocate;
 class Free;
 class Cond;
 class Stmt;
-class LinearForm;
+class Term;
+class Polynomial;
+class RoundOff;
+class ReduceOp;
+class AtomicAdd;
 
 class TORCH_API IRMutator {
  public:
@@ -69,8 +72,7 @@ class TORCH_API IRMutator {
 #undef IMM_MUTATE_DECLARE
   virtual const Expr* mutate(const Cast* v);
   virtual const Expr* mutate(const Var* v);
-  virtual const Expr* mutate(const Let* v);
-  virtual Stmt* mutate(const LetStmt* v);
+  virtual const Expr* mutate(const Buf* v);
   virtual const Expr* mutate(const Ramp* v);
   virtual const Expr* mutate(const Load* v);
   virtual const Expr* mutate(const Broadcast* v);
@@ -86,11 +88,16 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const Intrinsics* v);
   virtual const Expr* mutate(const FunctionCall* v);
 
-  virtual const Expr* mutate(const LinearForm* v);
+  virtual const Expr* mutate(const Term* v);
+  virtual const Expr* mutate(const Polynomial* v);
+  virtual const Expr* mutate(const RoundOff* v);
+
+  virtual const Expr* mutate(const ReduceOp* v);
 
   virtual Stmt* mutate(const For* v);
   virtual Stmt* mutate(const Block* v);
   virtual Stmt* mutate(const Store* v);
+  virtual Stmt* mutate(const AtomicAdd* v);
 
   virtual Stmt* mutate(const Allocate* v);
   virtual Stmt* mutate(const Free* v);

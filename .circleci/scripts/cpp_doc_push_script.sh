@@ -72,10 +72,10 @@ time python tools/setup_helpers/generate_code.py \
 
 # Build the docs
 pushd docs/cpp
-pip install breathe>=4.13.0 bs4 lxml six
+pip install breathe==4.13.0 bs4 lxml six
 pip install --no-cache-dir -e "git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme"
 pip install exhale>=0.2.1
-pip install sphinx>=2.0
+pip install sphinx==2.4.4
 # Uncomment once it is fixed
 # pip install -r requirements.txt
 time make VERBOSE=1 html -j

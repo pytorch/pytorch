@@ -74,10 +74,10 @@ Date:  February 1996
 */
   T x, z, num, dem; /*working variables */
   /* coefficients in rational expansion */
-  T a[4]={ 0.886226899, -1.645349621,  0.914624893, -0.140543331};
-  T b[4]={-2.118377725,  1.442710462, -0.329097515,  0.012229801};
-  T c[4]={-1.970840454, -1.624906493,  3.429567803,  1.641345311};
-  T d[2]={ 3.543889200,  1.637067800};
+  T a[4] = {  T(0.886226899), T(-1.645349621),  T(0.914624893), T(-0.140543331) };
+  T b[4] = { T(-2.118377725),  T(1.442710462), T(-0.329097515),  T(0.012229801) };
+  T c[4] = { T(-1.970840454), T(-1.624906493),  T(3.429567803),  T(1.641345311) };
+  T d[2] = {  T(3.543889200),  T(1.637067800) };
   T y_abs = std::abs(y);
   if(y_abs > 1.0) return std::numeric_limits<T>::quiet_NaN();
 #ifdef _WIN32
@@ -265,3 +265,5 @@ static inline float calc_digamma(float x) {
   }
   return result + logf(x) - (0.5f / x) - y;
 }
+
+inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }

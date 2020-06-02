@@ -48,6 +48,13 @@ variable_list _make_grads(
           new_grads.emplace_back(at::ones_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
         }
       } else {
+        TORCH_CHECK(
+          grad_output.is_complex() == output.is_complex(),
+          "For complex Tensors, both grad_output and output are required ",
+          "to have the same dtype. Mismatch in dtype: grad_output[",
+          grad_output, "] has a dtype of ", grad_output.scalar_type(),
+          " and output[", output, "] has a dtype of ", output.scalar_type(),
+          ".");
         // grad output is defined, just append to the new_grads
         new_grads.emplace_back(grad_output);
       }
@@ -68,6 +75,10 @@ variable_list run_backward(
   for (size_t i = 0; i < num_tensors; i++) {
     const Variable& output = outputs[i];
     auto gradient_edge = impl::gradient_edge(output);
+    if(output.is_complex()) {
+      TORCH_WARN_ONCE("Complex backward is not fully supported yet and could lead to wrong ",
+                      "gradients for functions we have not fixed yet");
+    }
     TORCH_CHECK(
         gradient_edge.function,
         "element ", i, " of tensors does not require grad and does not have a grad_fn",

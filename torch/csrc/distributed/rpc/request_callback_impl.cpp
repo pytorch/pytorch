@@ -73,16 +73,18 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
 // When request message has autograd info, processMessage() will set up valid
 // current context id properly. This struct is used to clean up current context
 // id after processMessage() is done.
-struct ClearAutogradContextGuard {
-  ClearAutogradContextGuard() = default;
-  ~ClearAutogradContextGuard() {
-    clear();
+struct DistAutogradContextGuard {
+  explicit DistAutogradContextGuard(int64_t ctxId) {
+    auto& container = DistAutogradContainer::getInstance();
+    prevCtxId_ = container.currentContextId();
+    container.forceCurrentContextId(ctxId);
+  }
+  ~DistAutogradContextGuard() {
+    auto& container = DistAutogradContainer::getInstance();
+    container.forceCurrentContextId(prevCtxId_);
   }
 
-  void clear() {
-    auto& autogradContainer = DistAutogradContainer::getInstance();
-    autogradContainer.clearCurrentContext();
-  }
+  int64_t prevCtxId_;
 };
 
 } // anonymous namespace
@@ -127,20 +129,40 @@ void RequestCallbackImpl::processRpc(
       auto& stack = scriptCall.stackRef();
       if (scriptCall.hasOp()) {
         scriptCall.op()->getOperation()(stack);
-      } else {
-        PythonRpcHandler::getInstance()
-            .jitCompilationUnit()
-            ->get_function(scriptCall.qualifiedName())
-            .run(stack);
+        TORCH_INTERNAL_ASSERT(
+            stack.size() == 1,
+            "Return value of a builtin operator or a "
+            "TorchScript function should be a single IValue, got a vector of "
+            "size ",
+            stack.size());
+        markComplete(
+            std::move(ScriptResp(std::move(stack.front()))).toMessage());
+        return;
       }
 
-      TORCH_INTERNAL_ASSERT(
-          stack.size() == 1,
-          "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of "
-          "size ",
-          stack.size());
-      markComplete(std::move(ScriptResp(std::move(stack.front()))).toMessage());
+      // runAsync() starts in the calling thread, but may return an uncompleted
+      // future (though for non-async code, it will typically be completed).
+      // If it was async, our callback will typically be invoked by the
+      // continuation on an at::launch() thread.
+      auto jitFuture = PythonRpcHandler::getInstance()
+                           .jitCompilationUnit()
+                           ->get_function(scriptCall.qualifiedName())
+                           .runAsync(stack);
+
+      if (jitFuture->completed()) {
+        markComplete(
+            std::move(ScriptResp(std::move(jitFuture->value()))).toMessage());
+        return;
+      }
+      jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
+        try {
+          Message m = ScriptResp(std::move(jitFuture->value())).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(std::move(m));
+        } catch (const std::exception& e) {
+          responseFuture->setError(e.what());
+        }
+      });
       return;
     }
     case MessageType::PYTHON_CALL: {
@@ -148,7 +170,7 @@ void RequestCallbackImpl::processRpc(
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
       {
-        pybind11::gil_scoped_acquire ag;
+        py::gil_scoped_acquire acquire;
         serializedPyObj =
             std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
                 pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())));
@@ -177,40 +199,73 @@ void RequestCallbackImpl::processRpc(
       }
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
+      auto postProcessing = [rrefId, forkId, messageId, responseFuture]() {
+        if (rrefId != forkId) {
+          // Caller is a user and callee is the owner, add fork
+          //
+          // NB: rrefId == forkId is true if and only if calling remote to
+          // self. In that case both the caller and the callee will access
+          // the OwnerRRef. Hence, on the callee side (here), it should not
+          // call addForkOfOwner as it is not a fork. To allow callee to
+          // distinguish when this request is sent to self, the caller will
+          // set forkId using rrefId (OwnerRRef does not have a forkId
+          // anyway).
+          RRefContext::getInstance().addForkOfOwner(rrefId, forkId);
+        }
+        Message m = RemoteRet(rrefId, forkId).toMessage();
+        m.setId(messageId);
+        responseFuture->markCompleted(std::move(m));
+      };
 
-      // TODO: make this asynchronous
       // scriptRemoteCall is only alive within this block, use reference to
-      // avoid copy
+      // avoid copy. If the underlying code runs with a continuation, runAsync()
+      // below will std::move the appropriate portion of the stack.
       auto& stack = scriptRemoteCall.stackRef();
       if (scriptRemoteCall.hasOp()) {
-        scriptRemoteCall.op()->getOperation()(stack);
-      } else {
-        PythonRpcHandler::getInstance()
-            .jitCompilationUnit()
-            ->get_function(scriptRemoteCall.qualifiedName())
-            .run(stack);
+        try {
+          scriptRemoteCall.op()->getOperation()(stack);
+        } catch (const std::exception& e) {
+          // Don't throw in this call, but rather transfer the exception
+          // to the rref.
+          ownerRRef->setError(e.what());
+          postProcessing();
+          return;
+        }
+        TORCH_INTERNAL_ASSERT(
+            stack.size() == 1,
+            "Return value of a builtin operator or a "
+            "TorchScript function should be a single IValue, got a vector of "
+            "size ",
+            stack.size());
+        ownerRRef->setValue(std::move(stack.front()));
+        postProcessing();
+        return;
       }
 
-      TORCH_INTERNAL_ASSERT(
-          stack.size() == 1,
-          "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of "
-          "size ",
-          stack.size());
-
-      ownerRRef->setValue(std::move(stack.front()));
-      if (rrefId != forkId) {
-        // Caller is a user and callee is the owner, add fork
-        //
-        // NB: rrefId == forkId is true if and only if calling remote to self.
-        // In that case both the caller and the callee will access the
-        // OwnerRRef. Hence, on the callee side (here), it should not call
-        // addForkOfOwner as it is not a fork. To allow callee to distinguish
-        // when this request is sent to self, the caller will set forkId using
-        // rrefId (OwnerRRef does not have a forkId anyway).
-        ctx.addForkOfOwner(rrefId, forkId);
+      c10::intrusive_ptr<c10::ivalue::Future> jitFuture;
+      try {
+        jitFuture = PythonRpcHandler::getInstance()
+                        .jitCompilationUnit()
+                        ->get_function(scriptRemoteCall.qualifiedName())
+                        .runAsync(stack);
+        if (jitFuture->completed()) { // short-cut.
+          ownerRRef->setValue(jitFuture->value());
+          postProcessing();
+          return;
+        }
+      } catch (const std::exception& e) {
+        ownerRRef->setError(e.what());
+        postProcessing();
+        return;
       }
-      markComplete(RemoteRet(rrefId, forkId).toMessage());
+      jitFuture->addCallback([ownerRRef, postProcessing, jitFuture]() {
+        try {
+          ownerRRef->setValue(jitFuture->value());
+        } catch (const std::exception& e) {
+          ownerRRef->setError(e.what());
+        }
+        postProcessing();
+      });
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
@@ -224,14 +279,23 @@ void RequestCallbackImpl::processRpc(
 
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       IValue py_ivalue;
-      {
-        pybind11::gil_scoped_acquire ag;
-        py_ivalue = jit::toIValue(
-            pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
-            PyObjectType::get());
+      try {
+        {
+          py::gil_scoped_acquire acquire;
+          py_ivalue = jit::toIValue(
+              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
+              PyObjectType::get());
+        }
+        ownerRRef->setValue(std::move(py_ivalue));
+      } catch (py::error_already_set& e) {
+        // py::error_already_set requires GIL to destruct, take special care.
+        ownerRRef->setError(e.what());
+        py::gil_scoped_acquire acquire;
+        e.restore();
+        PyErr_Clear();
+      } catch (std::exception& e) {
+        ownerRRef->setError(e.what());
       }
-
-      ownerRRef->setValue(std::move(py_ivalue));
 
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
@@ -250,70 +314,97 @@ void RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
-      if (rref->hasValue()) { // optional fast-path
-        markComplete(ScriptRRefFetchRet({rref->getValue()}).toMessage());
-        return;
-      } else {
+
+      auto futureOwner = ctx.getOwnerRRef(srf.rrefId());
+
+      if (futureOwner->completed()) { // optional fast-path
+        // the OwnerRRef has been created
+        const auto& rref = futureOwner->constValue();
+        if (rref->hasValue()) {
+          markComplete(ScriptRRefFetchRet({rref->getValue()}).toMessage());
+          return;
+        }
+      }
+
+      futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
+        const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
-        // Our response is satisfied when the rpcs come back.
+
+        // Our response is satisfied when the rpc.remote() request
+        // finishes executing on the owner.
         whenValueSet->addCallback(
-            [responseFuture, messageId, rref](
-                const rpc::Message& /* unused */,
-                const c10::optional<utils::FutureError>& error) {
-              if (!error) {
+            [responseFuture, messageId, rref, whenValueSet]() {
+              if (whenValueSet->hasError()) {
+                responseFuture->setError(whenValueSet->error()->what());
+                return;
+              }
+              try {
                 Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
                 m.setId(messageId);
                 responseFuture->markCompleted(std::move(m));
-              } else {
-                responseFuture->setError(error->what());
+              } catch (const std::exception& e) {
+                responseFuture->setError(e.what());
               }
             });
-      }
+      });
+
       return;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
+      // Making this lambda mutable to allow move-capture it in callbacks
+      auto serialize = [](IValue value) mutable -> SerializedPyObj {
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+        // Need this GIL to guard jit::toPyObj and destruct its returned
+        // py::object
+        py::gil_scoped_acquire acquire;
+        return pythonRpcHandler.serialize(jit::toPyObject(std::move(value)));
+      };
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
-      if (rref->hasValue()) { // optional fast-path
-        auto value = rref->getValue();
-        py::object pyValue;
-        {
-          pybind11::gil_scoped_acquire ag;
-          pyValue = torch::jit::toPyObject(std::move(value));
+
+      auto futureOwner = ctx.getOwnerRRef(prf.rrefId());
+
+      if (futureOwner->completed()) { // optional fast-path
+        // the OwnerRRef has been created
+        const auto& rref = futureOwner->constValue();
+        if (rref->hasValue()) {
+          SerializedPyObj result = serialize(rref->getValue());
+          markComplete(
+              PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
+          return;
         }
-        SerializedPyObj result =
-            PythonRpcHandler::getInstance().serialize(pyValue);
-        markComplete(
-            PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
-        return;
       }
 
-      auto whenValueSet = rref->getFuture();
+      futureOwner->addCallback([responseFuture,
+                                messageId,
+                                futureOwner,
+                                serialize{std::move(serialize)}]() mutable {
+        const auto& rref = futureOwner->constValue();
+        auto whenValueSet = rref->getFuture();
 
-      // Our response is satisfied when the rpcs come back.
-      whenValueSet->addCallback(
-          [responseFuture, messageId, rref](
-              const rpc::Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (!error) {
-              auto value = rref->getValue();
-              py::object pyValue;
-              {
-                pybind11::gil_scoped_acquire ag;
-                pyValue = torch::jit::toPyObject(std::move(value));
-              }
-              SerializedPyObj result =
-                  PythonRpcHandler::getInstance().serialize(pyValue);
-              Message m =
-                  PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(error->what());
-            }
-          });
+        // Our response is satisfied when the the rpc.remote() request
+        // finishes executing on the owner.
+        whenValueSet->addCallback([responseFuture,
+                                   messageId,
+                                   rref,
+                                   whenValueSet,
+                                   serialize{std::move(serialize)}]() mutable {
+          if (whenValueSet->hasError()) {
+            responseFuture->setError(whenValueSet->error()->what());
+            return;
+          }
+          try {
+            SerializedPyObj result = serialize(rref->getValue());
+            Message m =
+                PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
+      });
+
       return;
     }
     case MessageType::RREF_USER_DELETE: {
@@ -321,7 +412,7 @@ void RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
       auto deletedRRef = ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
       if (deletedRRef && deletedRRef->isPyObj()) {
-        pybind11::gil_scoped_acquire ag;
+        py::gil_scoped_acquire acquire;
         deletedRRef.reset();
       }
       markComplete(std::move(RRefAck()).toMessage());
@@ -358,7 +449,8 @@ void RequestCallbackImpl::processRpc(
           autogradContext != nullptr,
           "autogradContext is nullptr, FORWARD_AUTOGRAD_REQ should always get "
           "or create valid autogradContext in addRecvRpcBackward.");
-      autogradContainer.setCurrentContextId(autogradContext->contextId());
+
+      DistAutogradContextGuard ctxGuard(autogradContext->contextId());
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
@@ -375,13 +467,31 @@ void RequestCallbackImpl::processRpc(
       auto fromWorkerId = rpcWithAutograd.fromWorkerId();
       // The original future needs to be marked as completed when the wrapped
       // one completes, with the autograd context information wrapped.
+      // Uses weak_ptr so we can std::move the value.
       wrappedRpcResponseFuture->addCallback(
-          [responseFuture, messageId, fromWorkerId, wrappedRpcResponseFuture](
-              const Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (error) {
+          [responseFuture,
+           messageId,
+           fromWorkerId,
+           weak = std::weak_ptr<FutureMessage>(wrappedRpcResponseFuture),
+           ctxId = autogradContext->contextId()]() {
+            // As this callback can be invoked by a different thread, we have to
+            // make sure that the thread_local states in the previous thread is
+            // correctly propagated.
+            // NB: The execution of TorchScript functions can also run on a
+            // different thread, which is addressed by
+            // https://github.com/pytorch/pytorch/pull/36395
+            // NB: when adding async UDF support, we should also propagate
+            // thread_local states there.
+            // TODO: Land on a general solution for RPC ThreadLocalState. See
+            // https://github.com/pytorch/pytorch/issues/38510
+            DistAutogradContextGuard cbCtxGuard(ctxId);
+
+            auto wrappedRpcResponseFuture = weak.lock();
+            TORCH_INTERNAL_ASSERT(wrappedRpcResponseFuture);
+            if (wrappedRpcResponseFuture->hasError()) {
               // Propagate error to responseFuture if we had one.
-              responseFuture->setError(error->what());
+              responseFuture->setError(
+                  wrappedRpcResponseFuture->error()->what());
             } else {
               auto msg = getMessageWithAutograd(
                   fromWorkerId,
@@ -416,15 +526,13 @@ void RequestCallbackImpl::processRpc(
 
       // Our response is satisfied when the rpcs come back.
       execFuture->addCallback(
-          [responseFuture, messageId](
-              const Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (!error) {
+          [responseFuture, messageId](const FutureMessage& execFuture) {
+            if (!execFuture.hasError()) {
               Message m = std::move(PropagateGradientsResp()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
             } else {
-              responseFuture->setError(error->what());
+              responseFuture->setError(*(execFuture.error()));
             }
           });
       return;
@@ -469,13 +577,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
          // a shared_ptr here.
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
-         id = request.id()](
-            const bool& /*unused*/,
-            const c10::optional<utils::FutureError>& /*unused*/) {
+         id = request.id()]() {
           try {
-            // For a recv thread, current context id should be invalid outside
-            // processMessage().
-            ClearAutogradContextGuard guard;
             processRpc(*rpc, messageType, id, retFuture);
           } catch (py::error_already_set& e) {
             retFuture->markCompleted(handleError(e, messageType, id));

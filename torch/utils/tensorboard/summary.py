@@ -70,7 +70,7 @@ def hparams(hparam_dict=None, metric_dict=None):
     import torch
     from six import string_types
     from tensorboard.plugins.hparams.api_pb2 import (
-        Experiment, HParamInfo, MetricInfo, MetricName, Status
+        Experiment, HParamInfo, MetricInfo, MetricName, Status, DataType
     )
     from tensorboard.plugins.hparams.metadata import (
         PLUGIN_NAME,
@@ -99,37 +99,32 @@ def hparams(hparam_dict=None, metric_dict=None):
         logging.warning('parameter: metric_dict should be a dictionary, nothing logged.')
         raise TypeError('parameter: metric_dict should be a dictionary, nothing logged.')
 
-    hps = [HParamInfo(name=k) for k in hparam_dict.keys()]
-    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
+    hps = []
 
-    exp = Experiment(hparam_infos=hps, metric_infos=mts)
-
-    content = HParamsPluginData(experiment=exp, version=PLUGIN_DATA_VERSION)
-    smd = SummaryMetadata(
-        plugin_data=SummaryMetadata.PluginData(
-            plugin_name=PLUGIN_NAME,
-            content=content.SerializeToString()
-        )
-    )
-    exp = Summary(value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=smd)])
 
     ssi = SessionStartInfo()
     for k, v in hparam_dict.items():
+        if v is None:
+            continue
         if isinstance(v, int) or isinstance(v, float):
             ssi.hparams[k].number_value = v
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_FLOAT64")))
             continue
 
         if isinstance(v, string_types):
             ssi.hparams[k].string_value = v
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_STRING")))
             continue
 
         if isinstance(v, bool):
             ssi.hparams[k].bool_value = v
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_BOOL")))
             continue
 
         if isinstance(v, torch.Tensor):
             v = make_np(v)[0]
             ssi.hparams[k].number_value = v
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_FLOAT64")))
             continue
         raise ValueError('value should be one of int, float, str, bool, or torch.Tensor')
 
@@ -142,6 +137,19 @@ def hparams(hparam_dict=None, metric_dict=None):
         )
     )
     ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
+
+    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
+
+    exp = Experiment(hparam_infos=hps, metric_infos=mts)
+
+    content = HParamsPluginData(experiment=exp, version=PLUGIN_DATA_VERSION)
+    smd = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME,
+            content=content.SerializeToString()
+        )
+    )
+    exp = Summary(value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=smd)])
 
     sei = SessionEndInfo(status=Status.Value('STATUS_SUCCESS'))
     content = HParamsPluginData(session_end_info=sei, version=PLUGIN_DATA_VERSION)
@@ -308,7 +316,7 @@ def image(tag, tensor, rescale=1, dataformats='NCHW'):
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
 
-def image_boxes(tag, tensor_image, tensor_boxes, rescale=1, dataformats='CHW'):
+def image_boxes(tag, tensor_image, tensor_boxes, rescale=1, dataformats='CHW', labels=None):
     '''Outputs a `Summary` protocol buffer with images.'''
     tensor_image = make_np(tensor_image)
     tensor_image = convert_to_HWC(tensor_image, dataformats)
@@ -317,11 +325,12 @@ def image_boxes(tag, tensor_image, tensor_boxes, rescale=1, dataformats='CHW'):
         np.float32) * _calc_scale_factor(tensor_image)
     image = make_image(tensor_image.astype(np.uint8),
                        rescale=rescale,
-                       rois=tensor_boxes)
+                       rois=tensor_boxes,
+                       labels=labels)
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
 
-def draw_boxes(disp_image, boxes):
+def draw_boxes(disp_image, boxes, labels=None):
     # xyxy format
     num_boxes = boxes.shape[0]
     list_gt = range(num_boxes)
@@ -331,12 +340,12 @@ def draw_boxes(disp_image, boxes):
                                       boxes[i, 1],
                                       boxes[i, 2],
                                       boxes[i, 3],
-                                      display_str=None,
+                                      display_str=None if labels is None else labels[i],
                                       color='Red')
     return disp_image
 
 
-def make_image(tensor, rescale=1, rois=None):
+def make_image(tensor, rescale=1, rois=None, labels=None):
     """Convert a numpy representation of an image to Image protobuf"""
     from PIL import Image
     height, width, channel = tensor.shape
@@ -344,7 +353,7 @@ def make_image(tensor, rescale=1, rois=None):
     scaled_width = int(width * rescale)
     image = Image.fromarray(tensor)
     if rois is not None:
-        image = draw_boxes(image, rois)
+        image = draw_boxes(image, rois, labels=labels)
     image = image.resize((scaled_width, scaled_height), Image.ANTIALIAS)
     import io
     output = io.BytesIO()

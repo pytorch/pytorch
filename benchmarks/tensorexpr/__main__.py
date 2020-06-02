@@ -4,14 +4,16 @@ from . import benchmark
 import os
 from . import tensor_engine
 
-# import normalization
-
-# import reduction
-
-# import softmax
-# import pooling
-# import conv
-# import matmul
+from . import attention      # noqa: F401
+from . import broadcast      # noqa: F401
+# from . import conv           # noqa: F401
+from . import elementwise    # noqa: F401
+from . import matmul         # noqa: F401
+# from . import normalization  # noqa: F401
+# from . import pooling        # noqa: F401
+# from . import reduction      # noqa: F401
+# from . import softmax        # noqa: F401
+from . import swish          # noqa: F401
 
 
 def main():
@@ -90,7 +92,7 @@ Works only with Python3.\n A few examples:
     if args.cuda_fuser == "te":
         import torch
 
-        torch._C._jit_register_tensorexpr_fuser()
+        torch._C._jit_set_texpr_fuser_enabled(True)
 
     def set_global_threads(num_threads):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)

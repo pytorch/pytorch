@@ -58,11 +58,11 @@ In foo.cc, do:
 //    always be built without __AVX512F__, __AVX512DQ__, __AVX512VL__, __AVX2__
 //    and __AVX__.
 // During run time:
-//    we use cpuid to identify cpu support and run the proper functions.
+//    we use cpuinfo to identify cpu support and run the proper functions.
 
 #pragma once
 
-#include "caffe2/utils/cpuid.h"
+#include <cpuinfo.h>
 
 // DO macros: these should be used in your entry function, similar to foo()
 // above, that routes implementations based on CPU capability.
@@ -70,23 +70,34 @@ In foo.cc, do:
 #define BASE_DO(funcname, ...) return funcname##__base(__VA_ARGS__);
 
 #ifdef CAFFE2_PERF_WITH_AVX512
-#define AVX512_DO(funcname, ...)                       \
-  if (GetCpuId().avx512f() && GetCpuId().avx512dq() && \
-      GetCpuId().avx512vl()) {                         \
-    return funcname##__avx512(__VA_ARGS__);            \
+#define AVX512_DO(funcname, ...)                                   \
+  {                                                                \
+    static const bool isDo = cpuinfo_initialize() &&               \
+        cpuinfo_has_x86_avx512f() && cpuinfo_has_x86_avx512dq() && \
+        cpuinfo_has_x86_avx512vl();                                \
+    if (isDo) {                                                    \
+      return funcname##__avx512(__VA_ARGS__);                      \
+    }                                                              \
   }
 #else // CAFFE2_PERF_WITH_AVX512
 #define AVX512_DO(funcname, ...)
 #endif // CAFFE2_PERF_WITH_AVX512
 
 #ifdef CAFFE2_PERF_WITH_AVX2
-#define AVX2_DO(funcname, ...)            \
-  if (GetCpuId().avx2()) {                \
-    return funcname##__avx2(__VA_ARGS__); \
+#define AVX2_DO(funcname, ...)                                               \
+  {                                                                          \
+    static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx2(); \
+    if (isDo) {                                                              \
+      return funcname##__avx2(__VA_ARGS__);                                  \
+    }                                                                        \
   }
-#define AVX2_FMA_DO(funcname, ...)             \
-  if (GetCpuId().avx2() && GetCpuId().fma()) { \
-    return funcname##__avx2_fma(__VA_ARGS__);  \
+#define AVX2_FMA_DO(funcname, ...)                                             \
+  {                                                                            \
+    static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx2() && \
+        cpuinfo_has_x86_fma3();                                                \
+    if (isDo) {                                                                \
+      return funcname##__avx2_fma(__VA_ARGS__);                                \
+    }                                                                          \
   }
 #else // CAFFE2_PERF_WITH_AVX2
 #define AVX2_DO(funcname, ...)
@@ -94,13 +105,20 @@ In foo.cc, do:
 #endif // CAFFE2_PERF_WITH_AVX2
 
 #ifdef CAFFE2_PERF_WITH_AVX
-#define AVX_DO(funcname, ...)            \
-  if (GetCpuId().avx()) {                \
-    return funcname##__avx(__VA_ARGS__); \
+#define AVX_DO(funcname, ...)                  \
+  {                                            \
+    static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx(); \
+    if (isDo) {                                \
+      return funcname##__avx(__VA_ARGS__);     \
+    }                                          \
   }
-#define AVX_F16C_DO(funcname, ...)             \
-  if (GetCpuId().avx() && GetCpuId().f16c()) { \
-    return funcname##__avx_f16c(__VA_ARGS__);  \
+#define AVX_F16C_DO(funcname, ...)                                            \
+  {                                                                           \
+    static const bool isDo = cpuinfo_initialize() && cpuinfo_has_x86_avx() && \
+        cpuinfo_has_x86_f16c();                                               \
+    if (isDo) {                                                               \
+      return funcname##__avx_f16c(__VA_ARGS__);                               \
+    }                                                                         \
   }
 #else // CAFFE2_PERF_WITH_AVX
 #define AVX_DO(funcname, ...)

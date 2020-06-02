@@ -94,7 +94,6 @@ graph(%1 : Float(*, *, *)?):
   }
 
   // tests addmm fusion
-  // Note: addmm fusion is disabled by default
   {
     auto graph = std::make_shared<Graph>();
     parseIR(
@@ -110,7 +109,7 @@ graph(%1 : Float(*, *, *)?):
         return (%6)
         )IR",
         graph.get());
-    PeepholeOptimize(graph, true);
+    FuseAddMM(graph);
     testing::FileCheck().check("addmm")->run(*graph);
   }
 }

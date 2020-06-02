@@ -54,7 +54,7 @@ struct TORCH_API RMSpropParamState : public OptimizerCloneableParamState<RMSprop
 class TORCH_API RMSprop : public Optimizer {
  public:
   explicit RMSprop(std::vector<OptimizerParamGroup> param_groups,
-      RMSpropOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<RMSpropOptions>(defaults)) {
+      RMSpropOptions defaults = {}) : Optimizer(std::move(param_groups), std::make_unique<RMSpropOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
     TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
     TORCH_CHECK(defaults.momentum() >= 0, "Invalid momentum value: ", defaults.momentum());
@@ -63,22 +63,9 @@ class TORCH_API RMSprop : public Optimizer {
   }
 
   explicit RMSprop(std::vector<Tensor> params,
-      RMSpropOptions defaults) : RMSprop({std::move(OptimizerParamGroup(params))}, defaults) {}
+      RMSpropOptions defaults = {}) : RMSprop({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
-
-  /// Returns the number of parameters referenced by the optimizer.
-  size_t size() const noexcept override;
-
-  /// Adds the given vector of parameters to the optimizer's parameter list.
-  void add_parameters(const std::vector<Tensor>& parameters) override;
-
-  /// Provides a const reference to the parameters this optimizer holds.
-  const std::vector<Tensor>& parameters() const noexcept override;
-
-  /// Provides a reference to the parameters this optimizer holds.
-  std::vector<Tensor>& parameters() noexcept override;
-
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 

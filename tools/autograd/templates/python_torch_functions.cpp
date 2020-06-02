@@ -288,11 +288,11 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
-inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator generator, Tensor result) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, c10::optional<Generator> generator, Tensor result) {
   pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, high, size, generator);
 }
-inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator generator, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t high, IntArrayRef size, c10::optional<Generator> generator, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
   pybind11::gil_scoped_release no_gil;
   return torch::randint(high, size, generator, options);
@@ -306,11 +306,11 @@ inline Tensor dispatch_randint(int64_t high, IntArrayRef size, const TensorOptio
   pybind11::gil_scoped_release no_gil;
   return torch::randint(high, size, options);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator generator, Tensor result) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, c10::optional<Generator> generator, Tensor result) {
   pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, low, high, size, generator);
 }
-inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator generator, const TensorOptions & options) {
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, c10::optional<Generator> generator, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
   pybind11::gil_scoped_release no_gil;
   return torch::randint(low, high, size, generator, options);
@@ -503,7 +503,7 @@ static PyMethodDef torch_functions[] = {
 
 static PyTypeObject THPVariableFunctions = {
   PyVarObject_HEAD_INIT(NULL, 0)
-  "torch._C._VariableFunctions",         /* tp_name */
+  "torch._C._VariableFunctionsClass",    /* tp_name */
   0,                                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
@@ -547,6 +547,12 @@ void initTorchFunctions(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPVariableFunctions);
+
+  // Steals
+  Py_INCREF(&THPVariableFunctions);
+  if (PyModule_AddObject(module, "_VariableFunctionsClass", reinterpret_cast<PyObject*>(&THPVariableFunctions)) < 0) {
+    throw python_error();
+  }
   // PyType_GenericNew returns a new reference
   THPVariableFunctionsModule = PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
   // PyModule_AddObject steals a reference

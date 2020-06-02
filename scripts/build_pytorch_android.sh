@@ -20,7 +20,7 @@ echo "PYTORCH_DIR:$PYTORCH_DIR"
 echo "WORK_DIR:$WORK_DIR"
 
 echo "ANDROID_HOME:$ANDROID_HOME"
-if [ ! -z "$ANDROID_HOME" ]; then
+if [ -z "$ANDROID_HOME" ]; then
   echo "ANDROID_HOME not set; please set it to Android sdk directory"
 fi
 

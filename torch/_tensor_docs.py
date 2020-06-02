@@ -9,7 +9,7 @@ def add_docstr_all(method, docstr):
     add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
 common_args = parse_kwargs("""
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.preserve_format``.
 """)
 
@@ -173,6 +173,21 @@ abs_() -> Tensor
 In-place version of :meth:`~Tensor.abs`
 """)
 
+add_docstr_all('absolute',
+               r"""
+absolute() -> Tensor
+
+Alias for :func:`abs`
+""")
+
+add_docstr_all('absolute_',
+               r"""
+absolute_() -> Tensor
+
+In-place version of :meth:`~Tensor.absolute`
+Alias for :func:`abs_`
+""")
+
 add_docstr_all('acos',
                r"""
 acos() -> Tensor
@@ -320,9 +335,9 @@ Examples::
 
 
     # Example 2: Applying a per-channel-scale
-    def scale_channels(input, scale):
-        scale = scale.refine_names('C')
-        return input * scale.align_as(input)
+    >>> def scale_channels(input, scale):
+    >>>    scale = scale.refine_names('C')
+    >>>    return input * scale.align_as(input)
 
     >>> num_channels = 3
     >>> scale = torch.randn(num_channels, names=('C',))
@@ -745,7 +760,7 @@ type as :attr:`self`.
     Unlike `copy_()`, this function is recorded in the computation graph. Gradients
     propagating to the cloned tensor will propagate to the original tensor.
 
-Args: 
+Args:
     {memory_format}
 """.format(**common_args))
 
@@ -754,11 +769,11 @@ add_docstr_all('contiguous',
 contiguous(memory_format=torch.contiguous_format) -> Tensor
 
 Returns a contiguous in memory tensor containing the same data as :attr:`self` tensor. If
-:attr:`self` tensor is already in the specified memory format, this function returns the 
+:attr:`self` tensor is already in the specified memory format, this function returns the
 :attr:`self` tensor.
 
-Args: 
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
+Args:
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.contiguous_format``.
 """)
 
@@ -853,6 +868,13 @@ Args:
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
 """.format(**common_args))
+
+add_docstr_all('logcumsumexp',
+               r"""
+logcumsumexp(dim) -> Tensor
+
+See :func:`torch.logcumsumexp`
+""")
 
 add_docstr_all('cummax',
                r"""
@@ -1182,13 +1204,6 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
-add_docstr_all('real',
-               r"""
-real() -> Tensor
-
-See :func:`torch.real`
-""")
-
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -1285,13 +1300,6 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
-add_docstr_all('imag',
-               r"""
-imag() -> Tensor
-
-See :func:`torch.imag`
-""")
-
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
@@ -1383,7 +1391,13 @@ The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
-.. include:: cuda_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
     dim (int): dimension along which to index
@@ -1476,9 +1490,10 @@ Args:
 
 add_docstr_all('index_put',
                r"""
-index_put(indices, value, accumulate=False) -> Tensor
+index_put(tensor1, indices, value, accumulate=False) -> Tensor
 
-Out-place version of :meth:`~Tensor.index_put_`
+Out-place version of :meth:`~Tensor.index_put_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_put_`.
 """)
 
 add_docstr_all('index_select',
@@ -1534,15 +1549,43 @@ inverse() -> Tensor
 See :func:`torch.inverse`
 """)
 
+add_docstr_all('isnan',
+               r"""
+isnan() -> Tensor
+
+See :func:`torch.isnan`
+""")
+
+add_docstr_all('isinf',
+               r"""
+isinf() -> Tensor
+
+See :func:`torch.isinf`
+""")
+
+add_docstr_all('isfinite',
+               r"""
+isfinite() -> Tensor
+
+See :func:`torch.isfinite`
+""")
+
+add_docstr_all('isclose',
+               r"""
+isclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
+
+See :func:`torch.isclose`
+""")
+
 add_docstr_all('is_contiguous',
                r"""
 is_contiguous(memory_format=torch.contiguous_format) -> bool
 
-Returns True if :attr:`self` tensor is contiguous in memory in the order specified 
+Returns True if :attr:`self` tensor is contiguous in memory in the order specified
 by memory format.
 
-Args: 
-    memory_format (:class:`torch.memory_format`, optional): Specifies memory allocation 
+Args:
+    memory_format (:class:`torch.memory_format`, optional): Specifies memory allocation
         order. Default: ``torch.contiguous_format``.
 """)
 
@@ -1697,6 +1740,20 @@ add_docstr_all('log2_',
 log2_() -> Tensor
 
 In-place version of :meth:`~Tensor.log2`
+""")
+
+add_docstr_all('logaddexp',
+               r"""
+logaddexp(other) -> Tensor
+
+See :func:`torch.logaddexp`
+""")
+
+add_docstr_all('logaddexp2',
+               r"""
+logaddexp2(other) -> Tensor
+
+See :func:`torch.logaddexp2`
 """)
 
 add_docstr_all('log_normal_', r"""
@@ -2367,8 +2424,8 @@ memory is uninitialized.
 
 Args:
     sizes (torch.Size or int...): the desired size
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
-        Tensor. Default: ``torch.contiguous_format``. Note that memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        Tensor. Default: ``torch.contiguous_format``. Note that memory format of
         :attr:`self` is going to be unaffected if ``self.size()`` matches ``sizes``.
 
 Example::
@@ -2387,8 +2444,8 @@ Resizes the :attr:`self` tensor to be the same size as the specified
 :attr:`tensor`. This is equivalent to ``self.resize_(tensor.size())``.
 
 Args:
-    memory_format (:class:`torch.memory_format`, optional): the desired memory format of 
-        Tensor. Default: ``torch.contiguous_format``. Note that memory format of 
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        Tensor. Default: ``torch.contiguous_format``. Note that memory format of
         :attr:`self` is going to be unaffected if ``self.size()`` matches ``tensor.size()``.
 
 """)
@@ -2503,7 +2560,13 @@ dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
-.. include:: cuda_deterministic.rst
+Note:
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
     dim (int): the axis along which to index
@@ -3295,15 +3358,17 @@ of elements, but may have a different size. For a tensor to be viewed, the new
 view size must be compatible with its original size and stride, i.e., each new
 view dimension must either be a subspace of an original dimension, or only span
 across original dimensions :math:`d, d+1, \dots, d+k` that satisfy the following
-contiguity-like condition that :math:`\forall i = 0, \dots, k-1`,
+contiguity-like condition that :math:`\forall i = d, \dots, d+k-1`,
 
 .. math::
 
   \text{stride}[i] = \text{stride}[i+1] \times \text{size}[i+1]
 
-Otherwise, :meth:`contiguous` needs to be called before the tensor can be
-viewed. See also: :meth:`reshape`, which returns a view if the shapes are
-compatible, and copies (equivalent to calling :meth:`contiguous`) otherwise.
+Otherwise, it will not be possible to view :attr:`self` tensor as :attr:`shape`
+without copying it (e.g., via :meth:`contiguous`). When it is unclear whether a
+:meth:`view` can be performed, it is advisable to use :meth:`reshape`, which
+returns a view if the shapes are compatible, and copies (equivalent to calling 
+:meth:`contiguous`) otherwise.
 
 Args:
     shape (torch.Size or int...): the desired size
@@ -3447,6 +3512,14 @@ stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_en
 See :func:`torch.stft`
 """)
 
+add_docstr_all('istft',
+               r"""
+istft(n_fft, hop_length=None, win_length=None, window=None,
+ center=True, normalized=False, onesided=True, length=None) -> Tensor
+
+See :func:`torch.istft`
+""")
+
 add_docstr_all('fft',
                r"""
 fft(signal_ndim, normalized=False) -> Tensor
@@ -3527,23 +3600,26 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, tensor) -> Tensor
+index_add(tensor1, dim, index, tensor2) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_add_`
+Out-of-place version of :meth:`torch.Tensor.index_add_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_add_`.
 """)
 
 add_docstr_all('index_copy',
                r"""
-index_copy(dim, index, tensor) -> Tensor
+index_copy(tensor1, dim, index, tensor2) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_copy_`
+Out-of-place version of :meth:`torch.Tensor.index_copy_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_copy_`.
 """)
 
 add_docstr_all('index_fill',
                r"""
-index_fill(dim, index, value) -> Tensor
+index_fill(tensor1, dim, index, value) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_fill_`
+Out-of-place version of :meth:`torch.Tensor.index_fill_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_fill_`.
 """)
 
 add_docstr_all('scatter',
@@ -3669,4 +3745,13 @@ Is this Tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+""")
+
+add_docstr_all('as_subclass',
+               r"""
+as_subclass(cls) -> Tensor
+
+Makes a ``cls`` instance with the same data pointer as ``self``. Changes
+in the output mirror changes in ``self``, and the output stays attached
+to the autograd graph. ``cls`` must be a subclass of ``Tensor``.
 """)
