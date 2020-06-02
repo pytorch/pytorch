@@ -136,16 +136,19 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         version = local_metadata.get('version', None)
         if version is None or version == 1:
             # BN related parameters and buffers were moved into the BN module for v2
-            state_dict[prefix + 'bn.weight'] = state_dict[prefix + 'gamma']
-            state_dict.pop(prefix + 'gamma')
-            state_dict[prefix + 'bn.bias'] = state_dict[prefix + 'beta']
-            state_dict.pop(prefix + 'beta')
-            state_dict[prefix + 'bn.running_mean'] = state_dict[prefix + 'running_mean']
-            state_dict.pop(prefix + 'running_mean')
-            state_dict[prefix + 'bn.running_var'] = state_dict[prefix + 'running_var']
-            state_dict.pop(prefix + 'running_var')
-            state_dict[prefix + 'bn.num_batches_tracked'] = state_dict[prefix + 'num_batches_tracked']
-            state_dict.pop(prefix + 'num_batches_tracked')
+            v2_to_v1_names = {
+                'bn.weight': 'gamma',
+                'bn.bias': 'beta',
+                'bn.running_mean': 'running_mean',
+                'bn.running_var': 'running_var',
+                'bn.num_batches_tracked': 'num_batches_tracked',
+            }
+            for v2_name, v1_name in v2_to_v1_names.items():
+                if prefix + v1_name in state_dict:
+                    state_dict[prefix + v2_name] = state_dict[prefix + v1_name]
+                    state_dict.pop(prefix + v1_name)
+                elif strict:
+                    missing_keys.append(prefix + v2_name)
 
         super(_ConvBnNd, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)

@@ -5,6 +5,7 @@ from .qconfig import *
 from .fake_quantize import *
 from .fuse_modules import fuse_modules
 from .stubs import *
+from .quantize_script import *
 
 def default_eval_fn(model, calib_data):
     r"""
