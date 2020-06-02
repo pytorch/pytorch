@@ -26,6 +26,12 @@ Message PythonCall::toMessageImpl() && {
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
+  TORCH_INTERNAL_ASSERT(
+      message.payload().size() >= 1,
+      "Failed to convert an RPC message to PythonCall, the payload should at "
+      "least contain one byte indicating whether this is an async function, "
+      "but got payload of size ",
+      message.payload().size());
   const char& c = message.payload()[0];
   TORCH_INTERNAL_ASSERT(c == 0 || c == 1);
   bool isAsyncFunction = (c == 1);

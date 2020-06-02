@@ -160,7 +160,7 @@ void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
   pyHandleException_(obj);
 }
 
-bool PythonRpcHandler::isException(const py::object& obj) {
+bool PythonRpcHandler::isRemoteException(const py::object& obj) {
    PROFILE_GIL_SCOPED_ACQUIRE;
    auto type = obj.get_type();
    auto moduleName = type.attr("__module__").cast<std::string>();

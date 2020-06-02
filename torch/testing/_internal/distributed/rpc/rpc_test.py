@@ -417,6 +417,10 @@ def async_add_multi_fanout(to, x, num, step):
     return ret_future
 
 
+def return_future():
+    return torch.futures.Future()
+
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -2845,6 +2849,17 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_async_function_multi_fanout(self):
         self._test_async_function_multi(async_add_multi_fanout)
+
+    @dist_init
+    def test_return_future(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Can not pickle torch.futures.Future"
+        ):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                return_future,
+            )
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
