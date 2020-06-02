@@ -58,7 +58,6 @@ struct SymbolRange {
       : start_version_{_start_version},
         end_version_{_end_version},
         sym_{_sym} {}
-
   const uint64_t start_version_;
   const uint64_t end_version_;
   const Symbol sym_;
