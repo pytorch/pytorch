@@ -181,11 +181,13 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0, "ZeroDivisionError");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0, "ZeroDivisionError");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
