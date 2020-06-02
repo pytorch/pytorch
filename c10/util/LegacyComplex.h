@@ -11,9 +11,6 @@ class numeric_limits<std::complex<float>> : public numeric_limits<float>  {};
 template <>
 class numeric_limits<std::complex<double>> : public numeric_limits<double>  {};
 
-template <>
-class numeric_limits<c10::complex<at::Half>> : public numeric_limits<c10::Half>  {};
-
 #define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION \
   typename std::enable_if_t<std::is_floating_point<fT>::value && std::is_integral<iT>::value, int> = 0
 
