@@ -23,12 +23,7 @@ TH_API void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value);
 
 #if !defined(TH_REAL_IS_BFLOAT16)
 
-TH_API accreal THTensor_(sumall)(THTensor *t);
-
 void THTensor_(preserveReduceDimSemantics)(THTensor *r_, int in_dims, int reduce_dimension, int keepdim);
-
-TH_API scalar_t THTensor_(minall)(THTensor *t);
-TH_API scalar_t THTensor_(maxall)(THTensor *t);
 
 TH_API void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 TH_API void THTensor_(take)(THTensor *tensor, THTensor *src, THLongTensor *index);

@@ -68,6 +68,11 @@ if sys.platform == 'win32':
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
     prev_error_mode = kernel32.SetErrorMode(0x0001)
 
+    kernel32.LoadLibraryW.restype = ctypes.c_void_p
+    if with_load_library_flags:
+        kernel32.AddDllDirectory.restype = ctypes.c_void_p
+        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+
     for dll_path in dll_paths:
         if sys.version_info >= (3, 8):
             os.add_dll_directory(dll_path)
