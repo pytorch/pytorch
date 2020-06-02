@@ -3,7 +3,7 @@
 namespace torch {
   static thread_local bool enable_torch_function = true;
 
-  inline bool torch_function_enabled() {
+  bool torch_function_enabled() {
       return enable_torch_function;
   }
 }
