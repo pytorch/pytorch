@@ -1820,24 +1820,18 @@ class TestONNXRuntime(unittest.TestCase):
                 return self.lstm(input, initial_state)
 
         def get_LstmNet_model_and_inputs(num_layers, bidirectional):
+            input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
             num_directions = 2 if bidirectional else 1
             model = LstmNet(num_layers, bidirectional)
-            input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
             h0 = torch.randn(num_layers * num_directions, BATCH_SIZE, RNN_HIDDEN_SIZE)
             c0 = torch.randn(num_layers * num_directions, BATCH_SIZE, RNN_HIDDEN_SIZE)
             return model, (input, (h0, c0))
 
-        model1, input1 = get_LstmNet_model_and_inputs(1, True)
-        self.run_test(model1, input1)
-
-        model2, input2 = get_LstmNet_model_and_inputs(1, False)
-        self.run_test(model2, input2)
-
-        model1, input1 = get_LstmNet_model_and_inputs(2, True)
-        self.run_test(model1, input1)
-
-        model2, input2 = get_LstmNet_model_and_inputs(3, False)
-        self.run_test(model2, input2)
+        num_layers = [1, 1, 2, 3]
+        bidirectional = [True, False, True, False]
+        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)] 
+        for model, input in models_and_inputs:
+            self.run_test(model, input)
 
     def test_rnn_no_bias(self):
         def make_model(layers, packed_sequence):
@@ -1869,29 +1863,13 @@ class TestONNXRuntime(unittest.TestCase):
                 input = tuple(inputs)
             return input
 
-        input = make_input(RNN_BATCH_SIZE, 1, 0)
-        model = make_model(1, 0)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
+        layers = [1, 3, 1, 3, 1, 3]
+        packed_sequence = [0, 0, 1, 1, 2, 2]
+        models = [make_model(l, p) for l, p in zip(layers, packed_sequence)]
+        inputs = [make_input(RNN_BATCH_SIZE, l, p) for l, p in zip(layers, packed_sequence)]
 
-        input = make_input(RNN_BATCH_SIZE, 3, 0)
-        model = make_model(3, 0)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
-
-        input = make_input(RNN_BATCH_SIZE, 1, 1)
-        model = make_model(1, 1)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
-
-        input = make_input(RNN_BATCH_SIZE, 3, 1)
-        model = make_model(3, 1)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
-
-        input = make_input(RNN_BATCH_SIZE, 1, 2)
-        model = make_model(1, 2)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
-
-        input = make_input(RNN_BATCH_SIZE, 3, 2)
-        model = make_model(3, 2)
-        self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
+        for model, input in zip(models, inputs):
+            self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
 
     def test_gru_no_bias(self):
         class GruNet(torch.nn.Module):
@@ -1911,13 +1889,16 @@ class TestONNXRuntime(unittest.TestCase):
             h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
             return model, (input, h0)
 
-        batch_size1 = 3
-        model1, input1 = get_GruNet_model_and_inputs(7, 3, 2, batch_size1, 5, True)
-        self.run_test(model1, input1, do_constant_folding=True)
-
-        batch_size2 = 4
-        model2, input2 = get_GruNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
-        self.run_test(model2, input2, do_constant_folding=True)
+        input_size = [7, 5]
+        hidden_size = [3, 4]
+        num_layers = [2, 3]
+        batch_size = [3, 4]
+        seq_len = [5, 7]
+        bidirectional = [True, False] 
+        models_and_inputs = [get_GruNet_model_and_inputs(i, h, n, b, s, bi)
+                             for i, h, n, b, s, bi in zip(input_size, hidden_size, num_layers, batch_size, seq_len, bidirectional)]
+        for model, input in models_and_inputs:
+            self.run_test(model, input, do_constant_folding=True)
 
     def test_gru_constant_folding(self):
         class GruNet(torch.nn.Module):
