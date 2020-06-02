@@ -45,6 +45,7 @@ class NodeFinder : public IRVisitor {
 
   std::vector<Node*> nodes;
 };
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

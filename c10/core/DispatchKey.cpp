@@ -40,6 +40,8 @@ const char* toString(DispatchKey t) {
       return "Autograd";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
+    case DispatchKey::Batched:
+      return "Batched";
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
     case DispatchKey::Autocast:
@@ -48,6 +50,8 @@ const char* toString(DispatchKey t) {
       return "TESTING_ONLY_GenericWrapper";
     case DispatchKey::Profiler:
       return "Profile";
+    case DispatchKey::Named:
+      return "Named";
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }

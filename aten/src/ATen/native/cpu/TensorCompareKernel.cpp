@@ -83,6 +83,9 @@ static void min_kernel_impl(
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
+  TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
+    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
@@ -116,6 +119,9 @@ static void max_kernel_impl(
     bool keepdim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
+
+  TORCH_CHECK(result.scalar_type() == self.scalar_type() && indice.scalar_type() == kLong,
+    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", result.scalar_type(), "and", indice.scalar_type());
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, wrap_dim, keepdim, [&] (

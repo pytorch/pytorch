@@ -101,7 +101,7 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
       /* Nothing to do, data already sorted */          \
       break;                                            \
       default:                                          \
-      assert(false);                                    \
+      TORCH_INTERNAL_ASSERT(false);                                    \
     }                                                   \
   }
 

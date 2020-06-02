@@ -109,12 +109,12 @@ __host__ __device__ static inline double nearbyint_wrapper(double a) {
   return ::nearbyint(a);
 }
 
-__host__ __device__ static inline std::complex<float> nearbyint_wrapper(std::complex<float> a) {
-  return std::complex<float>(::nearbyintf(static_cast<float>(a.real())), ::nearbyintf(static_cast<float>(a.imag())));
+__host__ __device__ static inline c10::complex<float> nearbyint_wrapper(c10::complex<float> a) {
+  return c10::complex<float>(::nearbyintf(static_cast<float>(a.real())), ::nearbyintf(static_cast<float>(a.imag())));
 }
 
-__host__ __device__ static inline std::complex<double> nearbyint_wrapper(std::complex<double> a) {
-  return std::complex<double>(::nearbyint(static_cast<double>(a.real())), ::nearbyint(static_cast<double>(a.imag())));
+__host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::complex<double> a) {
+  return c10::complex<double>(::nearbyint(static_cast<double>(a.real())), ::nearbyint(static_cast<double>(a.imag())));
 }
 
 void round_kernel_cuda(TensorIterator& iter) {
@@ -136,12 +136,12 @@ __host__ __device__ static inline double trunc_wrapper(double a) {
   return ::trunc(a);
 }
 
-__host__ __device__ static inline std::complex<float> trunc_wrapper(std::complex<float> a) {
-  return std::complex<float>(::truncf(static_cast<float>(a.real())), ::truncf(static_cast<float>(a.imag())));
+__host__ __device__ static inline c10::complex<float> trunc_wrapper(c10::complex<float> a) {
+  return c10::complex<float>(::truncf(static_cast<float>(a.real())), ::truncf(static_cast<float>(a.imag())));
 }
 
-__host__ __device__ static inline std::complex<double> trunc_wrapper(std::complex<double> a) {
-  return std::complex<double>(::trunc(static_cast<double>(a.real())), ::trunc(static_cast<double>(a.imag())));
+__host__ __device__ static inline c10::complex<double> trunc_wrapper(c10::complex<double> a) {
+  return c10::complex<double>(::trunc(static_cast<double>(a.real())), ::trunc(static_cast<double>(a.imag())));
 }
 
 void trunc_kernel_cuda(TensorIterator& iter) {
