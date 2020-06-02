@@ -8349,17 +8349,6 @@ a")
         self.assertEqual(any_refinement2(3), torch.tensor(3))
         self.assertEqual(any_refinement2(torch.tensor(5)), torch.tensor(5))
 
-    def test_any_in_class_fails(self):
-        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
-            @torch.jit.script
-            class Foo(object):
-                def __init__(self, a):
-                    # type: (Tuple[int,Any]) -> None
-                    self.a = a
-
-                def hi(self):
-                    pass
-
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
@@ -10188,6 +10177,17 @@ a")
 
         self.checkScript(torch_unique, (None,))
         self.checkScript(torch_unique, (0,))
+
+        def torch_unique_consecutive(dim: Optional[int]):
+            ten = torch.unique(torch.tensor([[1, 3], [3, 2], [3, 2], [2, 3]], dtype=torch.long))
+            a = torch.unique_consecutive(ten, dim=dim)
+            b = torch.unique_consecutive(ten, return_counts=True, dim=dim)
+            c = torch.unique_consecutive(ten, return_inverse=True, dim=dim)
+            d = torch.unique_consecutive(ten, return_counts=True, return_inverse=True, dim=dim)
+            return a, b, c, d
+
+        self.checkScript(torch_unique_consecutive, (None,))
+        self.checkScript(torch_unique_consecutive, (0,))
 
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
