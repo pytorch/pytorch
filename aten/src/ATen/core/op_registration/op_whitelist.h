@@ -24,7 +24,7 @@ constexpr bool op_whitelist_check(const char* op_name) {
   // all ops are to be registered
   return true;
 #else
-  return c10::util::op_whitelist_contains(C10_STRINGIZE(TORCH_OPERATOR_WHITELIST), op_name, ';');
+  return c10::util::op_whitelist_contains(C10_STRINGIZE(TORCH_OPERATOR_WHITELIST), op_name);
 #endif
 }
 
