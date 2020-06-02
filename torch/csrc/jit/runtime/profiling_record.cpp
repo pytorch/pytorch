@@ -152,9 +152,19 @@ bool needsProfiledInputs(Node* n) {
   }
 
   switch (n->kind()) {
+    // specialize_autogradzero
     case prim::AutogradAdd:
     case prim::AutogradAnyNonZero:
     case prim::AutogradZero:
+    // peephole
+    case aten::dim:
+    case aten::size:
+    case aten::expand:
+    case prim::dtype:
+    case prim::device:
+    case aten::is_floating_point:
+    case aten::is_cuda:
+    case aten::type_as:
       return true;
     default:
       return false;
