@@ -42,31 +42,13 @@ class DistributedDataParallel(Module):
 
     The batch size should be larger than the number of GPUs used locally.
 
-    See also: :ref:`distributed-basics` and :ref:`cuda-nn-dataparallel-instead`.
+    See also: :ref:`distributed-basics` and :ref:`cuda-nn-ddp-instead`.
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
 
     Creation of this class requires that ``torch.distributed`` to be already
     initialized, by calling :func:`torch.distributed.init_process_group`.
 
-    ``DistributedDataParallel`` can be used in the following two ways:
-
-    (1) Single-Process Multi-GPU
-
-    In this case, a single process will be
-    spawned on each host/node and each process will operate on all the GPUs
-    of the node where it's running. To use ``DistributedDataParallel`` in
-    this way, you can simply construct the model as the following:
-
-        >>> torch.distributed.init_process_group(backend="nccl")
-        >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices by default
-
-    (2) Multi-Process Single-GPU
-
-    This is the highly recommended way to use ``DistributedDataParallel``, with
-    multiple processes, each of which operates on a single GPU. This is
-    currently the fastest approach to do data parallel training using PyTorch
-    and applies to both single-node(multi-GPU) and multi-node data
-    parallel training. It is proven to be significantly faster than
+    ``DistributedDataParallel`` is proven to be significantly faster than
     :class:`torch.nn.DataParallel` for single-node multi-GPU data
     parallel training.
 
@@ -228,7 +210,8 @@ class DistributedDataParallel(Module):
     """
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
-                 process_group=None, bucket_cap_mb=25,
+                 process_group=None,
+                 bucket_cap_mb=25,
                  find_unused_parameters=False,
                  check_reduction=False):
 
@@ -287,13 +270,11 @@ class DistributedDataParallel(Module):
             # do not receive gradients.
             pass
 
-        MB = 1024 * 1024
-
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = int(250 * MB)
+        self.broadcast_bucket_size = int(250 * 1024 * 1024)
 
         # reduction bucket size
-        self.bucket_bytes_cap = int(bucket_cap_mb * MB)
+        self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
 
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
@@ -314,7 +295,36 @@ class DistributedDataParallel(Module):
         (4) registering the grad hooks
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
+
+        def parameters(m, recurse=True):
+            def model_parameters(m):
+                ps = m._former_parameters.values() \
+                    if hasattr(m, "_former_parameters") \
+                    else m.parameters(recurse=False)
+                for p in ps:
+                    yield p
+
+            for m in m.modules() if recurse else [m]:
+                for p in model_parameters(m):
+                    yield p
+
         if self.device_ids and len(self.device_ids) > 1:
+
+            import warnings
+            warnings.warn(
+                "Single-Process Multi-GPU is not the recommended mode for "
+                "DDP. In this mode, each DDP instance operates on multiple "
+                "devices and creates multiple module replicas within one "
+                "process. The overhead of scatter/gather and GIL contention "
+                "in every forward pass can slow down training. "
+                "Please consider using one DDP instance per device or per "
+                "module replica by explicitly setting device_ids or "
+                "CUDA_VISIBLE_DEVICES. "
+                "NB: There is a known issue in nn.parallel.replicate that "
+                "prevents a single DDP instance to operate on multiple model "
+                "replicas."
+            )
+
             # only create replicas for single-device CUDA modules
             #
             # TODO: we don't need to replicate params in here. they're always going to
@@ -324,13 +334,13 @@ class DistributedDataParallel(Module):
             self._module_copies[0] = self.module
 
             for module_copy in self._module_copies[1:]:
-                for param, copy_param in zip(self.module.parameters(), module_copy.parameters()):
+                for param, copy_param in zip(self.module.parameters(), parameters(module_copy)):
                     copy_param.requires_grad = param.requires_grad
 
         else:
             self._module_copies = [self.module]
 
-        self.modules_params = [list(m.parameters()) for m in self._module_copies]
+        self.modules_params = [list(parameters(m)) for m in self._module_copies]
         self.modules_buffers = [list(m.buffers()) for m in self._module_copies]
 
         # Build tuple of (module, parameter) for all parameters that require grads.
@@ -340,7 +350,7 @@ class DistributedDataParallel(Module):
                 for module in replica.modules()
                 for parameter in filter(
                     lambda parameter: parameter.requires_grad,
-                    module.parameters(recurse=False))
+                    parameters(module, recurse=False))
             ] for replica in self._module_copies]
 
         # Build list of parameters.
@@ -369,7 +379,7 @@ class DistributedDataParallel(Module):
         # computation finishes. Experiments showed 1MB is a reasonable value.
         bucket_indices = dist._compute_bucket_assignment_by_size(
             parameters[0],
-            [1024 * 1024, self.bucket_bytes_cap],
+            [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap],
             expect_sparse_gradient[0])
 
         # Note: reverse list of buckets because we want to approximate the
@@ -379,7 +389,8 @@ class DistributedDataParallel(Module):
             parameters,
             list(reversed(bucket_indices)),
             self.process_group,
-            expect_sparse_gradient)
+            expect_sparse_gradient,
+            self.bucket_bytes_cap)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)

@@ -228,7 +228,7 @@ class cudnnTensorDescWrapper {
       return desc_;
     }
     CAFFE_ENFORCE_EQ(
-        dims.size(), 4, "Currently only 4-dimensional descriptor supported.");
+        dims.size(), 4U, "Currently only 4-dimensional descriptor supported.");
     format_ = format;
     type_ = type;
     dims_ = dims;
@@ -282,7 +282,7 @@ class cudnnFilterDescWrapper {
       return desc_;
     }
     CAFFE_ENFORCE_EQ(
-        dims.size(), 4, "Currently only 4-dimensional descriptor supported.");
+        dims.size(), 4U, "Currently only 4-dimensional descriptor supported.");
     order_ = order;
     type_ = type;
     dims_ = dims;

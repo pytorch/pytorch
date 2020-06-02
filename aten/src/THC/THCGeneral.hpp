@@ -10,12 +10,10 @@ struct THCState {
   int numDevices;
 
   /* Allocator using cudaMallocHost. */
-  // NB: These allocators (specifically, cudaHostAllocator) MUST implement
-  // maybeGlobalBoundDeleter, because we have a few use-cases where we need to
-  // do raw allocations with them (for Thrust).
+  // NB: cudaHostAllocator MUST implement maybeGlobalBoundDeleter, because we have
+  // a few use-cases where we need to do raw allocations with them (for Thrust).
   // TODO: Make this statically obvious
   at::Allocator* cudaHostAllocator;
-  at::Allocator* cudaDeviceAllocator;
 
   /* Table of enabled peer-to-peer access between directed pairs of GPUs.
      If i accessing allocs on j is enabled, p2pAccess[i][j] is 1; 0 otherwise. */

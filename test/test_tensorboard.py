@@ -44,7 +44,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from common_utils import TestCase, run_tests, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -178,7 +178,7 @@ class TestTensorBoardUtils(BaseTestCase):
         tensor = make_np(test_image)
         tensor = convert_to_HWC(tensor, 'NCHW')
         scale_factor = summary._calc_scale_factor(tensor)
-        self.assertEqual(scale_factor, 1, 'Values are already in [0, 255], scale factor should be 1')
+        self.assertEqual(scale_factor, 1, msg='Values are already in [0, 255], scale factor should be 1')
 
 
     def test_prepare_video(self):
@@ -283,11 +283,7 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
         self.assertTrue(passed)
 
     def test_pathlib(self):
-        import sys
-        if sys.version_info.major == 2:
-            import pathlib2 as pathlib
-        else:
-            import pathlib
+        import pathlib
         p = pathlib.Path('./pathlibtest' + str(uuid.uuid4()))
         with SummaryWriter(p) as writer:
             writer.add_scalar('test', 1)
@@ -341,7 +337,7 @@ class TestTensorBoardSummary(BaseTestCase):
         '''
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
         scale_factor = summary._calc_scale_factor(test_image)
-        self.assertEqual(scale_factor, 1, 'Values are already in [0, 255], scale factor should be 1')
+        self.assertEqual(scale_factor, 1, msg='Values are already in [0, 255], scale factor should be 1')
 
     def test_float32_image(self):
         '''
@@ -350,7 +346,7 @@ class TestTensorBoardSummary(BaseTestCase):
         '''
         test_image = np.random.rand(3, 32, 32).astype(np.float32)
         scale_factor = summary._calc_scale_factor(test_image)
-        self.assertEqual(scale_factor, 255, 'Values are in [0, 1], scale factor should be 255')
+        self.assertEqual(scale_factor, 255, msg='Values are in [0, 1], scale factor should be 255')
 
     def test_list_input(self):
         with self.assertRaises(Exception) as e_info:
@@ -450,6 +446,21 @@ class TestTensorBoardSummary(BaseTestCase):
             with self.createSummaryWriter() as writer:
                 writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
 
+    def test_hparams_number(self):
+        hp = {'lr': 0.1}
+        mt = {'accuracy': 0.1}
+        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
+
+    def test_hparams_bool(self):
+        hp = {'bool_var': True}
+        mt = {'accuracy': 0.1}
+        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
+
+    def test_hparams_string(self):
+        hp = {'string_var': "hi"}
+        mt = {'accuracy': 0.1}
+        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
+
     def test_mesh(self):
         v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
         c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
@@ -460,13 +471,21 @@ class TestTensorBoardSummary(BaseTestCase):
 def remove_whitespace(string):
     return string.replace(' ', '').replace('\t', '').replace('\n', '')
 
-def read_expected_content(function_ptr):
+def get_expected_file(function_ptr):
     module_id = function_ptr.__class__.__module__
-    test_dir = os.path.dirname(sys.modules[module_id].__file__)
+    test_file = sys.modules[module_id].__file__
+    # Look for the .py file (since __file__ could be pyc).
+    test_file = ".".join(test_file.split('.')[:-1]) + '.py'
+
+    # Use realpath to follow symlinks appropriately.
+    test_dir = os.path.dirname(os.path.realpath(test_file))
     functionName = function_ptr.id().split('.')[-1]
-    expected_file = os.path.join(test_dir,
-                                 "expect",
-                                 'TestTensorBoard.' + functionName + ".expect")
+    return os.path.join(test_dir,
+                        "expect",
+                        'TestTensorBoard.' + functionName + ".expect")
+
+def read_expected_content(function_ptr):
+    expected_file = get_expected_file(function_ptr)
     assert os.path.exists(expected_file)
     with open(expected_file, "r") as f:
         return f.read()
@@ -494,12 +513,7 @@ def compare_proto(str_to_compare, function_ptr):
     return remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
 def write_proto(str_to_compare, function_ptr):
-    module_id = function_ptr.__class__.__module__
-    test_dir = os.path.dirname(sys.modules[module_id].__file__)
-    functionName = function_ptr.id().split('.')[-1]
-    expected_file = os.path.join(test_dir,
-                                 "expect",
-                                 'TestTensorBoard.' + functionName + ".expect")
+    expected_file = get_expected_file(function_ptr)
     with open(expected_file, 'w') as f:
         f.write(str(str_to_compare))
 

@@ -10,6 +10,11 @@ retry () {
 if [[ "$(uname)" == Darwin ]]; then
   # macos executor (builds and tests)
   workdir="/Users/distiller/project"
+elif [[ "$OSTYPE" == "msys" ]]; then
+  # windows executor (builds and tests)
+  rm -rf /c/w
+  ln -s "/c/Users/circleci/project" /c/w
+  workdir="/c/w"
 elif [[ -d "/home/circleci/project" ]]; then
   # machine executor (binary tests)
   workdir="/home/circleci/project"
@@ -19,8 +24,14 @@ else
 fi
 
 # It is very important that this stays in sync with binary_populate_env.sh
-export PYTORCH_ROOT="$workdir/pytorch"
-export BUILDER_ROOT="$workdir/builder"
+if [[ "$OSTYPE" == "msys" ]]; then
+  # We need to make the paths as short as possible on Windows
+  export PYTORCH_ROOT="$workdir/p"
+  export BUILDER_ROOT="$workdir/b"
+else
+  export PYTORCH_ROOT="$workdir/pytorch"
+  export BUILDER_ROOT="$workdir/builder"
+fi
 
 # Clone the Pytorch branch
 retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"

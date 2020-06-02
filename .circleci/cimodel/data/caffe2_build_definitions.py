@@ -5,14 +5,14 @@ import cimodel.lib.conf_tree as conf_tree
 from cimodel.lib.conf_tree import Ver
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.caffe2_build_data import CONFIG_TREE_DATA, TopLevelNode
-
+from cimodel.data.simple.util.branch_filters import gen_branches_only_filter_dict
 
 from dataclasses import dataclass
 
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = "345"
+DOCKER_IMAGE_VERSION = "376"
 
 
 @dataclass
@@ -23,6 +23,7 @@ class Conf:
     # for gpu files and host compiler (gcc/clang) for cpu files)
     compilers: [Ver]
     build_only: bool
+    test_only: bool
     is_important: bool
 
     @property
@@ -32,8 +33,9 @@ class Conf:
     # TODO: Eventually we can probably just remove the cudnn7 everywhere.
     def get_cudnn_insertion(self):
 
-        omit = self.language == "onnx_py2" \
-            or self.language == "onnx_py3.6" \
+        omit = self.language == "onnx_main_py3.6" \
+            or self.language == "onnx_ort1_py3.6" \
+            or self.language == "onnx_ort2_py3.6" \
             or set(self.compiler_names).intersection({"android", "mkl", "clang"}) \
             or str(self.distro) in ["ubuntu14.04", "macos10.13"]
 
@@ -50,6 +52,13 @@ class Conf:
 
     def construct_phase_name(self, phase):
         root_parts = self.get_build_name_root_parts()
+
+        build_name_substitutions = {
+            "onnx_ort1_py3.6": "onnx_main_py3.6",
+            "onnx_ort2_py3.6": "onnx_main_py3.6",
+        }
+        if phase == "build":
+            root_parts = [miniutils.override(r, build_name_substitutions) for r in root_parts]
         return "_".join(root_parts + [phase]).replace(".", "_")
 
     def get_platform(self):
@@ -61,9 +70,10 @@ class Conf:
     def gen_docker_image(self):
 
         lang_substitutions = {
-            "onnx_py2": "py2",
-            "onnx_py3.6": "py3.6",
-            "cmake": "py2",
+            "onnx_main_py3.6": "py3.6",
+            "onnx_ort1_py3.6": "py3.6",
+            "onnx_ort2_py3.6": "py3.6",
+            "cmake": "py3",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
@@ -73,8 +83,10 @@ class Conf:
     def gen_workflow_params(self, phase):
         parameters = OrderedDict()
         lang_substitutions = {
-            "onnx_py2": "onnx-py2",
-            "onnx_py3.6": "onnx-py3.6",
+            "onnx_py3": "onnx-py3",
+            "onnx_main_py3.6": "onnx-main-py3.6",
+            "onnx_ort1_py3.6": "onnx-ort1-py3.6",
+            "onnx_ort2_py3.6": "onnx-ort2-py3.6",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
@@ -106,16 +118,15 @@ class Conf:
     def gen_workflow_job(self, phase):
         job_def = OrderedDict()
         job_def["name"] = self.construct_phase_name(phase)
-        job_def["requires"] = ["setup"]
 
         if phase == "test":
-            job_def["requires"].append(self.construct_phase_name("build"))
+            job_def["requires"] = [self.construct_phase_name("build")]
             job_name = "caffe2_" + self.get_platform() + "_test"
         else:
             job_name = "caffe2_" + self.get_platform() + "_build"
 
         if not self.is_important:
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            job_def["filters"] = gen_branches_only_filter_dict()
         job_def.update(self.gen_workflow_params(phase))
         return {job_name : job_def}
 
@@ -136,6 +147,7 @@ def instantiate_configs():
             distro=fc.find_prop("distro_version"),
             compilers=fc.find_prop("compiler_version"),
             build_only=fc.find_prop("build_only"),
+            test_only=fc.find_prop("test_only"),
             is_important=fc.find_prop("important"),
         )
 
@@ -150,10 +162,11 @@ def get_workflow_jobs():
 
     x = []
     for conf_options in configs:
-
         phases = ["build"]
         if not conf_options.build_only:
             phases = dimensions.PHASES
+        if conf_options.test_only:
+            phases = ["test"]
 
         for phase in phases:
             x.append(conf_options.gen_workflow_job(phase))

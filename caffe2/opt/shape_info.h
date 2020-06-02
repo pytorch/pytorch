@@ -127,4 +127,6 @@ CAFFE2_API ShapeInfo constructShapeInfoWithDefaultDimType(
     TensorBoundShape_DimType defaultFirstDimType =
         TensorBoundShape_DimType_BATCH);
 
+CAFFE2_API void parseShapeInfoMapFromString(const std::string&, ShapeInfoMap&);
+
 } // namespace caffe2

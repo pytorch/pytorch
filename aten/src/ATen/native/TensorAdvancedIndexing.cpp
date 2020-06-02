@@ -69,8 +69,14 @@ namespace at { namespace native {
 DEFINE_DISPATCH(index_stub);
 DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
+DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
+DEFINE_DISPATCH(masked_select_serial_stub);
+DEFINE_DISPATCH(masked_select_stub);
 
+DEFINE_DISPATCH(gather_stub);
+DEFINE_DISPATCH(scatter_stub);
+DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
 
 static bool all_strides_match(TensorList tensors) {
@@ -233,6 +239,18 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   return iter;
 }
 
+static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.add_output(result, info.src.device(), info.src.scalar_type());
+  iter.add_input(info.src);
+  for (auto& index : info.indices) {
+    iter.add_input(index);
+  }
+  iter.build();
+  return iter;
+}
+
 Tensor index(const Tensor & self, TensorList indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
 
@@ -240,6 +258,15 @@ Tensor index(const Tensor & self, TensorList indices) {
   auto iter = make_index_iterator(info);
   index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
   return iter.output();
+}
+
+Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
+  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+
+  auto info = make_info(self, indices);
+  auto iter = make_index_out_iterator(info, result);
+  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
+  return result;
 }
 
 Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
@@ -457,11 +484,15 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "index_select", [&] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+
+      auto self_data_ptr = self.data_ptr<scalar_t>();
+      auto result_data_ptr = result.data_ptr<scalar_t>();
+      auto self_numel = self.numel();
       for (auto i = 0; i < numel; i++) {
         auto self_i = index_data[i];
-        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-        scalar_t *self_ip = self.data_ptr<scalar_t>() + self_i * self_stride;
-        *(result.data_ptr<scalar_t>() + i * result_stride) = *self_ip;
+        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
+        scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+        *(result_data_ptr + i * result_stride) = *self_ip;
       }
     });
   }
@@ -488,20 +519,49 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
+Tensor & gather_out_cpu_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "gather_out(): Expected dtype int64 for index");
+  result.resize_(index.sizes());
+  gather_stub(result.device().type(), result, self, dim, index);
+  return result;
+}
+
+Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "gather(): Expected dtype int64 for index");
+  Tensor result = at::empty({0}, self.options());
+  return gather_out_cpu_cuda(result, self, dim, index, sparse_grad);
+}
+
+Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_(): Expected dtype int64 for index");
+  scatter_stub(self.device().type(), self, dim, index, src);
+  return self;
+}
+
+Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_fill_(): Expected dtype int64 for index");
+  scatter_fill_stub(self.device().type(), self, dim, index, src);
+  return self;
+}
+
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter(): Expected dtype int64 for index");
   return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter(): Expected dtype int64 for index");
   return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
 
-Tensor & scatter_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add_(): Expected dtype int64 for index");
   scatter_add_stub(self.device().type(), self, dim, index, src);
   return self;
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add(): Expected dtype int64 for index");
   return self.clone(at::MemoryFormat::Preserve).scatter_add_(dim, index, source);
 }
 
@@ -509,6 +569,42 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
   return _self.clone(at::MemoryFormat::Contiguous).masked_scatter_(_mask, source);
+}
+
+static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar value) {
+  NoNamesGuard guard;
+  if (mask.dtype() == ScalarType::Byte) {
+    TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
+  }
+
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.dont_resize_outputs();
+  iter.add_output(self);
+  iter.add_input(mask);
+  iter.build();
+
+  masked_fill_stub(iter.device_type(), iter, value);
+  return self;
+}
+
+Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, Scalar value) {
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+
+  masked_fill_impl_cpu(self, mask, value);
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  return self;
+}
+
+Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, const Tensor & value) {
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+  TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
+      "with ", value.dim(), " dimension(s).");
+
+  masked_fill_impl_cpu(self, mask, value.item());
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  return self;
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
@@ -530,13 +626,89 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-  Tensor _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
-  result = _self.clone(at::MemoryFormat::Contiguous);
-  result.masked_fill_(mask, source);
+    Tensor _mask, _self;
+    std::tie(_mask, _self) = expand_outplace(mask, self);
+    result = _self.clone(at::MemoryFormat::Contiguous);
+    result.masked_fill_(mask, source);
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
+}
+
+static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
+  NoNamesGuard guard;
+
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
+              "masked_select: expected BoolTensor or ByteTensor for mask");
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(),
+              "masked_select(): self and result must have the same scalar type");
+
+  if (mask.dtype() == at::ScalarType::Byte) {
+    TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
+  }
+
+  Tensor _mask, _self;
+  std::tie(_mask, _self) = expand_outplace(mask, self);
+
+  auto shape = _self.sizes();
+  int64_t numel = _mask.sum().item().toLong();
+  result.resize_({numel});
+  if (numel == 0) {
+    return result;
+  }
+
+  // Create strided view of result before feeding into TensorIterator
+  auto strides = DimVector(shape.size(), 0);
+  auto result_strided = result.as_strided(shape, strides);
+
+  // serial kernel
+  bool use_serial_kernel = self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
+  if (use_serial_kernel) {
+    auto iter = TensorIterator();
+    iter.dont_compute_common_dtype();
+    iter.dont_resize_outputs();
+    iter.add_output(result_strided);
+    iter.add_input(_self);
+    iter.add_input(_mask);
+    iter.build();
+
+    masked_select_serial_stub(iter.device_type(), iter);
+    return result;
+  }
+
+  // Use a prefix sum to record the output locations of the masked elements,
+  // so as to parallel with TensorIterator.
+  auto mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
+  auto mask_prefix_sum = at::empty(shape, self.options().dtype(at::kLong));
+  auto mask_long_data = mask_long.data_ptr<int64_t>();
+  auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
+  // TODO: Here can only use std::partial_sum for C++14,
+  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better peformance.
+  // std::exclusive_scan(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data, 0);
+  std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
+
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.dont_resize_outputs();
+  iter.add_output(result_strided);
+  iter.add_input(_self);
+  iter.add_input(_mask);
+  iter.add_input(mask_prefix_sum);
+  iter.build();
+
+  masked_select_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
+  namedinference::compute_broadcast_outnames(self, mask);
+  return masked_select_out_impl_cpu(result, self, mask);
+}
+
+Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
+  Tensor result = at::empty({0}, self.options());
+  return masked_select_out_cpu(result, self, mask);
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){

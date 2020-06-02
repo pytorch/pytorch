@@ -23,12 +23,9 @@ Build system pieces:
 
 * [setup_helpers](setup_helpers) - Helper code for searching for
   third-party dependencies on the user system.
-* [build_pytorch_libs.sh](build_pytorch_libs.sh) - Script that
-  builds all of the constituent libraries of PyTorch, but not the
-  PyTorch Python extension itself.  We are working on eliminating this
-  script in favor of a unified cmake build.
-* [build_pytorch_libs.bat](build_pytorch_libs.bat) - Same as
-  above, but for Windows.
+* [build_pytorch_libs.py](build_pytorch_libs.py) - cross-platform script that
+  builds all of the constituent libraries of PyTorch, 
+  but not the PyTorch Python extension itself.
 * [build_libtorch.py](build_libtorch.py) - Script for building
   libtorch, a standalone C++ library without Python support.  This
   build script is tested in CI.

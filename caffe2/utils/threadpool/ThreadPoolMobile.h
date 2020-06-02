@@ -20,4 +20,5 @@ ThreadPool* mobile_threadpool();
 // "at::parallel_for" primitive to replace pthreadpool_compute_1d for Pytorch;
 pthreadpool_t mobile_pthreadpool();
 
+size_t getDefaultNumThreads();
 } // namespace caffe2

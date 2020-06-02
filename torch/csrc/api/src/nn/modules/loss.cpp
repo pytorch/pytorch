@@ -29,7 +29,7 @@ void KLDivLossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor KLDivLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return F::detail::kl_div(input, target, options.reduction());
+  return F::detail::kl_div(input, target, options.reduction(), options.log_target());
 }
 
 // ============================================================================

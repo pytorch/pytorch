@@ -9,6 +9,8 @@
 #include <limits>
 #include <vector>
 
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+
 namespace at {
 namespace native {
 
@@ -40,15 +42,15 @@ template <typename scalar_t>
 static void adaptive_avg_pool2d_single_out_frame(
     scalar_t* input_p,
     scalar_t* output_p,
-    int64_t sizeD,
+    int64_t sizeC,
     int64_t isizeH,
     int64_t isizeW,
     int64_t osizeH,
     int64_t osizeW,
-    int64_t istrideD,
+    int64_t istrideC,
     int64_t istrideH,
     int64_t istrideW) {
-  at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, sizeC, 0, [&](int64_t start, int64_t end) {
     for (auto d = start; d < end; d++) {
       /* loop over output */
       int64_t oh, ow;
@@ -66,7 +68,7 @@ static void adaptive_avg_pool2d_single_out_frame(
 
           /* local pointers */
           scalar_t* ip =
-              input_p + d * istrideD + istartH * istrideH + istartW * istrideW;
+              input_p + d * istrideC + istartH * istrideH + istartW * istrideW;
           scalar_t* op = output_p + d * osizeH * osizeW + oh * osizeW + ow;
 
           /* compute local average: */
@@ -92,7 +94,8 @@ static void adaptive_avg_pool2d_single_out_frame(
 std::vector<int64_t> get_output_shape(
     const Tensor& input,
     IntArrayRef output_size) {
-  for (int64_t i = 0; i < input.dim(); i++) {
+  for (int64_t i = 1; i < input.dim(); i++) {
+    // Allow for empty batch.
     TORCH_CHECK(
         input.size(i) > 0,
         "adaptive_avg_pooling2d(): expected input to have non-empty spatial "
@@ -108,7 +111,7 @@ std::vector<int64_t> get_output_shape(
       "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   /* sizes */
-  int64_t sizeD = input.size(-3);
+  int64_t sizeC = input.size(-3);
   const auto osizeH = output_size[0];
   const auto osizeW = output_size[1];
 
@@ -116,10 +119,10 @@ std::vector<int64_t> get_output_shape(
   std::vector<int64_t> output_shape;
   int64_t sizeB = 0;
   if (input.dim() == 3) {
-    output_shape = {sizeD, osizeH, osizeW};
+    output_shape = {sizeC, osizeH, osizeW};
   } else {
     sizeB = input.size(-4);
-    output_shape = {sizeB, sizeD, osizeH, osizeW};
+    output_shape = {sizeB, sizeC, osizeH, osizeW};
   }
 
   return output_shape;
@@ -130,11 +133,11 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
   Tensor output;
   const auto output_shape = get_output_shape(input, output_size);
   /* sizes */
-  int64_t sizeD = input.size(-3);
+  int64_t sizeC = input.size(-3);
   int64_t isizeH = input.size(-2);
   int64_t isizeW = input.size(-1);
   /* strides */
-  int64_t istrideD = input.stride(-3);
+  int64_t istrideC = input.stride(-3);
   int64_t istrideH = input.stride(-2);
   int64_t istrideW = input.stride(-1);
 
@@ -146,23 +149,23 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
     // Fast path for NHWC
     Tensor output = at::_empty_affine_quantized(
         output_shape,
-        input.options(),
+        input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        input.suggest_memory_format());
+        c10::nullopt);
     if (input.dim() == 3 || input.size(0) == 1) {
       qadaptive_avg_pool2d_nhwc_stub(
           input.device().type(),
           input,
           output,
           0,
-          sizeD,
+          sizeC,
           isizeH,
           isizeW,
           osizeH,
           osizeW,
           0,
-          istrideD,
+          istrideC,
           istrideH,
           istrideW);
     } else {
@@ -174,13 +177,13 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
               input,
               output,
               b,
-              sizeD,
+              sizeC,
               isizeH,
               isizeW,
               osizeH,
               osizeW,
               istrideB,
-              istrideD,
+              istrideC,
               istrideH,
               istrideW);
         }
@@ -198,12 +201,12 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
       adaptive_avg_pool2d_single_out_frame<scalar_t>(
           input_data,
           output_data,
-          sizeD,
+          sizeC,
           isizeH,
           isizeW,
           osizeH,
           osizeW,
-          istrideD,
+          istrideC,
           istrideH,
           istrideW);
     } else {
@@ -212,13 +215,13 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
         for (auto b = start; b < end; b++) {
           adaptive_avg_pool2d_single_out_frame<scalar_t>(
               input_data + b * istrideB,
-              output_data + b * sizeD * osizeH * osizeW,
-              sizeD,
+              output_data + b * sizeC * osizeH * osizeW,
+              sizeC,
               isizeH,
               isizeW,
               osizeH,
               osizeW,
-              istrideD,
+              istrideC,
               istrideH,
               istrideW);
         }
@@ -227,11 +230,64 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
     return output;
   }
 }
+
+#ifdef USE_PYTORCH_QNNPACK
+Tensor qnnpack_adaptive_avg_pool2d(
+    const at::Tensor& input,
+    IntArrayRef output_size) {
+  std::array<int64_t, 2> kernel_size;
+  std::array<int64_t, 2> stride;
+  std::array<int64_t, 2> padding{0, 0};
+  bool ceil_mode{false};
+  bool count_include_pad{false};
+
+  const auto output_shape = get_output_shape(input, output_size);
+  auto output_height = output_shape[output_shape.size() - 2];
+  auto output_width = output_shape[output_shape.size() - 1];
+  auto input_height = input.sizes()[input.dim() - 2];
+  auto input_width = input.sizes()[input.dim() - 1];
+  stride[0] = input_height / output_height;
+  stride[1] = input_width / output_width;
+  // Given the constraint that input_height/width % output_height/width == 0
+  // stride and kernel size are same.
+  kernel_size[0] = stride[0];
+  kernel_size[1] = stride[1];
+
+  return at::native::qnnp_avgpool_helper::qnnpack_avg_pool2d(
+      input,
+      kernel_size,
+      stride,
+      padding,
+      ceil_mode,
+      count_include_pad,
+      c10::nullopt);
+}
+
+bool enable_qnnpack_for_ada_avgpool(
+    const at::Tensor& input,
+    IntArrayRef output_size) {
+  const auto output_shape = get_output_shape(input, output_size);
+  auto output_height = output_shape[output_shape.size() - 2];
+  auto output_width = output_shape[output_shape.size() - 1];
+  auto input_height = input.sizes()[input.dim() - 2];
+  auto input_width = input.sizes()[input.dim() - 1];
+
+  return !(input_width == output_width && input_height == output_height) &&
+      (input_height % output_height == 0) && (input_width % output_width == 0);
+}
+#endif
 } // namespace
 
 Tensor quantized_adaptive_avg_pool2d(
     const at::Tensor& input,
     IntArrayRef output_size) {
+#ifdef USE_PYTORCH_QNNPACK
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+      input.scalar_type() == kQUInt8 &&
+      enable_qnnpack_for_ada_avgpool(input, output_size)) {
+    return qnnpack_adaptive_avg_pool2d(input, output_size);
+  }
+#endif
   Tensor output;
   AT_DISPATCH_QINT_TYPES(
       input.scalar_type(), "quantized_adaptive_avg_pool2d", [&]() {

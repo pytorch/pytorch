@@ -15,24 +15,33 @@
 #include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
+namespace details {
+
+/// Provides slicing info for the outputs. All the vector members should be of
+/// the same size as number of outpus of the Onnxifi op.
+struct OutputReshapeInfo {
+  std::vector<Tensor> begins;
+  std::vector<Tensor> ends;
+  std::vector<bool> fast_path;
+};
+
+struct TensorInfo {
+  std::vector<uint64_t> dims;
+  uint64_t onnxifi_type;
+  bool quantized;
+  uint32_t quantizationAxis;
+  uint64_t quantizationParams;
+  std::vector<float> scales;
+  std::vector<int32_t> biases;
+  explicit TensorInfo(const TensorProto& t);
+  explicit TensorInfo(const QTensorProto& t);
+  TensorInfo(TensorInfo&&) = default;
+  TensorInfo& operator=(TensorInfo&&) = default;
+};
+} // namespace details
 
 template <typename Context>
 class OnnxifiOp final : public Operator<Context> {
-  struct TensorInfo {
-    TensorInfo() {}
-    TensorInfo(TensorInfo&&) = default;
-    TensorInfo& operator=(TensorInfo&&) = default;
-    std::vector<uint64_t> dims;
-    uint64_t onnxifi_type;
-  };
-
-  struct OutputReshapeInfo {
-    std::vector<Tensor> begins;
-    std::vector<Tensor> ends;
-    std::vector<bool> fast_path;
-    bool skip{false};
-  };
-
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   explicit OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
@@ -68,40 +77,36 @@ class OnnxifiOp final : public Operator<Context> {
     all_scales_.reserve(ws->Blobs().size());
     input_shapes_.resize(input_names_.size());
     output_shapes_.resize(output_names_.size());
-    output_reshape_info_.begins.reserve(output_names_.size());
-    output_reshape_info_.ends.reserve(output_names_.size());
-    output_reshape_info_.fast_path.reserve(output_names_.size());
     int output_idx = 0;
+    ArgumentHelper helper(operator_def);
+    auto output_shape_info =
+        helper.GetRepeatedArgument<TensorProto>("output_shape_info");
+    auto output_qshape_info =
+        helper.GetRepeatedArgument<QTensorProto>("output_qshape_info");
+    std::unordered_map<std::string, TensorProto> output_shape_map;
+    for (const auto& info : output_shape_info) {
+      output_shape_map.emplace(info.name(), info);
+    }
+    std::unordered_map<std::string, QTensorProto> output_qshape_map;
+    for (const auto& info : output_qshape_info) {
+      output_qshape_map.emplace(info.name(), info);
+    }
     for (const auto& output : output_names_) {
       output_desc_.push_back(onnxTensorDescriptorV1());
       output_desc_.back().name = output.c_str();
 
       // For output, we try to get its output size hint
-      int64_t num_dims = 0;
-      const std::string key = c10::str("output_shape_hint_", output_idx);
-      auto output_shape_hint = this->template GetRepeatedArgument<int>(key);
-      if (!output_shape_hint.empty()) {
-        TensorInfo info;
-        info.onnxifi_type = output_shape_hint.front();
-        for (size_t i = 1; i < output_shape_hint.size(); ++i) {
-          info.dims.push_back(output_shape_hint[i]);
+      const auto it = output_shape_map.find(output);
+      if (it != output_shape_map.end()) {
+        output_shape_hints_.emplace(
+            output_idx, details::TensorInfo(it->second));
+      } else {
+        const auto qit = output_qshape_map.find(output);
+        if (qit != output_qshape_map.end()) {
+          output_shape_hints_.emplace(
+              output_idx, details::TensorInfo(qit->second));
         }
-        num_dims = info.dims.size();
-        output_shape_hints_.emplace(output_idx, std::move(info));
       }
-
-      // Initialize the tensors used to slice the output
-      output_reshape_info_.begins.emplace_back();
-      ReinitializeTensor(
-          &output_reshape_info_.begins.back(),
-          {num_dims},
-          at::dtype<int32_t>().device(CPU));
-      output_reshape_info_.ends.emplace_back();
-      ReinitializeTensor(
-          &output_reshape_info_.ends.back(),
-          {num_dims},
-          at::dtype<int32_t>().device(CPU));
-      output_reshape_info_.fast_path.push_back(false);
       ++output_idx;
     }
 
@@ -277,35 +282,40 @@ class OnnxifiOp final : public Operator<Context> {
   /// Set up function pointer if onnxifi_ext is enabled
   void getExtFunctionPointers() {
 #ifdef ONNXIFI_ENABLE_EXT
-    onnxExtensionFunctionPointer p;
+    union {
+      onnxExtensionFunctionPointer p;
+      decltype(onnxSetIOAndRunGraphPointer_) set;
+      decltype(onnxReleaseTraceEventsPointer_) release;
+    } u;
     if (lib_->onnxGetExtensionFunctionAddress(
-            backend_id_, "onnxSetIOAndRunGraphFunction", &p) !=
+            backend_id_, "onnxSetIOAndRunGraphFunction", &u.p) !=
         ONNXIFI_STATUS_SUCCESS) {
       onnxSetIOAndRunGraphPointer_ = nullptr;
     } else {
-      onnxSetIOAndRunGraphPointer_ =
-          reinterpret_cast<decltype(onnxSetIOAndRunGraphPointer_)>(p);
+      onnxSetIOAndRunGraphPointer_ = u.set;
     }
     if (lib_->onnxGetExtensionFunctionAddress(
-            backend_id_, "onnxReleaseTraceEventsFunction", &p) !=
+            backend_id_, "onnxReleaseTraceEventsFunction", &u.p) !=
         ONNXIFI_STATUS_SUCCESS) {
       onnxReleaseTraceEventsPointer_ = nullptr;
     } else {
-      onnxReleaseTraceEventsPointer_ =
-          reinterpret_cast<decltype(onnxReleaseTraceEventsPointer_)>(p);
+      onnxReleaseTraceEventsPointer_ = u.release;
     }
 #endif
   }
 
-  void extractOutputBatchSizes();
+  /// Extract output batch size. If the output batch size is going to be at
+  /// max_batch_size_, return true indicating that no output shape adjustment is
+  /// needed. Otherwise, return false.
+  int extractOutputBatchSizes();
 
-  // If needed, adjust output tensor shape based on the real input batch size.
-  // If the output shape is conditioned on first dim (batch size), we have a
-  // fast path to shrink the tensor shape by just manipulating the meta data.
-  // Otherwise, we have to slice it in the middle of the dimension with copy
-  // invoked. This is a slow path and we don't expect it to happen very often.
-  // We can already omit this step by setting "adjust_output_batch_" to false
-  void maybeAdjustOutputBatchSizes();
+  /// Adjust output tensor shape based on the current input batch size.
+  /// If the output shape is conditioned on first dim (batch size), we have a
+  /// fast path to shrink the tensor shape by just manipulating the meta data.
+  /// Otherwise, we have to slice it in the middle of the dimension with copy
+  /// invoked. This is a slow path and we don't expect it to happen very often.
+  /// We can already omit this step by setting "adjust_output_batch_" to false
+  void adjustOutputBatchSizes(int current_batch_size);
 
   std::vector<onnxTensorDescriptorV1> buildInitializationList(
       Workspace* ws,
@@ -314,6 +324,9 @@ class OnnxifiOp final : public Operator<Context> {
       std::vector<std::vector<uint64_t>>* weight_shapes,
       std::vector<std::vector<float>>* all_scales,
       std::vector<std::vector<int32_t>>* all_offsets) const;
+
+  /// initialize an OutputReshapeInfo object
+  details::OutputReshapeInfo initOutputReshapeInfo() const;
 
   // pointer to loaded onnxifi library
   onnxifi_library* lib_{nullptr};
@@ -330,7 +343,9 @@ class OnnxifiOp final : public Operator<Context> {
   std::vector<onnxTensorDescriptorV1> output_desc_;
 
   // Output reshape info
-  OutputReshapeInfo output_reshape_info_;
+  // It is a map keyed on batch size and the value OutputReshapeInfo for the
+  // batch size.
+  std::unordered_map<int, details::OutputReshapeInfo> output_reshape_info_;
 
 #ifdef ONNXIFI_ENABLE_EXT
   // onnxifi extension mode function pointer
@@ -383,7 +398,7 @@ class OnnxifiOp final : public Operator<Context> {
   std::vector<std::vector<int32_t>> all_offsets_;
 
   // output shape hints
-  std::unordered_map<int, TensorInfo> output_shape_hints_;
+  std::unordered_map<int, details::TensorInfo> output_shape_hints_;
 
   // input shape info. Used by shape inference when inputs are not at
   // max_batch_size

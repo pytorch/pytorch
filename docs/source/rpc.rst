@@ -1,3 +1,8 @@
+:orphan:
+
+.. contents:: :local:
+    :depth: 2
+
 .. _distributed-rpc-framework:
 
 Distributed RPC Framework
@@ -8,9 +13,9 @@ training through a set of primitives to allow for remote communication, and a
 higher-level API to automatically differentiate models split across several
 machines.
 
-.. warning::
-  The RPC API is experimental and subject to change.
-
+.. warning ::
+     APIs in the RPC package are stable. There are multiple ongoing work items
+     to improve performance and error handling, which will ship in future releases.
 
 
 Basics
@@ -62,11 +67,11 @@ across RPC boundaries. These features can be categorized into four sets of APIs.
    :meth:`~torch.optim.Optimizer` (e.g., :meth:`~torch.optim.SGD`,
    :meth:`~torch.optim.Adagrad`, etc.) and a list of parameter RRefs, creates an
    :meth:`~torch.optim.Optimizer` instance on each distinct RRef owner, and
-   updates parameters accordingly when running `step()`. When you have
+   updates parameters accordingly when running ``step()``. When you have
    distributed forward and backward passes, parameters and gradients will be
    scattered across multiple workers, and hence it requires an optimizer on each
    of the involved workers. Distributed Optimizer wraps all those local
-   optimizers into one, and provides a concise constructor and `step()` API.
+   optimizers into one, and provides a concise constructor and ``step()`` API.
 
 
 .. _rpc:
@@ -78,21 +83,24 @@ Before using RPC and distributed autograd primitives, initialization must take
 place. To initialize the RPC framework we need to use
 :meth:`~torch.distributed.rpc.init_rpc` which would initialize the RPC
 framework, RRef framework and distributed autograd. By default, this will also
-initialize the `ProcessGroup` (:meth:`~torch.distributed.init_process_group`)
-backend for RPC communication. The `ProcessGroup` backend internally uses gloo
+initialize the ``ProcessGroup`` (:meth:`~torch.distributed.init_process_group`)
+backend for RPC communication. The ``ProcessGroup`` backend internally uses gloo
 for communication.
-
 
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_rpc
 
 The following APIs allow users to remotely execute functions as well as create
 references (RRefs) to remote data objects. In these APIs, when passing a
-`Tensor` as an argument or a return value, the destination worker will try to
-create a `Tensor` with the same meta (i.e., device, stride, etc.), which might
-crash if the device lists on source and destination workers are different. In
-such cases, applications can always feed in CPU tensors and manually move it
-to appropriate devices if necessary.
+``Tensor`` as an argument or a return value, the destination worker will try to
+create a ``Tensor`` with the same meta (i.e., shape, stride, etc.). We
+intentionally disallow transmitting CUDA tensors because it might crash if the
+device lists on source and destination workers do not match. In such cases,
+applications can always explicitly move the input tensors to CPU on the caller
+and move it to the desired devices on the callee if necessary.
+
+.. warning::
+  TorchScript support in RPC is experimental and subject to change.
 
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
@@ -101,17 +109,18 @@ to appropriate devices if necessary.
 .. autofunction:: shutdown
 .. autoclass:: WorkerInfo
     :members:
-.. autoclass:: RpcBackendOptions
+.. autoclass:: ProcessGroupRpcBackendOptions
     :members:
-
+    :inherited-members:
 
 .. _rref:
+
 
 RRef
 ----
 
-An `RRef` (Remote REFerence) is a reference to a value of some type `T`
-(e.g. `Tensor`) on a remote worker. This handle keeps the referenced remote
+An ``RRef`` (Remote REFerence) is a reference to a value of some type ``T``
+(e.g. ``Tensor``) on a remote worker. This handle keeps the referenced remote
 value alive on the owner, but there is no implication that the value will be
 transferred to the local worker in the future. RRefs can be used in
 multi-machine training by holding references to `nn.Modules
@@ -122,6 +131,12 @@ details.
 
 .. autoclass:: RRef
     :members:
+
+
+.. toctree::
+    :caption: More Information about RRef
+
+    rpc/rref
 
 
 Distributed Autograd Framework
@@ -137,8 +152,30 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 .. automodule:: torch.distributed.autograd
     :members: context, backward, get_gradients
 
+.. toctree::
+    :caption: More Information about RPC Autograd
+
+    rpc/distributed_autograd
+
+
 Distributed Optimizer
 ---------------------
 
 .. automodule:: torch.distributed.optim
     :members: DistributedOptimizer
+
+Design Notes
+------------
+The distributed autograd design note covers the design of the RPC-based distributed autograd framework that is useful for applications such as model parallel training.
+
+-  :ref:`distributed-autograd-design`
+
+The RRef design note covers the design of the :ref:`rref` (Remote REFerence) protocol used to refer to values on remote workers by the framework.
+
+-  :ref:`remote-reference-protocol`
+
+Tutorials
+---------
+The RPC tutorial introduces users to the RPC framework and provides two example applications using :ref:`torch.distributed.rpc<distributed-rpc-framework>` APIs.
+
+-  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__

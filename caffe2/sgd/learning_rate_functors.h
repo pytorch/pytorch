@@ -1,13 +1,14 @@
 #ifndef CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
 #define CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
-#define _USE_MATH_DEFINES
 
 #include <cmath>
 #include <list>
 #include <map>
 
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif // _MSC_VER
 

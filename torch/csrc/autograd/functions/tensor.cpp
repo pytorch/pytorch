@@ -40,10 +40,12 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
 CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
+    c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn_,
     std::shared_ptr<Node> fn_)
     : Node(),
       base(base_var),
       view(std::move(view_)),
+      view_fn(std::move(view_fn_)),
       fn(std::move(fn_)) {
   // Take the next_edges of fn as our own, except for index 0 which goes
   // to base instead of the view.
@@ -60,6 +62,10 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   check_input_variables("CopySlices", inputs, 1);
   auto& grad = inputs[0];
 
+  // Acquire lock to here protect thread safety on fn
+  // see Note [Thread Safety on Autograd Node]
+  std::lock_guard<std::mutex> lock(mutex_);
+
   if (!fn) {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
@@ -67,8 +73,14 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   auto result = at::empty_strided(base.sizes(), base.strides(), grad.options());
   result.copy_(grad);
 
-  auto offset = view.storage_offset() - base.storage_offset();
-  auto grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
+  at::Tensor grad_slice;
+  if (view_fn.has_value()) {
+    auto fn = view_fn.value();
+    grad_slice = fn(result);
+  } else {
+    auto offset = view.storage_offset() - base.storage_offset();
+    grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
+  }
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if
@@ -92,6 +104,8 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
 }
 
 void CopySlices::release_variables() {
+  // Acquire lock to here protect thread safety on fn
+  std::lock_guard<std::mutex> lock(mutex_);
   fn = nullptr;
 }
 

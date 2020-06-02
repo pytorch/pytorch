@@ -30,6 +30,7 @@ dist/
 docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
+docs/source/generated/
 log
 test/.coverage
 test/.hypothesis/
@@ -47,6 +48,9 @@ third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
 torch/__init__.pyi
+torch/_C/__init__.pyi
+torch/_C/_nn.pyi
+torch/_C/_VariableFunctions.pyi
 torch/nn/functional.pyi
 torch/nn/modules/*.pyi
 torch/csrc/autograd/generated/*
@@ -57,11 +61,6 @@ torch/csrc/jit/generated/*
 torch/csrc/jit/fuser/config.h
 torch/csrc/nn/THCUNN.cpp
 torch/csrc/nn/THCUNN.cwrap
-torch/csrc/nn/THNN_generic.cpp
-torch/csrc/nn/THNN_generic.cwrap
-torch/csrc/nn/THNN_generic.h
-torch/csrc/nn/THNN.cpp
-torch/csrc/nn/THNN.cwrap
 torch/bin/
 torch/cmake/
 torch/lib/*.a*
@@ -254,3 +253,12 @@ TAGS
 
 # ccls file
 .ccls-cache/
+
+# clang-format storage location used by apply_clang_format.py
+.clang-format-bin
+
+# clangd background index
+.clangd/
+
+# bazel symlinks
+bazel-*

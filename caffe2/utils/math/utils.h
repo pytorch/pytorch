@@ -6,7 +6,7 @@
 #include "caffe2/core/common.h"
 
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || \
-    defined(__HIP__)
+    defined(__HIP__) || (defined(__clang__) && defined(__CUDA__))
 #define MATH_UTILS_DECL inline __host__ __device__
 #else
 #define MATH_UTILS_DECL inline

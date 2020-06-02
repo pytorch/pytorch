@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+// clang-format off
 /**
  * Embedding lookup with reduction.
  *
@@ -20,9 +21,9 @@ namespace caffe2 {
  *   for (k = 0..block_size-1)
  *     out[i*block_size + k] = 0
  *   start_offset = offsets[i]
- *   end_offset = i == output_size-1 ? index_size : offsets[i+1] - 1
+ *   end_offset = offsets[i+1]
  *   length = end_offset - start_offset
- *   for (j = start_offset..end_offset)
+ *   for (j = start_offset..end_offset-1)
  *     for (k = 0..block_size-1)
  *       out[i*block_size + k] += input[indices[pos]*block_size + k] *
  *           (weights ? weights[IS_WEIGHT_POSITIONAL ? j - start_offset : pos] : 1.0)
@@ -34,6 +35,7 @@ namespace caffe2 {
  * TODO: make this API also take "offsets" rather than "lengths" to match the
  *       API for PyTorch's EmbeddingBag
  */
+// clang-format on
 template <
     typename IndexType,
     typename InType,

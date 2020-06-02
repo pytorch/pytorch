@@ -16,6 +16,6 @@ void THC_sleep(THCState* state, int64_t cycles)
 {
   dim3 grid(1);
   dim3 block(1);
-  spin_kernel<<<grid, block, 0, THCState_getCurrentStream(state)>>>(cycles);
+  spin_kernel<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(cycles);
   THCudaCheck(cudaGetLastError());
 }

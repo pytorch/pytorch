@@ -1,13 +1,13 @@
 import os
 import sys
 import unittest
-from common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode
+from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode_for_profiling_tests
 import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
+from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -28,7 +28,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
     # end-to-end fashion.
     def _perform_ad_subgraph_slicing(self, fn, *input_sizes):
         with disable_autodiff_subgraph_inlining():
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 ge = torch.jit.script(fn)
                 inputs = [torch.randn(size, requires_grad=True) for size in input_sizes]
                 ge(*inputs, profile_and_replay=True)
@@ -46,7 +46,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         input = torch.rand(6, 10).requires_grad_()
         with disable_autodiff_subgraph_inlining():
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 

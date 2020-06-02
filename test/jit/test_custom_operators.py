@@ -7,7 +7,7 @@ import torch
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -69,9 +69,9 @@ class TestCustomOperators(JitTestCase):
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            r"aten::transpose\(\) is missing value for argument 'dim0'."
+            r"aten::type_as\(\) is missing value for argument 'other'."
         ):
-            torch.ops.aten.transpose(torch.ones(5, 5))
+            torch.ops.aten.type_as(torch.ones(5, 5))
 
     def test_passing_an_argument_both_as_positional_and_kwarg(self):
         with self.assertRaisesRegex(

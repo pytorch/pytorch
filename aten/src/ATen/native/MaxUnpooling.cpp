@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <tuple>
 
 namespace at {
@@ -30,10 +31,12 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
   auto* rawIndices = indices.data_ptr<int64_t>();
   auto* rawOutput = output.data_ptr<scalar_t>();
 
+  at::internal::lazy_init_num_threads();
+
   for (int64_t n = 0; n < numBatch; n++) {
     int64_t nOutputOffset = n * numChannels * owidth * oheight;
     int64_t nInputOffset = n * numChannels * inputWidth * inputHeight;
-    int64_t k;
+    int64_t k = 0;
     bool has_error = false;
     int64_t error_index = 0;
 #pragma omp parallel for private(k)
@@ -161,10 +164,12 @@ Tensor max_unpooling3d_forward_out_cpu_frame(
   scalar_t* output_data = output.data_ptr<scalar_t>();
   int64_t* indices_data = indices.data_ptr<int64_t>();
 
+  at::internal::lazy_init_num_threads();
+
   for (int64_t p = 0; p < nBatch; p++) {
     int64_t inputOffset = p * nSlices * iT * iW * iH;
     int64_t outputOffset = p * nSlices * oT * oW * oH;
-    int64_t k;
+    int64_t k = 0;
     bool has_error = false;
     int error_index = 0;
 #pragma omp parallel for private(k)
@@ -352,7 +357,9 @@ static void max_unpooling2d_backward_out_cpu_frame(
     int64_t owidth) {
   bool has_error = false;
   int64_t error_index = 0;
-  int k;
+  int k = 0;
+
+  at::internal::lazy_init_num_threads();
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++) {
     scalar_t* gradInput_p_k = gradInput_p + k * iwidth * iheight;
@@ -484,9 +491,12 @@ static void max_unpooling3d_backward_out_cpu_frame(
     int64_t oT,
     int64_t oH,
     int64_t oW) {
-  int k;
+  int k = 0;
   bool has_error = false;
   int error_index = 0;
+
+  at::internal::lazy_init_num_threads();
+
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++) {
     scalar_t* gradInput_p_k = gradInput_p + k * iT * iH * iW;

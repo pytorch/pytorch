@@ -32,8 +32,13 @@ qactivation_long_configs = op_bench.cross_product_configs(
 )
 
 qactivation_short_configs = op_bench.cross_product_configs(
-    dims=((3, 4, 5),      # Rank=3
-          (2, 3, 4, 5)),  # Rank=4,
+    dims=(
+        (3, 4, 5),      # Rank=3
+        (2, 3, 4, 5),    # Rank=4,
+        # Dimensions from the floating point benchmarks
+        (512, 512),
+        (256, 1024),
+    ),
     contig=(False,),
     inplace=(False,),
     dtype=(torch.quint8, torch.qint8, torch.qint32),
@@ -42,8 +47,15 @@ qactivation_short_configs = op_bench.cross_product_configs(
 
 qactivation_ops = op_bench.op_list(
     attrs=(
-        ('relu', nnq.ReLU),
-        ('relu6', nnq.ReLU6),
+        ('relu', nnq.functional.relu),
+        ('relu6', torch.ops.quantized.relu6),
+        ('functional.hardtanh', nnq.functional.hardtanh),
+        ('functional.hardswish', nnq.functional.hardswish),
+        ('functional.elu', nnq.functional.elu),
+        ('functional.hardsigmoid', nnq.functional.hardsigmoid),
+        ('functional.leaky_relu', nnq.functional.leaky_relu),
+        ('functional.sigmoid', torch.nn.functional.sigmoid),
+        ('functional.tanh', torch.nn.functional.tanh),
     ),
     attr_names=('op_name', 'op_func'),
 )
@@ -54,12 +66,12 @@ class QActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
     def _setup(self, dims, contig, dtype):
         # Input
         f_input = (torch.rand(*dims) - 0.5) * 256
-        scale = 1.0
-        zero_point = 0
+        self.scale = 1.0
+        self.zero_point = 0
 
         # Quantize the tensor
-        self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
-                                                 zero_point=zero_point,
+        self.q_input = torch.quantize_per_tensor(f_input, scale=self.scale,
+                                                 zero_point=self.zero_point,
                                                  dtype=dtype)
         if not contig:
             # Make non-contiguous
@@ -71,6 +83,8 @@ class QActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
         self.qop = op_func
 
     def forward(self):
+        if self.qop == nnq.functional.hardswish:
+            return self.qop(self.q_input, scale=self.scale, zero_point=self.zero_point)
         return self.qop(self.q_input)
 
 

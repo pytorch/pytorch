@@ -211,6 +211,9 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
+    def forward(self):
+        raise NotImplementedError()
+
 
 class ModuleDict(Module):
     r"""Holds submodules in a dictionary.
@@ -331,13 +334,12 @@ class ModuleDict(Module):
                             "iterable of key/value pairs, but got " +
                             type(modules).__name__)
 
-        if isinstance(modules, container_abcs.Mapping):
-            if isinstance(modules, (OrderedDict, ModuleDict)):
-                for key, module in modules.items():
-                    self[key] = module
-            else:
-                for key, module in sorted(modules.items()):
-                    self[key] = module
+        if isinstance(modules, (OrderedDict, ModuleDict)):
+            for key, module in modules.items():
+                self[key] = module
+        elif isinstance(modules, container_abcs.Mapping):
+            for key, module in sorted(modules.items()):
+                self[key] = module
         else:
             for j, m in enumerate(modules):
                 if not isinstance(m, container_abcs.Iterable):
@@ -451,6 +453,9 @@ class ParameterList(Module):
         tmpstr = '\n'.join(child_lines)
         return tmpstr
 
+    def __call__(self, input):
+        raise RuntimeError('ParameterList should not be called.')
+
 
 class ParameterDict(Module):
     r"""Holds parameters in a dictionary.
@@ -561,13 +566,12 @@ class ParameterDict(Module):
                             "iterable of key/value pairs, but got " +
                             type(parameters).__name__)
 
-        if isinstance(parameters, container_abcs.Mapping):
-            if isinstance(parameters, (OrderedDict, ParameterDict)):
-                for key, parameter in parameters.items():
-                    self[key] = parameter
-            else:
-                for key, parameter in sorted(parameters.items()):
-                    self[key] = parameter
+        if isinstance(parameters, (OrderedDict, ParameterDict)):
+            for key, parameter in parameters.items():
+                self[key] = parameter
+        elif isinstance(parameters, container_abcs.Mapping):
+            for key, parameter in sorted(parameters.items()):
+                self[key] = parameter
         else:
             for j, p in enumerate(parameters):
                 if not isinstance(p, container_abcs.Iterable):
@@ -590,3 +594,6 @@ class ParameterDict(Module):
             child_lines.append('  (' + k + '): ' + parastr)
         tmpstr = '\n'.join(child_lines)
         return tmpstr
+
+    def __call__(self, input):
+        raise RuntimeError('ParameterDict should not be called.')

@@ -43,7 +43,6 @@ public:
   IntArrayRef strides() const override;
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
   int64_t stride(int64_t d) const override;
-  void resize_dim(int64_t ndim) override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;

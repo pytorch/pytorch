@@ -46,7 +46,7 @@ from functools import wraps
 # Helper functions
 # ---------------------------------------------------------------------------------
 
-# Save some builtins as locals, because we'll shadown them below
+# Save some builtins as locals, because we'll shadow them below
 _sum = sum
 
 
@@ -101,7 +101,7 @@ def _maybe_get_scalar(value):
 
 
 def _get_const(value, desc, arg_name):
-    if _is_value(value) and value.node().kind() != 'onnx::Constant':
+    if _is_value(value) and value.node().kind() not in ('onnx::Constant', 'prim::Constant'):
         raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`".format(arg_name, value))
     return _parse_arg(value, desc)
 
@@ -174,6 +174,16 @@ def _is_tensor_list(x):
 
 def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+
+
+def _onnx_unsupported(op_name):
+    raise RuntimeError('Unsupported: ONNX export of operator {}. '
+                       'Please open a bug to request ONNX export support for the missing operator.'.format(op_name))
+
+
+def _onnx_opset_unsupported(op_name, current_opset, supported_opset):
+    raise RuntimeError('Unsupported: ONNX export of {} in '
+                       'opset {}. Please try opset version {}.'.format(op_name, current_opset, supported_opset))
 
 
 def _black_list_in_opset(name):
@@ -299,13 +309,8 @@ def _get_interpolate_attributes(g, mode, args):
 
 def _interpolate_get_scales(g, scale_factor, dim):
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
-    if _is_packed_list(scale_factor):
-        scale_factor = _unpack_list(scale_factor)
-        scales = []
-        for dim_scale_factor in scale_factor:
-            dim_scale_factor = _unsqueeze_helper(g, dim_scale_factor, 0)
-            dim_scale_factor = g.op("Cast", dim_scale_factor, to_i=cast_pytorch_to_onnx["Float"])
-            scales.append(dim_scale_factor)
+    if isinstance(scale_factor.type(), torch._C.ListType):
+        return g.op("Concat", offsets, scale_factor, axis_i=0)
     else:
         scale_factor = _unsqueeze_helper(g, scale_factor, 0)
         scale_factor = g.op("Cast", scale_factor, to_i=cast_pytorch_to_onnx["Float"])
@@ -418,6 +423,20 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
     padding = tuple(tuple_fn(padding))
     return padding
 
+def assert_training_mode(op_mode, op_name):
+    global _training_mode
+    op_mode = True if op_mode == 1 else False
+    if op_mode != _training_mode:
+        op_mode = "training " if op_mode else "inference"
+        training_mode = "training " if _training_mode else "inference"
+        # setting the model mode could result in op_mode != _training_mode
+        # if the model is a FuncModule. In this case we warn the user of
+        # the state and export depending on training_mode
+        warnings.warn("ONNX export mode is set to " + training_mode +
+                      " mode, but operator " + op_name + " is set to " +
+                      op_mode + " mode. The model will be exported in " +
+                      training_mode + ", as specified by the export mode.")
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
@@ -447,7 +466,7 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [7, 8, 9, 10, 11]
+_onnx_stable_opsets = [7, 8, 9, 10, 11, 12]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 
@@ -465,6 +484,11 @@ _operator_export_type = None
 def _set_operator_export_type(operator_export_type):
     global _operator_export_type
     _operator_export_type = operator_export_type
+
+_training_mode = None
+def _set_training_mode(training_mode):
+    global _training_mode
+    _training_mode = training_mode
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
@@ -497,8 +521,8 @@ scalar_name_to_pytorch = {
     'int64_t': 'Long',
     'int16_t': 'Short',
     'bool': 'Bool',
-    'complex64': '',
-    'complex128': ''
+    'complex64': 'ComplexFloat',
+    'complex128': 'ComplexDouble'
 }
 
 

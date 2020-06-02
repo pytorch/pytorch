@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/boolean_unmask_ops.h"
 
@@ -87,7 +89,7 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
     auto* indicesData = indices_.mutable_data<int>();
 
     ComputeIndicesKernel<<<
-        min(maskSize, CAFFE_MAXIMUM_NUM_BLOCKS),
+        std::min(maskSize, CAFFE_MAXIMUM_NUM_BLOCKS),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
@@ -95,7 +97,7 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
 
     auto* valueSizesData = valueSizes_.mutable_data<int>();
     FillValuesKernel<<<
-        min(numMasks, CAFFE_MAXIMUM_NUM_BLOCKS),
+        std::min(numMasks, CAFFE_MAXIMUM_NUM_BLOCKS),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(

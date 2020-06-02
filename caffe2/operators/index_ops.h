@@ -82,7 +82,7 @@ struct Index : IndexBase {
         numKeys <= maxElements_,
         "Cannot load index: Tensor is larger than max_elements.");
     decltype(dict_) dict;
-    for (int i = 0; i < numKeys; ++i) {
+    for (auto i = 0U; i < numKeys; ++i) {
       CAFFE_ENFORCE(
           dict.insert({keys[i], i + 1}).second,
           "Repeated elements found: cannot load into dictionary.");
@@ -109,7 +109,7 @@ struct Index : IndexBase {
 
  private:
   void FrozenGet(const T* keys, int64_tValue* values, size_t numKeys) {
-    for (int i = 0; i < numKeys; ++i) {
+    for (auto i = 0U; i < numKeys; ++i) {
       auto it = dict_.find(keys[i]);
       values[i] = it != dict_.end() ? it->second : 0;
     }

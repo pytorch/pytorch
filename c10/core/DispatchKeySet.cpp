@@ -16,7 +16,7 @@ std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
   os << "DispatchKeySet(";
   DispatchKey tid;
   bool first = true;
-  while ((tid = ts.highestPriorityTypeId()) != DispatchKey::UndefinedTensorId) {
+  while ((tid = ts.highestPriorityTypeId()) != DispatchKey::Undefined) {
     if (!first) {
       os << ", ";
     }

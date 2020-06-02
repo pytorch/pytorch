@@ -197,9 +197,7 @@ void max_pool3d_with_indices_out_frame(
            offsetZ);
     }
 
-    TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-      "max_pool3d_backward_out_cuda_frame failed with error code ",
-      cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError()); 
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -265,9 +263,7 @@ void max_pool3d_with_indices_backward_out_frame(
         dilationT, dilationH, dilationW,
         offsetZ);
 
-    TORCH_CHECK(cudaGetLastError() == cudaSuccess,
-      "max_pool3d_with_indices_backward_out_frame failed with error code ",
-      cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError()); 
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -360,22 +356,24 @@ void max_pool3d_with_indices_out_cuda_template(
     work_indices = work_indices.reshape({nbatch * nslices, otime, oheight, owidth});
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
     input.scalar_type(),
     "max_pool3d_with_indices_out_frame",
     [&]{
-      scalar_t *input_data = work_input.data_ptr<scalar_t>();
-      int64_t totalZ = otime * nslices * nbatch;
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "max_pool3d_with_indices_out_frame", [&] {
+        scalar_t *input_data = work_input.data_ptr<scalar_t>();
+        int64_t totalZ = otime * nslices * nbatch;
 
-      max_pool3d_with_indices_out_frame(
-        input_data, work_output, work_indices,
-        totalZ,
-        itime, iheight, iwidth,
-        otime, oheight, owidth,
-        kT, kH, kW,
-        dT, dH, dW,
-        pT, pH, pW,
-        dilationT, dilationH, dilationW);
+        max_pool3d_with_indices_out_frame(
+          input_data, work_output, work_indices,
+          totalZ,
+          itime, iheight, iwidth,
+          otime, oheight, owidth,
+          kT, kH, kW,
+          dT, dH, dW,
+          pT, pH, pW,
+          dilationT, dilationH, dilationW);
+      });
     }
   );
 }
@@ -470,20 +468,22 @@ void max_pool3d_with_indices_backward_out_cuda_template(
       work_indices = work_indices.reshape({nbatch * nslices, otime, oheight, owidth});
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "max_pool3d_with_indices_backward_out_frame",
     [&] {
-      const int64_t totalZ = otime * nslices * nbatch;
-      scalar_t *grad_input_data = work_grad_input.data_ptr<scalar_t>();
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "max_pool3d_with_indices_backward_out_frame", [&] {
+        const int64_t totalZ = otime * nslices * nbatch;
+        scalar_t *grad_input_data = work_grad_input.data_ptr<scalar_t>();
 
-      max_pool3d_with_indices_backward_out_frame(
-        grad_input_data, work_grad_output, work_indices,
-        totalZ,
-        itime, iheight, iwidth,
-        owidth, oheight,
-        dT, dH, dW,
-        pT, pH, pW,
-        dilationT, dilationH, dilationW);
+        max_pool3d_with_indices_backward_out_frame(
+          grad_input_data, work_grad_output, work_indices,
+          totalZ,
+          itime, iheight, iwidth,
+          oheight, owidth,
+          dT, dH, dW,
+          pT, pH, pW,
+          dilationT, dilationH, dilationW);
+      });
     }
   );
 }

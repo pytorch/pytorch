@@ -200,7 +200,7 @@ std::vector<at::Tensor> scatter(
     }
     chunks[chunk] =
         chunks[chunk].to(
-            {at::DeviceType::CUDA, device_index},
+            {DeviceType::CUDA, device_index},
             /*non_blocking=*/true,
             /*copy=*/false,
             /*memory_format=*/at::MemoryFormat::Preserve);
@@ -238,9 +238,9 @@ at::Tensor gather(
         tensor.suggest_memory_format() == MemoryFormat::ChannelsLast;
   }
   expected_size[dim] = total_size;
-  at::Device device(at::DeviceType::CPU);
+  at::Device device(DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
-    device = at::Device(at::DeviceType::CUDA, destination_index ? *destination_index : -1);
+    device = at::Device(DeviceType::CUDA, destination_index ? *destination_index : -1);
   }
 
   auto memory_format = MemoryFormat::Contiguous;

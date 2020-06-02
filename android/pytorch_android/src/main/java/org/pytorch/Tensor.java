@@ -1,8 +1,7 @@
 package org.pytorch;
 
-import com.facebook.jni.annotations.DoNotStrip;
 import com.facebook.jni.HybridData;
-
+import com.facebook.jni.annotations.DoNotStrip;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -643,7 +642,8 @@ public abstract class Tensor {
 
   // Called from native
   @DoNotStrip
-  private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype, HybridData hybridData) {
+  private static Tensor nativeNewTensor(
+      ByteBuffer data, long[] shape, int dtype, HybridData hybridData) {
     Tensor tensor = null;
     if (DType.FLOAT32.jniCode == dtype) {
       tensor = new Tensor_float32(data.asFloatBuffer(), shape);

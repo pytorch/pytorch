@@ -246,6 +246,7 @@ size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
 
 
 PyTorchStreamReader::~PyTorchStreamReader() {
+  mz_zip_clear_last_error(ar_.get());
   mz_zip_reader_end(ar_.get());
   valid("closing reader for archive ", archive_name_.c_str());
 }

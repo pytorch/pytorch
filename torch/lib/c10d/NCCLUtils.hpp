@@ -80,7 +80,12 @@ class NCCLComm {
     auto comm = std::make_shared<NCCLComm>();
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank));
+    comm->ncclId_ = commId;
     return comm;
+  }
+
+  ncclUniqueId getNcclId() {
+    return ncclId_;
   }
 
   // Must not be copyable
@@ -151,6 +156,8 @@ class NCCLComm {
 
  protected:
   ncclComm_t ncclComm_;
+  // Unique nccl_id for this communicator.
+  ncclUniqueId ncclId_;
   bool aborted_;
   ncclResult_t ncclAsyncErr_;
   mutable std::mutex mutex_;
