@@ -40,7 +40,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Alternative if the caller is already holding the GIL.
   void handleExceptionGILHeld(const py::object& obj);
   // Check if obj is an RemoteException instance.
-  bool isException(const py::object& obj);
+  bool isRemoteException(const py::object& obj);
 
   // Explicitly clean up py::objects to avoid segment faults when
   // py::objects with CPython are cleaned up later at program exit

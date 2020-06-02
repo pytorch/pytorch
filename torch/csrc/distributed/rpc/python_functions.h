@@ -33,7 +33,7 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
     const float rpcTimeoutSeconds,
-    const bool asyncFunction);
+    const bool isAsyncFunction);
 
 c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& dstWorkerName,

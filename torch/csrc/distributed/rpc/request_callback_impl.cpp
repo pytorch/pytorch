@@ -177,7 +177,7 @@ void RequestCallbackImpl::processRpc(
           auto result =
               pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf());
 
-          if (pythonRpcHandler.isException(result) ) {
+          if (pythonRpcHandler.isRemoteException(result)) {
             // Hit exception when running the user function.
             // Not releasing GIL before serialize to avoid an additional
             // context switch.
@@ -190,19 +190,21 @@ void RequestCallbackImpl::processRpc(
 
           try {
             pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
-          } catch (...) {
-            // user function return type cannot be cast to a Future type.
+          } catch (const py::cast_error &e) {
             auto type = result.get_type();
             auto errMsg = c10::str(
-                "Functions decorated with @rpc.async_function must return a "
+                e.what(),
+                ". Functions decorated with @rpc.async_function must return a "
                 "torch.futures.Future object, but got ",
                 type.attr("__module__").cast<std::string>(),
                 ".",
                 type.attr("__qualname__").cast<std::string>());
 
-            py::gil_scoped_release release;
-            responseFuture->markCompleted(
-                createExceptionResponse(errMsg, messageId));
+            {
+              py::gil_scoped_release release;
+              responseFuture->markCompleted(
+                  createExceptionResponse(errMsg, messageId));
+            }
             return;
           }
         }
