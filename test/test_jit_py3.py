@@ -403,6 +403,33 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
             torch.jit.script(wrong_type)
 
+    def test_subexpression_List_Future(self):
+        from typing import List
+        @torch.jit.script
+        def fn(x: List[torch.jit.Future[int]]):
+            return x
+
+        g = fn.graph
+        assert "Future" in repr(g)
+
+    def test_subexpression_Tuple_int_int_Future(self):
+        from typing import Tuple
+        @torch.jit.script
+        def fn(x: Tuple[int, int, torch.jit.Future[int]]):
+            return x
+
+        g = fn.graph
+        assert "Future" in repr(g)
+
+    def test_subexpression_Dict_int_Future(self):
+        from typing import Tuple
+        @torch.jit.script
+        def fn(x: Dict[int, torch.jit.Future[int]]):
+            return x
+
+        g = fn.graph
+        assert "Future" in repr(g)
+
     def test_parser_bug(self):
         def parser_bug(o: Optional[torch.Tensor]):
             pass

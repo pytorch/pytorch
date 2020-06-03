@@ -34,12 +34,32 @@ def createResolutionCallbackFromEnv(lookup_base):
         if '[' in qualified_name:
             first, last = qualified_name.find('['), qualified_name.rfind(']')
             base = qualified_name[:first]
-            subexp = qualified_name[first + 1: last]
-
-            # either base or subexp could include '.' or '['
             base_mod = env(base, module)
-            subexp_mod = env(subexp, module)
-            return base_mod[subexp_mod]
+
+            # assume only subexp (between []) could contain ','
+            # but allow each element of the list to be any type hence recursive env()
+            subexp = qualified_name[first + 1: last]
+            if ',' in subexp:
+                no_whitespace = "".join(subexp.split())
+                parts = no_whitespace.split(',')
+                types = [env(p, module) for p in parts]
+
+                # HACK for now - must be a better way to approximate base_mod[*types]
+                if len(types) == 1:
+                    return base_mod[types[0]]
+                elif len(types) == 2:
+                    return base_mod[types[0], types[1]]
+                elif len(types) == 3:
+                    return base_mod[types[0], types[1], types[2]]
+                elif len(types) == 4:
+                    return base_mod[types[0], types[1], types[2], types[3]]
+                else:
+                    raise ValueError("tuples beyond length 4 not supported yet.")
+
+            else:
+                # either base or subexp could include '.' or '['
+                subexp_mod = env(subexp, module)
+                return base_mod[subexp_mod]
         elif '.' in qualified_name:
             parts = qualified_name.split('.')
             base = parts[0]
