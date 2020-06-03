@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <algorithm>
 #include <array>
@@ -51,10 +51,14 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
     const int M = X.size_to_dim(canonical_axis);
     const int N = X.size_from_dim(canonical_axis);
     Y->ResizeLike(X);
+    scale_.Resize(M);
+    bias_.Resize(M);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     T* mean_data = mean->template mutable_data<T>();
     T* sigma_data = sigma->template mutable_data<T>();
+    T* scale_data = scale_.template mutable_data<T>();
+    T* bias_data = bias_.template mutable_data<T>();
 
     std::vector<float> X_rounded(X.numel());
     fbgemm::RoundToFloat16(
@@ -75,7 +79,49 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
         mean_data,
         sigma_data,
         &context_);
+//    ComputeSigmaAndFusedParams<T>(
+//       M, epsilon_, mean_data, sigma_data, sigma_data, scale_data, bias_data);
+    ConstEigenVectorArrayMap<T> var_arr(sigma_data, M);
+    EigenVectorArrayMap<T> sigma_arr(sigma_data, M);
+    sigma_arr = var_arr + static_cast<T>(epsilon_);
+    math::Rsqrt<T, CPUContext>(M, sigma_data, scale_data, &context_);
+    math::Mul<T, CPUContext>(M, scale_data, sigma_data, sigma_data, &context_);
+    EigenVectorArrayMap<T>(bias_data, M) =
+        -ConstEigenVectorArrayMap<T>(scale_data, M) *
+        ConstEigenVectorArrayMap<T>(mean_data, M);
 
+//    LayerNormForward<T>(
+//        M, N, X_data, scale_data, bias_data, gamma_data, beta_data, Y_data);
+    const T* gamma_data = nullptr;
+    const T* beta_data = nullptr;
+    if (elementwise_affine_) {
+      CAFFE_ENFORCE_EQ(InputSize(), 3);
+      const auto& gamma = Input(1);
+      const auto& beta = Input(2);
+      CAFFE_ENFORCE_EQ(gamma.numel(), N);
+      CAFFE_ENFORCE_EQ(beta.numel(), N);
+      gamma_data = gamma.template data<T>();
+      beta_data = beta.template data<T>();
+    }
+    ConstEigenArrayMap<T> X_arr(X_data, N, M);
+    ConstEigenVectorArrayMap<T> scale_arr(scale_data, M);
+    ConstEigenVectorArrayMap<T> bias_arr(bias_data, M);
+    EigenArrayMap<T> Y_arr(Y_data, N, M);
+    if (gamma_data != nullptr && beta_data != nullptr) {
+      ConstEigenVectorArrayMap<T> gamma_arr(gamma_data, N);
+      ConstEigenVectorArrayMap<T> beta_arr(beta_data, N);
+      Y_arr = (((X_arr.rowwise() * scale_arr.transpose()).rowwise() +
+                bias_arr.transpose())
+                   .colwise() *
+               gamma_arr)
+                  .colwise() +
+          beta_arr;
+    } else {
+      CAFFE_ENFORCE(gamma_data == nullptr);
+      CAFFE_ENFORCE(beta_data == nullptr);
+      Y_arr = (X_arr.rowwise() * scale_arr.transpose()).rowwise() +
+          bias_arr.transpose();
+    }
     return true;
   }
 
@@ -83,6 +129,9 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
   const int axis_;
   const float epsilon_;
   const bool elementwise_affine_;
+
+  Tensor scale_{Context::GetDeviceType()};
+  Tensor bias_{Context::GetDeviceType()};
 
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(OUTPUT, MEAN, STD);
