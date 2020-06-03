@@ -33,7 +33,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, onlyOnCPUAndCUDA
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA
 import torch.backends.quantized
 import torch.testing._internal.data
 
@@ -6416,6 +6416,21 @@ class TestTorchDeviceType(TestCase):
         input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
         input_.sum().backward()
 
+    @skipCUDAIfRocm
+    @largeTensorTest('12GB')
+    def test_conv_transposed_large(self, device):
+        # ConvTranspose3d works for large input tensors (gh-32866)
+        in_channels = 64
+        out_channels = 128
+        kernel_size = 5
+
+        conv = torch.nn.ConvTranspose3d(
+            in_channels, out_channels, kernel_size=kernel_size,
+            stride=2, padding=2, output_padding=1).to(device)
+
+        x = torch.rand([1, 64, 8, 128, 172]).to(device)
+        y = conv(x)
+
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @onlyCPU
     @dtypes(torch.float)
@@ -10970,6 +10985,14 @@ class TestTorchDeviceType(TestCase):
                                          device=device).as_strided(shape, strides)
                 self.assertEqual(empty_strided.shape, as_strided.shape)
                 self.assertEqual(empty_strided.stride(), as_strided.stride())
+
+    def test_strided_mismatched_stride_shape(self, device):
+        for shape, strides in [((1, ), ()), ((1, 2), (1, ))]:
+            with self.assertRaisesRegex(RuntimeError, "mismatch in length of strides and shape"):
+                torch.tensor(0.42, device=device).as_strided(shape, strides)
+
+            with self.assertRaisesRegex(RuntimeError, "mismatch in length of strides and shape"):
+                torch.tensor(0.42, device=device).as_strided_(shape, strides)
 
     def test_sign(self, device):
         for dtype in torch.testing.get_all_math_dtypes(device):
