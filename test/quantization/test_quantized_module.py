@@ -148,12 +148,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
-        # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on save.
-        # <start code>
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
@@ -161,12 +155,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
-        # <end code>
-        #
-        # Currently disabled after TorchBind PR
-        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-        #     b = io.BytesIO()
-        #     torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
@@ -295,13 +283,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
 
-        # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on
-        # save.
-        # <start code>
         b = io.BytesIO()
         torch.save(qconv_module, b)
         b.seek(0)
@@ -311,12 +292,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(loaded_conv.scale, qconv_module.scale)
         self.assertEqual(loaded_conv.zero_point,
                          qconv_module.zero_point)
-        # <end code>
-        # with self.assertRaisesRegex(
-        #     RuntimeError, r'torch.save\(\) is not currently supported'
-        # ):
-        #     bytes_io = io.BytesIO()
-        #     torch.save(qconv_module, bytes_io)
 
         # JIT testing
         self.checkScriptable(
@@ -695,22 +670,12 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
-        # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on save.
-        # <start code>
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
         loaded = torch.load(b)
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
-        # <end code>
-        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-        #     b = io.BytesIO()
-        #     torch.save(qlinear, b)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
