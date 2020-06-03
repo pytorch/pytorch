@@ -2208,11 +2208,8 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc2(x)
 
         m = torch.jit.script(M())
-
         m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-        data = torch.randn(5, 5, dtype=torch.float)
         m = convert_dynamic_script(m, debug=True)
-
         assert len(m._modules._c.items()) == 2, \
             'Expected to have two submodule of linear'
 
@@ -2282,3 +2279,38 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         FileCheck().check("quantized::linear_dynamic") \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
+
+    def test_dynamic_shared_weights(self):
+        class myMod(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.linear = nn.Linear(5, 5)
+                self.linear.weight = weight
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class DynamicModel(torch.nn.Module):
+            def __init__(self):
+                super(DynamicModel, self).__init__()
+                self.weight = torch.nn.Parameter(torch.ones(5, 5))
+                self.mod1 = myMod(self.weight)
+
+            def forward(self, x):
+                y = self.mod1(x)
+                z = torch.nn.functional.linear(y, self.weight)
+                return z
+
+        model = torch.jit.script(DynamicModel()).eval()
+        data = torch.randn(5, 5, dtype=torch.float)
+        for op in ['mod1', '']:
+            qconfig_dict = {op: default_dynamic_qconfig}
+            model_graph = quantize_dynamic_script(model, qconfig_dict)
+            out_graph = model_graph(data)
+
+            # Explicitly call forward on model before convert
+            m = prepare_dynamic_script(model, qconfig_dict)
+            m(data)
+            m = convert_dynamic_script(m, debug=False)
+            out_ref = model_graph(data)
+            self.assertEqual(out_graph, out_ref)
