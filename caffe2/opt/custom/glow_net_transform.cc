@@ -63,6 +63,10 @@ std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   }
   auto tokens = caffe2::split(',', str);
   for (const auto& token : tokens) {
+    if (token == "-1") {
+      net_position_list.emplace(-1);
+      continue;
+    }
     auto range = caffe2::split('-', token);
     if (range.size() == 1) {
       net_position_list.emplace(std::stoi(range[0]));

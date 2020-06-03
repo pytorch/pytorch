@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
@@ -39,7 +40,8 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
   switch (messageType) {
     case MessageType::PYTHON_CALL: {
       auto& pc = static_cast<PythonCall&>(rpc);
-      return std::make_unique<UnpickledPythonCall>(pc.serializedPyObj());
+      return std::make_unique<UnpickledPythonCall>(
+          pc.serializedPyObj(), pc.isAsyncExecution());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -73,16 +75,18 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
 // When request message has autograd info, processMessage() will set up valid
 // current context id properly. This struct is used to clean up current context
 // id after processMessage() is done.
-struct ClearAutogradContextGuard {
-  ClearAutogradContextGuard() = default;
-  ~ClearAutogradContextGuard() {
-    clear();
+struct DistAutogradContextGuard {
+  explicit DistAutogradContextGuard(int64_t ctxId) {
+    auto& container = DistAutogradContainer::getInstance();
+    prevCtxId_ = container.currentContextId();
+    container.forceCurrentContextId(ctxId);
+  }
+  ~DistAutogradContextGuard() {
+    auto& container = DistAutogradContainer::getInstance();
+    container.forceCurrentContextId(prevCtxId_);
   }
 
-  void clear() {
-    auto& autogradContainer = DistAutogradContainer::getInstance();
-    autogradContainer.clearCurrentContext();
-  }
+  int64_t prevCtxId_;
 };
 
 } // anonymous namespace
@@ -147,34 +151,114 @@ void RequestCallbackImpl::processRpc(
                            ->get_function(scriptCall.qualifiedName())
                            .runAsync(stack);
 
-      if (jitFuture->completed()) {
-        markComplete(
-            std::move(ScriptResp(std::move(jitFuture->value()))).toMessage());
-        return;
-      }
-      jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
-        try {
-          Message m = ScriptResp(std::move(jitFuture->value())).toMessage();
-          m.setId(messageId);
-          responseFuture->markCompleted(std::move(m));
-        } catch (const std::exception& e) {
-          responseFuture->setError(e.what());
+      if (scriptCall.isAsyncExecution()) {
+        jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
+          try {
+            auto valueJitFuture = jitFuture->value().toFuture();
+            valueJitFuture->addCallback([responseFuture,
+                                         messageId,
+                                         valueJitFuture]() {
+              try {
+                Message m = ScriptResp(valueJitFuture->value()).toMessage();
+                m.setId(messageId);
+                responseFuture->markCompleted(std::move(m));
+              } catch (const std::exception& e) {
+                responseFuture->setError(e.what());
+              }
+            });
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
+      } else {
+        if (jitFuture->completed()) {
+          markComplete(
+              std::move(ScriptResp(jitFuture->value())).toMessage());
+          return;
         }
-      });
+
+        jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
+          try {
+            Message m = ScriptResp(jitFuture->value()).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
+      }
+
       return;
     }
     case MessageType::PYTHON_CALL: {
       auto& upc = static_cast<UnpickledPythonCall&>(rpc);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
-      {
-        py::gil_scoped_acquire acquire;
-        serializedPyObj =
-            std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
-                pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())));
+      if (upc.isAsyncExecution()) {
+        std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
+        {
+          py::gil_scoped_acquire acquire;
+          auto result =
+              pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf());
+
+          if (pythonRpcHandler.isRemoteException(result)) {
+            // Hit exception when running the user function.
+            // Not releasing GIL before serialize to avoid an additional
+            // context switch.
+            auto serializedPyObj = pythonRpcHandler.serialize(result);
+            py::gil_scoped_release release;
+            markComplete(
+                std::move(PythonResp(std::move(serializedPyObj))).toMessage());
+            return;
+          }
+
+          try {
+            pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
+          } catch (const py::cast_error& e) {
+            auto type = result.get_type();
+            auto errMsg = c10::str(
+                e.what(),
+                ". Functions decorated with @rpc.async_function must return a "
+                "torch.futures.Future object, but got ",
+                type.attr("__module__").cast<std::string>(),
+                ".",
+                type.attr("__qualname__").cast<std::string>());
+
+            {
+              py::gil_scoped_release release;
+              responseFuture->markCompleted(
+                  createExceptionResponse(errMsg, messageId));
+            }
+            return;
+          }
+        }
+        pyFuture->fut->addCallback([msgId = messageId,
+                                    responseFuture = responseFuture,
+                                    jitFuture = pyFuture->fut,
+                                    &pythonRpcHandler]() {
+          std::shared_ptr<SerializedPyObj> serializedPyObj;
+          {
+            py::gil_scoped_acquire acquire;
+            serializedPyObj =
+                std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
+                    jit::toPyObject(jitFuture->value())));
+          }
+          auto m =
+              std::move(PythonResp(std::move(*serializedPyObj))).toMessage();
+          m.setId(msgId);
+          responseFuture->markCompleted(std::move(m));
+        });
+      } else {
+        std::shared_ptr<SerializedPyObj> serializedPyObj;
+        {
+          py::gil_scoped_acquire acquire;
+          serializedPyObj = std::make_shared<SerializedPyObj>(
+              pythonRpcHandler.serialize(pythonRpcHandler.runPythonUdf(
+                  std::move(upc).movePythonUdf())));
+        }
+        markComplete(
+            std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
       }
-      markComplete(
-          std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
+
       return;
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
@@ -277,23 +361,13 @@ void RequestCallbackImpl::processRpc(
 
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       IValue py_ivalue;
-      try {
-        {
-          py::gil_scoped_acquire acquire;
-          py_ivalue = jit::toIValue(
-              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
-              PyObjectType::get());
-        }
-        ownerRRef->setValue(std::move(py_ivalue));
-      } catch (py::error_already_set& e) {
-        // py::error_already_set requires GIL to destruct, take special care.
-        ownerRRef->setError(e.what());
+      {
         py::gil_scoped_acquire acquire;
-        e.restore();
-        PyErr_Clear();
-      } catch (std::exception& e) {
-        ownerRRef->setError(e.what());
+        py_ivalue = jit::toIValue(
+            pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
+            PyObjectType::get());
       }
+      ownerRRef->setValue(std::move(py_ivalue));
 
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
@@ -376,7 +450,7 @@ void RequestCallbackImpl::processRpc(
       futureOwner->addCallback([responseFuture,
                                 messageId,
                                 futureOwner,
-                                serialize{std::move(serialize)}]() {
+                                serialize{std::move(serialize)}]() mutable {
         const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
 
@@ -386,7 +460,7 @@ void RequestCallbackImpl::processRpc(
                                    messageId,
                                    rref,
                                    whenValueSet,
-                                   serialize{std::move(serialize)}] {
+                                   serialize{std::move(serialize)}]() mutable {
           if (whenValueSet->hasError()) {
             responseFuture->setError(whenValueSet->error()->what());
             return;
@@ -447,7 +521,8 @@ void RequestCallbackImpl::processRpc(
           autogradContext != nullptr,
           "autogradContext is nullptr, FORWARD_AUTOGRAD_REQ should always get "
           "or create valid autogradContext in addRecvRpcBackward.");
-      autogradContainer.setCurrentContextId(autogradContext->contextId());
+
+      DistAutogradContextGuard ctxGuard(autogradContext->contextId());
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
@@ -469,7 +544,20 @@ void RequestCallbackImpl::processRpc(
           [responseFuture,
            messageId,
            fromWorkerId,
-           weak = std::weak_ptr<FutureMessage>(wrappedRpcResponseFuture)]() {
+           weak = std::weak_ptr<FutureMessage>(wrappedRpcResponseFuture),
+           ctxId = autogradContext->contextId()]() {
+            // As this callback can be invoked by a different thread, we have to
+            // make sure that the thread_local states in the previous thread is
+            // correctly propagated.
+            // NB: The execution of TorchScript functions can also run on a
+            // different thread, which is addressed by
+            // https://github.com/pytorch/pytorch/pull/36395
+            // NB: when adding async UDF support, we should also propagate
+            // thread_local states there.
+            // TODO: Land on a general solution for RPC ThreadLocalState. See
+            // https://github.com/pytorch/pytorch/issues/38510
+            DistAutogradContextGuard cbCtxGuard(ctxId);
+
             auto wrappedRpcResponseFuture = weak.lock();
             TORCH_INTERNAL_ASSERT(wrappedRpcResponseFuture);
             if (wrappedRpcResponseFuture->hasError()) {
@@ -562,10 +650,22 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
          id = request.id()]() {
+          // The cost of pre-request check is minimal thanks to
+          // std::shared_lock. The cost is in magnitude
+          // of 10us.
+          auto serverProcessGlobalProfilerStateStackEntryPtr =
+              profiler::processglobal::StateStackEntry::current();
+          // If server global profiler is enabled, we futher pay the
+          // cost of thread local profiler state initialization.
+          if (serverProcessGlobalProfilerStateStackEntryPtr) {
+            // Initialize thread-local profiler state from process-global
+            // profiler state.
+            ::torch::autograd::profiler::enableProfiler(
+                serverProcessGlobalProfilerStateStackEntryPtr->statePtr()
+                    ->config());
+          }
+
           try {
-            // For a recv thread, current context id should be invalid outside
-            // processMessage().
-            ClearAutogradContextGuard guard;
             processRpc(*rpc, messageType, id, retFuture);
           } catch (py::error_already_set& e) {
             retFuture->markCompleted(handleError(e, messageType, id));
@@ -579,6 +679,18 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
                            // recorded the exception in the response message.
           } catch (std::exception& e) {
             retFuture->markCompleted(handleError(e, messageType, id));
+          }
+
+          // Response message has been sent at this moment, this post-response
+          // work doesn't affect RPC trip time.
+          if (serverProcessGlobalProfilerStateStackEntryPtr) {
+            // Restore thread-local profiler state.
+            ::torch::autograd::profiler::thread_event_lists event_lists =
+                ::torch::autograd::profiler::disableProfiler();
+            // Put thread_local event_lists into the process-global profiler
+            // state.
+            profiler::processglobal::pushResultRecursive(
+                serverProcessGlobalProfilerStateStackEntryPtr, event_lists);
           }
         });
   } catch (std::exception& e) {

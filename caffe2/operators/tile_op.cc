@@ -6,9 +6,13 @@ namespace caffe2 {
 
 template <>
 bool TileOp<CPUContext>::RunOnDevice() {
-  return DispatchHelper<
-      TensorTypes<std::int32_t, std::int64_t, float, double, std::string>>::
-      call(this, Input(0));
+  return DispatchHelper<TensorTypes<
+      at::Half,
+      std::int32_t,
+      std::int64_t,
+      float,
+      double,
+      std::string>>::call(this, Input(0));
 }
 
 template <>

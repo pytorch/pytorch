@@ -27,6 +27,7 @@ from . import (
     _set_and_start_rpc_agent,
     backend_registry,
 )
+
 from .internal import (
     PythonUDF,
     RPCExecMode,
@@ -152,6 +153,8 @@ def _wait_all_workers():
         _wait_all_workers_sequence_id += 1
 
     is_leader_worker = leader_worker_name == self_worker_name
+    # Set a long enough timeout for all shutdown messages to be processed.
+    timeout = 5  # seconds
 
     # Phase 1: Followers send intents.
     # All followers report intents to the leader.
@@ -162,6 +165,7 @@ def _wait_all_workers():
             leader_worker_name,
             _on_leader_follower_report_shutdown_intent,
             args=(sequence_id, self_worker_name,),
+            timeout=timeout,
         )
 
     proceed_signal = _wait_all_workers_sequence_id_to_states[
@@ -174,7 +178,6 @@ def _wait_all_workers():
     # after receiving all followers' intents.
     if is_leader_worker:
         # The leader sends out proceeed signals to all followers.
-        timeout = 5  # seconds
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
             fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal,
@@ -472,7 +475,8 @@ def remote(to, func, args=None, kwargs=None):
         if should_profile:
             assert torch.autograd._profiler_enabled()
             assert rf is not None
-            rf._call_end_callbacks_on_future(rref._get_future())
+            fut = rf._call_end_callbacks_on_future(rref._get_future())
+            rref._set_profiling_future(fut)
 
     return rref
 
@@ -512,22 +516,50 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
+        is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
+
+        if is_async_exec:
+            wrapped = func._wrapped_async_rpc_function
+            if isinstance(wrapped, torch.jit.ScriptFunction):
+                func = wrapped
+
         if qualified_name is not None:
-            fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
+            fut = _invoke_rpc_builtin(
+                dst_worker_info,
+                qualified_name,
+                rpc_timeout,
+                *args,
+                **kwargs
+            )
         elif isinstance(func, torch.jit.ScriptFunction):
             fut = _invoke_rpc_torchscript(
-                dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
+                dst_worker_info.name,
+                torch.jit._qualified_name(func),
+                args,
+                kwargs,
+                rpc_timeout,
+                is_async_exec
             )
         else:
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
-            fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rpc_timeout)
+            fut = _invoke_rpc_python_udf(
+                dst_worker_info,
+                pickled_python_udf,
+                tensors,
+                rpc_timeout,
+                is_async_exec
+            )
         if should_profile:
             assert torch.autograd._profiler_enabled()
             assert rf is not None
             # Schedule profiling callbacks to run when the future completes.
-            rf._call_end_callbacks_on_future(fut)
+            # This returns a future that is completed when the original future
+            # completes and the profiling callbacks have been completed as well,
+            # to guarantee that fut.wait() completes the profiling. This new
+            # future will contain the same value as the original future.
+            fut = rf._call_end_callbacks_on_future(fut)
     return fut
 
 
