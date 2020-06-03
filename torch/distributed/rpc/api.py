@@ -27,6 +27,7 @@ from . import (
     _set_and_start_rpc_agent,
     backend_registry,
 )
+
 from .internal import (
     PythonUDF,
     RPCExecMode,
@@ -152,6 +153,8 @@ def _wait_all_workers():
         _wait_all_workers_sequence_id += 1
 
     is_leader_worker = leader_worker_name == self_worker_name
+    # Set a long enough timeout for all shutdown messages to be processed.
+    timeout = 5  # seconds
 
     # Phase 1: Followers send intents.
     # All followers report intents to the leader.
@@ -162,6 +165,7 @@ def _wait_all_workers():
             leader_worker_name,
             _on_leader_follower_report_shutdown_intent,
             args=(sequence_id, self_worker_name,),
+            timeout=timeout,
         )
 
     proceed_signal = _wait_all_workers_sequence_id_to_states[
@@ -174,7 +178,6 @@ def _wait_all_workers():
     # after receiving all followers' intents.
     if is_leader_worker:
         # The leader sends out proceeed signals to all followers.
-        timeout = 5  # seconds
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
             fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal,
@@ -513,6 +516,8 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
+        is_async_fn = hasattr(func, "_wrapped_async_rpc_function")
+
         if qualified_name is not None:
             fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
@@ -523,7 +528,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
-            fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rpc_timeout)
+            fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rpc_timeout, is_async_fn)
         if should_profile:
             assert torch.autograd._profiler_enabled()
             assert rf is not None
