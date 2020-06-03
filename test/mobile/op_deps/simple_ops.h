@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/Tensor.h>
 
 namespace at {
