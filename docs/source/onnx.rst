@@ -611,6 +611,7 @@ with matching custom ops implementation, e.g. `Caffe2 custom ops <https://caffe2
 Operator Export Type
 ------------------------------------------------
 Exporting models with unsupported ONNX operators can be achieved using the ``operator_export_type`` flag in export API.
+This flag is useful when users try to export ATen and non-ATen operators that are not registered and supported in ONNX.
 
 ONNX
 ~~~~
@@ -692,7 +693,7 @@ To export a raw ir. ::
 
 ONNX_FALLTHROUGH
 ~~~~~~~~~~~~~~~~
-This mode can be used to export any operator that is not registered and supported in ONNX.
+This mode can be used to export any operator (ATen or non-ATen) that is not registered and supported in ONNX.
 Exported falls through and exports the operator as is, as custom op. Exporting custom operators
 enables users to register and implement the operator as part of their runtime backend. ::
 
