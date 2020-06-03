@@ -39,6 +39,16 @@
 
 namespace at { namespace native {
 
+namespace detail {
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
+#else
+template <typename T1, typename T2> using pair = std::pair<T1, T2>;
+#endif
+
+} // namespace detail
+
 template <typename scalar_t, typename index_t, typename combine_t>
 struct WelfordData {
   scalar_t mean;
@@ -306,12 +316,6 @@ struct NormTwoOps {
 };
 
 namespace detail {
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
-#else
-template <typename T1, typename T2> using pair = std::pair<T1, T2>;
-#endif
 
 template <typename scalar_t>
 struct LessOrNan {
