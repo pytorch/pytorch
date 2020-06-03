@@ -8,8 +8,12 @@ namespace distributed {
 namespace rpc {
 
 UnpickledPythonCall::UnpickledPythonCall(
-    const SerializedPyObj& serializedPyObj) {
-  pythonUdf_ = PythonRpcHandler::getInstance().deserialize(serializedPyObj);
+    const SerializedPyObj& serializedPyObj,
+    bool isAsyncExecution)
+    : isAsyncExecution_(isAsyncExecution) {
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  pybind11::gil_scoped_acquire ag;
+  pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
 }
 
 UnpickledPythonCall::~UnpickledPythonCall() {

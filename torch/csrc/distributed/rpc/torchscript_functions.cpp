@@ -16,9 +16,10 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
-    const float rpcTimeoutSeconds) {
-  auto scriptCall =
-      std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
+    const float rpcTimeoutSeconds,
+    const bool asyncFunction) {
+  auto scriptCall = std::make_unique<ScriptCall>(
+      qualifiedName, std::move(stack), asyncFunction);
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto futMessage = autograd::sendMessageWithAutograd(
       *rpcAgentPtr,

@@ -85,10 +85,22 @@ def add_observer_(module):
     Return:
         None, module is modified inplace with added observer modules and forward_hooks
     """
+    # respect device affinity when adding observers
+    # devices = {p.device for p in module.parameters()}
+    devices = get_unique_devices_(module)
+    assert len(devices) <= 1, (
+        "add_observer_ only works with cpu or single-device CUDA modules, "
+        "but got devices {}".format(devices)
+    )
+    device = next(iter(devices)) if len(devices) > 0 else None
+
     for child in module.children():
         if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
             if hasattr(child, 'qconfig') and child.qconfig is not None:
-                child.activation_post_process = child.qconfig.activation()
+                activation = child.qconfig.activation()
+                if device is not None:
+                    activation.to(device)
+                child.activation_post_process = activation
         else:
             add_observer_(child)
 
@@ -97,8 +109,15 @@ def add_observer_(module):
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
        len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential):
         # observer and hook will be gone after we swap the module
-        module.add_module('activation_post_process', module.qconfig.activation())
+        activation = module.qconfig.activation()
+        if device is not None:
+            activation.to(device)
+        module.add_module('activation_post_process', activation)
         module.register_forward_hook(_observer_forward_hook)
+
+def get_unique_devices_(module):
+    return {p.device for p in module.parameters()} | \
+        {p.device for p in module.buffers()}
 
 def add_quant_dequant(module):
     r"""Wrap the leaf child module in QuantWrapper if it has a valid qconfig
@@ -321,6 +340,9 @@ def convert(module, mapping=None, inplace=False):
                          nni.LinearReLU,
                          nni.BNReLU2d,
                          nni.BNReLU3d,
+                         nni.ConvBn1d,
+                         nni.ConvReLU1d,
+                         nni.ConvBnReLU1d,
                          nni.ConvReLU2d,
                          nni.ConvReLU3d)
 
@@ -349,7 +371,16 @@ def swap_module(mod, mapping):
     # Always replace dequantstub with dequantize
     if hasattr(mod, 'qconfig') and mod.qconfig is not None or type(mod) == DeQuantStub:
         if type(mod) in mapping:
+            # respect device affinity when swapping modules
+            devices = get_unique_devices_(mod)
+            assert len(devices) <= 1, (
+                "swap_module only works with cpu or single-device CUDA modules, "
+                "but got devices {}".format(devices)
+            )
+            device = next(iter(devices)) if len(devices) > 0 else None
             new_mod = mapping[type(mod)].from_float(mod)
+            if device:
+                new_mod.to(device)
     return new_mod
 
 def get_observer_dict(mod, target_dict, prefix=""):

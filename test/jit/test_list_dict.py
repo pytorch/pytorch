@@ -122,11 +122,6 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "out of range"):
             fn2([])
 
-        with self.assertRaisesRegex(RuntimeError, "only supported for list and dict"):
-            @torch.jit.script
-            def fn(x):
-                del x
-
         with self.assertRaisesRegex(RuntimeError, "deletion at a single index"):
             @torch.jit.script
             def fn(x):
@@ -311,7 +306,7 @@ class TestList(JitTestCase):
             test_invalid_list_equality,
             (),
             RuntimeError,
-            "bool value of Tensor")
+            "Boolean value of Tensor")
 
     def test_list_sort(self):
         template = dedent('''
@@ -343,7 +338,7 @@ class TestList(JitTestCase):
             return x
 
         self.checkScriptRaisesRegex(test_fail, (([torch.zeros([2]), torch.zeros([2])],)), Exception,
-                                    "bool value of Tensor with more than one value")
+                                    "Boolean value of Tensor with more than one value")
 
         @torch.jit.script
         def test_mutation():
@@ -1242,6 +1237,7 @@ class TestDict(JitTestCase):
             a['b'] -= 12
             a['c'] *= 122
             a['c'] /= 2
+            a['c'] %= 2
             return a
 
         def aug_assign_dict_prim(a):
@@ -1250,6 +1246,7 @@ class TestDict(JitTestCase):
             a['b'] -= 2.4
             a['c'] *= 3.0
             a['c'] /= 2.0
+            a['c'] %= 2.0
             return a
 
         self.checkScript(aug_assign_dict_tensor, (self.dict(),))
