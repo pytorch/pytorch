@@ -1,3 +1,5 @@
+# For documentation concerning this configuration please refer to,
+# https://github.com/pytorch/pytorch-probot#trigger-circleci-workflows
 labels_to_circle_params:
   ci/binaries:
     parameter: run_binary_tests
