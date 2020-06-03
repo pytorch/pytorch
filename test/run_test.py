@@ -69,6 +69,7 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'test_openmp',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
@@ -79,6 +80,7 @@ TESTS = [
     'test_determination',
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'test_futures',
 ]
 
 WINDOWS_BLACKLIST = [
@@ -154,6 +156,7 @@ SLOW_TESTS = [
     'distributed/test_c10d_spawn',
     'test_quantization',
     'test_determination',
+    'test_futures',
 ]
 _DEP_MODULES_CACHE = {}
 
