@@ -412,6 +412,7 @@ del ComplexFloatStorageBase
 import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
+import torch.futures
 import torch.nn
 import torch.nn.intrinsic
 import torch.nn.quantized
