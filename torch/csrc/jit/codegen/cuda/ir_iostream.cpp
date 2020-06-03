@@ -556,7 +556,7 @@ void IRPrinter::printReductionOps(Fusion* fusion) {
     auto d_type = rop_pair.second;
 
     indent();
-    os << "__global__ void reduction_" << op_type << "_" << d_type << "("
+    os << "__device__ void reduction_" << op_type << "_" << d_type << "("
        << d_type << "& a, "
        << "const " << d_type << " b) {\n";
     indent_size++;
