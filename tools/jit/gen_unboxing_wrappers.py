@@ -20,11 +20,10 @@ torch/csrc/jit/generated/
 
 import argparse
 import re
-import yaml
 from itertools import groupby
-from ..autograd.utils import CodeTemplate, YamlLoader, write
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
+from ..autograd.utils import CodeTemplate, write, is_out_variant, signature_without_args
 
 # JIT has a type system of
 # Scalar = int | float | bool # int is the largest int (int64_t),
@@ -251,10 +250,6 @@ def is_view(decl):
     return base_name(decl) in RETURNS_VIEWS_OF_INPUT
 
 
-def is_out_variant(decl):
-    return decl['name'].endswith('_out')
-
-
 # Copied from ..autograd.gen_python_functions.SKIP_PYTHON_BINDINGS
 BACKWARD_OP_PATTERNS = [
     '.*_backward',
@@ -278,18 +273,11 @@ def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
-def load_op_list(path):
-    with open(path, 'r') as f:
-        op_list = yaml.load(f, Loader=YamlLoader)
-    return op_list
-
-
 def gen_unboxing_wrappers(
     declarations,
     out,
     template_path,
     disable_autograd=False,
-    selected_op_list_path=None,
     selected_op_list=None,
     force_schema_registration=False,
 ):
@@ -476,9 +464,6 @@ def gen_unboxing_wrappers(
             reorder_out_args(decl)
 
     jit_decls.extend(additional_jit_decls)
-    if not selected_op_list:
-        selected_op_list = []
-    selected_op_list += load_op_list(selected_op_list_path) if selected_op_list_path else []
     jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration)
 
     # generation is deterministic
@@ -525,12 +510,6 @@ def reorder_out_args(decl):
 
 def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
-
-def signature_without_args(decl):
-    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
-    return 'aten::{}{}'.format(name, overload_name)
-
 
 def main():
     parser = argparse.ArgumentParser(

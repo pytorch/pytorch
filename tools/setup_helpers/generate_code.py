@@ -1,10 +1,17 @@
 import argparse
 import os
 import sys
+import yaml
+from ..autograd.utils import YamlLoader
 
 source_files = {'.py', '.cpp', '.h'}
 
 DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
+
+def load_op_list(path):
+    with open(path, 'r') as f:
+        op_list = yaml.load(f, Loader=YamlLoader)
+    return op_list
 
 
 # TODO: This is a little inaccurate, because it will also pick
@@ -28,6 +35,9 @@ def generate_code(ninja_global=None,
                   selected_op_list_path=None,
                   selected_op_list=None,
                   force_schema_registration=False):
+    if not selected_op_list:
+        selected_op_list = []
+    selected_op_list += load_op_list(selected_op_list_path) if selected_op_list_path else []
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
@@ -50,19 +60,18 @@ def generate_code(ninja_global=None,
         gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, autograd_dir)
 
     if subset == "libtorch" or not subset:
-        # TODO: add selected op mechanism in augotrad to save learning size
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
+            selected_op_list=selected_op_list,
         )
         gen_unboxing_wrappers(
             declarations_path or DECLARATIONS_PATH,
             jit_gen_dir,
             tools_jit_templates,
             disable_autograd=disable_autograd,
-            selected_op_list_path=selected_op_list_path,
             selected_op_list=selected_op_list,
             force_schema_registration=force_schema_registration)
 
