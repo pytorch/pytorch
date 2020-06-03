@@ -1,12 +1,23 @@
 import functools
 
+
 def async_execution(fn):
     r"""
     A decorator for a function indicating that the return value of the function
     is guaranteed to be a ``torch.futures.Future`` object and this function can
-    run asynchronously on the RPC callee. This is useful when this function's
+    run asynchronously on the RPC callee. More specifically, the callee extracts
+    the ``torch.futures.Future`` returned by the wrapped function and installs
+    subsequent processing steps as a callback to that ``Future``. The installed
+    callback will read the value from the ``Future`` when completed and send the
+    value back as the RPC response. That also means the returned
+    ``torch.futures.Future`` only exists on the callee side and is never sent
+    through RPC. This decorator is useful when the wrapped function's (``fn``)
     execution needs to pause and resume due to, e.g., containing
     :meth:`~torch.distributed.rpc.rpc_async` or waiting for other signals.
+
+    .. note:: This decorator must be the outmost one when combined with other
+        decorators. Otherwise, RPC will not be able to detect the attributes
+        installed by this decorator.
 
     Example::
         The returned ``torch.futures.Future`` object can come from
@@ -16,7 +27,7 @@ def async_execution(fn):
 
         >>> from torch.distributed import rpc
         >>>
-        >>> # omit setting up and shutdown RPC
+        >>> # omitting setup and shutdown RPC
         >>>
         >>> # On worker0
         >>> @rpc.functions.async_execution
@@ -32,7 +43,7 @@ def async_execution(fn):
         >>>         lambda fut: fut.wait() + z
         >>>     )
         >>>
-        >>> ret = pc.rpc_sync(
+        >>> ret = rpc.rpc_sync(
         >>>     "worker1",
         >>>     async_add_chained,
         >>>     args=("worker2", torch.ones(2), 1, 1)
