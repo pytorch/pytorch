@@ -27,9 +27,9 @@ void GroupNormKernelImplInternal(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  DCHECK_EQ(X.numel(), N * C * HxW);
-  DCHECK(!gamma.defined() || gamma.numel() == C);
-  DCHECK(!beta.defined() || beta.numel() == C);
+  TORCH_CHECK(X.numel() == N * C * HxW);
+  TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
+  TORCH_CHECK(!beta.defined() || beta.numel() == C);
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.data_ptr<T>();
@@ -271,11 +271,11 @@ void GroupNormBackwardKernelImplInternal(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  DCHECK_EQ(dY.numel(), N * C * HxW);
-  DCHECK_EQ(X.numel(), N * C * HxW);
-  DCHECK_EQ(mean.numel(), N * group);
-  DCHECK_EQ(rstd.numel(), N * group);
-  DCHECK(!gamma.defined() || gamma.numel() == C);
+  TORCH_CHECK(dY.numel() == N * C * HxW);
+  TORCH_CHECK(X.numel() == N * C * HxW);
+  TORCH_CHECK(mean.numel() == N * group);
+  TORCH_CHECK(rstd.numel() == N * group);
+  TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
 
   const T* dY_data = dY.data_ptr<T>();
   const T* X_data = X.data_ptr<T>();

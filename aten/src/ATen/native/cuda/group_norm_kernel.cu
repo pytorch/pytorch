@@ -367,9 +367,9 @@ void GroupNormKernelImplInternal(
     Tensor* mean,
     Tensor* rstd) {
   using T_ACC = acc_type<T, true>;
-  DCHECK_EQ(X.numel(), N * C * HxW);
-  DCHECK(!gamma.defined() || gamma.numel() == C);
-  DCHECK(!beta.defined() || beta.numel() == C);
+  TORCH_CHECK(X.numel() == N * C * HxW);
+  TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
+  TORCH_CHECK(!beta.defined() || beta.numel() == C);
   if (N == 0) {
     return;
   }
@@ -455,12 +455,11 @@ void GroupNormBackwardKernelImplInternal(
     Tensor* dbeta) {
   using T_ACC = acc_type<T, true>;
   const int64_t G = group;
-  const int64_t D = C / G;
-  DCHECK_EQ(dY.numel(), N * C * HxW);
-  DCHECK_EQ(X.numel(), N * C * HxW);
-  DCHECK_EQ(mean.numel(), N * G);
-  DCHECK_EQ(rstd.numel(), N * G);
-  DCHECK(!gamma.defined() || gamma.numel() == C);
+  TORCH_CHECK(dY.numel() == N * C * HxW);
+  TORCH_CHECK(X.numel() == N * C * HxW);
+  TORCH_CHECK(mean.numel() == N * G);
+  TORCH_CHECK(rstd.numel() == N * G);
+  TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 
   if (N == 0) {

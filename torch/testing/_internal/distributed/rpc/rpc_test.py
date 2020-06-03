@@ -312,12 +312,35 @@ def add_use_future_cb(to, x, y, z):
         out.set_result(fut.wait() + z)
 
     fut = rpc.rpc_async(to, torch.add, args=(x, y))
-    fut._then(callback)
+    fut.then(callback)
     return out.result()
 
 
 def get_events_from_profile(profile_rref):
     return profile_rref.local_value().process_global_function_events
+
+
+def add_use_future_set_result(to, x, y, z):
+    out = torch.futures.Future()
+    fut = rpc.rpc_async(to, torch.add, args=(x, y))
+    fut.then(lambda fut : out.set_result(fut.wait() + z))
+    return out.wait()
+
+
+def add_use_future_nested_cb(to, x, y, z):
+    out = torch.futures.Future()
+
+    def callback(fut1):
+        fut2 = rpc.rpc_async(to, torch.add, args=(fut1.wait(), z))
+        fut2.then(lambda fut2 : out.set_result(fut2.wait()))
+
+    fut1 = rpc.rpc_async(to, torch.add, args=(x, y))
+    fut1.then(callback)
+    return out.wait()
+
+
+def fail_on_fut(fut):
+    pass
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -2481,7 +2504,7 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n))
         )
 
-        fut._then(callback)
+        fut.then(callback)
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
         self.assertEqual(set_by_cb.result(), torch.ones(n, n) * 2 + 1)
@@ -2498,7 +2521,7 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n))
         )
 
-        cb_fut = fut._then(my_function)
+        cb_fut = fut.then(my_function)
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
@@ -2513,7 +2536,7 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
 
         fut0 = rpc.rpc_async(dst, torch.add, args=(torch.ones(2, 2), 1))
-        fut1 = fut0._then(lambda x: x + 1)
+        fut1 = fut0.then(lambda x: x + 1)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -2539,7 +2562,7 @@ class RpcTest(RpcAgentTestFixture):
 
         cb_futs = []
         for idx in range(num_cbs):
-            cb_futs.append(fut._then(partial(callback, idx)))
+            cb_futs.append(fut.then(partial(callback, idx)))
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
@@ -2567,7 +2590,7 @@ class RpcTest(RpcAgentTestFixture):
 
         num_cbs = 20
         for _ in range(num_cbs):
-            fut = fut._then(callback)
+            fut = fut.then(callback)
 
         self.assertEqual(fut.wait(), torch.ones(n, n) + 1 + num_cbs)
 
@@ -2592,7 +2615,7 @@ class RpcTest(RpcAgentTestFixture):
                 dst,
                 torch.add,
                 args=(fut0.wait(), 1)
-            )._then(lambda fut1: fut1.wait() + 1)
+            ).then(lambda fut1: fut1.wait() + 1)
 
             return fut2.wait()
 
@@ -2600,7 +2623,7 @@ class RpcTest(RpcAgentTestFixture):
             dst,
             torch.add,
             args=(torch.ones(2, 2), 1)
-        )._then(callback)
+        ).then(callback)
 
         self.assertEqual(fut3.wait(), torch.ones(2, 2) + 3)
 
@@ -2613,7 +2636,7 @@ class RpcTest(RpcAgentTestFixture):
                 fut0.wait()
             raise RuntimeError("Another expected error")
 
-        fut1 = rpc.rpc_async(dst, raise_func)._then(callback)
+        fut1 = rpc.rpc_async(dst, raise_func).then(callback)
         with self.assertRaisesRegex(RuntimeError, "Another expected error"):
             fut1.wait()
 
@@ -2625,7 +2648,58 @@ class RpcTest(RpcAgentTestFixture):
             TypeError,
             "incompatible function arguments."
         ):
-            rpc.rpc_async(dst, raise_func)._then(None)
+            rpc.rpc_async(dst, raise_func).then(None)
+
+    @dist_init
+    def test_mark_future_twice(self):
+        fut = rpc.rpc_async(
+            worker_name((self.rank + 1) % self.world_size),
+            torch.add,
+            args=(torch.zeros(2, 2), 1)
+        )
+        self.assertEqual(fut.wait(), torch.zeros(2, 2) + 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Future can only be marked completed once"
+        ):
+            fut.set_result(1)
+
+    @dist_init
+    def test_pickle_future(self):
+        fut = torch.futures.Future()
+        errMsg = "Can not pickle torch.futures.Future"
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, errMsg):
+                rpc.rpc_sync(dst, fail_on_fut, args=(fut,))
+
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, errMsg):
+                rpc.rpc_async(dst, fail_on_fut, args=(fut,))
+
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, errMsg):
+                rpc.remote(dst, fail_on_fut, args=(fut,))
+
+    def _test_future_cb(self, func):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(
+            dst1,
+            func,
+            args=(dst2, torch.ones(2, 2), 1, 2)
+        )
+        self.assertEqual(ret, torch.ones(2, 2) + 1 + 2)
+
+    @dist_init
+    def test_future_in_rpc(self):
+        self._test_future_cb(add_use_future_set_result)
+
+    @dist_init
+    def test_future_nested_callback(self):
+        self._test_future_cb(add_use_future_nested_cb)
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
