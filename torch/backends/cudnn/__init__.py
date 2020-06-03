@@ -86,23 +86,23 @@ def is_acceptable(tensor):
 _handles = {}
 
 
-def set_flags(_enabled, _benchmark, _deterministic, _use_tf32):
-    global benchmark, deterministic, use_tf32
+def set_flags(_enabled, _benchmark, _deterministic, _allow_tf32):
+    global benchmark, deterministic, allow_tf32
     orig_flags = (torch._C._get_cudnn_enabled(),
                   torch._C._get_cudnn_benchmark(),
                   torch._C._get_cudnn_deterministic(),
-                  torch._C._get_cudnn_use_tf32())
+                  torch._C._get_cudnn_allow_tf32())
     torch._C._set_cudnn_enabled(_enabled)
     torch._C._set_cudnn_benchmark(_benchmark)
     torch._C._set_cudnn_deterministic(_deterministic)
-    torch._C._set_cudnn_use_tf32(_use_tf32)
+    torch._C._set_cudnn_allow_tf32(_allow_tf32)
     return orig_flags
 
 
 @contextmanager
-def flags(enabled=False, benchmark=False, deterministic=False, use_tf32=True):
+def flags(enabled=False, benchmark=False, deterministic=False, allow_tf32=True):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, benchmark, deterministic, use_tf32)
+        orig_flags = set_flags(enabled, benchmark, deterministic, allow_tf32)
     try:
         yield
     finally:
@@ -122,7 +122,7 @@ class CudnnModule(PropModule):
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)
     benchmark = ContextProp(torch._C._get_cudnn_benchmark, torch._C._set_cudnn_benchmark)
-    use_tf32 = ContextProp(torch._C._get_cudnn_use_tf32, torch._C._set_cudnn_use_tf32)
+    allow_tf32 = ContextProp(torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32)
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273

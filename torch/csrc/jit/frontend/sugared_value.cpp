@@ -29,18 +29,18 @@ std::shared_ptr<SugaredValue> PrintValue::call(
   return std::make_shared<NoneValue>();
 }
 
-static const std::unordered_map<std::string, std::string>&
-builtin_cast_methods() {
-  static std::unordered_map<std::string, std::string> builtin_cast_methods = {
-      {"byte", "_cast_Byte"},
-      {"char", "_cast_Char"},
-      {"double", "_cast_Double"},
-      {"float", "_cast_Float"},
-      {"int", "_cast_Int"},
-      {"long", "_cast_Long"},
-      {"short", "_cast_Short"},
-      {"half", "_cast_Half"}};
-  return builtin_cast_methods;
+static const std::unordered_map<std::string, at::ScalarType>&
+builtin_cast_method_to_scalar_type() {
+  static std::unordered_map<std::string, at::ScalarType> mapping = {
+      {"byte", at::kByte},
+      {"char", at::kChar},
+      {"double", at::kDouble},
+      {"float", at::kFloat},
+      {"int", at::kInt},
+      {"long", at::kLong},
+      {"short", at::kShort},
+      {"half", at::kHalf}};
+  return mapping;
 }
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
@@ -85,9 +85,9 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value_->type()->isSubtypeOf(TensorType::get())) {
-    if (builtin_cast_methods().count(field)) {
-      return std::make_shared<BuiltinFunction>(
-          Symbol::aten(builtin_cast_methods().at(field)),
+    if (builtin_cast_method_to_scalar_type().count(field)) {
+      return std::make_shared<TensorCastValue>(
+          builtin_cast_method_to_scalar_type().at(field),
           NamedValue(loc, "self", value_));
     }
   }
