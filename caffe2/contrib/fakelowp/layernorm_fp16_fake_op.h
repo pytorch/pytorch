@@ -79,16 +79,9 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
         mean_data,
         sigma_data,
         &context_);
+
     ComputeSigmaAndFusedParams<T>(
        M, epsilon_, mean_data, sigma_data, sigma_data, scale_data, bias_data);
-//    ConstEigenVectorArrayMap<T> var_arr(sigma_data, M);
-//    EigenVectorArrayMap<T> sigma_arr(sigma_data, M);
-//    sigma_arr = var_arr + static_cast<T>(epsilon_);
-//    math::Rsqrt<T, CPUContext>(M, sigma_data, scale_data, &context_);
-//    math::Mul<T, CPUContext>(M, scale_data, sigma_data, sigma_data, &context_);
-//    EigenVectorArrayMap<T>(bias_data, M) =
-//        -ConstEigenVectorArrayMap<T>(scale_data, M) *
-//        ConstEigenVectorArrayMap<T>(mean_data, M);
 
     const T* gamma_data = nullptr;
     const T* beta_data = nullptr;
@@ -104,25 +97,6 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
     LayerNormForward<T>(
           M, N, X_data, scale_data, bias_data, gamma_data, beta_data, Y_data);
 
-//    ConstEigenArrayMap<T> X_arr(X_data, N, M);
-//    ConstEigenVectorArrayMap<T> scale_arr(scale_data, M);
-//    ConstEigenVectorArrayMap<T> bias_arr(bias_data, M);
-//    EigenArrayMap<T> Y_arr(Y_data, N, M);
-//    if (gamma_data != nullptr && beta_data != nullptr) {
-//      ConstEigenVectorArrayMap<T> gamma_arr(gamma_data, N);
-//      ConstEigenVectorArrayMap<T> beta_arr(beta_data, N);
-//      Y_arr = (((X_arr.rowwise() * scale_arr.transpose()).rowwise() +
-//                bias_arr.transpose())
-//                   .colwise() *
-//               gamma_arr)
-//                  .colwise() +
-//          beta_arr;
-//    } else {
-//      CAFFE_ENFORCE(gamma_data == nullptr);
-//      CAFFE_ENFORCE(beta_data == nullptr);
-//      Y_arr = (X_arr.rowwise() * scale_arr.transpose()).rowwise() +
-//          bias_arr.transpose();
-//    }
     return true;
   }
 
