@@ -7,6 +7,8 @@ from torch.onnx import utils, OperatorExportTypes
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
 import torch.utils.cpp_extension
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+import caffe2.python.onnx.backend as backend
+from verify import verify
 
 import onnx
 import onnxruntime  # noqa
@@ -693,6 +695,21 @@ class TestUtilityFuns(TestCase):
                                                    operator_export_type=OperatorExportTypes.ONNX)
 
         assert len(params_dict) == 2
+
+    def test_modifying_params(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.param = torch.nn.Parameter(torch.tensor([2.0]))
+
+            def forward(self, x):
+                y = x * x
+                self.param.data.add_(1.0)
+                return y
+
+        x = torch.tensor([1, 2])
+        # To keep the unused model parameter, need to set constant folding to False
+        verify(MyModel(), x, backend, do_constant_folding=False)
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
