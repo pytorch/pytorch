@@ -42,20 +42,6 @@ struct PatternInfo {
   }
 };
 
-auto aten_add_alpha_is_one = [](const Match& match,
-                                const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
-    return alpha && alpha->isInt() && alpha->toInt() == 1;
-};
-
-auto is_functional_relu = [](const Match& match,
-                             const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    Value* relu = match_vmap.at(vmap.at("relu"));
-    return relu->type()->cast<FunctionType>() && getFuncName(relu) == "relu";
-};
-
 } // namespace graph_rewrite_helper
 } // namespace jit
 } // namespace torch

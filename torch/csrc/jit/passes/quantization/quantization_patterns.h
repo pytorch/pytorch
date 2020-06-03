@@ -3,13 +3,12 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/quantization/helper.h>
 #include <string>
 #include <unordered_map>
 
 namespace torch {
 namespace jit {
-using graph_rewrite_helper::aten_add_alpha_is_one;
 
 struct QuantFusionInfo {
   std::string quantized_op_name;

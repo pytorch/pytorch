@@ -37,22 +37,6 @@ using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
 using graph_rewrite_helper::MatchFilter;
 using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithAtenConv;
-using graph_rewrite_helper::aten_add_alpha_is_one;
-using graph_rewrite_helper::is_functional_relu;
-
-auto is_relu_module = [](const Match& match,
-                         const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    Value* relu = match_vmap.at(vmap.at("relu"));
-    auto type = relu->type()->cast<ClassType>();
-    if (type && type->name()) {
-      static std::regex mangle_re("\\.___torch_mangle_\\d+");
-      auto qualified_name =
-        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
-      return qualified_name == "__torch__.torch.nn.modules.activation.ReLU";
-    }
-    return false;
-};
 
 // helper functions
 void fillQConfigMap(
