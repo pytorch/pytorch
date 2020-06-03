@@ -26,8 +26,7 @@ inline Result call_unboxed_super_slow_temp_shim(const c10::OperatorHandle& op, A
   // boxing code currently does not support this. Instead, exclude the Profiler
   // dispatch key and go through unboxed dispatch, avoiding boxing altogether
   c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
-  return c10::Dispatcher::singleton().template call<Result, Args...>(
-      op, std::forward<Args>(args)...);
+  return op.typed<Result(Args...)>().call(std::forward<Args>(args)...);
 }
 
 // Get the scale of the input to quantized op. There are two cases here

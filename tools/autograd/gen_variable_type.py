@@ -344,8 +344,10 @@ ${return_type} ${api_name}(${formals}); // {"schema": "${schema_string}", "compo
 
 # ProfiledType templates
 PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
-static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
-TORCH_INTERNAL_ASSERT(op);
+static auto op = c10::Dispatcher::singleton()
+    .findSchema({"aten::${operator_name}", "${overload_name}"})
+    .value()
+    .typed<${return_type} (${arg_types})>();
 RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
@@ -620,6 +622,7 @@ def emit_profiled_body(declaration):
     for a in arguments:
         processed_args.append('{}'.format(a['name']))
 
+    arg_types = ', '.join([a['type'] for a in declaration['arguments']])
     ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
 
     def check_record_function_input_type(simple_type):
@@ -630,12 +633,14 @@ def emit_profiled_body(declaration):
             arg['name'] for arg in declaration['arguments']
             if check_record_function_input_type(arg['simple_type'])])
 
-    profiled_dispatch_args = ['*op', 'c10::DispatchKey::Profiler'] + declaration['args']
+    profiled_dispatch_args = ['op', 'c10::DispatchKey::Profiler'] + declaration['args']
 
     call = PROFILE_DISPATCH_UNBOXED.substitute(
         declaration,
         name=name,
         input_names=record_function_input_names(),
+        return_type=declaration['return_type'],
+        arg_types=arg_types,
         ret_and_arg_types=ret_and_arg_types,
         profiled_dispatch_args=profiled_dispatch_args,
     )
