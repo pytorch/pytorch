@@ -52,7 +52,8 @@ PyRRef pyRemoteBuiltin(
 PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors);
+    std::vector<torch::Tensor>& tensors,
+    const bool isAsyncExecution);
 
 PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,

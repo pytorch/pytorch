@@ -27,7 +27,7 @@ class TORCH_API UnpickledPythonCall : public RpcCommandBase {
   Message toMessageImpl() && override;
   const py::object& pythonUdf() const;
 
-  inline bool isAsyncExecution() {
+  inline bool isAsyncExecution() const {
     return isAsyncExecution_;
   }
 

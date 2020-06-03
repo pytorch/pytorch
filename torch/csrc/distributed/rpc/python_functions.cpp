@@ -95,9 +95,10 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
-    const IValue& forkId) {
+    const IValue& forkId,
+    const bool isAsyncExecution) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
-      std::move(serializedPyObj), rrefId, forkId);
+      std::move(serializedPyObj), rrefId, forkId, isAsyncExecution);
 
   // set forceGradRecording to true as even if the args does not contain any
   // tensor, the return value might still contain tensors.
@@ -281,7 +282,8 @@ PyRRef pyRemoteBuiltin(
 PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors) {
+    std::vector<torch::Tensor>& tensors,
+    const bool isAsyncExecution) {
   DCHECK(!PyGILState_Check());
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
@@ -292,7 +294,8 @@ PyRRef pyRemotePythonUdf(
         dst,
         std::move(serializedPyObj),
         userRRef->rrefId().toIValue(),
-        userRRef->forkId().toIValue());
+        userRRef->forkId().toIValue(),
+        isAsyncExecution);
 
     userRRef->registerOwnerCreationFuture(fm);
 
@@ -309,7 +312,8 @@ PyRRef pyRemotePythonUdf(
         dst,
         std::move(serializedPyObj),
         ownerRRef->rrefId().toIValue(),
-        ownerRRef->rrefId().toIValue());
+        ownerRRef->rrefId().toIValue(),
+        isAsyncExecution);
 
     ownerRRef->registerOwnerCreationFuture(fm);
 
