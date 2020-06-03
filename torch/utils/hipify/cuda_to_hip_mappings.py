@@ -2890,7 +2890,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         (
             "cuOccupancyMaxActiveBlocksPerMultiprocessor",
             (
-                "hipOccupancyMaxActiveBlocksPerMultiprocessor",
+                "hipModuleOccupancyMaxActiveBlocksPerMultiprocessor",
                 CONV_OCCUPANCY,
                 API_DRIVER,
             ),
@@ -2898,7 +2898,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         (
             "cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
             (
-                "hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
+                "hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
                 CONV_OCCUPANCY,
                 API_DRIVER,
                 HIP_UNSUPPORTED,
@@ -2906,12 +2906,12 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         (
             "cuOccupancyMaxPotentialBlockSize",
-            ("hipOccupancyMaxPotentialBlockSize", CONV_OCCUPANCY, API_DRIVER),
+            ("hipModuleOccupancyMaxPotentialBlockSize", CONV_OCCUPANCY, API_DRIVER),
         ),
         (
             "cuOccupancyMaxPotentialBlockSizeWithFlags",
             (
-                "hipOccupancyMaxPotentialBlockSizeWithFlags",
+                "hipModuleOccupancyMaxPotentialBlockSizeWithFlags",
                 CONV_OCCUPANCY,
                 API_DRIVER,
                 HIP_UNSUPPORTED,
@@ -8010,6 +8010,9 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("curandGenerateUniform", ("hiprandGenerateUniform", API_CAFFE2)),
         ("curand_generator", ("hiprand_generator", API_CAFFE2)),
         ("CaffeCudaGetDevice", ("CaffeHipGetDevice", API_CAFFE2)),
+        # do not rename CUDA_KERNEL_ASSERT,
+        # the ordered dict guarantees this pattern will match first, before "CUDA"
+        ("CUDA_KERNEL_ASSERT", ("CUDA_KERNEL_ASSERT", API_CAFFE2)),
         ("CUDA", ("HIP", API_CAFFE2)),
         ("Cuda", ("Hip", API_CAFFE2)),
         ("cuda_", ("hip_", API_CAFFE2)),

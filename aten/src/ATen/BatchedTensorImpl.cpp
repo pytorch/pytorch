@@ -7,7 +7,7 @@ namespace at {
 
 BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   : TensorImpl(
-      c10::DispatchKeySet(DispatchKey::BatchedTensorKey),
+      c10::DispatchKeySet(DispatchKey::Batched),
       value.dtype(),
       value.device()
     )

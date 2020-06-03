@@ -16,10 +16,9 @@ void div_kernel_cuda(TensorIterator& iter) {
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_cuda", [&]() {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      auto inv_b = thrust_t(1.0) / thrust_t(iter.scalar_value<scalar_t>(2));
+      auto inv_b = scalar_t(1.0) / iter.scalar_value<scalar_t>(2);
       iter.remove_operand(2);
-      gpu_kernel(iter, [inv_b]GPU_LAMBDA(thrust_t a) -> thrust_t {
+      gpu_kernel(iter, [inv_b]GPU_LAMBDA(scalar_t a) -> scalar_t {
         return a * inv_b;
       });
     });

@@ -280,15 +280,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::data(Tensor(a) a) -> Tensor(a)",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, autograd::Variable(a).variable_data());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::is_sparse(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
