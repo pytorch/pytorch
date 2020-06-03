@@ -115,6 +115,21 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
+  void insert_stmt_before(Stmt* s, Stmt* before) {
+    if (s->get_parent()) {
+      throw malformed_input("Block append Stmt with existing parent", s);
+    }
+
+    auto pos = std::find(stmts_.begin(), stmts_.end(), before);
+    if (pos == stmts_.end()) {
+      throw malformed_input(
+          "Inserting after statement that is not in block", s);
+    }
+
+    stmts_.insert(pos, s);
+    set_parent(s, this);
+  }
+
   void insert_stmt_after(Stmt* s, Stmt* after) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
