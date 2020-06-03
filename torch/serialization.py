@@ -346,7 +346,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
     Note:
         The file extension does not matter while saving the object. The object can be saved using
         .pt, .zip or any other extension. (You can literally save the object as .py file and 
-        it will just work as intented). 
+        it will just work as intended). 
     
     .. warning::
         If you are using Python 2, :func:`torch.save` does NOT support :class:`StringIO.StringIO`
