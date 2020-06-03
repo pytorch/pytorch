@@ -404,7 +404,7 @@ class TestScriptPy3(JitTestCase):
             torch.jit.script(wrong_type)
 
     def test_subexpression_List_Future(self):
-        from typing import List
+
         @torch.jit.script
         def fn(x: List[torch.jit.Future[int]]):
             return x
@@ -413,7 +413,7 @@ class TestScriptPy3(JitTestCase):
         assert "Future" in repr(g)
 
     def test_subexpression_Tuple_int_int_Future(self):
-        from typing import Tuple
+
         @torch.jit.script
         def fn(x: Tuple[int, int, torch.jit.Future[int]]):
             return x
@@ -422,13 +422,20 @@ class TestScriptPy3(JitTestCase):
         assert "Future" in repr(g)
 
     def test_subexpression_Dict_int_Future(self):
-        from typing import Tuple
+
         @torch.jit.script
         def fn(x: Dict[int, torch.jit.Future[int]]):
             return x
 
         g = fn.graph
         assert "Future" in repr(g)
+
+    def test_subexpression_Optional(self):
+        assert False, "TODO implement me"
+
+    def test_unimported_type_resolution(self):
+        # verify fallback from the python resolver to the c++ resolver
+        assert False, "TODO implement me, maybe in a new file?"
 
     def test_parser_bug(self):
         def parser_bug(o: Optional[torch.Tensor]):
