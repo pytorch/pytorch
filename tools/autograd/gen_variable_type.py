@@ -249,9 +249,9 @@ OPTIONAL_TO_VAL = CodeTemplate("""\
 auto ${val} = ${arg}.value_or(${default});
 """)
 
-SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED = CodeTemplate("""\
+SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_DTYPE_CHANGE = CodeTemplate("""\
 c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
-if (!self.unsafeGetTensorImpl()->support_as_strided()) {
+if (!self.unsafeGetTensorImpl()->support_as_strided() || ${is_view_with_dtype_change}) {
   ${replay_view_func}
 }
 """)
@@ -905,7 +905,11 @@ def emit_body(declaration):
         replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
             input_base=input_base,
             replay_view_call=replay_view_call)
-        return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED.substitute(
+
+        is_view_with_dtype_change = 'true' if name in ['view_as_real'] else 'false'
+
+        return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_DTYPE_CHANGE.substitute(
+            is_view_with_dtype_change=is_view_with_dtype_change,
             replay_view_func=replay_view_func)
 
     def wrap_output(return_values, var):

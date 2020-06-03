@@ -27,4 +27,20 @@ Tensor view_as_real(const Tensor& self) {
   return at::empty({0}, self.options().dtype(float_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
 }
 
+// expects as input a float or double tensor (with last dimension of size 2)
+// and returns back a tensor with corresponding complex dtype
+Tensor view_as_complex(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.scalar_type() == kFloat || self.scalar_type() == kDouble);
+
+  auto new_sizes = self.sizes().vec();
+  TORCH_INTERNAL_ASSERT(new_sizes[self.dim()-1] == 2);
+  new_sizes.pop_back();
+
+  auto new_strides = self.strides().vec();
+  new_strides.pop_back();
+
+  const auto complex_type = c10::toComplexType(self.scalar_type());
+  return at::empty({0}, self.options().dtype(complex_type)).set_(self.storage(), self.storage_offset(), new_sizes, new_strides);
+}
+
 }} // namespace at::native

@@ -120,10 +120,18 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
       auto fn = view_func.value();
       if (diff_view_meta->has_view_fn()) {
         auto prev_fn = diff_view_meta->view_fn();
-        view_func = [=](const at::Tensor& root_base) {
-          auto temp = prev_fn(root_base);
-          return fn(temp);
-        };
+        if (prev_fn == nullptr) {
+          view_func = [=](const at::Tensor& root_base) {
+            // auto temp = as_strided(root_base, ...);
+            auto temp = fn(root_base);
+            return fn(temp);
+          };
+        } else {
+          view_func = [=](const at::Tensor& root_base) {
+            auto temp = prev_fn(root_base);
+            return fn(temp);
+          };
+        }
       } else {
         // When base_var is a view but doesn't carry a view_fn in DifferentiableViewMeta, it's
         // a view that doesn't support inplace update, e.g. unbind.
@@ -140,11 +148,13 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
         };
       }
     }
+    // if the new tensor doesn't have a view_func but it's parent has one
     else if(diff_view_meta->has_view_fn()) {
-      auto prev_fn = diff_view_meta->view_fn();
+      auto prev_view_fn = diff_view_meta->view_fn();
       view_func = [=](const at::Tensor& root_base) {
-        auto temp = prev_fn(root_base);
-        return as_strided(temp, xxxx);
+        auto temp = prev_view_fn(root_base);
+        return prev_view_fn(temp);
+        // return as_strided(temp, temp.size(), temp.storage().strides);
       };
     }
     base_var = base_var._base();

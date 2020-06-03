@@ -320,6 +320,17 @@ static inline ScalarType toValueType(ScalarType t) {
   }
 }
 
+static inline ScalarType toComplexType(ScalarType t) {
+  switch (t) {
+    case ScalarType::Float:
+      return ScalarType::ComplexFloat;
+    case ScalarType::Double:
+      return ScalarType::ComplexDouble;
+    default:
+      return t;
+  }
+}
+
 // see tensor_attributes.rst for detailed explanation and examples
 // of casting rules.
 static inline bool canCast(const ScalarType from, const ScalarType to) {

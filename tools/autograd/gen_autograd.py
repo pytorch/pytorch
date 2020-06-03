@@ -65,6 +65,8 @@ VIEW_FUNCTIONS = {
     'sparse_coo_tensor_with_dims_and_tensors': 'values',
 }
 
+# add view_as_real
+
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
