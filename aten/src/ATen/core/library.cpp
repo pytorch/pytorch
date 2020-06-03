@@ -74,8 +74,6 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
     }
   }
 
-// TODO: Error if an operator is def'ed multiple times.  Right now we just
-// merge everything
 
 #define DEF_PRELUDE "def(\"", schema.operator_name(), "\"): "
 Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name) & {

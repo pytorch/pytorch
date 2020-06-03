@@ -155,10 +155,7 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
 void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug) {
   TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " (", debug, ") vs ", op.schema(), " (", op.debug(), ")");
   if (schema.isDefaultAliasAnalysisKind()) {
-    // [BACKWARDS COMPAT] If the *new* schema is the default alias analysis
-    // kind, for BC, we will accept it.  If we don't accept it, most extensions
-    // that override existing operators will stop working (as they generally did
-    // not specify alias information).
+    TORCH_CHECK(false, toString(op.operator_name()), " can not be defined more than once");
   } else if (op.schema().isDefaultAliasAnalysisKind()) {
     // [BACKWARDS COMPAT] If you POST-FACTO specify a non-default alias analysis
     // kind after we already have a schema for a function, bong it in for BC
