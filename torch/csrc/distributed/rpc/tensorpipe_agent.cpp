@@ -7,6 +7,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+
 // An environment variable along the lines of GLOO_ and NCCL_SOCKET_IFNAME that
 // allows the user to specify a device to bind to, instead of binding to the
 // address that the hostname resolves to.
@@ -21,6 +23,31 @@ const std::string kNumIdleThreads = "agent.num_idle_threads";
 const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
+
+std::string guessAddress(tensorpipe::transport::uv::Context& uvContext) {
+  tensorpipe::Error error;
+  std::string uvAddress;
+  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
+  if (ifnameEnv != nullptr) {
+    std::tie(error, uvAddress) = uvContext.lookupAddrForIface(ifnameEnv);
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for interface "
+                   << ifnameEnv << " (" << error.what() << "), defaulting to "
+                   << kDefaultUvAddress;
+      uvAddress = kDefaultUvAddress;
+    }
+  } else {
+    std::tie(error, uvAddress) = uvContext.lookupAddrForHostname();
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
+                   << error.what() << "), defaulting to " << kDefaultUvAddress;
+      uvAddress = kDefaultUvAddress;
+    }
+  }
+  return uvAddress;
+}
+
+} // namespace
 
 //////////////////////////  MetricsTracker  /////////////////////////////////
 
@@ -103,25 +130,7 @@ TensorPipeAgent::~TensorPipeAgent() {
 void TensorPipeAgent::startImpl() {
   auto uvContext = std::make_shared<tensorpipe::transport::uv::Context>();
 
-  tensorpipe::Error error;
-  std::string uvAddress;
-  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
-  if (ifnameEnv != nullptr) {
-    std::tie(error, uvAddress) = uvContext->lookupAddrForIface(ifnameEnv);
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for interface "
-                   << ifnameEnv << " (" << error.what() << "), defaulting to "
-                   << kDefaultUvAddress;
-      uvAddress = kDefaultUvAddress;
-    }
-  } else {
-    std::tie(error, uvAddress) = uvContext->lookupAddrForHostname();
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
-                   << error.what() << "), defaulting to " << kDefaultUvAddress;
-      uvAddress = kDefaultUvAddress;
-    }
-  }
+  std::string uvAddress = guessAddress(*uvContext);
 
   context_->registerTransport(1, "tcp", std::move(uvContext));
 #ifdef TP_ENABLE_SHM
@@ -382,6 +391,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   requestMessage.setId(nextMessageID_++);
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
+  lock.unlock();
+
   futureResponseMessage->futMsg.addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
         this->threadPool_.inThreadPool(),
@@ -404,13 +415,13 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
     auto expirationTime = computeRpcMessageExpiryTime(timeout);
 
     // Add the Future to the right vector in the timeoutMap_
-    auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-    timeoutFuturesVector.emplace_back(futureResponseMessage);
+    {
+      std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+      auto& timeoutFuturesVector = timeoutMap_[expirationTime];
+      timeoutFuturesVector.emplace_back(futureResponseMessage);
+    }
     timeoutThreadCV_.notify_one();
   }
-
-  // Don't need to hold lock while calling tensorpipe API.
-  lock.unlock();
 
   pipeWrite(
       clientPipe.pipe_,
