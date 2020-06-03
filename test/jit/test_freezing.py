@@ -323,6 +323,7 @@ class TestFreezing(JitTestCase):
         output = m.forward(input)
         output_s = ms.forward(input)
         output_f = mf.forward(input)
+        print(output, " ", output_s, " ", output_f)
         # Should be equal
         self.assertNotEqual(output, output_s)
         self.assertEqual(output_s, output_f)
