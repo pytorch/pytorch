@@ -36,10 +36,15 @@ def createResolutionCallbackFromEnv(lookup_base):
             base = qualified_name[:first]
             base_mod = env(base, module)
 
+            # intentional bailout, e.g. base == "Tuple" but wasn't imported in Module
+            if not base_mod:
+                return None
+
             # assume only subexp (between []) could contain ','
             # but allow each element of the list to be any type hence recursive env()
             subexp = qualified_name[first + 1: last]
-            if ',' in subexp:
+            if ',' in subexp and (subexp.find('[') == -1 or
+                                  subexp.find('[') > subexp.find(',')):
                 no_whitespace = "".join(subexp.split())
                 parts = no_whitespace.split(',')
                 types = [env(p, module) for p in parts]
