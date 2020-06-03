@@ -2710,6 +2710,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, batch1, batch2, alpha, beta))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_linspace(self):
         class LinSpace(torch.nn.Module):
             def forward(self, x, y):
