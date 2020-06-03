@@ -343,6 +343,84 @@ def fail_on_fut(fut):
     pass
 
 
+@rpc.functions.async_execution
+def async_raise_func():
+    raise RuntimeError("Expected error")
+
+
+@rpc.functions.async_execution
+def async_wrong_type():
+    return torch.zeros(2, 2)
+
+
+@rpc.functions.async_execution
+def async_add(to, x, y):
+    return rpc.rpc_async(to, torch.add, args=(x, y))
+
+
+@rpc.functions.async_execution
+def async_add_with_future_ctor(to, x, y, z):
+    fut = torch.futures.Future()
+    rpc.rpc_async(to, torch.add, args=(x, y)).then(
+        lambda fut1: fut.set_result(fut1.wait() + z)
+    ).wait()
+    return fut
+
+
+@rpc.functions.async_execution
+def async_add_chained(to, x, y, z):
+    return rpc.rpc_async(to, torch.add, args=(x, y)).then(
+        lambda fut: fut.wait() + z
+    )
+
+
+@rpc.functions.async_execution
+def async_add_chained_multi(to, x, num, step):
+    fut = rpc.rpc_async(to, torch.add, args=(x, 0))
+    for _ in range(num):
+        fut = fut.then(lambda fut: fut.wait() + step)
+    return fut
+
+
+@rpc.functions.async_execution
+def async_add_nested(to, x, y, z):
+    return rpc.rpc_async(to, async_add, args=(to, x, y)).then(
+        lambda fut: fut.wait() + z
+    )
+
+
+@rpc.functions.async_execution
+def async_add_multi_fanout(to, x, num, step):
+    futs = []
+    for i in range(num):
+        if i == 0:
+            futs.append(rpc.rpc_async(to, torch.add, args=(x, step)))
+        else:
+            futs.append(rpc.rpc_async(to, torch.add, args=(0, step)))
+
+    # TODO: use torch.futures.collect_all
+    import threading
+    lock = threading.Lock()
+    state = {"cnt": 0, "ret": torch.zeros_like(x)}
+    ret_future = torch.futures.Future()
+
+    def inc_and_set(fut):
+        with lock:
+            state["cnt"] += 1
+            state["ret"] += fut.wait()
+            if state["cnt"] >= len(futs):
+                ret_future.set_result(state["ret"])
+
+    for fut in futs:
+        fut.then(inc_and_set)
+
+    return ret_future
+
+
+def return_future():
+    return torch.futures.Future()
+
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -2700,6 +2778,88 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_future_nested_callback(self):
         self._test_future_cb(add_use_future_nested_cb)
+
+    @dist_init
+    def test_async_function_raise(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected error"):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                async_raise_func
+            )
+
+    @dist_init
+    def test_async_function_wrong_return_type(self):
+        errMsg = (
+            "Functions decorated with @rpc\\.async_function must return a "
+            "torch\\.futures\\.Future object,"
+        )
+        with self.assertRaisesRegex(RuntimeError, errMsg):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                async_wrong_type
+            )
+
+    @dist_init
+    def test_async_function_simple(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(dst1, async_add, args=(dst2, torch.ones(2, 2), 1))
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+    def _test_async_function(self, fn):
+        if self.rank == 0:
+            dst1 = worker_name((self.rank + 1) % self.world_size)
+            dst2 = worker_name((self.rank + 2) % self.world_size)
+
+            ret = rpc.rpc_sync(dst1, fn, args=(dst2, torch.ones(2, 2), 1, 2))
+
+            self.assertEqual(ret, torch.ones(2, 2) + 3)
+
+    @dist_init
+    def test_async_function_with_future_ctor(self):
+        self._test_async_function(async_add_with_future_ctor)
+
+    @dist_init
+    def test_async_function_chained(self):
+        self._test_async_function(async_add_chained)
+
+    @dist_init
+    def test_async_function_nested(self):
+        self._test_async_function(async_add_nested)
+
+    def _test_async_function_multi(self, fn):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        num = 20
+        step = 3
+        ret = rpc.rpc_sync(
+            dst1,
+            fn,
+            args=(dst2, torch.ones(2, 2), num, step)
+        )
+
+        self.assertEqual(ret, torch.ones(2, 2) + num * step)
+
+    @dist_init
+    def test_async_function_multi_chained(self):
+        self._test_async_function_multi(async_add_chained_multi)
+
+    @dist_init
+    def test_async_function_multi_fanout(self):
+        self._test_async_function_multi(async_add_multi_fanout)
+
+    @dist_init
+    def test_return_future(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Can not pickle torch.futures.Future"
+        ):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                return_future,
+            )
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
