@@ -98,17 +98,7 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
 
 
 class DistOptimizerTest(RpcAgentTestFixture):
-    def _skip_if_tensorpipe_agent(old_func):  # noqa: B902
-        def decorator(self):
-            return unittest.skipIf(
-                self.rpc_backend == rpc.backend_registry.BackendType.TENSORPIPE,
-                "This test is not yet supported in the Tensorpipe Agent"
-            )(old_func)
-
-        return decorator
-
     @dist_init()
-    @_skip_if_tensorpipe_agent
     def test_dist_optim_exception(self):
         # distributed version
         owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
@@ -137,7 +127,6 @@ class DistOptimizerTest(RpcAgentTestFixture):
                 dist_optim.step(context_id)
 
     @dist_init()
-    @_skip_if_tensorpipe_agent
     def test_dist_optim_exception_on_constructor(self):
         # distributed version
         owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
