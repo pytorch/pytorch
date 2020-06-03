@@ -1,5 +1,4 @@
 import concurrent.futures
-import os
 import sys
 import time
 import unittest
@@ -2364,6 +2363,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
     @dist_init
+    @_skip_if_tensorpipe_agent
     def test_cuda(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         t1 = torch.rand(3, 3).cuda(0)
@@ -2404,8 +2404,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_user_rrefs_confirmed(self):
-        print(os.getpid())
-        # time.sleep(20)
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
         ret = rpc.rpc_sync(
