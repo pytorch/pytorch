@@ -5901,7 +5901,8 @@ Flip array in the left/right direction, returning a new tensor.
 Flip the entries in each row in the left/right direction. 
 Columns are preserved, but appear in a different order than before.
 
-Notes: Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
+Note:
+    Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
 
 Args:
     input (Tensor): Must be at least 2-dimensional.
@@ -5926,7 +5927,8 @@ Flip array in the up/down direction, returning a new tensor.
 Flip the entries in each column in the up/down direction.
 Rows are preserved, but appear in a different order than before.
 
-Notes: Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
+Note:
+    Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
 
 Args:
     input (Tensor): Must be at least 1-dimensional.
