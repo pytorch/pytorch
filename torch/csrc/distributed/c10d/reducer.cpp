@@ -254,7 +254,7 @@ void Reducer::verify_replica0_across_processes() {
                   " appears not to match sizes of the same param in process 0.");
     }
     for (const auto& str : t.strides()) {
-      TORCH_CHECK(str == control_accessor[i++](),
+      TORCH_CHECK(str == control_accessor[i++],
                   "replicas[0][", p, "] in this process"
                   " with strides ", t.strides(),
                   " appears not to match strides of the same param in process 0.");
