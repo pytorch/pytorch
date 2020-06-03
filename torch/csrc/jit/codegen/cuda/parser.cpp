@@ -31,9 +31,33 @@ typedef Expr* CgOp;
 
 typedef void (
     *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue>&);
+typedef bool (
+    *MergeQueryFuncPtr)(const Node* const);
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
+  class RegistrationEntry {
+   public:
+    RegistrationEntry(ParseFuncPtr parse_f, MergeQueryFuncPtr merge_f = nullptr)
+     : parse_f_(parse_f), merge_f_(merge_f) {}
+
+    void parse(const Node* const node, std::unordered_map<size_t, CgValue>& values) {
+      parse_f_(node, values);
+    }
+
+    bool is_compatible(const Node* const node) {
+      return true;
+      if (merge_f_ == nullptr) {
+        return true;
+      }
+      return merge_f_(node);
+    }
+
+   private:
+    ParseFuncPtr parse_f_;
+    MergeQueryFuncPtr merge_f_;
+  };
+
  private:
   static const int nthreads = 128;
   static const int unroll_factor = 4;
@@ -160,7 +184,7 @@ class IrParser {
     }
     for (auto& pair_op_func : iter->second) {
       if (node->matches(pair_op_func.first->schema())) {
-        return true;
+        return pair_op_func.second.is_compatible(node);
       }
     }
     return false;
@@ -168,9 +192,10 @@ class IrParser {
 
   static void registerParseRule(
       std::shared_ptr<Operator>& op,
-      ParseFuncPtr fn) {
+      ParseFuncPtr parse_fn,
+      MergeQueryFuncPtr merge_query_fn = nullptr) {
     jit_operator_registry_[Symbol::fromQualString(op->schema().name())]
-        .emplace_back(std::make_pair(op, fn));
+        .emplace_back(std::piecewise_construct, std::forward_as_tuple(op), std::forward_as_tuple(parse_fn, merge_query_fn));
   }
 
  private:
@@ -475,7 +500,7 @@ class IrParser {
           node->kind().toDisplayString());
       for (auto& pair_op_func : iter->second) {
         if (node->matches(pair_op_func.first->schema())) {
-          pair_op_func.second(node, value_map_);
+          pair_op_func.second.parse(node, value_map_);
           return;
         }
       }
@@ -543,14 +568,14 @@ class IrParser {
   // parsing rule registry.
   static std::unordered_map<
       Symbol,
-      std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>>
+      std::vector<std::pair<std::shared_ptr<Operator>, RegistrationEntry>>>
       jit_operator_registry_;
   static bool init_registry_;
 };
 
 std::unordered_map<
     Symbol,
-    std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>>
+    std::vector<std::pair<std::shared_ptr<Operator>, IrParser::RegistrationEntry>>>
     IrParser::jit_operator_registry_;
 bool IrParser::init_registry_ = true;
 
