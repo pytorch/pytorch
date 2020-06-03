@@ -534,14 +534,6 @@ PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_view_as_real(THPVariable* self, void *unused)
-{
-  HANDLE_TH_ERRORS
-  auto& self_ = self->cdata;
-  return THPVariable_Wrap(at::view_as_real(self_));
-  END_HANDLE_TH_ERRORS
-}
-
 // properties are registered here because we are currently only able to bind them
 // manually. TODO: make declarable in native_functions
 static struct PyGetSetDef THPVariable_properties[] = {
@@ -573,7 +565,6 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
   {"real", (getter)THPVariable_get_real, nullptr, nullptr, nullptr},
   {"imag", (getter)THPVariable_get_imag, nullptr, nullptr, nullptr},
-  {"view_as_real", (getter)THPVariable_view_as_real, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
