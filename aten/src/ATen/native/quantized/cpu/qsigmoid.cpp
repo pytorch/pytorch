@@ -28,7 +28,7 @@ Tensor qnnpack_sigmoid(Tensor input) {
 
   initQNNPACK();
 
-  Tensor input_contig = input.contiguous();
+  Tensor input_contig = input.contiguous(input.suggest_memory_format());
   size_t num_elems = 1;
   for (int i = 1; i < input_contig.ndimension(); ++i) {
     num_elems *= input_contig.size(i);
