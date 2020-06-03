@@ -2280,6 +2280,7 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
 
+    @override_qengines
     def test_dynamic_shared_weights(self):
         class myMod(torch.nn.Module):
             def __init__(self, weight):
