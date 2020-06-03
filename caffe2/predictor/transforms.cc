@@ -80,7 +80,7 @@ bool CanRenameForwards(
         }
         VLOG(7) << "CanRenameForwards will make " << op.DebugString()
                 << " in-place, but this is in the okay-types-to-inplace "
-                << "whitelist";
+                << "allowlist";
       }
       // This op won't be inplaced (or it's okay if it is) but we still have to
       // watch out for future uses of "from"
@@ -140,7 +140,7 @@ bool CanRenameBackwards(
         }
         VLOG(7) << "CanRenameBackwards will in-place the producer of " << from
                 << " but this is okay because it's in our in-placeable "
-                << "whitelist";
+                << "allowlist";
       }
       // This op won't be in-placed (or it will but it's still okay), but we
       // have to check the forwards logic too

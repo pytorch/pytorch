@@ -355,13 +355,13 @@ class TestQuantizedOps(TestCase):
                 # In the FP kernel, mean and variance are calculated in floating point.
                 # In the quantized kernel, they are calculated in integer arithmetic.
                 # Because of this, the numerics do not always match exactly which is
-                # expected and acceptable. We do two things to whitelist this failure
+                # expected and acceptable. We do two things to allowlist this failure
                 # in this test:
                 # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                # 2. allowlist a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.
@@ -1697,13 +1697,13 @@ class TestQuantizedOps(TestCase):
                 # In the int8 and uint8 versions of the quantized kernel, they are
                 # calculated in integer arithmetic (which is exact).
                 # Because of this, the numerics do not always match exactly which is
-                # expected and acceptable. We do the following to whitelist this failure
+                # expected and acceptable. We do the following to allowlist this failure
                 # in this test:
                 # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                # 2. allowlist a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.
@@ -1779,13 +1779,13 @@ class TestQuantizedOps(TestCase):
                 # In the int8 and uint8 versions of the quantized kernel, they are
                 # calculated in integer arithmetic (which is exact).
                 # Because of this, the numerics do not always match exactly which is
-                # expected and acceptable. We do the following to whitelist this failure
+                # expected and acceptable. We do the following to allowlist this failure
                 # in this test:
                 # 1. do not use Hypothesis to generate the input tensor.  Hypothesis
                 #    favors homogeneous inputs in its search strategies which isn't
                 #    representative of the inputs we care about, and tends to maximize
                 #    this particular numerics difference.
-                # 2. whitelist a small % of off by Y_scale errors.  Even when the
+                # 2. allowlist a small % of off by Y_scale errors.  Even when the
                 #    variance of the input is high, there can be off by one errors
                 #    in the result if the input value happens to fall exactly on
                 #    the bin boundary of the output scale.

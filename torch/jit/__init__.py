@@ -1963,7 +1963,7 @@ if _enabled:
         return inspect.getmembers(cls, predicate=lambda x: inspect.isfunction(x) or inspect.ismethod(x))
 
 
-    _compiled_methods_whitelist = {
+    _compiled_methods_allowlist = {
         'forward', 'register_buffer', 'register_parameter', 'add_module',
         '_apply', 'apply', 'cuda', 'cpu', 'to', 'type', 'float', 'double', 'half',
         'state_dict', '_save_to_state_dict', 'load_state_dict',
@@ -1982,7 +1982,7 @@ if _enabled:
     for name, method in _get_methods(torch.nn.Module):
         if name.startswith('__'):
             continue
-        if name not in RecursiveScriptModule.__dict__ and name not in _compiled_methods_whitelist:
+        if name not in RecursiveScriptModule.__dict__ and name not in _compiled_methods_allowlist:
             setattr(RecursiveScriptModule, method.__name__, _make_fail(name))
 
 else:

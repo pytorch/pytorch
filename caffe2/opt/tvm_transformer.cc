@@ -139,7 +139,7 @@ void TvmTransformer::transform(
     NetDef* pred_net,
     const std::vector<std::string>& weight_names,
     const ShapeInfoMap& input_shape_hints,
-    const std::unordered_set<int>& blacklisted_ops) {
+    const std::unordered_set<int>& denylisted_ops) {
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
 
@@ -174,7 +174,7 @@ void TvmTransformer::transform(
 
   // We are ready to transform the net
   NetDef net_opt =
-      applyTvmTransform(pred_net, weights, blacklisted_ops, shape_hints);
+      applyTvmTransform(pred_net, weights, denylisted_ops, shape_hints);
 
   // Copy the properties
   for (const auto& arg : args) {
@@ -221,12 +221,12 @@ const std::unordered_set<std::string>& TvmTransformer::getSupportedOps() {
 
 bool TvmTransformer::canConvertFullGraph(
     const caffe2::NetDef& net,
-    const std::unordered_set<int>& blacklisted_ops) {
+    const std::unordered_set<int>& denylisted_ops) {
   const auto& supported_ops = getSupportedOps();
   for (const auto& op : net.op()) {
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-    if (blacklisted_ops.count(pos) || supported_ops.count(op.type()) == 0) {
+    if (denylisted_ops.count(pos) || supported_ops.count(op.type()) == 0) {
       return false;
     }
   }
@@ -236,18 +236,18 @@ bool TvmTransformer::canConvertFullGraph(
 NetDef TvmTransformer::applyTvmTransform(
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blacklisted_ops,
+    const std::unordered_set<int>& denylisted_ops,
     const ShapeInfoMap& shape_hints) {
   const auto profiling_based_jit = opts_.profiling_based_jit;
-  auto tvm_supports = [&blacklisted_ops, &shape_hints, &profiling_based_jit](
+  auto tvm_supports = [&denylisted_ops, &shape_hints, &profiling_based_jit](
                           const caffe2::OperatorDef& op) {
     const auto& supported_ops = getSupportedOps();
     try {
-      // If the op position is black listed, return false
+      // If the op position is denylisted, return false
       int pos =
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-      if (blacklisted_ops.count(pos)) {
-        LOG(INFO) << "Blacklisting op" << op.type() << " at position " << pos;
+      if (denylisted_ops.count(pos)) {
+        LOG(INFO) << "Denylisting op" << op.type() << " at position " << pos;
         return false;
       }
 
@@ -287,7 +287,7 @@ void tvmTransform(
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
     const ShapeInfoMap& shape_hints,
-    const std::unordered_set<int>& blacklisted_ops,
+    const std::unordered_set<int>& denylisted_ops,
     int32_t max_batch_size,
     int32_t max_seq_size,
     int32_t num_embeddings,
@@ -308,7 +308,7 @@ void tvmTransform(
   // Clean up the external input/output of the net
   cleanUpPredictNet(net, input_names, output_names, weight_names);
 
-  ts.transform(ws, net, weight_names, shape_hints, blacklisted_ops);
+  ts.transform(ws, net, weight_names, shape_hints, denylisted_ops);
 }
 
 void cleanUpPredictNet(

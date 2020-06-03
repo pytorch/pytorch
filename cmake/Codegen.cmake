@@ -170,16 +170,16 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
     execute_process(
       COMMAND
-      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_whitelist.py
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
       --op-dependency "${OP_DEPENDENCY}"
       --root-ops "${SELECTED_OP_LIST}"
-      OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
+      OUTPUT_VARIABLE OP_REGISTRATION_ALLOWLIST
     )
-    separate_arguments(OP_REGISTRATION_WHITELIST)
-    message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+    separate_arguments(OP_REGISTRATION_ALLOWLIST)
+    message(STATUS "Custom build with op registration allowlist: ${OP_REGISTRATION_ALLOWLIST}")
     list(APPEND CUSTOM_BUILD_FLAGS
       --force_schema_registration
-      --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
+      --op_registration_whitelist ${OP_REGISTRATION_ALLOWLIST})
   endif()
   if(USE_VULKAN)
     set(GEN_VULKAN_FLAGS --vulkan)

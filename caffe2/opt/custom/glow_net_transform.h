@@ -17,7 +17,7 @@ namespace glow {
 
 // Onnxifi transformation on the net and workspace.  We also
 // needed the input data/shape to populate the shape. In addition, we take a \p
-// blacklist to control and mask what ops we want to consider in onnxifi
+// denylist to control and mask what ops we want to consider in onnxifi
 // process. We can also set whether to use ONNX proto or C2 proto through
 // ONNXIFI interface.
 void onnxifi(
@@ -26,7 +26,7 @@ void onnxifi(
     const std::vector<std::string>& input_names,
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
-    const std::unordered_set<int>& blacklist,
+    const std::unordered_set<int>& denylist,
     const ShapeInfoMap& shape_hints,
     bool use_onnx,
     size_t max_batch_size = 0,

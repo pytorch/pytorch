@@ -11,7 +11,7 @@ namespace caffe2 {
 /**
  * Common Subexpression Elimination
  *
- * This transforms looks for specific operators (denoted by whitelisted_ops_),
+ * This transforms looks for specific operators (denoted by allowlisted_ops_),
  * and removes unnecessary repetition of that operator.
  *
  * Consider some operator of X, that reads from blob b_ written to by W.
@@ -43,10 +43,10 @@ class CAFFE2_API CommonSubexpressionEliminationTransform : public Transform {
       override;
 
  private:
-  bool IsWhitelisted(string op_type) {
-    return whitelisted_ops_.count(op_type);
+  bool IsAllowlisted(string op_type) {
+    return allowlisted_ops_.count(op_type);
   }
-  std::set<string> whitelisted_ops_ = {"LearningRate", "FC"};
+  std::set<string> allowlisted_ops_ = {"LearningRate", "FC"};
 };
 
 } // namespace caffe2

@@ -579,8 +579,8 @@ endif()
 # Propagate the host flags to the host compiler via -Xcompiler
 option(CUDA_PROPAGATE_HOST_FLAGS "Propagate C/CXX_FLAGS and friends to the host compiler via -Xcompile" ON)
 
-# Blacklisted flags to prevent propagation
-set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST  "" CACHE STRING "Blacklisted flags to prevent propagation")
+# Denylisted flags to prevent propagation
+set(CUDA_PROPAGATE_HOST_FLAGS_DENYLIST  "" CACHE STRING "Denylisted flags to prevent propagation")
 
 # Enable CUDA_SEPARABLE_COMPILATION
 option(CUDA_SEPARABLE_COMPILATION "Compile CUDA objects with separable compilation enabled.  Requires CUDA 5.0+" OFF)
@@ -595,7 +595,7 @@ mark_as_advanced(
   CUDA_HOST_COMPILATION_CPP
   CUDA_NVCC_FLAGS
   CUDA_PROPAGATE_HOST_FLAGS
-  CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST
+  CUDA_PROPAGATE_HOST_FLAGS_DENYLIST
   CUDA_BUILD_CUBIN
   CUDA_BUILD_EMULATION
   CUDA_VERBOSE_BUILD
@@ -1420,10 +1420,10 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
     set(CUDA_HOST_SHARED_FLAGS)
   endif()
 
-  macro(_filter_blacklisted_host_flags CUDA_FLAGS)
+  macro(_filter_denylisted_host_flags CUDA_FLAGS)
     string(REGEX REPLACE "[ \t]+" ";" ${CUDA_FLAGS} "${${CUDA_FLAGS}}")
-    foreach(_blacklisted ${CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST})
-      list(REMOVE_ITEM ${CUDA_FLAGS} "${_blacklisted}")
+    foreach(_denylisted ${CUDA_PROPAGATE_HOST_FLAGS_DENYLIST})
+      list(REMOVE_ITEM ${CUDA_FLAGS} "${_denylisted}")
     endforeach()
     string(REPLACE ";" " " ${CUDA_FLAGS} "${${CUDA_FLAGS}}")
   endmacro()
@@ -1432,7 +1432,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
   # always need to set the SHARED_FLAGS, though.
   if(CUDA_PROPAGATE_HOST_FLAGS)
     set(_cuda_C_FLAGS "${CMAKE_${CUDA_C_OR_CXX}_FLAGS}")
-    _filter_blacklisted_host_flags(_cuda_C_FLAGS)
+    _filter_denylisted_host_flags(_cuda_C_FLAGS)
     set(_cuda_host_flags "set(CMAKE_HOST_FLAGS ${_cuda_C_FLAGS} ${CUDA_HOST_SHARED_FLAGS})")
   else()
     set(_cuda_host_flags "set(CMAKE_HOST_FLAGS ${CUDA_HOST_SHARED_FLAGS})")
@@ -1458,7 +1458,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         endif()
       endif()
       set(_cuda_C_FLAGS "${CMAKE_${CUDA_C_OR_CXX}_FLAGS_${config_upper}}")
-      _filter_blacklisted_host_flags(_cuda_C_FLAGS)
+      _filter_denylisted_host_flags(_cuda_C_FLAGS)
       if(_cuda_fix_g3)
         string(REPLACE "-g3" "-g" _cuda_C_FLAGS "${_cuda_C_FLAGS}")
       endif()

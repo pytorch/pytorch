@@ -61,7 +61,7 @@ def get_all_examples():
     This function grabs (hopefully all) examples from the torch documentation
     strings and puts them in one nonsensical module returned as a string.
     """
-    blacklist = {
+    denylist = {
         "_np",
     }
     allexamples = ""
@@ -85,7 +85,7 @@ def get_all_examples():
     for fname in dir(torch):
         fn = getattr(torch, fname)
         docstr = inspect.getdoc(fn)
-        if docstr and fname not in blacklist:
+        if docstr and fname not in denylist:
             e = get_examples_from_docstring(docstr)
             if e:
                 example_file_lines.append("\n\ndef example_torch_{}():".format(fname))
@@ -94,7 +94,7 @@ def get_all_examples():
     for fname in dir(torch.Tensor):
         fn = getattr(torch.Tensor, fname)
         docstr = inspect.getdoc(fn)
-        if docstr and fname not in blacklist:
+        if docstr and fname not in denylist:
             e = get_examples_from_docstring(docstr)
             if e:
                 example_file_lines.append("\n\ndef example_torch_tensor_{}():".format(fname))

@@ -1,11 +1,11 @@
 """
-This util is invoked from cmake to produce the op registration whitelist param
+This util is invoked from cmake to produce the op registration allowlist param
 for `ATen/gen.py` for custom mobile build.
 For custom build with dynamic dispatch, it takes the op dependency graph of ATen
 and the list of root ops, and outputs all transitive dependencies of the root
-ops as the whitelist.
+ops as the allowlist.
 For custom build with static dispatch, the op dependency graph will be omitted,
-and it will directly output root ops as the whitelist.
+and it will directly output root ops as the allowlist.
 """
 
 import argparse

@@ -53,7 +53,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       NetDef* pred_net,
       const std::vector<std::string>& weight_names,
       const ShapeInfoMap& shape_hints,
-      const std::unordered_set<int>& blacklisted_ops) override;
+      const std::unordered_set<int>& denylisted_ops) override;
 
  private:
   // Since we create new tensors during the conversion process, we actually need
@@ -86,7 +86,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   NetDef TransformViaC2(
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
-      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_set<int>& denylisted_ops,
       const ShapeInfoMap& shape_hints);
 
   // Transform by passing ONNX proto to backend
@@ -94,7 +94,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       Workspace* ws,
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
-      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_set<int>& denylisted_ops,
       ShapeInfoMap* shape_hints);
 
   // Query whether an operator is supported by passing C2 protobuf
@@ -102,14 +102,14 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const caffe2::OperatorDef& op,
       const ShapeInfoMap& shape_hints,
       const std::unordered_set<std::string>& weights,
-      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_set<int>& denylisted_ops,
       onnxBackendID backend_id) const;
 
   // Query whether an operator is supported by passing ONNX protobuf
   bool supportOpOnnx(
       const caffe2::OperatorDef& op,
       onnx::OnnxExporter* exporter,
-      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_set<int>& denylisted_ops,
       onnxBackendID backend_id) const;
 
   // Tie the output of Gather to the scalar weight input of the
@@ -120,20 +120,20 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const NetDef& net,
       const ShapeInfoMap& shape_hints,
       const std::unordered_set<std::string>& weights,
-      std::unordered_set<int>* blacklisted_ops) const;
+      std::unordered_set<int>* denylisted_ops) const;
 
-  // For net with partitioning info, blacklist ops that are supposed to run on
+  // For net with partitioning info, denylist ops that are supposed to run on
   // CPU, whose partition info will contain empty device_id list.
-  void blacklistCpuPartition(
+  void denylistCpuPartition(
       const NetDef& net,
-      std::unordered_set<int>* blacklisted_ops) const;
+      std::unordered_set<int>* denylisted_ops) const;
 
   // Rule based filtering
   void applyFilteringRules(
       const NetDef& net,
       const ShapeInfoMap& shape_hints,
       const std::unordered_set<std::string>& weights,
-      std::unordered_set<int>* blacklisted_ops) const;
+      std::unordered_set<int>* denylisted_ops) const;
 
   // Determine backend id
   void getBackendId();
