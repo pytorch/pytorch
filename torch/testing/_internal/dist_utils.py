@@ -73,6 +73,14 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
         ):
             _build_faulty_backend_options(self, faulty_messages, messages_to_delay)
 
+        if (
+            rpc.backend_registry.backend_registered("TENSORPIPE")
+            and self.rpc_backend
+            == rpc.backend_registry.BackendType.TENSORPIPE
+        ):
+            TEST_CONFIG.rpc_backend_name = "TENSORPIPE"
+            _build_tensorpipe_backend_options()
+
         if setup_rpc:
             rpc.init_rpc(
                 name="worker%d" % self.rank,
@@ -125,6 +133,11 @@ def _build_faulty_backend_options(faulty_agent_fixture, faulty_messages, message
         messages_to_delay=messages_to_delay,
     )
 
+def _build_tensorpipe_backend_options():
+    TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
+        test_object.rpc_backend,
+        init_method=test_object.init_method,
+    )
 
 def noop():
     pass
@@ -161,6 +174,10 @@ def get_shutdown_error_regex(rpc_backend):
             "Connection reset by peer",
             "Connection closed by peer"
         ]
+    elif rpc_backend == "TENSORPIPE":
+        # FIXME Once we consolidate the error messages returned by the
+        # TensorPipe agent put some more specific regex here.
+        error_regexes = [".*"]
     else:
         error_regexes = [
             "Request aborted during client shutdown",
@@ -180,13 +197,13 @@ def get_timeout_error_regex(rpc_backend_name):
     should receive when an RPC has timed out. Useful for use with
     assertRaisesRegex() to ensure we have the right errors during timeout.
     """
-    if rpc_backend_name in ["PROCESS_GROUP", "FAULTY_PROCESS_GROUP"]:
+    if rpc_backend_name in ["PROCESS_GROUP", "FAULTY_PROCESS_GROUP", "TENSORPIPE"]:
         return "RPC ran for more than"
     else:
         return "(Timed out)|(Task expired)"
 
 
-def wait_until_pending_users_flushed():
+def wait_until_pending_futures_and_users_flushed():
     '''
     The RRef protocol holds forkIds of rrefs in a map until those forks are
     confirmed by the owner. The message confirming the fork may arrive after
@@ -197,11 +214,13 @@ def wait_until_pending_users_flushed():
     as processed. Call this function before asserting the map returned by
     _get_debug_info is empty.
     '''
-    num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
-    while num_pending_users != 0:
+    while True:
+        debug_info = _rref_context_get_debug_info()
+        num_pending_futures = int(debug_info["num_pending_futures"])
+        num_pending_users = int(debug_info["num_pending_users"])
+        if num_pending_futures == 0 and num_pending_users == 0:
+            break
         time.sleep(0.1)
-        num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
-    return
 
 def initialize_pg(init_method, rank, world_size):
     # This is for tests using `dist.barrier`.

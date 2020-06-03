@@ -53,25 +53,14 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   # TODO: Please move this to Docker
   # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
   pip_install --user "hypothesis==4.53.2"
-
-  # TODO: move this to Docker
-  PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
-  echo $PYTHON_VERSION
-  # if [[ $PYTHON_VERSION == "2" ]]; then
-  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl
-  # else
-  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
-  # fi
-  pip_install --user tb-nightly
-  # mypy will fail to install on Python <3.4.  In that case,
-  # we just won't run these tests.
   # Pin MyPy version because new errors are likely to appear with each release
-  pip_install --user "mypy==0.770" || true
-fi
+  pip_install --user "mypy==0.770"
+  # Update scikit-learn to a python-3.8 compatible version
+  if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
+    pip_install -U scikit-learn
+  fi
 
-# faulthandler become built-in since 3.3
-if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
-  pip_install --user faulthandler
+  pip_install --user tb-nightly
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -144,7 +133,7 @@ test_python_nn() {
 }
 
 test_python_ge_config_profiling() {
-  time python test/run_test.py --include test_jit_profiling test_jit_fuser_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -154,7 +143,7 @@ test_python_ge_config_legacy() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_profiling test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -278,7 +267,13 @@ test_bazel() {
 
   get_bazel
 
-  tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*_CUDA :all_tests
+  tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+}
+
+test_cpp_extension() {
+  # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
+  time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -310,6 +305,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_torch_function_benchmark
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
+elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
+  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure 
+  # cpp extension can be built correctly under this old env 
+  test_cpp_extension
 else
   test_torchvision
   test_python_nn

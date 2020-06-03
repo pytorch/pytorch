@@ -869,6 +869,13 @@ Args:
     {memory_format}
 """.format(**common_args))
 
+add_docstr_all('logcumsumexp',
+               r"""
+logcumsumexp(dim) -> Tensor
+
+See :func:`torch.logcumsumexp`
+""")
+
 add_docstr_all('cummax',
                r"""
 cummax(dim) -> (Tensor, Tensor)
@@ -1483,9 +1490,10 @@ Args:
 
 add_docstr_all('index_put',
                r"""
-index_put(indices, value, accumulate=False) -> Tensor
+index_put(tensor1, indices, value, accumulate=False) -> Tensor
 
-Out-place version of :meth:`~Tensor.index_put_`
+Out-place version of :meth:`~Tensor.index_put_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_put_`.
 """)
 
 add_docstr_all('index_select',
@@ -1539,6 +1547,27 @@ add_docstr_all('inverse',
 inverse() -> Tensor
 
 See :func:`torch.inverse`
+""")
+
+add_docstr_all('isnan',
+               r"""
+isnan() -> Tensor
+
+See :func:`torch.isnan`
+""")
+
+add_docstr_all('isinf',
+               r"""
+isinf() -> Tensor
+
+See :func:`torch.isinf`
+""")
+
+add_docstr_all('isfinite',
+               r"""
+isfinite() -> Tensor
+
+See :func:`torch.isfinite`
 """)
 
 add_docstr_all('isclose',
@@ -1711,6 +1740,20 @@ add_docstr_all('log2_',
 log2_() -> Tensor
 
 In-place version of :meth:`~Tensor.log2`
+""")
+
+add_docstr_all('logaddexp',
+               r"""
+logaddexp(other) -> Tensor
+
+See :func:`torch.logaddexp`
+""")
+
+add_docstr_all('logaddexp2',
+               r"""
+logaddexp2(other) -> Tensor
+
+See :func:`torch.logaddexp2`
 """)
 
 add_docstr_all('log_normal_', r"""
@@ -3324,7 +3367,7 @@ contiguity-like condition that :math:`\forall i = d, \dots, d+k-1`,
 Otherwise, it will not be possible to view :attr:`self` tensor as :attr:`shape`
 without copying it (e.g., via :meth:`contiguous`). When it is unclear whether a
 :meth:`view` can be performed, it is advisable to use :meth:`reshape`, which
-returns a view if the shapes are compatible, and copies (equivalent to calling 
+returns a view if the shapes are compatible, and copies (equivalent to calling
 :meth:`contiguous`) otherwise.
 
 Args:
@@ -3557,23 +3600,26 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, tensor) -> Tensor
+index_add(tensor1, dim, index, tensor2) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_add_`
+Out-of-place version of :meth:`torch.Tensor.index_add_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_add_`.
 """)
 
 add_docstr_all('index_copy',
                r"""
-index_copy(dim, index, tensor) -> Tensor
+index_copy(tensor1, dim, index, tensor2) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_copy_`
+Out-of-place version of :meth:`torch.Tensor.index_copy_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_copy_`.
 """)
 
 add_docstr_all('index_fill',
                r"""
-index_fill(dim, index, value) -> Tensor
+index_fill(tensor1, dim, index, value) -> Tensor
 
-Out-of-place version of :meth:`torch.Tensor.index_fill_`
+Out-of-place version of :meth:`torch.Tensor.index_fill_`.
+`tensor1` corresponds to `self` in :meth:`torch.Tensor.index_fill_`.
 """)
 
 add_docstr_all('scatter',
@@ -3699,6 +3745,40 @@ Is this Tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+""")
+
+add_docstr_all('real',
+               r"""
+Returns a new tensor containing real values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`real` is only supported for tensors with complex dtypes.
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.real
+    tensor([ 0.3100, -0.5445, -1.6492, -0.0638])
+
+""")
+
+add_docstr_all('imag',
+               r"""
+Returns a new tensor containing imaginary values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`imag` is only supported for tensors with complex dtypes.
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.imag
+    tensor([ 0.3553, -0.7896, -0.0633, -0.8119])
+
 """)
 
 add_docstr_all('as_subclass',

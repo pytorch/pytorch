@@ -19,6 +19,16 @@ class PackedParameter(torch.nn.Module):
         super(PackedParameter, self).__init__()
         self.param = param
 
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(PackedParameter, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'param'] = self.param
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self.param = state_dict[prefix + 'param']
+        super(PackedParameter, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                           missing_keys, unexpected_keys, error_msgs)
+
 class RNNBase(torch.nn.Module):
 
     _FLOAT_MODULE = nn.RNNBase
@@ -90,7 +100,7 @@ class RNNBase(torch.nn.Module):
                         packed_ih, packed_hh)
 
                 _all_weight_values.append(PackedParameter(cell_params))
-        self._all_params = ([m.param for m in _all_weight_values])
+        self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
 
     def _get_name(self):
         return 'DynamicQuantizedRNN'
@@ -254,7 +264,7 @@ class RNNBase(torch.nn.Module):
                         packed_ih, packed_hh)
 
                 _all_weight_values.append(PackedParameter(cell_params))
-        qRNNBase._all_params = ([m.param for m in _all_weight_values])
+        qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)
 
         return qRNNBase
 
@@ -286,12 +296,13 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
 
+        _all_params = ([m.param for m in self._all_weight_values])
         if batch_sizes is None:
-            result = torch.quantized_lstm(input, hx, self._all_params, self.bias, self.num_layers,
+            result = torch.quantized_lstm(input, hx, _all_params, self.bias, self.num_layers,
                                           float(self.dropout), self.training, self.bidirectional,
                                           self.batch_first, dtype=self.dtype, use_dynamic=True)
         else:
-            result = torch.quantized_lstm(input, batch_sizes, hx, self._all_params, self.bias,
+            result = torch.quantized_lstm(input, batch_sizes, hx, _all_params, self.bias,
                                           self.num_layers, float(self.dropout), self.training,
                                           self.bidirectional, dtype=self.dtype, use_dynamic=True)
         output = result[0]

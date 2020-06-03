@@ -2,95 +2,17 @@
 
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_interface.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
-#include <torch/csrc/jit/python/pybind.h>
-#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/custom_class.h>
 
 namespace torch {
 namespace jit {
-
-c10::FunctionSchema getPreprocessSchema() {
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument mod("mod", c10::AnyType::get());
-  c10::Argument method_compile_spec(
-      "method_compile_spec",
-      c10::DictType::create(c10::StringType::get(), c10::AnyType::get()));
-
-  c10::FunctionSchema preprocessor_schema(
-      "preprocess",
-      /*overload_name=*/"",
-      /*arguments=*/{self, mod, method_compile_spec},
-      /*returns=*/{mod});
-  return preprocessor_schema;
-}
-
-template <typename TBackendInterface>
-std::function<void(Stack&)> getPreprocessFunc() {
-  return [](Stack& stack) {
-    auto method_compile_spec = pop(stack).toGenericDict();
-    auto mod = pop(stack);
-    auto self = pop(stack).toCustomClass<TBackendInterface>();
-    auto ret = self->preprocess(mod, method_compile_spec);
-    push(stack, ret);
-  };
-}
-
-c10::FunctionSchema getCompileSchema() {
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument mod("processed", c10::AnyType::get());
-  auto any_dict_ty =
-      c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
-  c10::Argument method_compile_spec("method_compile_spec", any_dict_ty);
-  c10::Argument handles("handles", any_dict_ty);
-
-  c10::FunctionSchema compile_schema(
-      "compile",
-      /*overload_name=*/"",
-      /*arguments=*/{self, mod, method_compile_spec},
-      /*returns=*/{handles});
-  return compile_schema;
-}
-
-template <typename TBackendInterface>
-std::function<void(Stack&)> getCompileFunc() {
-  return [](Stack& stack) {
-    auto method_compile_spec = pop(stack).toGenericDict();
-    auto processed = pop(stack);
-    auto self = pop(stack).toCustomClass<TBackendInterface>();
-    auto ret = self->compile(processed, method_compile_spec);
-    push(stack, ret);
-  };
-}
-
-c10::FunctionSchema getExecuteSchema() {
-  auto any_list_ty = c10::ListType::create(c10::AnyType::get());
-  c10::Argument self("self", c10::AnyType::get());
-  c10::Argument handle("handle", c10::AnyType::get());
-  c10::Argument input("input", any_list_ty);
-  c10::Argument output("output", any_list_ty);
-  return c10::FunctionSchema(
-      "execute",
-      /*overload_name=*/"",
-      /*arguments=*/{self, handle, input},
-      /*returns=*/{output});
-}
-
-template <typename TBackendInterface>
-std::function<void(Stack&)> getExecuteFunc() {
-  return [](Stack& stack) {
-    auto args = pop(stack);
-    auto handle = pop(stack);
-    auto self = pop(stack);
-    auto backend = self.toCustomClass<TBackendInterface>();
-    auto res = backend->execute(handle, args.toList());
-    push(stack, res);
-  };
-}
 
 // Static registration API for backends.
 template <class TBackendInterface>
@@ -107,16 +29,16 @@ class backend {
                           .def(torch::init<>())
                           ._def_unboxed(
                               "preprocess",
-                              getPreprocessFunc<TBackendInterface>(),
-                              getPreprocessSchema())
+                              detail::getPreprocessFunc<TBackendInterface>(),
+                              detail::getPreprocessSchema())
                           ._def_unboxed(
                               "compile",
-                              getCompileFunc<TBackendInterface>(),
-                              getCompileSchema())
+                              detail::getCompileFunc<TBackendInterface>(),
+                              detail::getCompileSchema())
                           ._def_unboxed(
                               "execute",
-                              getExecuteFunc<TBackendInterface>(),
-                              getExecuteSchema());
+                              detail::getExecuteFunc<TBackendInterface>(),
+                              detail::getExecuteSchema());
   }
 
   // Generates and returns a function that takes a Module and a lowering
@@ -138,7 +60,10 @@ class backend {
       auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
 
       // Generate LoweredModule.
-      Module loweredModule("torch.jit." + backend_name + "LoweredModule");
+      Module loweredModule(
+          "torch.jit." + backend_name + "LoweredModule",
+          get_python_cu(),
+          /*should_mangle=*/true);
 
       // Generate attributes.
       // This is the original cloned and preprocessed module.
@@ -146,8 +71,7 @@ class backend {
           "__processed_module",
           AnyType::get(),
           cloned_module._ivalue(),
-          /*is_param=*/false,
-          /*allow_any=*/true);
+          /*is_param=*/false);
 
       // This is for the method_compile_spec passed in to to_<backend> or
       // loaded from an exported model.
@@ -155,8 +79,7 @@ class backend {
           "__method_compile_spec",
           any_dict_ty,
           toIValue(method_compile_spec, any_dict_ty).toGenericDict(),
-          /*is_param=*/false,
-          /*allow_any=*/true);
+          /*is_param=*/false);
 
       // This is a pointer to a backend instance that is used to access
       // compile and execute functions.
@@ -173,8 +96,7 @@ class backend {
           any_dict_ty,
           c10::impl::GenericDict(
               any_dict_ty->getKeyType(), any_dict_ty->getValueType()),
-          /*is_param=*/false,
-          /*allow_any=*/true);
+          /*is_param=*/false);
 
       // Methods.
 
