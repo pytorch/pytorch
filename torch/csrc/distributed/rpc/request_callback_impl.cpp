@@ -92,7 +92,7 @@ struct DistAutogradContextGuard {
 void processAsyncExecution(
     const py::object& pyFn,
     const int64_t messageId,
-    const std::shared_ptr<FutureMessage> responseFuture,
+    const std::shared_ptr<FutureMessage>& responseFuture,
     std::function<void(SerializedPyObj,
                        int64_t,
                        const std::shared_ptr<FutureMessage>&)> postProcessing) {
@@ -134,7 +134,7 @@ void processAsyncExecution(
   }
 
   pyFuture->fut->addCallback([messageId,
-                              responseFuture{std::move(responseFuture)},
+                              responseFuture,
                               postProcessing{std::move(postProcessing)},
                               jitFuture = pyFuture->fut,
                               &pythonRpcHandler]() {
