@@ -708,7 +708,6 @@ class TestUtilityFuns(TestCase):
                 return y
 
         x = torch.tensor([1, 2])
-        # To keep the unused model parameter, need to set constant folding to False
         verify(MyModel(), x, backend, do_constant_folding=False)
 
 # opset 10 tests
