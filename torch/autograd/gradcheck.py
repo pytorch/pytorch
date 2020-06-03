@@ -360,8 +360,9 @@ def gradcheck(
                 for gi, i in zip(grads_input, diff_input_list):
                     if (gi is not None) and (not gi.eq(0).all()):
                         return fail_test((
-                            'expected all input grads to be undefined or zero when all output'
-                            ' grads are undefined or zero'))
+                            'Expected all input grads to be undefined or zero when all output grads are undefined '
+                            'or zero. Please look at "Notes about undefined output gradients" in '
+                            '"tools/autograd/derivatives.yaml"'))
                 return True
 
             # All backward functions must work properly if all output grads are undefined

@@ -1,9 +1,17 @@
 # Defines derivative formulas and Python signatures of methods on Variable
 #
+# Note about possibly confusing nomenclature: An 'output gradient' is the
+# gradient of an output of a forward function. Output gradients are used as
+# the inputs to backward functions. `grads` is a vector of output gradients,
+# and `grad == grads[0]`, in all the derivative formulas in this file.
+# An 'input gradient' is the gradient of an input to a forward function.
+# Input gradients are the outputs of backward functions, corresponding to the
+# input names included in the derivative formulas defined in this file.
+#
 # Each entry consists of:
 #   - A 'name', which specifies the ATen name of the function you
 #     are defining derivatives for, and an argument specification.
-#   - One or more gradients entries, mapping a differentiable input
+#   - One or more gradients entries, mapping differentiable input
 #     names to a formula specifying how to compute its gradient.
 #     Note that a single gradient entry can specify the gradient
 #     formula for multiple input names, by specifying a key
@@ -104,6 +112,38 @@
 #         - If there are more than one differentiable output, by default all the views are
 #           marked as differentiable views and created with allow_rebase_history=false.
 #           Meaning that any inplace operation on it will raise an error. (unbind for example)
+#
+#  Notes about undefined output gradients:
+#     All backward functions must support all combinations of undefined output
+#     gradient Tensors, where `grad[i].defined() == false`. Code generation
+#     automatically adds this support to all derivative formulas that only
+#     calculate one input gradient, so in that case, you shouldn't have to think
+#     about undefined gradients (unless there is a bug in the code generation).
+#     However, if your derivative formula calculates multiple input gradients,
+#     you will need to add support explicitly.
+#
+#     It is usually preferable to add undefined grad support in the backward
+#     function itself (if you're using one), rather than in the derivative
+#     formula in this file.
+#
+#     Undefined Tensors are created with the base constructor `at::Tensor()`.
+#     It is an efficient way to represent a Tensor filled with zeros because
+#     the Tensor holds no sizing information and its Storage is left empty.
+#     But consequentially, Tensor operations cannot be performed on them.
+#     Therefore, your backward function should treat an undefined output grad as
+#     a zero, and it needs to be a special case.
+#
+#     If all output grads are undefined, then it should be correct for the
+#     backward function to return undefined input grads. Since we use the chain
+#     rule, output grads equal to zero should result in input grads equal to zero,
+#     unless there is some rare special case.
+#
+#     If a subset of output grads is undefined, then it may be acceptable for
+#     the backward function to return undefined input grads--it depends on the
+#     specific function, so you'll have to determine that yourself. If returning
+#     an undefined Tensor is correct for a given input grad, it is also logically
+#     correct to return a defined grad full of zeros, but that would not be
+#     preferable since it would be less efficient.
 #
 # NB: The parameter names here MUST be consistent with the parameter names
 # in Decalarations.yaml
