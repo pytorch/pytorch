@@ -507,6 +507,36 @@ struct TORCH_API CastValue : public BuiltinFunction {
   TypePtr type_;
 };
 
+struct TORCH_API TensorCastValue : public SugaredValue {
+  TensorCastValue(at::ScalarType type, NamedValue self)
+      : dtype_(type), self_(std::move(self)) {}
+
+  std::string kind() const override {
+    return "Cast";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    TORCH_INTERNAL_ASSERT(inputs.size() == 0 && attributes.size() == 0);
+    Value* dtype_const = m.graph()->insertConstant(dtype_, loc);
+    std::vector<NamedValue> kwargs{self_,
+                                   NamedValue(loc, "dtype", dtype_const)};
+    Value* casted_val = m.graph()->insert(
+        /*opname=*/Symbol::fromQualString("aten::to"),
+        /*args=*/inputs,
+        /*kwargs=*/kwargs,
+        /*range=*/loc);
+    return std::make_shared<SimpleValue>(casted_val);
+  }
+
+  at::ScalarType dtype_;
+  NamedValue self_;
+};
+
 // builtins operators and functions that call a method if it exists
 // on a class type, like 'len(x)' and 'x + y'
 struct TORCH_API MagicMethod : public SugaredValue {
