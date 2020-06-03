@@ -1,5 +1,3 @@
-#pragma once
-
 // ${generated_comment}
 
 #include <ATen/Functions.h>
