@@ -118,10 +118,9 @@ The RPC package also provides decorators which allow applications to specify
 how a given function should be treated on the callee side.
 
 .. warning::
-  The `rpc.functions` package is experimental and subject to change.
+  The ``rpc.functions`` package is experimental and subject to change.
 
-.. automodule:: torch.distributed.rpc.functions
-.. autofunction:: async_execution
+.. autofunction:: torch.distributed.rpc.functions.async_execution
 
 .. _rref:
 
