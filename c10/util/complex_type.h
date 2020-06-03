@@ -464,18 +464,6 @@ std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>&
 //
 // The implementation of these functions also follow the design of C++20
 
-namespace std {
-
-template<typename T>
-constexpr T real(const c10::complex<T>& z) {
-  return z.real();
-}
-
-template<typename T>
-constexpr T imag(const c10::complex<T>& z) {
-  return z.imag();
-}
-
 #if defined(__CUDACC__) || defined(__HIPCC__)
 namespace c10_internal {
   template<typename T>
@@ -490,6 +478,18 @@ namespace c10_internal {
   }
 } // namespace c10_internal
 #endif
+
+namespace std {
+
+template<typename T>
+constexpr T real(const c10::complex<T>& z) {
+  return z.real();
+}
+
+template<typename T>
+constexpr T imag(const c10::complex<T>& z) {
+  return z.imag();
+}
 
 template<typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
