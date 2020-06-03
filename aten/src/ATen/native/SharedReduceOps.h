@@ -13,7 +13,6 @@
 #include <aten/src/ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#include <thrust/tuple.h>
 #include <thrust/pair.h>
 #else
 #include <cmath>
@@ -95,11 +94,7 @@ struct WelfordOps {
     auto ret = (divisor > 0) ?
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    thrust::tuple<scalar_t, scalar_t> results((scalar_t) ret, (scalar_t) mean);
-#else
-    std::tuple<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
-#endif
+    detail::pair<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
     return results;
   }
 
