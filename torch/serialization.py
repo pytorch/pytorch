@@ -243,7 +243,7 @@ class _open_zipfile_reader(_opener):
 
 class _open_zipfile_writer_file(_opener):
     def __init__(self, name):
-        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(name))
+        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(str(name)))
 
     def __exit__(self, *args):
         self.file_like.write_end_of_file()
