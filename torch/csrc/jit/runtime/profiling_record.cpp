@@ -162,8 +162,8 @@ bool needsProfiledInputs(Node* n) {
     case aten::expand:
     case prim::dtype:
     case prim::device:
+    case prim::is_cuda:
     case aten::is_floating_point:
-    case aten::is_cuda:
     case aten::type_as:
       return true;
     default:

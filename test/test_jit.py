@@ -138,16 +138,16 @@ def doAutodiffCheck(testname):
         # AutogradJitGenerated
         'test___rdiv___constant',
         'test___rdiv___scalar_constant',
-        'test_split_cpu',
-        'test_split_dim_cpu',
-        'test_split_dim_neg0_cpu',
-        'test_split_size_list_cpu',
-        'test_split_size_list_dim_cpu',
-        'test_split_size_list_dim_neg0_cpu',
-        'test_split_with_sizes_cpu',
-        'test_split_with_sizes_dim_cpu',
-        'test_split_with_sizes_dim_neg0_cpu',
-        'test_split_with_sizes_size_0_cpu',
+        'test_split',
+        'test_split_dim',
+        'test_split_dim_neg0',
+        'test_split_size_list',
+        'test_split_size_list_dim',
+        'test_split_size_list_dim_neg0',
+        'test_split_with_sizes',
+        'test_split_with_sizes_dim',
+        'test_split_with_sizes_dim_neg0',
+        'test_split_with_sizes_size_0',
         'test_nn_max_pool2d_with_indices',
     ]
 
@@ -6510,7 +6510,7 @@ a")
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             self.assertTrue(loop_inputs[2].requires_grad())
             bailouts_in_outer_block = graph.findAllNodes("prim::BailOut", False)
-            self.assertFalse(bailouts_in_outer_block[1].output().requires_grad())
+            self.assertFalse(bailouts_in_outer_block[0].output().requires_grad())
         else:
             self.assertTrue(loop_inputs[1].requires_grad())
             self.assertTrue(loop.output().requires_grad())
