@@ -925,7 +925,7 @@ void TensorIterator::analyze_memory_format() {
       }
     }
   }
-  // If everything is ambigous lean towards channels last format
+  // If everything is ambiguous lean towards channels last format
   if (!requires_channels_last_output_ && all_leading_cl_ambiguous &&
       had_cl_suggested) {
     requires_channels_last_output_ = true;
