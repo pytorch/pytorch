@@ -527,7 +527,8 @@ struct CAFFE2_API TensorType : public Type {
       const VaryingShape<ShapeSymbol>& sizes,
       const VaryingShape<Stride>& stride_,
       c10::optional<bool> requires_grad,
-      c10::optional<bool> undefined = false);
+      c10::optional<bool> undefined = false,
+      bool is_inferred = false);
 
   static TensorTypePtr create(
       c10::optional<at::ScalarType> scalar_type,
@@ -663,6 +664,19 @@ struct CAFFE2_API TensorType : public Type {
     return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
   }
 
+  bool isInferredType() const {
+    return is_inferred_;
+  }
+
+  static TensorTypePtr getInferred() {
+    static auto valueInferred = TensorType::create(
+      /*scalar_type=*/{}, /*device=*/{},
+      /*sizes=*/VaryingShape<ShapeSymbol>{},
+      /*stride=*/VaryingShape<Stride>{}, /*requires_grad=*/{},
+      /*undefined=*/false, /*is_inferred=*/true);
+    return valueInferred;
+  }
+
   // this property is used by GuardElimination
   // please see `checkInputs` for more details
   bool isSummarized() const {
@@ -735,6 +749,8 @@ struct CAFFE2_API TensorType : public Type {
   // defined and undefined. However, no tensor type starts out with
   // `undefined_` set to `c10::nullopt`
   c10::optional<bool> undefined_;
+  // Represents whether or not this type was inferred.
+  bool is_inferred_ = false;
 };
 
 struct ListType;
@@ -1756,7 +1772,6 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       const TypePtr& type,
       bool is_parameter = false,
-      bool allow_any = false,
       bool is_buffer = false);
 
   // [Internal Only] Remove attribute from the ClassType,
@@ -1773,11 +1788,10 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       TypePtr ty,
       bool is_parameter = false,
-      bool allow_any = false,
       bool is_buffer = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter, allow_any, is_buffer);
+      return addAttribute(name, ty, is_parameter, is_buffer);
     }
 
     TORCH_CHECK(

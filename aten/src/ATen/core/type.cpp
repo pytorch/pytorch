@@ -529,16 +529,26 @@ bool is_null_or_equal(c10::optional<T> a, c10::IntArrayRef b) {
 }
 
 bool TensorType::matchTensor(const at::Tensor& t) {
-  bool undef = undefined().value_or(true);
-  if (undef && !t.defined()) {
-      return true;
+  bool undef = undefined().value_or(!t.defined());
+  if (undef != !t.defined()) {
+    // When the followings are true, we consider it's not a match:
+    // - undefined().has_value() == true
+    // - undefined().value() != !t.defined()
+    return false;
+  } else if (!t.defined()) {
+    // When the followings are true, we consider it's a match:
+    // - t is not defined
+    // - undefined() == null or undefined().value() == true
+    return true;
   }
+  // Here we know t.defined() == true and compare all other properties.
   bool rg = at::GradMode::is_enabled() && t.requires_grad();
-  return t.defined() && !undef
-    && scalarType().value_or(t.scalar_type()) == t.scalar_type()
+  bool matched_strides = (!t.has_storage() && !stride_properties().isComplete())
+    || stride_properties() == computeStrideProps(t.sizes(), t.strides(), t.is_contiguous());
+  return scalarType().value_or(t.scalar_type()) == t.scalar_type()
     && device().value_or(t.device()) == t.device()
     && requiresGrad().value_or(rg) == rg
-    && is_null_or_equal(strides().concrete_sizes(), t.strides())
+    && matched_strides
     && is_null_or_equal(sizes().concrete_sizes(), t.sizes());
 }
 
@@ -883,9 +893,12 @@ TensorTypePtr TensorType::create(
     const VaryingShape<ShapeSymbol>& sizes,
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
-    c10::optional<bool> undefined) {
-  return TensorTypePtr(new TensorType(
+    c10::optional<bool> undefined,
+    bool is_inferred) {
+    auto pt = TensorTypePtr(new TensorType(
       scalar_type, device, sizes, strides, requires_grad, undefined));
+    pt->is_inferred_ = is_inferred;
+  return pt;
 }
 
 TensorTypePtr TensorType::create(
@@ -990,7 +1003,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   AT_ASSERT(numAttributes() == refined_slots.size());
   for (size_t i = 0; i < attributes_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
-    ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER), false,
+    ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER),
     (attributes_[i].getKind() == AttributeKind::BUFFER));
   }
   // Copy methods over
@@ -1171,7 +1184,6 @@ size_t ClassType::addAttribute(
     const std::string& name,
     const TypePtr& type,
     bool is_parameter,
-    bool allow_any,
     bool is_buffer) {
   if (is_parameter && is_buffer){
     TORCH_INTERNAL_ASSERT(false, "Attribute cannot be both a parameter and a buffer!");
@@ -1180,9 +1192,6 @@ size_t ClassType::addAttribute(
   std::string what = is_parameter ? "parameter" : "attribute";
   what += (is_buffer? "buffer" : "not buffer");
   checkNotExist(name, what);
-  if (!allow_any) {
-    checkNoAny(*this, what.c_str(), name, type);
-  }
 
   size_t slot = attributes_.size();
 
