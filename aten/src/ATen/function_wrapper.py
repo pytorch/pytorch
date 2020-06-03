@@ -2,7 +2,9 @@
 # "what has to be done to add a Operation ..." first!
 
 import re
+import copy
 from code_template import CodeTemplate
+
 
 from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple
 
@@ -96,7 +98,8 @@ m.impl("${unqual_operator_name_with_overload}",
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}",
+       c10::impl::hacky_wrapper_for_legacy_signatures<decltype(TypeDefault::${type_wrapper_name}), &TypeDefault::${type_wrapper_name}>::func_ptr());
 """)
 
 # NB: In the ordinary, TypeDerived code generation work flow, specification
@@ -116,7 +119,7 @@ m.impl("${unqual_operator_name_with_overload}",
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       &${Type}::${type_wrapper_name})
+                       c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${Type}::${type_wrapper_name}), &${Type}::${type_wrapper_name}>::func_ptr())
 );
 """)
 
@@ -127,6 +130,20 @@ ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 
 # add non-virtual declaration to Tensor.cpp
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
+
+// ${schema_string}
+inline ${return_type} Tensor::${api_name}(${method_formals}) const {
+#ifdef USE_STATIC_DISPATCH
+    ${static_dispatch_method_body}
+#else
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+        .typed<${schema_order_cpp_signature}>();
+    return op.call(${schema_order_method_actuals});
+#endif
+}
+""")
+UNBOXEDONLY_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
@@ -153,6 +170,20 @@ C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults}
 
 # add method definition in Functions.h
 C10_FUNCTION_DEFINITION = CodeTemplate("""\
+
+// ${schema_string}
+static inline ${return_type} ${api_name}(${formals}) {
+#ifdef USE_STATIC_DISPATCH
+    ${static_dispatch_function_body}
+#else
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+        .typed<${schema_order_cpp_signature}>();
+    return op.call(${schema_order_actuals});
+#endif
+}
+""")
+UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 static inline ${return_type} ${api_name}(${formals}) {
@@ -445,6 +476,7 @@ NNBuffer = TypedDict('NNBuffer', {
 
 FunctionOption = TypedDict('FunctionOption', {
     'actuals': List[str],
+    'schema_order_actuals': List[str],
     'api_name': str,
     # Like api_name, but it is the name of the internal
     # CPUType/CUDAType/TypeDefault function that wraps
@@ -452,6 +484,7 @@ FunctionOption = TypedDict('FunctionOption', {
     # visible and is mangled with the overload name
     'type_wrapper_name': str,
     'arguments': List[THFormal],
+    'schema_order_arguments': List[THFormal],
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
     'buffers': List[NNBuffer],
@@ -486,6 +519,7 @@ FunctionOption = TypedDict('FunctionOption', {
     # TypeExtendedInterface
     'extended_method': bool,
     'method_actuals': List[str],
+    'schema_order_method_actuals': List[str],
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
     'named_guard_declaration': str,
@@ -520,6 +554,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('arguments', List[AtFormal]),
+    ('schema_order_arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
     ('python_module', str),
@@ -797,8 +832,8 @@ def create_generic(top_env, declarations):
             translated['is_nullable'] = argument['is_nullable']
         return translated
 
-    def get_formals(option, include_constants=False):
-        # type: (FunctionOption, bool) -> List[AtFormal]
+    def get_formals(option, schema_order, include_constants=False):
+        # type: (FunctionOption, bool, bool) -> List[AtFormal]
         seen = set()  # type: Set[str]
         pos_args = []  # type: List[THFormal]
         kwd_args = []  # type: List[THFormal]
@@ -814,16 +849,20 @@ def create_generic(top_env, declarations):
             # type: (THFormal) -> bool
             return argument.get('allocate', False) and argument.get('mask', False)
 
-        for argument in option['arguments']:
+        if schema_order:
+            arguments = copy.deepcopy(option['schema_order_arguments'])
+        else:
+            arguments = copy.deepcopy(option['arguments'])
+        for argument in arguments:
             if argument.get('output') and not argument.get('allocate', False):
                 insert(argument)
-        for argument in option['arguments']:
+        for argument in arguments:
             if include_constants and argument['type'] == 'CONSTANT':
                 insert(argument)
             elif is_real_argument_to_wrapper(argument):
                 insert(argument)
-        if any(has_output_mask(arg) for arg in option['arguments']):
-            mask_size = sum(has_output_mask(arg) for arg in option['arguments'])
+        if any(has_output_mask(arg) for arg in arguments):
+            mask_size = sum(has_output_mask(arg) for arg in arguments)
             insert({
                 'name': 'output_mask',
                 # NB: Lack of space in comma works around parsing
@@ -862,6 +901,18 @@ def create_generic(top_env, declarations):
             return return_types[0]['type']
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
 
+    def process_schema_order_actual(schema_order_actual):
+        if schema_order_actual == 'dtype':
+            return 'optTypeMetaToScalarType(options.dtype_opt())'
+        elif schema_order_actual == 'layout':
+            return 'options.layout_opt()'
+        elif schema_order_actual == 'device':
+            return 'options.device_opt()'
+        elif schema_order_actual == 'pin_memory':
+            return 'options.pinned_memory_opt()'
+        else:
+            return schema_order_actual
+
     def process_legacy_th_option(option):
         # type: (FunctionOption) -> None
         # Mutably populate option with derived values computed from values
@@ -870,7 +921,8 @@ def create_generic(top_env, declarations):
             '(^__i|[^_]_$)', option['api_name']) is not None
 
         # print(yaml.dump(option))
-        formals = get_formals(option)
+        formals = get_formals(option, False)
+        schema_order_formals = get_formals(option, True)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
@@ -903,7 +955,7 @@ def create_generic(top_env, declarations):
 
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
 
-    def native_get_formals(option, include_constants=False):
+    def native_get_formals(option, schema_order, include_constants=False):
         # type: (FunctionOption, bool) -> List[AtFormal]
         seen = set()  # type: Set[str]
         pos_args = []
@@ -918,7 +970,11 @@ def create_generic(top_env, declarations):
                 else:
                     pos_args.append(argument)
 
-        for argument in option['arguments']:
+        if schema_order:
+            arguments = option['schema_order_arguments']
+        else:
+            arguments = option['arguments']
+        for argument in arguments:
             insert(argument)
 
         # not clear we need dynamic_type translation as we can specify the correct type
@@ -1009,7 +1065,8 @@ def create_generic(top_env, declarations):
         assert option['python_module'] == '' or option['python_module'] == 'nn', \
             "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
                 option['python_module'], option['name'])
-        formals = native_get_formals(option)
+        formals = native_get_formals(option, False)
+        schema_order_formals = native_get_formals(option, True)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
@@ -1017,10 +1074,12 @@ def create_generic(top_env, declarations):
         option['return_type'] = format_return_type(option['returns'])
         option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
         option['actuals'] = [f['name'] for f in formals]
+        option['schema_order_actuals'] = [f['name'] for f in schema_order_formals]
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
 
         option['cpp_signature'] = "{} ({})".format(option['return_type'], ", ".join(option['formals_types']))
+        option['schema_order_cpp_signature'] = option['cpp_signature'].replace('const TensorOptions &', 'optional<ScalarType>, optional<Layout> layout, optional<Device> device, optional<bool> pin_memory')
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
@@ -1030,6 +1089,14 @@ def create_generic(top_env, declarations):
         # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
+        option['schema_order_method_actuals'] = [
+            f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in schema_order_formals]
+
+        if find_formal_by_type('TensorOptions', formals) is not None:
+            option['schema_order_actuals'] = [
+                process_schema_order_actual(actual) for actual in option['schema_order_actuals']]
+            option['schema_order_method_actuals'] = [
+                process_schema_order_actual(actual) for actual in option['schema_order_method_actuals']]
 
         def gen_tensor_method(option, formals):
             # type: (Any, List[AtFormal]) -> FunctionCode
@@ -1075,7 +1142,11 @@ def create_generic(top_env, declarations):
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, actuals=option['method_actuals'])
 
-            method_definition = C10_TENSOR_METHOD_DEFINITION
+            if option['use_c10_dispatcher'] == 'full':
+                method_definition = C10_TENSOR_METHOD_DEFINITION
+            else:
+                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                method_definition = UNBOXEDONLY_TENSOR_METHOD_DEFINITION
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body),
@@ -1109,8 +1180,13 @@ def create_generic(top_env, declarations):
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, actuals=option['actuals'])
 
-            fn_definition = C10_FUNCTION_DEFINITION.substitute(
-                option, static_dispatch_function_body=static_dispatch_function_body)
+            if option['use_c10_dispatcher'] == 'full':
+                fn_definition = C10_FUNCTION_DEFINITION.substitute(
+                    option, static_dispatch_function_body=static_dispatch_function_body)
+            else:
+                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                fn_definition = UNBOXEDONLY_FUNCTION_DEFINITION.substitute(
+                    option, static_dispatch_function_body=static_dispatch_function_body)
 
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
@@ -1215,6 +1291,7 @@ def create_generic(top_env, declarations):
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
             arguments=formals,
+            schema_order_arguments=schema_order_formals,
             method_of=method_of,
             mode=option['mode'],
             python_module=option['python_module'],

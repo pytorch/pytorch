@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <torch/library.h>
 #include <ATen/TypeDefault.h>
+#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 $extra_headers
 
 namespace at {

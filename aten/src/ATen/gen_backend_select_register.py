@@ -24,14 +24,33 @@ from function_wrapper import gen_dispatch_key_init
 GENERATED_COMMENT = CodeTemplate(
     "@" + "generated from ${filename}")
 
-FUNCTION_REGISTRATION = CodeTemplate("""\
+UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
   .impl_unboxedOnlyKernel<decltype(${function_name}), &${function_name}>(DispatchKey::BackendSelect)
   .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
 """)
 
+FUNCTION_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .kernel<std::remove_pointer_t<decltype(c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${function_name}), &${function_name}>::func_ptr())>,
+                                         c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${function_name}), &${function_name}>::func_ptr()>(DispatchKey::BackendSelect)
+  .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+""")
+
 FUNCTION_DEFINITION = CodeTemplate("""\
+// ${schema_string}
+Tensor ${function_name}(${method_formals}) {
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${name}", "${overload_name}")
+    .typed<${schema_order_cpp_signature}>();
+  ${dispatch_key_init}
+  return op.callWithDispatchKey(_dk, ${schema_order_actuals});
+}
+""")
+
+UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
 // ${schema_string}
 Tensor ${function_name}(${method_formals}) {
   static auto op = c10::Dispatcher::singleton()
@@ -41,6 +60,7 @@ Tensor ${function_name}(${method_formals}) {
   return op.callWithDispatchKey(_dk, ${actuals});
 }
 """)
+
 
 def needs_backend_select(declaration_option):
     # We register an op under the BackendSelect dispatch key
@@ -59,25 +79,38 @@ def register_backend_select_methods(declarations, template_path, file_manager):
     for decl in declarations:
         for option in decl["options"]:
             if needs_backend_select(option):
-                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-
                 name = option['name']
                 if option.get('overload_name', '') != '':
                     name = "{0}_{1}".format(name, option['overload_name'])
 
-                func_reg = FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
-                                                            function_name=name)
+                if option['use_c10_dispatcher'] == 'full':
+                    func_reg = FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
+                                                                function_name=name)
+                else:
+                    assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                    func_reg = UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
+                                                                            function_name=name)
 
                 dispatch_key_init = gen_dispatch_key_init('_dk', option['formals_list'])
 
-                method_def = FUNCTION_DEFINITION.substitute(function_name=name,
-                                                            schema_string=option['schema_string'],
-                                                            method_formals=option['formals_with_defaults'],
-                                                            name=option['name'],
-                                                            overload_name=option['overload_name'],
-                                                            dispatch_key_init=dispatch_key_init,
-                                                            cpp_signature=option['cpp_signature'],
-                                                            actuals=option['actuals'])
+                if option['use_c10_dispatcher'] == 'full':
+                    method_def = FUNCTION_DEFINITION.substitute(function_name=name,
+                                                                schema_string=option['schema_string'],
+                                                                method_formals=option['formals_with_defaults'],
+                                                                name=option['name'],
+                                                                overload_name=option['overload_name'],
+                                                                dispatch_key_init=dispatch_key_init,
+                                                                schema_order_cpp_signature=option['schema_order_cpp_signature'],
+                                                                schema_order_actuals=option['schema_order_actuals'])
+                else:
+                    method_def = UNBOXEDONLY_FUNCTION_DEFINITION.substitute(function_name=name,
+                                                                            schema_string=option['schema_string'],
+                                                                            method_formals=option['formals_with_defaults'],
+                                                                            name=option['name'],
+                                                                            overload_name=option['overload_name'],
+                                                                            dispatch_key_init=dispatch_key_init,
+                                                                            cpp_signature=option['cpp_signature'],
+                                                                            actuals=option['actuals'])
 
                 backend_select_function_registrations.append(func_reg)
                 backend_select_method_definitions.append(method_def)

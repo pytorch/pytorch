@@ -90,6 +90,18 @@ def get_simple_type(arg):
         simple_type = '{}?'.format(opt_match.group(1))
     return simple_type
 
+def process_schema_order_arg(schema_order_arg):
+    if schema_order_arg == 'dtype':
+        return 'optTypeMetaToScalarType(options.dtype_opt())'
+    elif schema_order_arg == 'layout':
+        return 'options.layout_opt()'
+    elif schema_order_arg == 'device':
+        return 'options.device_opt()'
+    elif schema_order_arg == 'pin_memory':
+        return 'options.pinned_memory_opt()'
+    else:
+        return schema_order_arg
+
 
 def load_aten_declarations(path):
     with open(path, 'r') as f:
@@ -109,6 +121,8 @@ def load_aten_declarations(path):
         declaration['formals'] = [arg['type'] + ' ' + arg['name']
                                   for arg in declaration['arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
+        declaration['schema_order_args'] = [arg['name'] for arg in declaration['schema_order_arguments']]
+        declaration['schema_order_args'] = [process_schema_order_arg(arg) for arg in declaration['schema_order_args']]
         declaration['api_name'] = declaration['name']
         # NB: keep this in sync with common_with_cwrap.py
         if declaration.get('overload_name'):

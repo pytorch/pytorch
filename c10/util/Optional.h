@@ -26,6 +26,7 @@
 #define C10_UTIL_OPTIONAL_H_
 
 #include <c10/util/in_place.h>
+#include <c10/util/Metaprogramming.h>
 
 #include <cassert>
 #include <functional>
@@ -916,6 +917,16 @@ constexpr optional<typename std::decay<T>::type> make_optional(T&& v) {
 template <class X>
 constexpr optional<X&> make_optional(std::reference_wrapper<X> v) {
   return optional<X&>(v.get());
+}
+
+template<class OptionalT, class Func>
+auto map_optional(OptionalT&& o, const Func& f) {
+  using result_type = typename guts::infer_function_traits_t<Func>::return_type;
+  if (o.has_value()) {
+    return optional<result_type>(f(*std::forward<OptionalT>(o)));
+  } else {
+    return optional<result_type>(nullopt);
+  }
 }
 
 } // namespace c10
