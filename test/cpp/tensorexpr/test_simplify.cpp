@@ -3,7 +3,6 @@
 #include "test/cpp/tensorexpr/test_utils.h"
 #include "torch/csrc/jit/tensorexpr/hash_provider.h"
 #include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 
 #include <cmath>
@@ -2039,6 +2038,23 @@ void testSimplifyForCleansUp() {
   }
 }
 
+void testSimplifyEliminateEmptyFor() {
+  KernelScope kernel_scope;
+
+  {
+    // Flatten many layers around an empty block to an empty block.
+    Stmt* last = new Block({});
+    for (int i = 0; i < 11; ++i) {
+      VarHandle loopVar("loopVar", kInt);
+      last = For::make(loopVar, 0, 10, last);
+    }
+
+    Stmt* simplified = IRSimplifier::simplify(last);
+    IS_NODE_WITH_NAME(Block, simplified, block);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+}
+
 void testSimplifyFlattenBlock() {
   KernelScope kernel_scope;
 
@@ -2121,6 +2137,80 @@ void testSimplifyFlattenBlock() {
     Stmt* simplified = IRSimplifier::simplify(last);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 0);
+  }
+}
+
+void testSimplifyEliminateZeroLengthAlloc() {
+  KernelScope kernel_scope;
+
+  {
+    // Simple positive case.
+    VarHandle x("x", kInt);
+
+    Allocate* alloc = Allocate::make(x, kInt, {0});
+    Free* free_ = Free::make(x);
+
+    Block* block1 = new Block({alloc, free_});
+    ASSERT_EQ(block1->nstmts(), 2);
+
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 0);
+  }
+
+  {
+    // Simple negative case.
+    VarHandle x("x", kInt);
+
+    Allocate* alloc = Allocate::make(x, kInt, {2});
+    Free* free_ = Free::make(x);
+
+    Block* block1 = new Block({alloc, free_});
+    ASSERT_EQ(block1->nstmts(), 2);
+
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 2);
+  }
+
+  {
+    // Finds right Alloc/Free.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+
+    Allocate* alloc1 = Allocate::make(x, kInt, {0});
+    Allocate* alloc2 = Allocate::make(y, kInt, {2});
+    Free* free2_ = Free::make(y);
+    Free* free1_ = Free::make(x);
+
+    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    ASSERT_EQ(block1->nstmts(), 4);
+
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 2);
+    IS_NODE_WITH_NAME(Allocate, block2->stmts().front(), simplified_alloc);
+    IS_VAR_WITH_NAME(simplified_alloc->buffer_var(), "y");
+    IS_NODE_WITH_NAME(Free, block2->stmts().back(), simplified_free);
+    ASSERT_EQ(simplified_alloc->buffer_var(), simplified_free->buffer_var());
+  }
+
+  {
+    // Dynamic shape.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle z("z", kInt);
+
+    Allocate* alloc1 = Allocate::make(x, kInt, {0});
+    Allocate* alloc2 = Allocate::make(y, kInt, {z});
+    Free* free2_ = Free::make(y);
+    Free* free1_ = Free::make(x);
+
+    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    ASSERT_EQ(block1->nstmts(), 4);
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 2);
   }
 }
 
