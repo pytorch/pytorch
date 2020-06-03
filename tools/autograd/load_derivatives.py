@@ -210,19 +210,20 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
                                            .format(defn_name))
 
                     diff_arg_names = [arg['name'] for arg in args_with_derivatives]
+                    assert len(diff_arg_names) > 0
 
-                    args = None
+                    args = []
                     for arg_name in arg_names:
-                        if args is None:
-                            args = arg_name
-                        else:
-                            args += ", " + arg_name
-
                         if arg_name in diff_arg_names:
-                            args += "_fw_grad"
+                            arg_name = arg_name + "_fw_grad"
+                        args.append(arg_name)
 
-                    # Only works for functions whose original out-of-place version is implemented in at::
-                    fw_formula = "at::{}({})".format(defn_name, args)
+                    if "namespace" in declaration['method_of']:
+                        fw_formula = "at::{}({})".format(defn_name, ", ".join(args))
+                    else:
+                        assert not declaration['inplace']
+                        assert "Tensor" in declaration['method_of']
+                        fw_formula = "{}.{}({})".format(args[0], defn_name, ", ".join(args[1:]))
 
                     fw_def['required_inputs'] = diff_arg_names
                     fw_def['formula'] = fw_formula

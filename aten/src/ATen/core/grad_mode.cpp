@@ -20,6 +20,16 @@ void GradMode::set_enabled(bool enabled) {
   GradMode_enabled = enabled;
 }
 
+thread_local bool FwGradMode_enabled = true;
+
+bool FwGradMode::is_enabled() {
+  return FwGradMode_enabled;
+}
+
+void FwGradMode::set_enabled(bool enabled) {
+  FwGradMode_enabled = enabled;
+}
+
 #else
 
 bool GradMode::is_enabled() {
@@ -28,6 +38,14 @@ bool GradMode::is_enabled() {
 
 void GradMode::set_enabled(bool enabled) {
   throw std::runtime_error("GradMode::set_enabled is not supported on mobile");
+}
+
+bool FwGradMode::is_enabled() {
+  throw std::runtime_error("FwGradMode is not supported on mobile");
+}
+
+void FwGradMode::set_enabled(bool enabled) {
+  throw std::runtime_error("FwGradMode is not supported on mobile");
 }
 
 #endif

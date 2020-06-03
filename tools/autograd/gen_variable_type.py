@@ -386,19 +386,21 @@ ${req_inp}.fw_grad().defined()\
 """)
 
 FW_DERIVATIVE_DEFINED_TEMPLATE = CodeTemplate("""\
-auto ${inp}_fw_grad = ${inp}.fw_grad().defined() ? ${inp}.fw_grad() : at::zeros_like(${inp});\
+auto ${inp}_fw_grad = ${inp}.fw_grad().defined() ? ${inp}.fw_grad() : ${new_val};
 """)
 
 FW_DERIVATIVE_TEMPLATE = CodeTemplate("""\
-if (${if_stmt}) {
+if (FwGradMode::is_enabled() && (${if_stmt})) {
+    NoFwGradGuard guard;
     ${fw_grad_defined}
+
     auto ${out_arg}_new_fw_grad = ${formula};
     ${out_arg}.set_fw_grad(${out_arg}_new_fw_grad);
 }
 """)
 
 FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
-TORCH_CHECK(!(${cond}), "Trying to use forward prop with ${name} that does not support it.");
+TORCH_CHECK(!(FwGradMode::is_enabled() && (${cond})), "Trying to use forward prop with ${name} that does not support it.");
 """)
 
 FACTORY_FUNCTION_NAMES = None
@@ -839,14 +841,11 @@ def emit_body(declaration):
     else:
         differentiable_outputs = candidate_differentiable_outputs
 
-    requires_derivative = (
-        base_name not in DONT_REQUIRE_DERIVATIVE and name not in DONT_REQUIRE_DERIVATIVE and
-        len(differentiable_inputs) > 0 and len(differentiable_outputs) > 0 and
-        strategy == 'use_derived')
+    undifferentiable = (base_name in DONT_REQUIRE_DERIVATIVE) or (name in DONT_REQUIRE_DERIVATIVE) or (strategy != 'use_derived')
 
-    requires_fw_derivatives = (
-        base_name not in DONT_REQUIRE_DERIVATIVE and name not in DONT_REQUIRE_DERIVATIVE and
-        len(fw_derivatives) > 0 and strategy == 'use_derived')
+    requires_derivative = (not undifferentiable) and (len(differentiable_inputs) > 0) and (len(differentiable_outputs) > 0)
+
+    requires_fw_derivatives = not undifferentiable and len(fw_derivatives) > 0
 
     if func is not None and not requires_derivative:
         raise RuntimeError('ERROR: derivative ignored for {} -- specified an autograd function without derivative'
@@ -1185,19 +1184,21 @@ def emit_body(declaration):
     def emit_fw_derivatives():
         content = []
         for derivative in fw_derivatives:
-            if inplace:
-                res = "self"
-            elif is_out_fn:
-                res = "out"
-            else:
-                res = derivative['out_arg']
-            if_stmt = " or ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp) for inp in derivative['required_inputs']])
-            fw_grad_defined = "\n".join([FW_DERIVATIVE_DEFINED_TEMPLATE.substitute(inp=inp) for inp in derivative['required_inputs']])
+            res = derivative['out_arg']
+
+            if_stmt = " or ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp['name']) for inp in differentiable_inputs if inp['name'] in derivative['required_inputs']])
+            fw_grad_defined = ""
+            for inp in differentiable_inputs:
+                if inp['name'] in derivative['required_inputs']:
+                    new_val = "at::zeros_like({})".format(inp['name'])
+                    if inp['is_nullable']:
+                        new_val = "({name}.defined()? {new_val} : Tensor())".format(name=inp['name'], new_val=new_val)
+                    fw_grad_defined += FW_DERIVATIVE_DEFINED_TEMPLATE.substitute(inp=inp['name'], new_val=new_val)
             content.append(FW_DERIVATIVE_TEMPLATE.substitute(if_stmt=if_stmt, formula=derivative['formula'], out_arg=res,
                                                              fw_grad_defined=fw_grad_defined))
         return content
 
-    def forbid_fw_derivatives():
+    def emit_forbid_fw_derivatives(is_inplace=False):
         to_check = []
         for inp in differentiable_inputs:
             if inp["dynamic_type"] == "Tensor":
@@ -1206,7 +1207,11 @@ def emit_body(declaration):
 
         if len(to_check) > 0:
             cond = " or ".join(to_check)
-            return FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, name=name)
+            if is_inplace:
+                msg = name + " (because it is inplace)"
+            else:
+                msg = name
+            return FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, name=msg)
         else:
             return ""
 
@@ -1232,10 +1237,14 @@ def emit_body(declaration):
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.append(emit_history())
-    if requires_fw_derivatives:
-        body.extend(emit_fw_derivatives())
+
+    if is_out_fn or declaration['inplace']:
+        body.append(emit_forbid_fw_derivatives(is_inplace=True))
     else:
-        body.append(forbid_fw_derivatives())
+        if requires_fw_derivatives:
+            body.extend(emit_fw_derivatives())
+        elif not undifferentiable:
+            body.append(emit_forbid_fw_derivatives())
     # post_record_trace must appear before save_outputs so that saved outputs
     # have their tracing state saved (that is setup by recordTrace)
     body.append(post_record_trace)

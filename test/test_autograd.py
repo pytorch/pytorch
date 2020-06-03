@@ -5107,13 +5107,13 @@ class TestAutogradFunctional(TestCase):
 
         inp = torch.rand(4)
         v = torch.rand(4)
-        with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
+        with self.assertRaisesRegex(RuntimeError, "The gradient with respect to the input is independent of entry 0"):
             res = autogradF.jvp(foo, inp, v, strict=True)
         res = autogradF.jvp(foo, inp, v, strict=False)
         self._assert_same_struct(res[1], res[0])
         self.assertEqual(res[1].abs().sum(), 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "The output of the user-provided function is independent of input 0"):
+        with self.assertRaisesRegex(RuntimeError, "The gradient with respect to the input is independent of entry 0"):
             res = autogradF.jvp(bar, inp, v, strict=True)
         res = autogradF.jvp(bar, inp, v, strict=False)
         self._assert_same_struct(res[1], res[0])
@@ -5816,28 +5816,14 @@ class TestAutogradFunctional(TestCase):
 
     def test_jacobian_match_vjp_jvp(self):
         def foo(x):
-            print("x", x)
-            print(x.fw_grad)
-            # return x ** 3 + x.sum()
-            x = x ** 3
-            print(x.fw_grad)
-            x = x.sum()
-            print(x.fw_grad)
-            return x
+            return x ** 3 + x.sum()
 
-        inputs = torch.rand(4)
-        # v = torch.rand(4)
+        inputs = torch.ones(4)
         v = torch.ones(4)
 
-        print("jac")
         jac = autogradF.jacobian(foo, inputs)
-        print("jvp")
         jvp = autogradF.jvp(foo, inputs, v)[1]
-        print("vjp")
         vjp = autogradF.vjp(foo, inputs, v)[1]
-        print(jac)
-        print(jvp)
-        print(vjp)
 
         self.assertEqual(jvp, torch.mm(jac, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vjp, torch.mm(v.unsqueeze(0), jac).squeeze(0))

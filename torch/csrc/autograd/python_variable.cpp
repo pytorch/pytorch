@@ -365,6 +365,8 @@ int THPVariable_set_fw_grad(THPVariable *self, PyObject *py_fw_grad, void *unuse
   }
   THPUtils_assertRet(-1, fw_grad.sizes().equals(var.sizes()),
       "assigned fw_grad has data of a different size");
+  TORCH_CHECK(!fw_grad.fw_grad().defined(), "Cannot set as a forward grad a Tensor "
+    "that already has a forward grad.")
 
   var.set_fw_grad(fw_grad);
   return 0;

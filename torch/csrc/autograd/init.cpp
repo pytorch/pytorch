@@ -127,6 +127,7 @@ static PyObject * set_grad_enabled(PyObject* _unused, PyObject *arg) {
     throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
   GradMode::set_enabled(arg == Py_True);
+  FwGradMode::set_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

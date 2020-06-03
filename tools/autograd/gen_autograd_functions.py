@@ -84,6 +84,11 @@ if (should_compute_output({ ${idx_ranges} })) {
 # TODO: This is probably not exhaustive, but it's a start
 UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
+def get_manual_backward_functions(template_path):
+    filename = os.path.join(template_path, "ManualBackwardFunctions.cpp")
+    with open(filename, "r") as f:
+        return f.read()
+
 
 def gen_autograd_functions_lib(out, autograd_functions, template_path):
     gen_autograd_functions(out, autograd_functions, template_path, "Functions")
@@ -115,13 +120,13 @@ def gen_autograd_functions(out, autograd_functions, template_path, file_basename
         'autograd_function_definitions': function_definitions,
         'autograd_function_declarations': function_declarations,
         'py_function_initializers': py_function_initializers,
+        'manual_backward_functions': get_manual_backward_functions(template_path)
     }
 
     for suffix in [".h", ".cpp"]:
         f = file_basename + suffix
         templated_output = CodeTemplate.from_file(os.path.join(template_path, f))
         write(out, f, templated_output, top_env)
-
 
 def process_function(func):
     env = {}
