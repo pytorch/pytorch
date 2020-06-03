@@ -1145,12 +1145,6 @@ void LoopNest::reorderAxis(For* a, For* b) {
     }
   }
 
-  // If the top level is now empty, eliminate it.
-  if (before->body()->nstmts() == 0) {
-    root->remove_stmt(before);
-    before = nullptr;
-  }
-
   // now we can actually reorder the chosen axes.
   std::swap(internal_axes.front(), internal_axes.back());
 
@@ -1160,9 +1154,15 @@ void LoopNest::reorderAxis(For* a, For* b) {
   }
 
   // Append the new statements to the root of the tree.
-  root->append_stmt(newInner);
+  if (before->body()->nstmts() == 0) {
+    // If the top level is now empty, eliminate it.
+    root->replace_stmt(before, newInner);
+  } else {
+    root->insert_stmt_after(newInner, before);
+  }
+
   if (after) {
-    root->append_stmt(after);
+    root->insert_stmt_after(after, newInner);
   }
 } // namespace tensorexpr
 
