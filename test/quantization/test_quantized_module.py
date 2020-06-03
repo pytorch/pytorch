@@ -154,13 +154,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         #
         # Instead, we currently check that the proper exception is thrown on save.
         # <start code>
-        # b = io.BytesIO()
-        # torch.save(qlinear, b)
-        # b.seek(0)
-        # loaded = torch.load(b)
-        # self.assertEqual(qlinear.weight(), loaded.weight())
-        # self.assertEqual(qlinear.scale, loaded.scale)
-        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        b = io.BytesIO()
+        torch.save(qlinear, b)
+        b.seek(0)
+        loaded = torch.load(b)
+        self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.scale, loaded.scale)
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
         # <end code>
         #
         # Currently disabled after TorchBind PR
@@ -302,21 +302,21 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Instead, we currently check that the proper exception is thrown on
         # save.
         # <start code>
-        # b = io.BytesIO()
-        # torch.save(conv_under_test, b)
-        # b.seek(0)
-        # loaded_conv = torch.load(b)
-        #
-        # self.assertEqual(loaded_qconv_module.bias(), qconv_module.bias())
-        # self.assertEqual(loaded_qconv_module.scale, qconv_module.scale)
-        # self.assertEqual(loaded_qconv_module.zero_point,
-        #                  qconv_module.zero_point)
+        b = io.BytesIO()
+        torch.save(qconv_module, b)
+        b.seek(0)
+        loaded_conv = torch.load(b)
+
+        self.assertEqual(loaded_conv.bias(), qconv_module.bias())
+        self.assertEqual(loaded_conv.scale, qconv_module.scale)
+        self.assertEqual(loaded_conv.zero_point,
+                         qconv_module.zero_point)
         # <end code>
-        with self.assertRaisesRegex(
-            RuntimeError, r'torch.save\(\) is not currently supported'
-        ):
-            bytes_io = io.BytesIO()
-            torch.save(qconv_module, bytes_io)
+        # with self.assertRaisesRegex(
+        #     RuntimeError, r'torch.save\(\) is not currently supported'
+        # ):
+        #     bytes_io = io.BytesIO()
+        #     torch.save(qconv_module, bytes_io)
 
         # JIT testing
         self.checkScriptable(
@@ -701,12 +701,12 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         #
         # Instead, we currently check that the proper exception is thrown on save.
         # <start code>
-        # b = io.BytesIO()
-        # torch.save(qlinear, b)
-        # b.seek(0)
-        # loaded = torch.load(b)
-        # self.assertEqual(qlinear.weight(), loaded.weight())
-        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        b = io.BytesIO()
+        torch.save(qlinear, b)
+        b.seek(0)
+        loaded = torch.load(b)
+        self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
         # <end code>
         # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
         #     b = io.BytesIO()
