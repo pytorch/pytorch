@@ -1,7 +1,7 @@
 import math
 import warnings
 import numbers
-from typing import Tuple, Optional, overload
+from typing import List, Tuple, Optional, overload
 
 import torch
 from torch import Tensor
@@ -10,8 +10,6 @@ from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
 from .. import init
 from ... import _VF
-
-from typing import Any, Optional, Tuple, List
 
 _rnn_impls = {
     'RNN_TANH': _VF.rnn_tanh,
