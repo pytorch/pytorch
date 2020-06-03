@@ -414,7 +414,6 @@ def run(paths):
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
-                declaration['supports_named_tensor'] = func.get('supports_named_tensor', False)
                 declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'with_codegenerated_unboxing_wrapper')
                 assert declaration['use_c10_dispatcher'] in ['with_codegenerated_unboxing_wrapper', 'full']
                 declaration['manual_kernel_registration'] = func.get('manual_kernel_registration', False)

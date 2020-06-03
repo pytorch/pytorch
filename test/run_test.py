@@ -69,9 +69,13 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'test_openmp',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
+    'distributed/rpc/tensorpipe/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
@@ -79,6 +83,7 @@ TESTS = [
     'test_determination',
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'test_futures',
 ]
 
 WINDOWS_BLACKLIST = [
@@ -86,6 +91,9 @@ WINDOWS_BLACKLIST = [
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
     'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
+    'distributed/rpc/tensorpipe/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
@@ -97,6 +105,9 @@ ROCM_BLACKLIST = [
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
     'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
+    'distributed/rpc/tensorpipe/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
@@ -138,8 +149,11 @@ SLOW_TESTS = [
     'test_jit_profiling',
     'test_torch',
     'distributed/test_distributed',
-    'distributed/rpc/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
+    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
+    'distributed/rpc/tensorpipe/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_rpc_spawn',
     'test_cuda',
     'test_cuda_primary_ctx',
     'test_cpp_extensions_aot_ninja',
@@ -154,6 +168,7 @@ SLOW_TESTS = [
     'distributed/test_c10d_spawn',
     'test_quantization',
     'test_determination',
+    'test_futures',
 ]
 _DEP_MODULES_CACHE = {}
 
@@ -573,6 +588,13 @@ def get_dep_modules(test):
             'urllib',
             'json',
             'collections',
+            # Modules below are excluded because they are hitting https://bugs.python.org/issue40350
+            # Trigger AttributeError: 'NoneType' object has no attribute 'is_package'
+            'mpl_toolkits',
+            'google',
+            'onnx',
+            # Triggers RecursionError
+            'mypy'
         ],
     )
     # HACK: some platforms default to ascii, so we can't just run_script :(
