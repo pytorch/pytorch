@@ -319,6 +319,7 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
     }
   }
 #endif
+  c10::reportMemoryUsageToProfiler(base_ptr_, size_, c10::Device(c10::DeviceType::CPU));
 }
 
 THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
@@ -563,4 +564,9 @@ at::DataPtr THRefcountedMapAllocator::makeDataPtr(WithFd, const char *filename, 
 
 void* THRefcountedMapAllocator::data() const {
   return static_cast<void*>(static_cast<char*>(base_ptr_) + TH_ALLOC_ALIGNMENT);
+}
+
+THMapAllocator::~THMapAllocator() {
+  close();
+  c10::reportMemoryUsageToProfiler(base_ptr_, -size_, c10::Device(c10::DeviceType::CPU));
 }

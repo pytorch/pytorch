@@ -46,9 +46,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy6 = relu6_module(qx)
 
         self.assertEqual(y_ref, qy.dequantize(),
-                         message="ReLU module API failed")
+                         msg="ReLU module API failed")
         self.assertEqual(y6_ref, qy6.dequantize(),
-                         message="ReLU6 module API failed")
+                         msg="ReLU6 module API failed")
 
 
     @given(
@@ -92,7 +92,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         qlinear.set_weight_bias(W_q, B)
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight(), W_q, atol=1e-5)
+        self.assertEqual(qlinear.weight(), W_q, atol=1e-5, rtol=0)
         W_pack = qlinear._packed_params._packed_params
 
         qlinear.scale = float(scale)
@@ -343,6 +343,67 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           length=st.integers(4, 16),
+           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 4),
+           kernel=st.integers(1, 7),
+           stride=st.integers(1, 2),
+           pad=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans(),
+           use_fused=st.booleans(),
+           use_channelwise=st.booleans())
+    @override_qengines
+    def test_conv1d_api(
+        self, batch_size, in_channels_per_group, length, out_channels_per_group,
+        groups, kernel, stride, pad, dilation,
+        X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
+        use_bias, use_fused, use_channelwise
+    ):
+        # Tests the correctness of the conv2d module.
+        in_channels = in_channels_per_group * groups
+        out_channels = out_channels_per_group * groups
+        input_feature_map_size = (length,)
+        kernel_size = (kernel, )
+        stride = (stride, )
+        pad = (pad, )
+        dilation = (dilation, )
+        if torch.backends.quantized.engine == 'qnnpack':
+            use_channelwise = False
+        if use_fused:
+            module_name = "QuantizedConvReLU1d"
+            qconv_module = nnq_fused.ConvReLU1d(
+                in_channels, out_channels, kernel, stride, pad,
+                dilation, groups, use_bias, padding_mode="zeros")
+        else:
+            module_name = "QuantizedConv1d"
+            qconv_module = nnq.Conv1d(
+                in_channels, out_channels, kernel, stride, pad,
+                dilation, groups, use_bias, padding_mode="zeros")
+
+        conv_module = nn.Conv1d(
+            in_channels, out_channels, kernel, stride, pad,
+            dilation, groups, use_bias, padding_mode="zeros")
+        if use_fused:
+            relu_module = nn.ReLU()
+            conv_module = nni.ConvReLU1d(conv_module, relu_module)
+        conv_module = conv_module.float()
+
+        self._test_conv_api_impl(
+            module_name, qconv_module, conv_module, batch_size,
+            in_channels_per_group, input_feature_map_size,
+            out_channels_per_group, groups, kernel_size, stride, pad,
+            dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
+            Y_zero_point, use_bias, use_fused, use_channelwise)
+
+    @given(batch_size=st.integers(1, 3),
+           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
            W=st.integers(4, 16),
            out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
@@ -378,8 +439,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         stride = (stride_h, stride_w)
         padding = (pad_h, pad_w)
         dilation = (dilation, dilation)
-        if torch.backends.quantized.engine == 'qnnpack':
-            use_channelwise = False
         if use_fused:
             module_name = "QuantizedConvReLU2d"
             qconv_module = nnq_fused.ConvReLU2d(
@@ -517,7 +576,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm2d module API failed")
+                         msg="BatchNorm2d module API failed")
 
     def test_batch_norm3d(self):
         """Tests the correctness of the batchnorm3d module.
@@ -535,7 +594,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm3d module API failed")
+                         msg="BatchNorm3d module API failed")
 
     def test_layer_norm(self):
         """Tests the correctness of the layernorm module.
@@ -565,7 +624,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qY = quant_mod(qX)
 
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         msg="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
 
 
@@ -599,7 +658,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Check if the module implementation matches calling the
         # ops directly
-        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack)
+        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack, reduce_range=True)
         self.assertEqual(Z_ref, Z_dq)
 
         # Test serialization of dynamic quantized Linear Module using state_dict
