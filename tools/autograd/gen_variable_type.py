@@ -354,7 +354,18 @@ return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_
 # TraceType templates
 TRACE_DISPATCH_UNBOXED = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-${assign_return_values}c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
+${tie_return_values} = ([&]() {
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    return c10::Dispatcher::singleton().call<${ret_and_arg_types}>(${trace_dispatch_args});
+})();
+""")
+
+TRACE_DISPATCH_UNBOXED_WITHOUT_RETURN_VALUES = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
+{
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
+  c10::Dispatcher::singleton().call<${ret_and_arg_types}>(${trace_dispatch_args});
+}
 """)
 
 
@@ -730,14 +741,20 @@ def emit_trace_body(declaration):
     trace_body.append(declare_returned_variables)
 
     ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
-    trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['args']
-    assign_return_values = '{} = '.format(tie_return_values) if not modifies_arguments and not returns_void else ''
-    call = TRACE_DISPATCH_UNBOXED.substitute(
-        declaration,
-        ret_and_arg_types=ret_and_arg_types,
-        trace_dispatch_args=trace_dispatch_args,
-        assign_return_values=assign_return_values,
-    )
+    trace_dispatch_args = ['op'] + declaration['args']
+    if not modifies_arguments and not returns_void:
+        call = TRACE_DISPATCH_UNBOXED.substitute(
+            declaration,
+            ret_and_arg_types=ret_and_arg_types,
+            trace_dispatch_args=trace_dispatch_args,
+            tie_return_values=tie_return_values,
+        )
+    else:
+        call = TRACE_DISPATCH_UNBOXED_WITHOUT_RETURN_VALUES.substitute(
+            declaration,
+            ret_and_arg_types=ret_and_arg_types,
+            trace_dispatch_args=trace_dispatch_args,
+        )
     trace_body.append(call)
     trace_body.append(post_record_trace)
     if not returns_void:
