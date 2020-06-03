@@ -1638,7 +1638,11 @@ if _enabled:
                 # This ensures that if we use the attr again in `__init__`, it
                 # will look like the actual value, not an instance of Attribute.
                 if isinstance(value, Attribute):
-                    if not hasattr(self, "__annotations__"):
+                    # NB: Ensure that we set __annotations__ on the specific
+                    # class in question, and not on a superclass (which would
+                    # be wrong wrong wrong!).
+                    # See also https://github.com/pytorch/pytorch/issues/39463
+                    if "__annotations__" not in self.__class__.__dict__:
                         self.__annotations__ = {}
                     self.__annotations__[attr] = value.type
                     value = value.value
