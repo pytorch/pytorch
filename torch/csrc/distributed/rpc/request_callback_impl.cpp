@@ -93,9 +93,9 @@ void processAsyncExecution(
     const py::object& pyFn,
     const int64_t messageId,
     const std::shared_ptr<FutureMessage>& responseFuture,
-    std::function<void(SerializedPyObj,
-                       int64_t,
-                       const std::shared_ptr<FutureMessage>&)> postProcessing) {
+    std::function<
+        void(SerializedPyObj, int64_t, const std::shared_ptr<FutureMessage>&)>
+        postProcessing) {
   std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   {
@@ -141,9 +141,8 @@ void processAsyncExecution(
     std::shared_ptr<SerializedPyObj> serializedPyObj;
     {
       py::gil_scoped_acquire acquire;
-      serializedPyObj =
-          std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
-              jit::toPyObject(jitFuture->value())));
+      serializedPyObj = std::make_shared<SerializedPyObj>(
+          pythonRpcHandler.serialize(jit::toPyObject(jitFuture->value())));
     }
     postProcessing(std::move(*serializedPyObj), messageId, responseFuture);
   });
@@ -215,25 +214,23 @@ void RequestCallbackImpl::processRpc(
         jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
           try {
             auto valueJitFuture = jitFuture->value().toFuture();
-            valueJitFuture->addCallback([responseFuture,
-                                         messageId,
-                                         valueJitFuture]() {
-              try {
-                Message m = ScriptResp(valueJitFuture->value()).toMessage();
-                m.setId(messageId);
-                responseFuture->markCompleted(std::move(m));
-              } catch (const std::exception& e) {
-                responseFuture->setError(e.what());
-              }
-            });
+            valueJitFuture->addCallback(
+                [responseFuture, messageId, valueJitFuture]() {
+                  try {
+                    Message m = ScriptResp(valueJitFuture->value()).toMessage();
+                    m.setId(messageId);
+                    responseFuture->markCompleted(std::move(m));
+                  } catch (const std::exception& e) {
+                    responseFuture->setError(e.what());
+                  }
+                });
           } catch (const std::exception& e) {
             responseFuture->setError(e.what());
           }
         });
       } else {
         if (jitFuture->completed()) {
-          markComplete(
-              std::move(ScriptResp(jitFuture->value())).toMessage());
+          markComplete(std::move(ScriptResp(jitFuture->value())).toMessage());
           return;
         }
 
@@ -270,9 +267,9 @@ void RequestCallbackImpl::processRpc(
         std::shared_ptr<SerializedPyObj> serializedPyObj;
         {
           py::gil_scoped_acquire acquire;
-          serializedPyObj = std::make_shared<SerializedPyObj>(
-              pythonRpcHandler.serialize(pythonRpcHandler.runPythonUdf(
-                  upc.pythonUdf())));
+          serializedPyObj =
+              std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
+                  pythonRpcHandler.runPythonUdf(upc.pythonUdf())));
         }
         markComplete(
             std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
