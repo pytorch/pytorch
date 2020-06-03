@@ -159,8 +159,7 @@ void RequestCallbackImpl::processRpc(
                                          messageId,
                                          valueJitFuture]() {
               try {
-                Message m =
-                    ScriptResp(std::move(valueJitFuture->value())).toMessage();
+                Message m = ScriptResp(valueJitFuture->value()).toMessage();
                 m.setId(messageId);
                 responseFuture->markCompleted(std::move(m));
               } catch (const std::exception& e) {
@@ -174,13 +173,13 @@ void RequestCallbackImpl::processRpc(
       } else {
         if (jitFuture->completed()) {
           markComplete(
-              std::move(ScriptResp(std::move(jitFuture->value()))).toMessage());
+              std::move(ScriptResp(jitFuture->value())).toMessage());
           return;
         }
 
         jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
           try {
-            Message m = ScriptResp(std::move(jitFuture->value())).toMessage();
+            Message m = ScriptResp(jitFuture->value()).toMessage();
             m.setId(messageId);
             responseFuture->markCompleted(std::move(m));
           } catch (const std::exception& e) {
