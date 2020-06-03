@@ -2321,3 +2321,39 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
             m2 = convert_dynamic_script(m2, debug=False)
             out_ref = m2(data)
             self.assertEqual(out_graph, out_ref)
+
+    @override_qengines
+    def test_dynamic_with_if(self):
+        class Res(torch.nn.Module):
+            def __init__(self):
+                super(Res, self).__init__()
+                self.weight = torch.nn.Parameter(torch.ones(5, 5))
+
+            def forward(self, x, cond):
+                # type: (Tensor, bool) -> Tensor
+                if cond:
+                    return torch.nn.functional.linear(x, self.weight)
+                else:
+                    return torch.nn.functional.linear(x, self.weight)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.res1 = Res()
+                self.res2 = Res()
+
+            def forward(self, x):
+                x = self.res1(x, True)
+                x = self.res2(x, False)
+                return x
+
+        model = torch.jit.script(M()).eval()
+        data = torch.randn(5, 5, dtype=torch.float)
+        qconfig_dict = {'': default_dynamic_qconfig}
+        m1 = quantize_dynamic_script(model, qconfig_dict)
+        out_graph = m1(data)
+
+        m2 = prepare_dynamic_script(model, qconfig_dict)
+        m2 = convert_dynamic_script(m2)
+        out_ref = m2(data)
+        self.assertEqual(out_graph, out_ref)
