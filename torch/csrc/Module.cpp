@@ -613,6 +613,7 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
   }
 }
 
+extern "C"
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
