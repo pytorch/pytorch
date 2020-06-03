@@ -201,10 +201,6 @@
 - name: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
-- name: bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor
-  self: zeros_like(grad, at::MemoryFormat::Preserve)
-  p: zeros_like(p)
-
 - name: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
   p: zeros_like(p)
