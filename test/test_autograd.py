@@ -6069,6 +6069,7 @@ class TestAutogradDeviceType(TestCase):
     def test_simple_reentrant_cross_device(self, device):
         class ReentrantFunc(Function):
             _cpu_mode = True
+
             @staticmethod
             def forward(ctx, x):
                 return x * (x + 2)
