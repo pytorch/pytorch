@@ -80,18 +80,22 @@ class TORCH_API Future final {
   // Sets error only if the future hasn't been marked completed already.
   // Useful in avoiding races where multiple threads try to setError
   // on a future.
-  void setErrorIfNeeded(std::string errorMsg) {
+  void setErrorIfNeeded(FutureError error) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
       // This should be rare and shouldn't cause log spew. Its important to
       // log errors and thats why we have this log here.
       LOG (INFO) << "Skipping setting following error on the Future since " <<
         "it is already marked completed (this is not neccessarily an error): "
-        << errorMsg;
+        << error.what();
       return;
     } else {
-      setErrorInternal(FutureError(std::move(errorMsg)), lock);
+      setErrorInternal(std::move(error), lock);
     }
+  }
+
+  void setErrorIfNeeded(std::string errorMsg) {
+    setErrorIfNeeded(FutureError(std::move(errorMsg)));
   }
 
   void setError(FutureError error) {
