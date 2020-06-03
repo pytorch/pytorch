@@ -1063,24 +1063,18 @@ InsertObserversHelper::insertObserversFor(
             aggregated_output_observers = output_observers;
           }
         }
-      } else {
-        for (Value* v : n->outputs()) {
-          propagateObservedProperty(v, block_observed_values);
-          if (!inputs_outputs.count(v) &&
-              !isObserved(v, block_observed_values)) {
-            auto observer_opt = getObserverFor(v);
-            // If the node is one of the propagate quant node, e.g.
-            // aten::cat, we should observe its output only
-            // if the input of the node is observed
-            if (observer_opt &&
-                shouldPropagateQuant(n, block_observed_values)) {
-              recordObserved(
-                  v, *observer_opt, values_to_observe, block_observed_values);
-            }
+      }
+      for (Value* v : n->outputs()) {
+        propagateObservedProperty(v, block_observed_values);
+        if (!inputs_outputs.count(v) && !isObserved(v, block_observed_values)) {
+          auto observer_opt = getObserverFor(v);
+          // If the node is one of the propagate quant node, e.g.
+          // aten::cat, we should observe its output only
+          // if the input of the node is observed
+          if (observer_opt && shouldPropagateQuant(n, block_observed_values)) {
+            recordObserved(
+                v, *observer_opt, values_to_observe, block_observed_values);
           }
-        }
-        for (Block* subblock : n->blocks()) {
-          blocks_to_visit.push(subblock);
         }
       }
     }
