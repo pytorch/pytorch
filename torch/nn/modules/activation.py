@@ -1035,9 +1035,16 @@ class Softmin(Module):
         super(Softmin, self).__init__()
         self.dim = dim
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
     def forward(self, input):
         return F.softmin(input, self.dim, _stacklevel=5)
 
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
 
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
@@ -1160,3 +1167,6 @@ class LogSoftmax(Module):
 
     def forward(self, input):
         return F.log_softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
