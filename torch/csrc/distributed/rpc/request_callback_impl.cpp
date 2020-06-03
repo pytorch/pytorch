@@ -190,7 +190,7 @@ void RequestCallbackImpl::processRpc(
 
           try {
             pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
-          } catch (const py::cast_error &e) {
+          } catch (const py::cast_error& e) {
             auto type = result.get_type();
             auto errMsg = c10::str(
                 e.what(),
