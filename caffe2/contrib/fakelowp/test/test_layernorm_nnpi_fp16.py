@@ -28,12 +28,12 @@ GLOW_LOWERED_BATCHNORM = False
 # Test the lowered LayerNorm op
 class LayerNorm(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65535),
-        size = st.integers(2,3),
-        input_channels=st.integers(1, 2),
-        batch_size=st.integers(2,4),
-        epsilon=st.floats(min_value=1e-4, max_value=1e-2))
+        size = st.integers(2,8),
+        input_channels=st.integers(1, 4),
+        batch_size=st.integers(2,8),
+        epsilon=st.floats(min_value=1e-5, max_value=1e-2))
     @settings(max_examples=100)
-    def _test_layernorm(self, seed, size, input_channels, batch_size, epsilon):
+    def test_layernorm(self, seed, size, input_channels, batch_size, epsilon):
         np.random.seed(seed)
         # Reset the workspace
         workspace.ResetWorkspace()
@@ -109,7 +109,11 @@ class LayerNorm(serial.SerializedTestCase):
                     "epsilon": epsilon,
                     "X": X,
                     "Y_glow": Y_glow,
+                    "mean_glow": mean_glow,
+                    "std_glow": std_glow,
                     "Y_c2": Y_c2,
+                    "mean_c2": mean_c2,
+                    "std_c2": std_c2,     
                     "diff_Y": diff_Y,
                     "diff_mean": diff_mean,
                     "diff_std": diff_std,
