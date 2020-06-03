@@ -23,7 +23,6 @@
       " but got ",                            \
       X)
 
-
 namespace {
 
 static cublasOperation_t _cublasOpFromChar(char op) {

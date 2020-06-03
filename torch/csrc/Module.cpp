@@ -474,9 +474,9 @@ PyObject *THPModule_setAllowTF32CuBLAS(PyObject *_unused, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_AllowTF32CuBLAS(PyObject *_unused, PyObject *noargs)
+PyObject *THPModule_allowTF32CuBLAS(PyObject *_unused, PyObject *noargs)
 {
-  if (at::globalContext().AllowTF32CuBLAS()) Py_RETURN_TRUE;
+  if (at::globalContext().allowTF32CuBLAS()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
 }
 
@@ -572,7 +572,7 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  nullptr},
-  {"_get_cublas_allow_tf32", (PyCFunction)THPModule_AllowTF32CuBLAS, METH_NOARGS,     nullptr},
+  {"_get_cublas_allow_tf32", (PyCFunction)THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", (PyCFunction)THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       nullptr},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       nullptr},
