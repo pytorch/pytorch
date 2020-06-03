@@ -798,6 +798,10 @@ void TensorIterator::compute_shape() {
       shape_ = DimVector(infer_size(shape_, shape));
     }
   }
+}
+
+void TensorIterator::resize_outputs() {
+  if (static_shape_) return;
   // Outputs cannot be broadcasted. Check that the shape of the outputs matches
   // the inferred shape. There's an exception for write-only tensors to support
   // our legacy behavior that functions with `out=` arguments resize their
@@ -848,17 +852,87 @@ void TensorIterator::compute_strides() {
 }
 
 void TensorIterator::analyze_memory_format() {
+  // TODO(vitalyf): Optimize to skip this section if outputs are already
+  // allocated and connot be resized
+  // TODO(vitalyf): Make it widely accessible function which takes list
+  // of tensors and returns suggested format
+  bool all_leading_cl_ambiguous = true;
+  bool had_cl_suggested = false;
+  bool all_leading_cl3d_ambiguous = true;
+  bool had_cl3d_suggested = false;
   for (auto& op : operands_) {
-    if (op.tensor.defined()) {
-      if (!requires_channels_last_output_ &&
+    if (op.tensor.defined() && !op.is_output) {
+      auto cl_ambiguous =
+          (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
+           op.tensor.is_contiguous(MemoryFormat::ChannelsLast)) ||
+          op.tensor.dim() < 4;
+
+      auto cl3d_ambiguous =
+          (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
+           op.tensor.is_contiguous(MemoryFormat::ChannelsLast3d)) ||
+          op.tensor.dim() < 5;
+
+      if (op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+        had_cl_suggested = true;
+      } else if (
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
+        had_cl3d_suggested = true;
+      }
+
+      if (!cl_ambiguous && all_leading_cl_ambiguous &&
           op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
         requires_channels_last_output_ = true;
-      }
-      else if (!requires_channels_last_3d_output_ &&
+      } else if (
+          !cl3d_ambiguous && all_leading_cl3d_ambiguous &&
           op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
         requires_channels_last_3d_output_ = true;
       }
+
+      // Keep checking if first input is arbitrary strided (ex. NC11) or can be
+      // broadcasted to anything numel == 1
+      if (all_leading_cl_ambiguous && !cl_ambiguous) {
+        all_leading_cl_ambiguous = false;
+      }
+      if (!cl_ambiguous && !requires_channels_last_output_ &&
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+        TORCH_WARN_ONCE(
+            "Mixed memory format inputs detected while calling the operator. "
+            "The operator will output contiguous tensor even if some of the inputs are in channels_last format.");
+      }
+      if (!cl_ambiguous && requires_channels_last_output_ &&
+          op.tensor.suggest_memory_format() != MemoryFormat::ChannelsLast) {
+        TORCH_WARN_ONCE(
+            "Mixed memory format inputs detected while calling the operator. "
+            "The operator will output channels_last tensor even if some of the inputs are not in channels_last format.");
+      }
+
+      // Keep checking if first input is arbitrary strided (ex. NC111) or can be
+      // broadcasted to anything numel == 1
+      if (all_leading_cl3d_ambiguous && !cl3d_ambiguous) {
+        all_leading_cl3d_ambiguous = false;
+      }
+      if (!cl3d_ambiguous && !requires_channels_last_3d_output_ &&
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
+        TORCH_WARN_ONCE(
+            "Mixed memory format inputs detected while calling the operator. "
+            "The operator will output contiguous tensor even if some of the inputs are not in channels_last_3 format.");
+      }
+      if (!cl3d_ambiguous && requires_channels_last_3d_output_ &&
+          op.tensor.suggest_memory_format() != MemoryFormat::ChannelsLast3d) {
+        TORCH_WARN_ONCE(
+            "Mixed memory format inputs detected while calling the operator. "
+            "The operator will output channels_last_3d tensor even if some of the inputs are not in channels_last_3d format.");
+      }
     }
+  }
+  // If everything is ambiguous lean towards channels last format
+  if (!requires_channels_last_output_ && all_leading_cl_ambiguous &&
+      had_cl_suggested) {
+    requires_channels_last_output_ = true;
+  }
+  if (!requires_channels_last_3d_output_ && all_leading_cl3d_ambiguous &&
+      had_cl3d_suggested) {
+    requires_channels_last_3d_output_ = true;
   }
 }
 
@@ -972,6 +1046,8 @@ bool TensorIterator::fast_set_up() {
             //       We will revisit this logic when doing the TensorIterator refactor work and
             //       it would probably be better to move this logic out of TensorIterator.
 
+            // TODO(vitalyf): Potentionally might try to address bigger than original memory size
+
             // Check whether output tensor needs restride, output's stride can be different than input tensors
             if (i != i_defined && !op.tensor.strides().equals(operands_[i_defined].tensor.strides())) {
               op.tensor.as_strided_(op.tensor.sizes(), operands_[i_defined].tensor.strides());
@@ -1048,10 +1124,10 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
 }
 
 void TensorIterator::build() {
-  // check input tensors memory format to use it during output allocation
-  analyze_memory_format();
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
+  // check input tensors memory format to use it during output allocation
+  analyze_memory_format();
   // Check that the outputs have no internal overlap
   // and do not share memory with inputs.
   check_mem_overlaps();
@@ -1059,6 +1135,8 @@ void TensorIterator::build() {
   compute_names();
   // compute the broadcasted shape
   compute_shape();
+  // resize outputs if necessary
+  resize_outputs();
   // compute the result dtype and device
   compute_types();
   // try fast setup output tensor, if failed, fallback to normal setup
