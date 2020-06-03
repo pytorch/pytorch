@@ -1,37 +1,46 @@
 # See README.md in this directory for more guidance
 
-# Temporary type cast operators. These are needed to trace type-casts now since
-# Type's are not supported in the IR. Instead, we call down to these
-# specialized operators for each datatype.
-# TODO: remove when we have Type support in the IR
+# *********NB: _cast_* operators are DEPRECATED and will be removed
+# eventually. These were previously used before TorchScript IR supported
+# representing ScalarType's. They are now superseded by usage of
+# `aten::to()`. The ops remain here for backward compatibility purposes.
+
+# DEPRECATED. DO NOT USE
 - func: _cast_Byte(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Char(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Double(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Float(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Int(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Long(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Short(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function

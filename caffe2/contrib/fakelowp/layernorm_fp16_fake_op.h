@@ -20,9 +20,10 @@ C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
 namespace caffe2 {
 
-class LayerNormFakeFp16Op : public Operator<CPUContext> {
+template <class Context>
+class LayerNormFakeFp16Op final : public Operator<Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(CPUContext);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   template <class... Args>
   explicit LayerNormFakeFp16Op(Args&&... args)
@@ -33,8 +34,7 @@ class LayerNormFakeFp16Op : public Operator<CPUContext> {
   ~LayerNormFakeFp16Op() noexcept override {}
 
   bool RunOnDevice() override {
-    return true;
-    // return DispatchHelper<InputTypes>::call(this, Input(DATA));
+    return DoRunWithType<float>();
   }
 
   template <typename T>
