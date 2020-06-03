@@ -68,17 +68,14 @@ Tensor qnnpack_hardswish(const Tensor& qx, Tensor& qy) {
 Tensor quantized_hardswish(const Tensor& qx, double output_scale, int64_t output_zero_point) {
   Tensor qy = at::_empty_affine_quantized(
       qx.sizes(),
-      at::device(kCPU)
-        .dtype(qx.scalar_type()),
-        // .memory_format(MemoryFormat::ChannelsLast),
+      at::device(kCPU).dtype(qx.scalar_type()),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      qx.suggest_memory_format());
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
     Tensor qx_contig = qx.contiguous(qx.suggest_memory_format());
-    TORCH_CHECK(qy.is_contiguous(), "qy must be contiguous");
     qnnpack_hardswish(qx_contig, qy);
     return qy;
   }

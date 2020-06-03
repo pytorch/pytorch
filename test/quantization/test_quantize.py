@@ -29,7 +29,7 @@ from torch.quantization import (
     default_histogram_observer,
 )
 
-from torch.quantization._quantize_script import (
+from torch.quantization.quantize_script import (
     quantize_script,
     quantize_dynamic_script
 )

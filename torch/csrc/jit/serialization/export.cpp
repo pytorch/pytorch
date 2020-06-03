@@ -87,13 +87,18 @@ void validateBlock(
         }
       }
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
-        FAIL_EXPORT(
-            "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
-            getNodeStackTraceString(node));
+        if (operator_export_type !=
+            onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {
+          FAIL_EXPORT(
+              "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
+              getNodeStackTraceString(node));
+        }
       }
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
-          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
+          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN ||
+          operator_export_type ==
+              onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH;
       if (node->kind().is_aten() && !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
