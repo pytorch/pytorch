@@ -1,4 +1,4 @@
-namespace std {
+// Warning! This file is included twice in c10/util/complex_type.h!
 
 // Exponential functions
 
@@ -207,5 +207,3 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T> &x) {
   return static_cast<c10::complex<T>>(std::atanh(static_cast<std::complex<T>>(x)));
 #endif
 }
-
-} // namespace std
