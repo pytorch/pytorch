@@ -6360,58 +6360,23 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
-    def _np_compare(self, fn_name, vals, device, dtype):
-        assert TEST_NUMPY
-
-        torch_fn = getattr(torch, fn_name)
-        np_fn = getattr(np, fn_name)
-
-        a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
-        np_result = torch.from_numpy(np_fn(a))
-
-        t = torch.tensor(vals, device=device, dtype=dtype)
-        torch_result = torch_fn(t).cpu()
-        self.assertEqual(np_result, torch_result)
-
-    def _np_compare_func(self, fns, vals, device, dtype):
-        assert TEST_NUMPY
-
-        torch_fn, np_fn = fns
-
-        a = np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype])
-
-        # `numpy` may return an array with `negative` strides
-        # which is currently not supported. `.copy()` assures
-        # that we get an array with `postive` strides only.
-        np_result = torch.from_numpy(np_fn(a).copy())
-
-        t = torch.tensor(vals, device=device, dtype=dtype)
-        torch_result = torch_fn(t).cpu()
-        self.assertEqual(np_result, torch_result)
-
-    def _rand_shape(self, dim, min_size, max_size):
-        shape = []
-        for i in range(dim):
-            shape.append(random.randint(min_size, max_size))
-        return tuple(shape)
-
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float)
     def test_isfinite_isinf_isnan(self, device, dtype):
         vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
 
-        self._np_compare('isfinite', vals, device, dtype)
-        self._np_compare('isinf', vals, device, dtype)
-        self._np_compare('isnan', vals, device, dtype)
+        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
+        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
+        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.long)
     def test_isfinite_isinf_isnan_int(self, device, dtype):
         vals = (-1, 0, 1)
 
-        self._np_compare('isfinite', vals, device, dtype)
-        self._np_compare('isinf', vals, device, dtype)
-        self._np_compare('isnan', vals, device, dtype)
+        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
+        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
+        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.complex64)
@@ -6426,9 +6391,9 @@ class TestTorchDeviceType(TestCase):
             complex(0, 1)
         )
 
-        self._np_compare('isfinite', vals, device, dtype)
-        self._np_compare('isinf', vals, device, dtype)
-        self._np_compare('isnan', vals, device, dtype)
+        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
+        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
+        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
 
     @onlyCPU
     def test_isfinite_type(self, device):
@@ -8064,6 +8029,12 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor([False, True])
         self.assertEqual(a.flip(0), torch.tensor([True, False]))
 
+    def _rand_shape(self, dim, min_size, max_size):
+        shape = []
+        for i in range(dim):
+            shape.append(random.randint(min_size, max_size))
+        return tuple(shape)
+
     @dtypes(torch.cfloat, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_complex_flip(self, device, dtype):
@@ -8077,7 +8048,7 @@ class TestTorchDeviceType(TestCase):
                 data = torch.randn(*shape, dtype=dtype).tolist()
                 torch_fn = partial(torch.flip, dims=flip_dim)
                 np_fn = partial(np.flip, axis=flip_dim)
-                self._np_compare_func((torch_fn, np_fn), data, device, dtype)
+                self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
 
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
@@ -8120,7 +8091,7 @@ class TestTorchDeviceType(TestCase):
             data = torch.randn(*shape, dtype=dtype).tolist()
             torch_fn = partial(torch.rot90, k=rot_times, dims=[0, 1])
             np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
-            self._np_compare_func((torch_fn, np_fn), data, device, dtype)
+            self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
 
     def test_signal_window_functions(self, device):
         if not TEST_SCIPY:
@@ -16130,7 +16101,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             complex(2.0, 0.0),
             complex(0.0, 2.0))
 
-        self._np_compare('reciprocal', vals, device, dtype)
+        self.compare_with_numpy(torch.reciprocal, np.reciprocal, vals, device, dtype)
 
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float)
