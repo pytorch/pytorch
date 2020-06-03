@@ -8084,6 +8084,8 @@ class TestTorchDeviceType(TestCase):
             shape = self._rand_shape(dim, 5, 10)
             # Randomly scale the input
             data = (torch.randn(*shape).to(dtype) * random.randint(50, 100)).tolist()
+            # Use _np_compare_func as it copies the output of np_func,
+            # which takes care of negative strides if present.
             self._np_compare_func(funcs, data, device, dtype)
 
     @dtypes(torch.float, torch.double, torch.int16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
@@ -8095,9 +8097,9 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float, torch.double, torch.int16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
     def test_fliplr_invalid(self, device, dtype):
         x = torch.randn(42).to(dtype)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(x)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(torch.tensor(42))
 
     @dtypes(torch.float, torch.double, torch.int16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
@@ -8108,8 +8110,8 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.float, torch.double, torch.int16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
     def test_flipud_invalid(self, device, dtype):
-        with self.assertRaises(RuntimeError):
-            torch.fliplr(torch.tensor(42))
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 1-d."):
+            torch.flipud(torch.tensor(42))
 
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
