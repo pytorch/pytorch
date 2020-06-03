@@ -92,12 +92,14 @@ def gen_build_workflows_tree():
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
+        windows_build_definitions.get_windows_workflows,
+        binary_build_definitions.get_binary_smoke_test_jobs,
     ]
 
     binary_build_functions = [
         binary_build_definitions.get_binary_build_jobs,
-        binary_build_definitions.get_binary_smoke_test_jobs,
-        windows_build_definitions.get_windows_workflows,
+        binary_build_definitions.get_nightly_tests,
+        binary_build_definitions.get_nightly_uploads,
     ]
 
     return {
@@ -138,10 +140,6 @@ YAML_SOURCES = [
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
 
-    Header("Nightly tests"),
-    Listgen(binary_build_definitions.get_nightly_tests, 3),
-    File("workflows/workflows-nightly-uploads-header.yml"),
-    Listgen(binary_build_definitions.get_nightly_uploads, 3),
     File("workflows/workflows-s3-html.yml"),
     File("workflows/workflows-docker-builder.yml"),
     File("workflows/workflows-ecr-gc.yml"),
