@@ -161,6 +161,7 @@ namespace jit {
   _(SimplifyForCleansUp)                    \
   _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
+  _(SimplifyEliminateZeroLengthAlloc)       \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
