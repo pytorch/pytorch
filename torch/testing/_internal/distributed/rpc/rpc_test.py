@@ -2748,6 +2748,14 @@ class RpcTest(RpcAgentTestFixture):
     def test_future_nested_callback(self):
         self._test_future_cb(add_use_future_nested_cb)
 
+    def _run_func_in_mode(self, to, fn, mode, args=None, kwargs=None):
+        if mode == RPCExecMode.SYNC:
+            return rpc.rpc_sync(to, fn, args=args, kwargs=kwargs)
+        elif mode == RPCExecMode.ASYNC:
+            return rpc.rpc_async(to, fn, args=args, kwargs=kwargs).wait()
+        elif mode == RPCExecMode.REMOTE:
+            return rpc.remote(to, fn, args=args, kwargs=kwargs).to_here()
+
     @dist_init
     def test_async_function_raise(self):
         with self.assertRaisesRegex(RuntimeError, "Expected error"):
@@ -2780,15 +2788,8 @@ class RpcTest(RpcAgentTestFixture):
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
 
-        if mode == RPCExecMode.SYNC:
-            ret = rpc.rpc_sync(dst1, fn, args=(dst2, torch.ones(2, 2), 1, 2))
-        elif mode == RPCExecMode.REMOTE:
-            ret = rpc.remote(
-                dst1,
-                fn,
-                args=(dst2, torch.ones(2, 2), 1, 2)
-            ).to_here()
-
+        args = (dst2, torch.ones(2, 2), 1, 2)
+        ret = self._run_func_in_mode(dst1, fn, mode, args=args)
         self.assertEqual(ret, torch.ones(2, 2) + 3)
 
     @dist_init
@@ -2824,24 +2825,20 @@ class RpcTest(RpcAgentTestFixture):
 
         num = 20
         step = 3
-        if mode == RPCExecMode.SYNC:
-            ret = rpc.rpc_sync(
-                dst1,
-                fn,
-                args=(dst2, torch.ones(2, 2), num, step)
-            )
-        elif mode == RPCExecMode.REMOTE:
-            ret = rpc.remote(
-                dst1,
-                fn,
-                args=(dst2, torch.ones(2, 2), num, step)
-            ).to_here()
-
+        args = (dst2, torch.ones(2, 2), num, step)
+        ret = self._run_func_in_mode(dst1, fn, mode, args=args)
         self.assertEqual(ret, torch.ones(2, 2) + num * step)
 
     @dist_init
     def test_async_function_multi_chained(self):
         self._test_async_function_multi(async_add_chained_multi)
+
+    @dist_init
+    def test_async_function_multi_chained_async(self):
+        self._test_async_function_multi(
+            async_add_chained_multi,
+            RPCExecMode.ASYNC
+        )
 
     @dist_init
     def test_async_function_multi_chained_remote(self):
@@ -2853,6 +2850,13 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_async_function_multi_fanout(self):
         self._test_async_function_multi(async_add_multi_fanout)
+
+    @dist_init
+    def test_async_function_multi_fanout_async(self):
+        self._test_async_function_multi(
+            async_add_multi_fanout,
+            RPCExecMode.ASYNC
+        )
 
     @dist_init
     def test_async_function_multi_fanout_remote(self):
