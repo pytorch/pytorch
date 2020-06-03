@@ -2,9 +2,8 @@
 #include <torch/csrc/jit/jit_log.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/graph_executor_impl.h>
-
 #include <stack>
 
 namespace torch {
@@ -19,7 +18,7 @@ class AttributePropagator {
   void run(std::shared_ptr<Graph>& graph) {
     Inline(*graph);
     propagateAttributes(graph);
-    runOptimization(graph, /* unroll? */ false);
+    EliminateDeadCode(graph);
     cleanupFrozenModule(graph);
   }
 
@@ -463,7 +462,7 @@ Module freeze_module(const Module& module) {
         "attempted to freeze a module that return itself");
   }
 
-  auto moduleClone = module.clone();
+  auto moduleClone = module.clone(true);
   AttributePropagator attrPropagator(moduleClone);
   method = moduleClone.get_method("forward");
   auto graph = method.graph();

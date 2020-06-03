@@ -89,7 +89,7 @@ class TestNamedTensor(TestCase):
             return
         result = op(*args)
         self.assertEqual(result.names, expected_names,
-                         message='Name inference for {} on device {} failed'.format(
+                         msg='Name inference for {} on device {} failed'.format(
                              op.__name__, device))
 
     # TODO(rzou): Some form of this check should be added to self.assertEqual.
@@ -147,8 +147,8 @@ class TestNamedTensor(TestCase):
         prev_none_refcnt = sys.getrefcount(None)
         scope()
         self.assertEqual(sys.getrefcount(None), prev_none_refcnt,
-                         message='Using tensor.names should not change '
-                                 'the refcount of Py_None')
+                         msg='Using tensor.names should not change '
+                             'the refcount of Py_None')
 
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
@@ -835,7 +835,7 @@ class TestNamedTensor(TestCase):
                 # Get a better error message by catching the error and asserting.
                 raise RuntimeError('{}: {}'.format(testcase.name, err))
             self.assertEqual(out.names, tensor.names,
-                             message=testcase.name)
+                             msg=testcase.name)
 
         def fn(name, *args, **kwargs):
             return [Function(name, lambda t: getattr(torch, name)(t, *args, **kwargs))]
@@ -1099,8 +1099,11 @@ class TestNamedTensor(TestCase):
     def test_unsupported_op_error_msg(self):
         named = torch.randn(3, 3, names=('N', 'C'))
         with self.assertRaisesRegex(
-                RuntimeError, "pdist is not yet supported with named tensors"):
+                RuntimeError, r"pdist.+is not yet supported with named tensors"):
             torch.pdist(named)
+        with self.assertRaisesRegex(
+                RuntimeError, r"as_strided_.+is not yet supported with named tensors"):
+            named.as_strided_((3, 3), (3, 1))
 
     def test_reduction_fns(self):
         def check_output(output, expected_names):

@@ -25,7 +25,7 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     const auto& type = pr.value().type_;
     const auto& isParameter = pr.value().isParam_;
     const auto& isBuffer = pr.value().isBuffer_;
-    cls->addAttribute(name, type, isParameter, false, isBuffer);
+    cls->addAttribute(name, type, isParameter, isBuffer);
   }
 
   for (const auto& pr : constants_) {
