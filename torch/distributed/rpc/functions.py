@@ -58,6 +58,11 @@ def async_execution(fn):
         >>> # omitting setup and shutdown RPC
         >>>
         >>> # On worker0
+        >>> @torch.jit.script
+        >>> def script_add(x, y):
+        >>>     # type: (Tensor, Tensor) -> Tensor
+        >>>     return x + y
+        >>>
         >>> @rpc.functions.async_execution
         >>> @torch.jit.script
         >>> def async_add(to, x, y):
