@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from future.utils import bytes_to_native_str
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest
 
@@ -95,6 +95,7 @@ class TestGradientCalculation(test_util.TestCase):
                 del op.device_option.extra_info[:]
         self.assertEqual(operatorDefList1, operatorDefList2)
 
+    @settings(deadline=None)
     @given(device_option=st.sampled_from([
         None,
         core.DeviceOption(workspace.GpuDeviceType, 1)]))

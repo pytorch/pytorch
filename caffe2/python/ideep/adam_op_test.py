@@ -16,13 +16,13 @@ import caffe2.python.ideep_test_util as mu
 class TestAdamOps(hu.HypothesisTestCase):
     @given(inputs=hu.tensors(n=4),
            ITER=st.integers(min_value=0, max_value=10000),
-           LR=st.floats(min_value=0.01, max_value=0.99,
+           LR=hu.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
-           beta1=st.floats(min_value=0.01, max_value=0.99,
+           beta1=hu.floats(min_value=0.01, max_value=0.99,
                            allow_nan=False, allow_infinity=False),
-           beta2=st.floats(min_value=0.01, max_value=0.99,
+           beta2=hu.floats(min_value=0.01, max_value=0.99,
                            allow_nan=False, allow_infinity=False),
-           epsilon=st.floats(min_value=0.01, max_value=0.99,
+           epsilon=hu.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **mu.gcs)
     def test_adam(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
@@ -47,13 +47,13 @@ class TestAdamOps(hu.HypothesisTestCase):
 
     @given(inputs=hu.tensors(n=4),
            ITER=st.integers(min_value=0, max_value=10000),
-           LR=st.floats(min_value=0.01, max_value=0.99,
+           LR=hu.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
-           beta1=st.floats(min_value=0.01, max_value=0.99,
+           beta1=hu.floats(min_value=0.01, max_value=0.99,
                            allow_nan=False, allow_infinity=False),
-           beta2=st.floats(min_value=0.01, max_value=0.99,
+           beta2=hu.floats(min_value=0.01, max_value=0.99,
                            allow_nan=False, allow_infinity=False),
-           epsilon=st.floats(min_value=0.01, max_value=0.99,
+           epsilon=hu.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            **mu.gcs)
     def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):

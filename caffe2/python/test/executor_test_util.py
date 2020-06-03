@@ -18,14 +18,12 @@ from hypothesis import settings
 
 
 CI_MAX_EXAMPLES = 2
-CI_TIMEOUT = 600
 
 
 def executor_test_settings(func):
     if hu.is_sandcastle() or hu.is_travis():
         return settings(
             max_examples=CI_MAX_EXAMPLES,
-            timeout=CI_TIMEOUT
         )(func)
     else:
         return func
@@ -65,7 +63,7 @@ def executor_test_model_names():
     if hu.is_sandcastle() or hu.is_travis():
         return ["MLP"]
     else:
-        return conv_model_generators().keys()
+        return sorted(conv_model_generators().keys())
 
 
 def build_conv_model(model_name, batch_size):

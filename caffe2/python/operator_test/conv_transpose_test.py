@@ -241,7 +241,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            use_bias=st.booleans(),
            compute_dX=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2)
     def test_convolution_transpose_gradients(self, stride, pad, kernel, adj,
                                              size, input_channels,
                                              output_channels, batch_size,
@@ -309,7 +309,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
            use_bias=st.booleans(),
            compute_dX=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2)
     def test_convolution_transpose_separate_stride_pad_adj_gradient(
             self, stride_h, stride_w, pad_t, pad_l, pad_b, pad_r, kernel,
             adj_h, adj_w, size, input_channels, output_channels, batch_size,

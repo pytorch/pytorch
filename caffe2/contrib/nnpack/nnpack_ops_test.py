@@ -175,7 +175,6 @@ class NNPackOpsTest(hu.HypothesisTestCase):
             atol=1e-4,
             rtol=1e-4)
 
-    @settings(timeout=3600)
     @unittest.skipIf(not os.environ.get("CAFFE2_BENCHMARK"), "Benchmark")
     @given(stride=st.integers(1, 1),
            pad=st.integers(0, 2),
@@ -213,7 +212,6 @@ class NNPackOpsTest(hu.HypothesisTestCase):
         print("Speedup for NNPACK: {:.2f}".format(
             times[""] / times["NNPACK"]))
 
-    @settings(timeout=3600)
     @unittest.skipIf(not os.environ.get("CAFFE2_BENCHMARK"), "Benchmark")
     @given(size=st.integers(30, 90),
            input_channels=st.sampled_from([3, 64, 256]),

@@ -11,7 +11,7 @@ import tempfile
 import unittest
 import time
 from mock import Mock
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
@@ -579,6 +579,7 @@ class DataParallelModelTest(TestCase):
         _test_forward_pass(x, devices, device_type, scale, bias, epsilon)
         _test_backward_pass(x, devices, device_type, scale, tolerance)
 
+    @settings(deadline=None)
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
     def test_multi_device_bn_net_lvl_cpu(self, seed, batch_size):
         if batch_size % 2 == 1:

@@ -51,6 +51,7 @@ import logging
 import numpy as np
 import os
 import six
+import struct
 
 
 def is_sandcastle():
@@ -65,57 +66,63 @@ def is_travis():
     return 'TRAVIS' in os.environ
 
 
-#  "min_satisfying_examples" setting has been deprecated in hypythesis
+def to_float32(x):
+    return struct.unpack("f", struct.pack("f", float(x)))[0]
+
+#  "min_satisfying_examples" setting has been deprecated in hypothesis
 #  3.56.0 and removed in hypothesis 4.x
-if hypothesis.version.__version_info__ >= (3, 56, 0):
-    hypothesis.settings.register_profile(
-        "sandcastle",
-        hypothesis.settings(
-            derandomize=True,
-            suppress_health_check=[hypothesis.HealthCheck.too_slow],
-            database=None,
-            max_examples=100,
-            verbosity=hypothesis.Verbosity.verbose))
-    hypothesis.settings.register_profile(
-        "dev",
-        hypothesis.settings(
-            suppress_health_check=[hypothesis.HealthCheck.too_slow],
-            database=None,
-            max_examples=10,
-            verbosity=hypothesis.Verbosity.verbose))
-    hypothesis.settings.register_profile(
-        "debug",
-        hypothesis.settings(
-            suppress_health_check=[hypothesis.HealthCheck.too_slow],
-            database=None,
-            max_examples=1000,
-            verbosity=hypothesis.Verbosity.verbose))
-else:
-    hypothesis.settings.register_profile(
-        "sandcastle",
-        hypothesis.settings(
-            derandomize=True,
-            suppress_health_check=[hypothesis.HealthCheck.too_slow],
-            database=None,
-            max_examples=100,
-            min_satisfying_examples=1,
-            verbosity=hypothesis.Verbosity.verbose))
-    hypothesis.settings.register_profile(
-        "dev",
-        hypothesis.settings(
-            suppress_health_check=[hypothesis.HealthCheck.too_slow],
-            database=None,
-            max_examples=10,
-            min_satisfying_examples=1,
-            verbosity=hypothesis.Verbosity.verbose))
-    hypothesis.settings.register_profile(
-        "debug",
-        hypothesis.settings(
-            suppress_health_check=[hypothesis.HealthCheck.too_slow],
-            database=None,
-            max_examples=1000,
-            min_satisfying_examples=1,
-            verbosity=hypothesis.Verbosity.verbose))
+def settings(*args, **kwargs):
+    if 'min_satisfying_examples' in kwargs and hypothesis.version.__version_info__ >= (3, 56, 0):
+        kwargs.pop('min_satisfying_examples')
+
+    if 'deadline' in kwargs and hypothesis.version.__version_info__ < (3, 56, 0):
+        kwargs.pop('deadline')
+
+    return hypothesis.settings(*args, **kwargs)
+
+# This wrapper wraps around `st.floats` and 
+# sets width parameters to 32 if version is newer than 3.67.0
+def floats(*args, **kwargs):
+
+    width_supported = hypothesis.version.__version_info__ >= (3, 67, 0)
+    if 'width' in kwargs and not width_supported:
+        kwargs.pop('width')
+
+    if 'width' not in kwargs and width_supported:
+        kwargs['width'] = 32
+        if kwargs.get('min_value', None) is not None:
+            kwargs['min_value'] = to_float32(kwargs['min_value'])
+        if kwargs.get('max_value', None) is not None:
+            kwargs['max_value'] = to_float32(kwargs['max_value'])
+
+    return st.floats(*args, **kwargs)
+
+
+hypothesis.settings.register_profile(
+    "sandcastle",
+    settings(
+        derandomize=True,
+        suppress_health_check=[hypothesis.HealthCheck.too_slow],
+        database=None,
+        deadline=None,
+        max_examples=100,
+        verbosity=hypothesis.Verbosity.verbose))
+hypothesis.settings.register_profile(
+    "dev",
+    settings(
+        suppress_health_check=[hypothesis.HealthCheck.too_slow],
+        database=None,
+        deadline=None,
+        max_examples=10,
+        verbosity=hypothesis.Verbosity.verbose))
+hypothesis.settings.register_profile(
+    "debug",
+    settings(
+        suppress_health_check=[hypothesis.HealthCheck.too_slow],
+        database=None,
+        deadline=None,
+        max_examples=1000,
+        verbosity=hypothesis.Verbosity.verbose))
 
 hypothesis.settings.load_profile(
     'sandcastle' if is_sandcastle() else os.getenv('CAFFE2_HYPOTHESIS_PROFILE',
@@ -129,8 +136,12 @@ def dims(min_value=1, max_value=5):
 
 def elements_of_type(dtype=np.float32, filter_=None):
     elems = None
-    if dtype in (np.float16, np.float32, np.float64):
-        elems = st.floats(min_value=-1.0, max_value=1.0)
+    if dtype is np.float16:
+        elems = floats(min_value=-1.0, max_value=1.0, width=16)
+    elif dtype is np.float32:
+        elems = floats(min_value=-1.0, max_value=1.0, width=32)
+    elif dtype is np.float64:
+        elems = floats(min_value=-1.0, max_value=1.0, width=64)
     elif dtype is np.int32:
         elems = st.integers(min_value=0, max_value=2 ** 31 - 1)
     elif dtype is np.int64:

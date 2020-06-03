@@ -8,7 +8,7 @@ from caffe2.python.test_util import TestCase
 import numpy as np
 import numpy.testing as npt
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 import functools
@@ -25,7 +25,6 @@ def primefac(n):
     if n > 1:
         ret.append(n)
     return ret
-
 
 class TestReBatchingQueue(TestCase):
     def test_rebatching_queue_single_enqueue_dequeue(self):
@@ -165,6 +164,7 @@ class TestReBatchingQueue(TestCase):
                 workspace.FetchBlob(tensors[idx])[:5]
             )
 
+    @settings(deadline=None)
     @given(
         num_producers=st.integers(1, 5),
         num_consumers=st.integers(1, 5),

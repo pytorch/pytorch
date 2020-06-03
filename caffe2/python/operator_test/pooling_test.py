@@ -218,7 +218,7 @@ class TestPooling(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "CUDNN"]),
            op_type=st.sampled_from(["AveragePool", "AveragePool2D"]),
            **hu.gcs)
-    @settings(max_examples=3, timeout=10)
+    @settings(max_examples=3)
     def test_global_avg_pool_nchw(self, op_type, sz, batch_size, engine, gc, dc):
         ''' Special test to stress the fast path of NCHW average pool '''
         op = core.CreateOperator(
@@ -242,7 +242,7 @@ class TestPooling(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "CUDNN"]),
            op_type=st.sampled_from(["MaxPool", "MaxPool2D"]),
            **hu.gcs)
-    @settings(max_examples=3, timeout=10)
+    @settings(max_examples=3)
     def test_global_max_pool_nchw(self, op_type, sz,
                                   batch_size, engine, gc, dc):
         ''' Special test to stress the fast path of NCHW max pool '''
