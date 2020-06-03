@@ -161,6 +161,7 @@ namespace jit {
   _(SimplifyForCleansUp)                    \
   _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
+  _(SimplifyEliminateZeroLengthAlloc)       \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
@@ -181,6 +182,7 @@ namespace jit {
   _(LoopNestReorderLongStringOfPreOrphans)  \
   _(LoopNestReorderLongStringOfPostOrphans) \
   _(LoopNestReorderLongStringFull)          \
+  _(LoopNestReorderInternalLoopNest)        \
   _(OuterLoopVectorization)                 \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
