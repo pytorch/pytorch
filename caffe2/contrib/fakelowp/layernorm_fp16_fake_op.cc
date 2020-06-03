@@ -1,4 +1,4 @@
-﻿#include "layernorm_fp16_fake_op.h"
+#include "layernorm_fp16_fake_op.h"
 
 namespace caffe2 {
 
