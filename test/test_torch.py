@@ -8014,6 +8014,12 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor([False, True])
         self.assertEqual(a.flip(0), torch.tensor([True, False]))
 
+    def _rand_shape(self, dim, min_size, max_size):
+        shape = []
+        for i in range(dim):
+            shape.append(random.randint(min_size, max_size))
+        return tuple(shape)
+
     @dtypes(torch.cfloat, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_complex_flip(self, device, dtype):
