@@ -76,6 +76,7 @@ struct TORCH_API StringView {
 constexpr std::size_t kSoftLimitCallbacks = 4;
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
+typedef uint64_t RecordFunctionHandle;
 
 struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards:
@@ -121,40 +122,45 @@ struct TORCH_API RecordFunction {
   // Internal functions, do not use directly;
   // used in python's context manager
 
-  // _before functions initialize RecordFunction members and call
+  // before functions initialize RecordFunction members and call
   // start callbacks
-  void _before(const char* name, int64_t sequence_nr = -1);
-  void _before(std::string name, int64_t sequence_nr = -1);
+  void before(const char* name, int64_t sequence_nr = -1);
+  void before(std::string name, int64_t sequence_nr = -1);
 
   template<typename F>
-  void _before(
+  void before(
       F fn,
       c10::ArrayRef<c10::IValue> args,
       int64_t current_sequence_nr = -1) {
     inputs_ = args.vec();
-    _before(fn, current_sequence_nr);
+    before(fn, current_sequence_nr);
   }
 
   template<typename F>
-  void _before(
+  void before(
       F fn,
       std::vector<c10::IValue>&& args,
       int64_t current_sequence_nr = -1) {
     inputs_ = std::move(args);
-    _before(fn, current_sequence_nr);
+    before(fn, current_sequence_nr);
   }
 
   // Internal, only for the use within RECORD_FUNCTION macro
   // (i.e. stack based RecordFunctions with scope lifetime);
   // sets this function as the current() thread local function;
-  // original value of current() is restored in destructor/_end
+  // original value of current() is restored in destructor/end
   void _setCurrent();
 
   // Calls end callbacks
-  void _end();
+  void end();
 
-  // Returns whether some of the callbacks require function inputs
-  bool _needsInputs();
+  inline RecordFunctionHandle handle() const {
+    return handle_;
+  }
+
+  inline void setHandle(RecordFunctionHandle handle) {
+    handle_ = handle;
+  }
 
   // Used internally to keep track of thread local and global callbacks
   // that were picked to run; must be sorted;
@@ -162,9 +168,9 @@ struct TORCH_API RecordFunction {
   CallbackHandles sorted_active_tls_handles_;
   CallbackHandles sorted_active_global_handles_;
   // Whether this RecordFunction runs any callbacks
-  bool active_ = false;
+  bool active = false;
   /// Whether any of the picked callbacks require inputs
-  bool needs_inputs_ = false;
+  bool needs_inputs = false;
 
  private:
   StringView name_;
@@ -187,6 +193,10 @@ struct TORCH_API RecordFunction {
 
   // The logical thread_id that this RecordFunction was created with
   uint64_t thread_id_ = 0;
+
+  // Unique id for this RecordFunction, used in callbacks to track start
+  // and end of ranges
+  RecordFunctionHandle handle_ {0};
 };
 
 //
@@ -224,6 +234,11 @@ class TORCH_API RecordFunctionCallback {
     return *this;
   }
 
+  RecordFunctionCallback& needsIds(bool needs_ids) {
+    needs_ids_ = needs_ids;
+    return *this;
+  }
+
   RecordFunctionCallback& samplingProb(double sampling_prob) {
     TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob_ <= 1.0,
         "Invalid sampling probability");
@@ -252,6 +267,10 @@ class TORCH_API RecordFunctionCallback {
 
   inline bool needsInputs() const {
     return needs_inputs_;
+  }
+
+  inline bool needsIds() const {
+    return needs_ids_;
   }
 
   inline double samplingProb() const {
@@ -293,6 +312,7 @@ class TORCH_API RecordFunctionCallback {
   std::function<void(const RecordFunction&)> end_;
   std::function<bool(const RecordFunctionCallback&)> should_run_;
   bool needs_inputs_ = false;
+  bool needs_ids_ = false;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
 
@@ -303,12 +323,12 @@ class TORCH_API RecordFunctionCallback {
 // optional argument - function's seq_no
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
-  if (guard.active_) { \
+  if (guard.active) { \
     guard._setCurrent(); \
-    if (guard.needs_inputs_) { \
-      guard._before(fn, inputs, ##__VA_ARGS__); \
+    if (guard.needs_inputs) { \
+      guard.before(fn, inputs, ##__VA_ARGS__); \
     } else { \
-      guard._before(fn, ##__VA_ARGS__); \
+      guard.before(fn, ##__VA_ARGS__); \
     } \
   }
 

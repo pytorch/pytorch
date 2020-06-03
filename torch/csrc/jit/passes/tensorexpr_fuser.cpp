@@ -90,8 +90,6 @@ bool isSupported(Node* node) {
     case aten::gt:
     case aten::le:
     case aten::lt:
-    case aten::min:
-    case aten::max:
     case aten::pow:
     case aten::clamp:
     case aten::lerp:
@@ -144,6 +142,17 @@ bool isSupported(Node* node) {
     case aten::__lshift__:
     case aten::__rshift__:
     case aten::where:
+      return true;
+    // Operators that can be both elementwise or reductions:
+    case aten::min:
+    case aten::max:
+      if (node->inputs().size() != 2) {
+        return false;
+      }
+      if (!node->inputs()[0]->type()->cast<TensorType>() ||
+          !node->inputs()[1]->type()->cast<TensorType>()) {
+        return false;
+      }
       return true;
     default:
       return false;
@@ -199,7 +208,7 @@ bool canMerge(Node* consumer, Node* producer, AliasDb& aliasDb) {
        consumer->kind() == getTensorExprSymbol()));
 
   // Alias checks
-  REQ(aliasDb.couldMoveAfterTopologically(consumer, producer));
+  REQ(aliasDb.couldMoveBeforeTopologically(producer, consumer));
 
   // Ops that return aliases can only be folded if this is the only use.
   if (producer->kind() == aten::slice || producer->kind() == aten::unsqueeze ||
@@ -265,17 +274,17 @@ c10::optional<Node*> tryMerge(
   if (producer->kind() == aten::cat) {
     Node* listconstruct = producer->inputs()[0]->node();
 
-    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
 
-    aliasDb.moveAfterTopologicallyValid(consumer, listconstruct);
+    aliasDb.moveBeforeTopologicallyValid(listconstruct, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(listconstruct), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(listconstruct, consumer);
   } else {
-    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);

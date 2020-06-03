@@ -38,6 +38,27 @@ class dtype:
     # TODO: is_floating_point, is_complex, is_Signed, __reduce__
     ...
 
+# Defined in torch/csrc/TypeInfo.cpp
+class iinfo:
+    bits: _int
+    min: _int
+    max: _int
+
+    def __init__(self, dtype: _dtype) -> None: ...
+
+class finfo:
+    bits: _float
+    min: _float
+    max: _float
+    eps: _float
+    tiny: _float
+
+    @overload
+    def __init__(self, dtype: _dtype) -> None: ...
+
+    @overload
+    def __init__(self) -> None: ...
+
 ${dtype_class_hints}
 
 # Defined in torch/csrc/Layout.cpp
@@ -95,12 +116,19 @@ def _get_backcompat_keepdim_warn() -> _bool: ...
 def _is_xnnpack_enabled() -> _bool: ...
 def _get_mkldnn_enabled() -> _bool: ...
 def _set_mkldnn_enabled(arg: _bool) -> None: ...
+def _get_cudnn_enabled() -> _bool: ...
+def _set_cudnn_enabled(arg: _bool) -> None: ...
+def _get_cudnn_benchmark() -> _bool: ...
+def _set_cudnn_benchmark(arg: _bool) -> None: ...
+def _get_cudnn_deterministic() -> _bool: ...
+def _set_cudnn_deterministic(arg: _bool) -> None: ...
 def _set_default_tensor_type(type) -> None: ...  # ick, what a bad legacy API
 def _set_default_dtype(d: _dtype) -> None: ...
 def _initExtension(shm_manager_path: str) -> None: ...
 has_openmp: _bool
 has_mkldnn: _bool
 has_mkl: _bool
+has_cudnn: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool
 
 # Defined in torch/csrc/jit/python/script_init.cpp
@@ -154,4 +182,6 @@ class _TensorBase(object):
     device: _device
     dtype: _dtype
     layout: _layout
+    real: Tensor
+    imag: Tensor
     ${tensor_method_hints}
