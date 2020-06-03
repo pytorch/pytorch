@@ -11,6 +11,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 from torch.testing._internal.common_utils import slowTest, suppress_warnings
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -395,11 +396,11 @@ class TestModels(JitTestCase):
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
-    if 'fbgemm' in torch.backends.quantized.supported_engines:
-        # Suppression: this exercises a deprecated API
-        @suppress_warnings
-        def test_snli_quantized(self):
-            self._test_snli(self, device='cpu', quantized=True)
+    @skipIfNoFBGEMM
+    # Suppression: this exercises a deprecated API
+    @suppress_warnings
+    def test_snli_quantized(self):
+        self._test_snli(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_snli_cuda(self):
@@ -541,11 +542,11 @@ class TestModels(JitTestCase):
     def test_vae(self):
         self._test_vae(self, device='cpu')
 
-    if 'fbgemm' in torch.backends.quantized.supported_engines:
-        # Suppression: this exercises a deprecated API
-        @suppress_warnings
-        def test_vae_quantized(self):
-            self._test_vae(self, device='cpu', quantized=True)
+    @skipIfNoFBGEMM
+    # Suppression: this exercises a deprecated API
+    @suppress_warnings
+    def test_vae_quantized(self):
+        self._test_vae(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_vae_cuda(self):

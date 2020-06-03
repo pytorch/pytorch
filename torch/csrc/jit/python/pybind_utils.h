@@ -71,7 +71,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
       : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
 
-  PythonFutureWrapper(const PythonFutureWrapper&) = delete;
+  explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
   PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
 
   py::object wait() {
@@ -134,6 +134,14 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
           }
         },
         PyObjectType::get()));
+  }
+
+  void markCompleted(const py::object& pyValue) {
+    DCHECK(PyGILState_Check());
+    IValue value = toIValue(pyValue, PyObjectType::get());
+
+    py::gil_scoped_release release;
+    fut->markCompleted(std::move(value));
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
