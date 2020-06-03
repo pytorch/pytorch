@@ -118,10 +118,9 @@ class Conf:
     def gen_workflow_job(self, phase):
         job_def = OrderedDict()
         job_def["name"] = self.construct_phase_name(phase)
-        job_def["requires"] = ["setup"]
 
         if phase == "test":
-            job_def["requires"].append(self.construct_phase_name("build"))
+            job_def["requires"] = [self.construct_phase_name("build")]
             job_name = "caffe2_" + self.get_platform() + "_test"
         else:
             job_name = "caffe2_" + self.get_platform() + "_build"
