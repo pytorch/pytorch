@@ -256,7 +256,7 @@ void RequestCallbackImpl::processRpc(
             upc.pythonUdf(),
             messageId,
             responseFuture,
-            [](py::object& result,
+            [](const py::object& result,
                const int64_t messageId,
                PythonRpcHandler& pythonRpcHandler,
                const std::shared_ptr<FutureMessage>& responseFuture) {
@@ -399,7 +399,7 @@ void RequestCallbackImpl::processRpc(
             messageId,
             responseFuture,
             [ownerRRef, rrefId, forkId](
-                py::object& result,
+                const py::object& result,
                 const int64_t messageId,
                 PythonRpcHandler& pythonRpcHandler,
                 const std::shared_ptr<FutureMessage>& responseFuture) {
