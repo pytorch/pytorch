@@ -209,7 +209,7 @@ struct TORCH_API AccumulateGrad : public Node {
   Variable variable;
 };
 
-#undef RESULT_CHECK
+#undef CHECK_RESULT
 
 } // namespace autograd
 } // namespace torch

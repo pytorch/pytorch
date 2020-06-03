@@ -220,34 +220,41 @@ void Reducer::verify_replica0_across_processes() {
   at::TensorOptions options;
   options = options.dtype(at::kLong);
   auto metadata = at::empty({static_cast<long>(i)}, options);
+
+  // Technically, process 0 is the broadcast source, so only process 0 needs
+  // to populate metadata.  But no harm keeping work aligned across processes.
+  auto metadata_accessor = metadata.accessor<int64_t, 1>();
   i = 0;
   for (const auto& t : replicas_[0]) {
     for (const auto& sz : t.sizes()) {
-      metadata[i++] = sz;
+      metadata_accessor[i++] = sz;
     }
     for (const auto& str : t.strides()) {
-      metadata[i++] = str;
+      metadata_accessor[i++] = str;
     }
   }
+
   auto metadata_dev = metadata.clone().to(replicas_[0][0].device());
   std::vector<at::Tensor> vec{metadata_dev};
   process_group_->broadcast(vec);
-  // Technically, since process 0 is the broadcast source, process 0 could
-  // skip the check.  But there's no harm letting it continue.
-  auto metadata_control = metadata_dev.to(metadata.device());
+
+  // Technically, process 0 doesn't need to double-check metadata, because it
+  // was the source.  But no harm keeping work aligned.
+  auto control = metadata_dev.to(metadata.device());
+  auto control_accessor = control.accessor<int64_t, 1>();
   i = 0;
   for (size_t p = 0; p < replicas_[0].size(); p++) {
     const auto& t = replicas_[0][p];
     // I'd like to include which process we are in the message,
     // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {
-      TORCH_CHECK(sz == metadata_control[i++].item<int64_t>(),
+      TORCH_CHECK(sz == control_accessor[i++],
                   "replicas[0][", p, "] in this process"
                   " with sizes ", t.sizes(),
                   " appears not to match sizes of the same param in process 0.");
     }
     for (const auto& str : t.strides()) {
-      TORCH_CHECK(str == metadata_control[i++].item<int64_t>(),
+      TORCH_CHECK(str == control_accessor[i++](),
                   "replicas[0][", p, "] in this process"
                   " with strides ", t.strides(),
                   " appears not to match strides of the same param in process 0.");
