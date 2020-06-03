@@ -16,6 +16,11 @@
 #include <ATen/Context.h>
 #include <ATen/TracerMode.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/TypeDefault.h>
+#include <ATen/CPUType.h>
+#include <ATen/QuantizedCPUType.h>
+
 namespace at {
 
 using native::tensor;
@@ -29,6 +34,7 @@ inline Tensor from_blob(
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {},
     const c10::optional<Device> target_device = c10::nullopt) {
+  AutoNonVariableTypeMode guard;  // TODO: remove
   tracer::impl::NoTracerDispatchMode tracer_guard;
   auto device = (target_device.has_value()?
     target_device.value() : globalContext().getDeviceFromPtr(data, options.device().type()));
@@ -60,6 +66,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const TensorOptions& options = {}) {
+  AutoNonVariableTypeMode guard;  // TODO: remove
   tracer::impl::NoTracerDispatchMode tracer_guard;
   auto device = globalContext().getDeviceFromPtr(data, options.device().type());
   if (options.device().has_index()) {

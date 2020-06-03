@@ -61,6 +61,7 @@ inline at::Tensor from_blob(
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, strides, deleter, options);
   })();
@@ -78,6 +79,7 @@ inline at::Tensor from_blob(
     at::IntArrayRef strides,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, strides, options);
   })();
@@ -96,6 +98,7 @@ inline at::Tensor from_blob(
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, deleter, options);
   })();
@@ -111,6 +114,7 @@ inline at::Tensor from_blob(
     at::IntArrayRef sizes,
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     return at::from_blob(data, sizes, options);
   })();

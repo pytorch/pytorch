@@ -289,6 +289,7 @@ Tensor internal_new_from_data(
   // here.
   Tensor tensor;
   {
+    at::AutoNonVariableTypeMode guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
