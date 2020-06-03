@@ -818,14 +818,14 @@ def script_add(x, y):
     return x + y
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 @torch.jit.script
 def async_add(to, x, y):
     # type: (str, Tensor, Tensor) -> Future[Tensor]
     return rpc.rpc_async(to, script_add, (x, y))
 
 
-@rpc.async_function
+@rpc.functions.async_execution
 @torch.jit.script
 def async_wrong_type():
     # type: () -> Tensor
@@ -1085,3 +1085,12 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
                 worker_name((self.rank + 1) % self.world_size),
                 async_wrong_type
             )
+
+    @dist_init
+    def test_async_function_wrong_decorator_order(self):
+        with self.assertRaises(RuntimeError):
+            @torch.jit.script
+            @rpc.functions.async_execution
+            def async_wrong_decorator_order(to, x, y):
+                # type: (str, Tensor, Tensor) -> Future[Tensor]
+                return rpc.rpc_async(to, script_add, (x, y))

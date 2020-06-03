@@ -41,7 +41,7 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     case MessageType::PYTHON_CALL: {
       auto& pc = static_cast<PythonCall&>(rpc);
       return std::make_unique<UnpickledPythonCall>(
-          pc.serializedPyObj(), pc.isAsyncFunction());
+          pc.serializedPyObj(), pc.isAsyncExecution());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -151,7 +151,7 @@ void RequestCallbackImpl::processRpc(
                            ->get_function(scriptCall.qualifiedName())
                            .runAsync(stack);
 
-      if (scriptCall.isAsyncFunction()) {
+      if (scriptCall.isAsyncExecution()) {
         jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
           try {
             auto valueJitFuture = jitFuture->value().toFuture();
@@ -194,7 +194,7 @@ void RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_CALL: {
       auto& upc = static_cast<UnpickledPythonCall&>(rpc);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      if (upc.isAsyncFunction()) {
+      if (upc.isAsyncExecution()) {
         std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
         {
           py::gil_scoped_acquire acquire;
