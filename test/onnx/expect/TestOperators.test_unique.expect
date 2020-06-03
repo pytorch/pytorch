@@ -1,9 +1,9 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.6"
+producer_version: "XXX"
 graph {
   node {
-    input: "x"
+    input: "input"
     output: "1"
     output: "2"
     output: "3"
@@ -23,7 +23,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "input"
     type {
       tensor_type {
         elem_type: 1

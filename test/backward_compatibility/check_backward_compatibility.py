@@ -21,7 +21,10 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
+    ('profiler::_call_end_callbacks_on_jit_fut*', datetime.date(9999, 1, 1)),
     ('aten::append*', datetime.date(2020, 4, 15)),
+    ('aten::_min', datetime.date(2020, 9, 9)),
+    ('aten::_max', datetime.date(2020, 9, 9)),
     ('aten::real*', datetime.date(2020, 4, 15)),
     ('aten::imag*', datetime.date(2020, 4, 15)),
     ('aten::quantize_per_tensor', datetime.date(2020, 4, 15)),
@@ -138,6 +141,7 @@ def dont_parse(schema_line):
 
 def check_bc(new_schema_dict):
     existing_schemas = torch._C._jit_get_all_schemas()
+    existing_schemas += torch._C._jit_get_custom_class_schemas()
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:

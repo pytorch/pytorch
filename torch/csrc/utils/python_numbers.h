@@ -12,31 +12,14 @@
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
 
 inline PyObject* THPUtils_packInt64(int64_t value) {
-#if PY_MAJOR_VERSION == 2
-  if (sizeof(long) == sizeof(int64_t)) {
-    return PyInt_FromLong(static_cast<long>(value));
-  } else if (value <= INT32_MAX && value >= INT32_MIN) {
-    return PyInt_FromLong(static_cast<long>(value));
-  }
-#endif
   return PyLong_FromLongLong(value);
 }
 
 inline PyObject* THPUtils_packUInt64(uint64_t value) {
-#if PY_MAJOR_VERSION == 2
-  if (value <= INT32_MAX) {
-    return PyInt_FromLong(static_cast<long>(value));
-  }
-#endif
   return PyLong_FromUnsignedLongLong(value);
 }
 
 inline PyObject* THPUtils_packDoubleAsInt(double value) {
-#if PY_MAJOR_VERSION == 2
-  if (value <= INT32_MAX && value >= INT32_MIN) {
-    return PyInt_FromLong(static_cast<long>(value));
-  }
-#endif
   return PyLong_FromDouble(value);
 }
 
@@ -47,11 +30,7 @@ inline bool THPUtils_checkLong(PyObject* obj) {
   }
 #endif
 
-#if PY_MAJOR_VERSION == 2
-  return (PyLong_Check(obj) || PyInt_Check(obj)) && !PyBool_Check(obj);
-#else
   return PyLong_Check(obj) && !PyBool_Check(obj);
-#endif
 }
 
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
@@ -111,11 +90,7 @@ inline bool THPUtils_checkDouble(PyObject* obj) {
     return true;
   }
 #endif
-#if PY_MAJOR_VERSION == 2
-  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj);
-#else
   return PyFloat_Check(obj) || PyLong_Check(obj);
-#endif
 }
 
 inline bool THPUtils_checkScalar(PyObject* obj) {
@@ -124,11 +99,7 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
     return true;
   }
 #endif
-#if PY_MAJOR_VERSION == 2
-  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj) || PyComplex_Check(obj);
-#else
   return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj);
-#endif
 }
 
 inline double THPUtils_unpackDouble(PyObject* obj) {
@@ -146,11 +117,6 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
     }
     return (double)value;
   }
-#if PY_MAJOR_VERSION == 2
-  if (PyInt_Check(obj)) {
-    return (double)PyInt_AS_LONG(obj);
-  }
-#endif
   double value = PyFloat_AsDouble(obj);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
@@ -165,4 +131,25 @@ inline std::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
   }
 
   return std::complex<double>(value.real, value.imag);
+}
+
+inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
+  if (PyFloat_Check(obj)) {
+    return (bool)PyFloat_AS_DOUBLE(obj);
+  }
+
+  if (PyComplex_Check(obj)) {
+    double real_val = PyComplex_RealAsDouble(obj);
+    double imag_val = PyComplex_ImagAsDouble(obj);
+    return !(real_val == 0 && imag_val == 0);
+  }
+
+  int overflow;
+  long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  // No need to check overflow, because when overflow occured, it should
+  // return true in order to keep the same behavior of numpy.
+  return (bool)value;
 }

@@ -27,6 +27,8 @@ elif [[ "$image" == *-artful* ]]; then
   UBUNTU_VERSION=17.10
 elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
+elif [[ "$image" == *-focal* ]]; then
+  UBUNTU_VERSION=20.04
 fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
@@ -72,14 +74,6 @@ case "$image" in
   pytorch-linux-xenial-pynightly)
     TRAVIS_PYTHON_VERSION=nightly
     GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda9-cudnn7-py3)
-    CUDA_VERSION=9.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -163,6 +157,31 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
+  pytorch-linux-bionic-py3.8-gcc9)
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
   pytorch-linux-xenial-rocm-py3.6-clang7)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=7
@@ -172,6 +191,14 @@ case "$image" in
     ROCM=yes
     # newer cmake version required
     CMAKE_VERSION=3.6.3
+    ;;
+  pytorch-linux-bionic-rocm-py3.6-clang7)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM=yes
     ;;
 esac
 
@@ -268,7 +295,11 @@ if [ -n "$CLANG_VERSION" ]; then
   if !(drun clang --version 2>&1 | grep -qF "clang version $CLANG_VERSION"); then
     echo "CLANG_VERSION=$CLANG_VERSION, but:"
     drun clang --version
-    exit 1
+    if [[ "$image" == *-rocm* ]]; then
+      echo "For ROCm builds, version mismatch expected."
+    else
+      exit 1
+    fi
   fi
 fi
 

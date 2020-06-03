@@ -13,6 +13,7 @@ from torch.nn import Module
 from torch.serialization import validate_cuda_device
 from torch._six import PY37, with_metaclass, string_classes, get_function_from_type
 from torch.utils import set_module
+from torch.autograd.grad_mode import _DecoratorContextManager
 
 import collections
 import contextlib
@@ -94,6 +95,42 @@ def optimized_execution(should_optimize):
     finally:
         torch._C._set_graph_executor_optimize(stored_flag)
 
+@contextlib.contextmanager
+def fuser(name):
+    old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
+    old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
+    old_texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+    old_nvfuser_state = torch._C._jit_nvfuser_enabled()
+    if name == 'fuser0':  # legacy fuser
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_set_nvfuser_enabled(False)
+    elif name == 'fuser1':  # NNC
+        old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+        old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_set_texpr_fuser_enabled(True)
+        torch._C._jit_set_nvfuser_enabled(False)
+    elif name == 'fuser2':  # nvFuser
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_set_nvfuser_enabled(True)
+    else:
+        raise Exception("unrecognized fuser option")
+    try:
+        yield
+    finally:
+        if name == 'fuser1':  # NNC
+            torch._C._jit_set_profiling_executor(old_profiling_executor)
+            torch._C._jit_set_profiling_mode(old_profiling_mode)
+        # recover the previous values
+        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
+        torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
+        torch._C._jit_set_texpr_fuser_enabled(old_texpr_fuser_state)
+        torch._C._jit_set_nvfuser_enabled(old_nvfuser_state)
 
 DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 
@@ -1109,13 +1146,21 @@ def _try_get_overloaded_fn(mod, field):
 class ScriptWarning(Warning):
     pass
 
-
 @contextlib.contextmanager
 def _disable_emit_hooks():
     hooks = torch._C._jit_get_emit_hooks()
     torch._C._jit_set_emit_hooks(None, None)
     yield
     torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+
+
+def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
+    def __enter__(self):
+        self.hooks = torch._C._jit_get_emit_hooks()
+        torch._C._jit_set_emit_hooks(None, None)
+
+    def __exit__(self, *args):
+        torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -1139,6 +1184,14 @@ def whichmodule(obj):
         except AttributeError:
             pass
     return '__main__'
+
+def _recursive_compile_class(obj, loc):
+    _qual_name = _qualified_name(obj)
+    # We're starting a new compilation, so update the error call stack in
+    # case it fails
+    error_stack = torch._C.CallStack(_qual_name, loc)
+    rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
+    _compile_and_register_class(obj, rcb, _qual_name)
 
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
@@ -1321,7 +1374,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
         if maybe_already_compiled_fn:
             return maybe_already_compiled_fn
-        ast = get_jit_def(obj)
+        ast = get_jit_def(obj, obj.__name__)
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
@@ -1396,7 +1449,7 @@ def script_method(fn):
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     _rcb = _jit_internal.createResolutionCallbackFromFrame(frames_up=2)
-    ast = get_jit_def(fn, self_name="ScriptModule")
+    ast = get_jit_def(fn, fn.__name__, self_name="ScriptModule")
     return ScriptMethodStub(_rcb, ast, fn)
 
 
@@ -2106,9 +2159,9 @@ def _check_overload_defaults(impl_defaults, overload_defaults, loc):
                 "parameter {name}".format(name=name))
 
 def _compile_function_with_overload(overload_fn, qual_name, impl_fn):
-    overload_decl = torch.jit.get_jit_def(overload_fn).decl()
+    overload_decl = torch.jit.get_jit_def(overload_fn, overload_fn.__name__).decl()
     overload_signature = torch.jit.annotations.get_signature(overload_fn, None, None, inspect.ismethod(overload_fn))
-    impl_ast = torch.jit.get_jit_def(impl_fn)
+    impl_ast = torch.jit.get_jit_def(impl_fn, impl_fn.__name__)
     overload_defaults = get_default_args(overload_fn)
     implementation_defaults = get_default_args(impl_fn)
     _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)

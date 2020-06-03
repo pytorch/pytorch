@@ -160,6 +160,11 @@ Non-linear activation functions
 .. autofunction:: hardtanh
 .. autofunction:: hardtanh_
 
+:hidden:`hardswish`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: hardswish
+
 :hidden:`relu6`
 ~~~~~~~~~~~~~~~
 

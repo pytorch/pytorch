@@ -359,7 +359,7 @@ class Hardswish(Module):
         \text{Hardswish}(x) = \begin{cases}
             0 & \text{if~} x \le -3, \\
             x & \text{if~} x \ge +3, \\
-            x^2/6 & \text{otherwise}
+            x \cdot (x + 3) /6 & \text{otherwise}
         \end{cases}
 
     Shape:
@@ -1074,9 +1074,16 @@ class Softmin(Module):
         super(Softmin, self).__init__()
         self.dim = dim
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
     def forward(self, input: Tensor) -> Tensor:
         return F.softmin(input, self.dim, _stacklevel=5)
 
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
 
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
@@ -1087,6 +1094,9 @@ class Softmax(Module):
 
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
+
+    When the input Tensor is a sparse tensor then the unspecifed
+    values are treated as ``-inf``.
 
     Shape:
         - Input: :math:`(*)` where `*` means, any number of additional
@@ -1111,6 +1121,7 @@ class Softmax(Module):
         >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
+
     """
     __constants__ = ['dim']
     dim: Optional[int]
@@ -1197,3 +1208,6 @@ class LogSoftmax(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         return F.log_softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)

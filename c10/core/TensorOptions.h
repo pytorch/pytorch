@@ -397,10 +397,14 @@ struct C10_API TensorOptions {
             return DispatchKey::IDEEP;
           case DeviceType::HIP:
             return DispatchKey::HIP;
+          case DeviceType::FPGA:
+            return DispatchKey::FPGA;
           case DeviceType::MSNPU:
             return DispatchKey::MSNPU;
           case DeviceType::XLA:
             return DispatchKey::XLA;
+          case DeviceType::Vulkan:
+            return DispatchKey::Vulkan;
           default:
             AT_ERROR("Unsupported device type for dense layout: ", device().type());
         }
@@ -623,6 +627,8 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::HIP) {
     return DeviceType::HIP;
+  } else if (tid == DispatchKey::FPGA) {
+    return DeviceType::FPGA;
   } else if (tid == DispatchKey::MKLDNN) {
     return DeviceType::MKLDNN;
   } else if (tid == DispatchKey::OpenGL) {
@@ -645,6 +651,8 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::HIP;
   } else if (tid == DispatchKey::MkldnnCPU) {
     return DeviceType::CPU;
+  } else if (tid == DispatchKey::Vulkan) {
+    return DeviceType::Vulkan;
   } else {
     AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
   }
