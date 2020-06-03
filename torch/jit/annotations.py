@@ -14,6 +14,8 @@ from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
+from typing import Callable
+
 
 PY35 = sys.version_info >= (3, 5)
 
@@ -284,7 +286,7 @@ def try_ann_to_type(ann, loc):
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))
-        ignored_builtin_classes = (torch.nn.Module, tuple, list)
+        ignored_builtin_classes = (torch.nn.Module, tuple, list, Callable)
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
             torch.jit._recursive_compile_class(ann, loc)
             return ClassType(_qualified_name(ann))

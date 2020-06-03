@@ -1643,7 +1643,7 @@ if _enabled:
                     # be wrong wrong wrong!).
                     # See also https://github.com/pytorch/pytorch/issues/39463
                     if "__annotations__" not in self.__class__.__dict__:
-                        self.__annotations__ = {}
+                        self.__class__.__annotations__ = {}
                     self.__annotations__[attr] = value.type
                     value = value.value
                 return super(ScriptModule, self).__setattr__(attr, value)

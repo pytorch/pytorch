@@ -11,6 +11,8 @@ from torch.jit._builtins import _find_builtin
 from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
 
+from typing import Callable
+
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -90,7 +92,12 @@ def infer_concrete_type_builder(nn_module):
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
-        if name in class_annotations:
+        # The forward function from Module is special; never use this annotations; we
+        # need to infer type directly using JIT.  I originally wanted to write
+        # this test as isinstance(class_annotations[name], Callable) but
+        # isinstance on typing things doesn't seem to work: isinstance(list, Callable)
+        # is also true!
+        if name in class_annotations and class_annotations[name] != torch.nn.Module.__annotations__["forward"]:
             attr_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
         elif isinstance(item, torch.jit.Attribute):
             attr_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())

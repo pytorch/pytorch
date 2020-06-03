@@ -748,6 +748,20 @@ class AbstractTestCases:
             res1 = torch.ones_like(expected)
             self.assertEqual(res1, expected)
 
+        def test_assert_equal_generic_meta(self):
+            from torch.jit import GenericMeta
+
+            class FooMeta(GenericMeta):
+                pass
+
+            class Foo(metaclass=FooMeta):
+                pass
+
+            # Somehow, GenericMeta is iterable. Make sure we don't
+            # exercise that case
+            self.assertEqual(Foo, Foo)
+            self.assertEqual(FooMeta, FooMeta)
+
         def test_dtypes(self):
             all_dtypes = torch.testing.get_all_dtypes()
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))

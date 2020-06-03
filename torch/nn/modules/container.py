@@ -110,7 +110,11 @@ class Sequential(Module):
     def __iter__(self) -> Iterator[Module]:
         return iter(self._modules.values())
 
-    def forward(self, input: Tensor) -> Tensor:
+    # NB: We can't really type check this function as the type of input
+    # may change dynamically (as is tested in
+    # TestScript.test_sequential_intermediary_types).  Cannot annotate
+    # with Any as TorchScript expects a more precise type
+    def forward(self, input):
         for module in self:
             input = module(input)
         return input
