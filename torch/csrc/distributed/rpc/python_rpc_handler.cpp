@@ -161,12 +161,12 @@ void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
 }
 
 bool PythonRpcHandler::isRemoteException(const py::object& obj) {
-   PROFILE_GIL_SCOPED_ACQUIRE;
-   auto type = obj.get_type();
-   auto moduleName = type.attr("__module__").cast<std::string>();
-   auto qualName = type.attr("__qualname__").cast<std::string>();
-   return moduleName.compare(kInternalModule) == 0
-      && qualName.compare("RemoteException") == 0;
+  PROFILE_GIL_SCOPED_ACQUIRE;
+  auto type = obj.get_type();
+  auto moduleName = type.attr("__module__").cast<std::string>();
+  auto qualName = type.attr("__qualname__").cast<std::string>();
+  return moduleName.compare(kInternalModule) == 0 &&
+      qualName.compare("RemoteException") == 0;
 }
 
 TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {
