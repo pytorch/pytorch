@@ -66,6 +66,10 @@ def createResolutionCallbackFromEnv(lookup_base):
             remainding_pieces = '.'.join(parts[1:])
             module_value = getattr(module, base)
             return env(remainding_pieces, module_value)
+        elif 'int' == qualified_name:
+            return int
+        elif 'float' == qualified_name:
+            return float
         else:
             return getattr(module, qualified_name)
 
