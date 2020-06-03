@@ -118,7 +118,7 @@ def method_tests():
     set_rng_seed(0)
     return [
         ('acosh', torch.rand(tuple()).add(1), NO_ARGS, 'scalar', (True,)),
-        ('acosh', (S, S, S), NO_ARGS, 'scalar', (True,)),
+        ('acosh', torch.rand(S, S, S).add(1), NO_ARGS, 'scalar', (True,)),
         ('add', (S, S, S), ((S, S, S),), '', (True,)),
         ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
         ('add', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
@@ -131,7 +131,7 @@ def method_tests():
         ('asinh', (), NO_ARGS, 'scalar', (True,)),
         ('asinh', (S, S, S), NO_ARGS, 'scalar', (True,)),
         ('atanh', torch.rand(tuple()), NO_ARGS, 'scalar', (True,)),
-        ('atanh', (S, S, S), NO_ARGS, 'scalar', (True,)),
+        ('atanh', torch.rand(S, S, S), NO_ARGS, 'scalar', (True,)),
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
         ('sub', (S, S, S), ((S, S, S),), '', (True,)),
