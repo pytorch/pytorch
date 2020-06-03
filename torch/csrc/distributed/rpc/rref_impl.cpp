@@ -82,7 +82,7 @@ void RRef::handleError(
              throw std::runtime_error(fm.error()->what());
            }}};
   errorHandlers.find(errorType)->second(futMessage);
-} // namespace rpc
+}
 
 //////////////////////////  UserRRef  /////////////////////////////////////
 

@@ -231,6 +231,10 @@ def wait_until_pending_futures_and_users_flushed(timeout=20):
 
 
 def get_num_owners_and_forks():
+    """
+    Retrieves number of OwnerRRefs and forks on this node from
+    _rref_context_get_debug_info.
+    """
     rref_dbg_info = _rref_context_get_debug_info()
     num_owners = rref_dbg_info["num_owner_rrefs"]
     num_forks = rref_dbg_info["num_forks"]

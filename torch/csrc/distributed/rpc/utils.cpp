@@ -40,6 +40,7 @@ RPCErrorType getRPCErrorType(const FutureMessage& fm) {
         pos + torch::distributed::rpc::kRPCErrorPrefix.size() + 1;
     auto errEndIdx = err.find(':', errStartIdx);
     if (errEndIdx == std::string::npos) {
+      // Indicates error was not formatted correctly.
       return RPCErrorType::UNKNOWN_ERROR;
     }
     auto errStr = err.substr(errStartIdx, errEndIdx - errStartIdx);

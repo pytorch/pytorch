@@ -13,7 +13,7 @@ from . import (
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
-    _delete_all_user_rrefs,
+    _delete_all_user_and_unforked_owner_rrefs,
     _destroy_rref_context,
     _get_current_rpc_agent,
     _invoke_remote_builtin,
@@ -152,6 +152,8 @@ def _wait_all_workers():
         _wait_all_workers_sequence_id += 1
 
     is_leader_worker = leader_worker_name == self_worker_name
+    # Set a long enough timeout for all shutdown messages to be processed.
+    timeout = 5  # seconds
 
     # Phase 1: Followers send intents.
     # All followers report intents to the leader.
@@ -162,6 +164,7 @@ def _wait_all_workers():
             leader_worker_name,
             _on_leader_follower_report_shutdown_intent,
             args=(sequence_id, self_worker_name,),
+            timeout=timeout,
         )
 
     proceed_signal = _wait_all_workers_sequence_id_to_states[
@@ -174,7 +177,6 @@ def _wait_all_workers():
     # after receiving all followers' intents.
     if is_leader_worker:
         # The leader sends out proceeed signals to all followers.
-        timeout = 5  # seconds
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
             fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal,
@@ -240,7 +242,7 @@ def shutdown(graceful=True):
     """
     if graceful:
         _wait_all_workers()
-        _delete_all_user_rrefs()
+        _delete_all_user_and_unforked_owner_rrefs()
         _get_current_rpc_agent().join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
@@ -402,7 +404,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         ``remote`` fail, such as with a timeout error, we take a best-effort
         approach to error handling. This means that errors are handled and set
         on the resulting RRef on an asynchronous basis. If the RRef has not been
-        used by the application before this handling (such as to_here or
+        used by the application before this handling (such as ``to_here`` or
         fork call), then future uses of the ``RRef`` will appropriately raise
         errors. However, it is possible that the user application will use the
         ``RRef`` before the errors are handled. In this case, errors may not be

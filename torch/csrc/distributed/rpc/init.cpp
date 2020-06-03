@@ -542,7 +542,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   });
 
   module.def(
-      "_delete_all_user_rrefs",
+      "_delete_all_user_and_unforked_owner_rrefs",
       [](std::chrono::milliseconds timeoutMillis) {
         RRefContext::getInstance().delAllUsersAndUnforkedOwners(timeoutMillis);
       },

@@ -261,6 +261,7 @@ void RRefContext::delAllUsersAndUnforkedOwners(
     for (const auto& it : owners_) {
       auto rrefId = it.first;
       if (forks_.find(rrefId) == forks_.end()) {
+        // Successful fork of owner was never processed.
         unforkedOwners.push_back(rrefId);
       }
     }
@@ -393,11 +394,7 @@ RRefForkData RRefContext::prepareChildFork(
     const c10::intrusive_ptr<RRef>& rref) {
   // If we know that rref creation on the owner has timed out, raise it to the
   // user here, otherwise continue with pickling.
-  // if (rref->getTimedOut()) {
-  //   throw std::runtime_error(
-  //       "RRef creation via rpc.remote() timed out, and it "
-  //       "is possible that the RRef on the owner node does not exist.");
-  // }
+
   TORCH_CHECK(
       !rref->getTimedOut(),
       "RRef creation via rpc.remote() timed out, and it "
