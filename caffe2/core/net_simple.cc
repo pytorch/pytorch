@@ -47,6 +47,10 @@ SimpleNet::SimpleNet(
       op->set_debug_def(
           std::shared_ptr<const OperatorDef>{net_def, &(net_def->op(idx))});
     }
+    // simple net does not support cpu async ops
+    CAFFE_ENFORCE(
+        !op->HasAsyncPart() || op->device_option().device_type() != PROTO_CPU,
+        "SimpleNet does not support async cpu ops");
     operators_.emplace_back(std::move(op));
   }
 }
@@ -86,7 +90,7 @@ template <typename A, typename B>
 bool PairLargerThan(const std::pair<A, B>& x, const std::pair<A, B>& y) {
   return x.second > y.second;
 }
-}
+} // namespace
 
 vector<float> SimpleNet::TEST_Benchmark(
     const int warmup_runs,
