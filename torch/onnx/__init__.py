@@ -75,10 +75,46 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
             export the internal IR directly instead of converting it to ONNX ops.
         operator_export_type (enum, default OperatorExportTypes.ONNX):
-            OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops.
-            OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
-            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing, fall back on ATen op.
-            OperatorExportTypes.RAW: export raw ir.
+            OperatorExportTypes.ONNX: All ops are exported as regular ONNX ops
+            (with ONNX namespace).
+            OperatorExportTypes.ONNX_ATEN: All ops are exported as ATen ops
+            (with aten namespace).
+            OperatorExportTypes.ONNX_ATEN_FALLBACK: If an ATen op is not supported
+            in ONNX or its symbolic is missing, fall back on ATen op. Registered ops
+            are exported to ONNX regularly.
+            Example graph:
+                graph(%0 : Float):
+                  %3 : int = prim::Constant[value=0]()
+                  %4 : Float = aten::triu(%0, %3) # missing op
+                  %5 : Float = aten::mul(%4, %0) # registered op
+                  return (%5)
+            is exported as:
+                graph(%0 : Float):
+                  %1 : Long() = onnx::Constant[value={0}]()
+                  %2 : Float = aten::ATen[operator="triu"](%0, %1)  # missing op
+                  %3 : Float = onnx::Mul(%2, %0) # registered op
+                  return (%3)
+            In the above example, aten::triu is not supported in ONNX, hence
+            exporter falls back on this op.
+            OperatorExportTypes.RAW: Export raw ir.
+            OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
+            in ONNX, fall through and export the operator as is, as a custom 
+            ONNX op. Using this mode, the op can be exported and implemented by
+            the user for their runtime backend.
+            Example graph:
+                graph(%x.1 : Long(1:1)):
+                  %1 : None = prim::Constant()
+                  %2 : Tensor = aten::sum(%x.1, %1)
+                  %y.1 : Tensor[] = prim::ListConstruct(%2)
+                  return (%y.1)
+            is exported as:
+                graph(%x.1 : Long(1:1)):
+                  %1 : Tensor = onnx::ReduceSum[keepdims=0](%x.1)
+                  %y.1 : Long() = prim::ListConstruct(%1)
+                  return (%y.1)
+            In the above example, prim::ListConstruct is not supported, hence
+            exporter falls through.
+
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
             evolve before next stable release, by default we export to one stable
