@@ -17,6 +17,7 @@
 #include <iosfwd>
 #include <type_traits>
 #include <utility>
+#include <thrust/pair.h>
 
 namespace at { namespace native {
 
