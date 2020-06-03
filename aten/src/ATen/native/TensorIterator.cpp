@@ -854,33 +854,44 @@ void TensorIterator::compute_strides() {
 void TensorIterator::analyze_memory_format() {
   // TODO(vitalyf): Optimize to skip this section if outputs are already
   // allocated and connot be resized
-  bool first_cl_and_cont = true;
-  bool first_cl3d_and_cont = true;
+  // TODO(vitalyf): Make it widely accessible function which takes list
+  // of tensors and returns suggested format
+  bool all_leading_cl_ambiguous = true;
+  bool had_cl_suggested = false;
+  bool all_leading_cl3d_ambiguous = true;
+  bool had_cl3d_suggested = false;
   for (auto& op : operands_) {
     if (op.tensor.defined() && !op.is_output) {
-
       auto cl_ambiguous =
           (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
            op.tensor.is_contiguous(MemoryFormat::ChannelsLast)) ||
-          op.tensor.numel() == 1;
+          op.tensor.dim() < 4;
 
-      auto cl3d_ambiguous = (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
-              op.tensor.is_contiguous(MemoryFormat::ChannelsLast3d)) ||
-          op.tensor.numel() == 1;
+      auto cl3d_ambiguous =
+          (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
+           op.tensor.is_contiguous(MemoryFormat::ChannelsLast3d)) ||
+          op.tensor.dim() < 5;
 
-      if (!cl_ambiguous && first_cl_and_cont &&
+      if (op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+        had_cl_suggested = true;
+      } else if (
+          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
+        had_cl3d_suggested = true;
+      }
+
+      if (!cl_ambiguous && all_leading_cl_ambiguous &&
           op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
         requires_channels_last_output_ = true;
-      } else if (!cl3d_ambiguous &&
-          first_cl3d_and_cont &&
+      } else if (
+          !cl3d_ambiguous && all_leading_cl3d_ambiguous &&
           op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
         requires_channels_last_3d_output_ = true;
       }
 
       // Keep checking if first input is arbitrary strided (ex. NC11) or can be
       // broadcasted to anything numel == 1
-      if (first_cl_and_cont && !cl_ambiguous) {
-        first_cl_and_cont = false;
+      if (all_leading_cl_ambiguous && !cl_ambiguous) {
+        all_leading_cl_ambiguous = false;
       }
       if (!cl_ambiguous && !requires_channels_last_output_ &&
           op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
@@ -897,8 +908,8 @@ void TensorIterator::analyze_memory_format() {
 
       // Keep checking if first input is arbitrary strided (ex. NC111) or can be
       // broadcasted to anything numel == 1
-      if (first_cl3d_and_cont && !cl3d_ambiguous) {
-        first_cl3d_and_cont = false;
+      if (all_leading_cl3d_ambiguous && !cl3d_ambiguous) {
+        all_leading_cl3d_ambiguous = false;
       }
       if (!cl3d_ambiguous && !requires_channels_last_3d_output_ &&
           op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
@@ -913,6 +924,15 @@ void TensorIterator::analyze_memory_format() {
             "The operator will output channels_last_3d tensor even if some of the inputs are not in channels_last_3d format.");
       }
     }
+  }
+  // If everything is ambigous lean towards channels last format
+  if (!requires_channels_last_output_ && all_leading_cl_ambiguous &&
+      had_cl_suggested) {
+    requires_channels_last_output_ = true;
+  }
+  if (!requires_channels_last_3d_output_ && all_leading_cl3d_ambiguous &&
+      had_cl3d_suggested) {
+    requires_channels_last_3d_output_ = true;
   }
 }
 
@@ -949,10 +969,13 @@ std::unique_ptr<TensorIterator> TensorIterator::split(int dim) {
 }
 
 int TensorIterator::get_dim_to_split() const {
-  TORCH_INTERNAL_ASSERT(ndim() >= 1 && shape()[ndim() - 1] >= 2);
+  TORCH_INTERNAL_ASSERT(ndim() >= 1);
   int64_t max_extent = -1;
   int dim_to_split = -1;
   for (int dim = ndim() - 1; dim >= 0; dim--) {
+    if (shape_[dim] == 0) {
+      continue;
+    }
     int64_t size = shape_[dim];
     for (auto& op : operands_) {
       int64_t extent = (size - 1) * op.stride_bytes[dim];
