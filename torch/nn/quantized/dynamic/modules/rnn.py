@@ -8,7 +8,6 @@ import torch.nn as nn
 from torch import Tensor  # noqa: F401
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
-from torch import _VF
 
 def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
@@ -196,9 +195,14 @@ class RNNBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        assert type(mod) in set([torch.nn.LSTM, torch.nn.GRU]), 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU'
+        assert type(mod) in set(
+            [torch.nn.LSTM,
+             torch.nn.GRU]
+        ), 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU'
         assert hasattr(
-            mod, 'qconfig'), 'Input float module must have qconfig defined'
+            mod,
+            'qconfig'
+        ), 'Input float module must have qconfig defined'
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer_method = mod.qconfig.weight
@@ -477,6 +481,9 @@ class GRU(RNNBase):
     def __init__(self, *args, **kwargs):
         super(GRU, self).__init__('GRU', *args, **kwargs)
 
+    def _get_name(self):
+        return 'DynamicQuantizedGRU'
+
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input, hx=None):  # noqa: F811
         # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
@@ -511,14 +518,12 @@ class GRU(RNNBase):
             hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
-        weight_values = []
-        for mod in self._all_weight_values:
-            weight_values.append(mod.param)
+        _all_params = ([m.param for m in self._all_weight_values])
         if batch_sizes is None:
-            result = torch.quantized_gru(input, hx, self._all_params, self.bias, self.num_layers,
+            result = torch.quantized_gru(input, hx, _all_params, self.bias, self.num_layers,
                                          self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = torch.quantized_gru(input, batch_sizes, hx, self._all_params, self.bias,
+            result = torch.quantized_gru(input, batch_sizes, hx, _all_params, self.bias,
                                          self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
@@ -536,7 +541,7 @@ class GRU(RNNBase):
 
 
 class RNNCellBase(torch.nn.Module):
-  #  _FLOAT_MODULE = nn.CellRNNBase
+    # _FLOAT_MODULE = nn.CellRNNBase
     __constants__ = ['input_size', 'hidden_size', 'bias']
 
     def __init__(self, input_size, hidden_size, bias=True, num_chunks=4, dtype=torch.qint8):
@@ -614,7 +619,10 @@ class RNNCellBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        assert type(mod) in set([torch.nn.LSTMCell, torch.nn.GRUCell, torch.nn.RNNCell]), 'nn.quantized.dynamic.RNNCellBase.from_float only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell'
+        assert type(mod) in set([torch.nn.LSTMCell,
+                                 torch.nn.GRUCell,
+                                 torch.nn.RNNCell]), 'nn.quantized.dynamic.RNNCellBase.from_float \
+                                 only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell'
         assert hasattr(
             mod, 'qconfig'), 'Input float module must have qconfig defined'
 
@@ -639,7 +647,8 @@ class RNNCellBase(torch.nn.Module):
         elif type(mod) == torch.nn.RNNCell:
             qRNNCellBase = RNNCell(mod.input_size, mod.hidden_size, bias=mod.bias, nonlinearity=mod.nonlinearity, dtype=dtype)
         else:
-            raise NotImplementedError('Only LSTMCell, GRUCell and RNNCell are supported for QuantizedRNN for now')
+            raise NotImplementedError('Only LSTMCell, GRUCell and RNNCell \
+            are supported for QuantizedRNN for now')
 
 
         assert mod.bias
@@ -740,6 +749,9 @@ class RNNCell(RNNCellBase):
         super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1, dtype=dtype)
         self.nonlinearity = nonlinearity
 
+    def _get_name(self):
+        return 'DynamicRNNCell'
+
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
@@ -747,12 +759,12 @@ class RNNCell(RNNCellBase):
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
         self.check_forward_hidden(input, hx, '')
         if self.nonlinearity == "tanh":
-            ret = _VF.quantized_rnn_tanh_cell_dynamic(
+            ret = torch.ops.quantized.quantized_rnn_tanh_cell_dynamic(
                 input, hx,
                 self._packed_weight_ih, self._packed_weight_hh,
                 self.bias_ih, self.bias_hh)
         elif self.nonlinearity == "relu":
-            ret = _VF.quantized_rnn_relu_cell_dynamic(
+            ret = torch.ops.quantized.quantized_rnn_relu_cell_dynamic(
                 input, hx,
                 self._packed_weight_ih, self._packed_weight_hh,
                 self.bias_ih, self.bias_hh)
@@ -831,6 +843,9 @@ class LSTMCell(RNNCellBase):
     def __init__(self, *args, **kwargs):
         super(LSTMCell, self).__init__(*args, num_chunks=4, **kwargs)
 
+    def _get_name(self):
+        return 'DynamicLSTMCell'
+
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
         self.check_forward_input(input)
@@ -840,7 +855,7 @@ class LSTMCell(RNNCellBase):
         self.check_forward_hidden(input, hx[0], '[0]')
         self.check_forward_hidden(input, hx[1], '[1]')
         print('Calling quantized_lstm_cell')
-        return _VF.quantized_lstm_cell_dynamic(
+        return torch.ops.quantized.quantized_lstm_cell_dynamic(
             input, hx,
             self._packed_weight_ih, self._packed_weight_hh,
             self.bias_ih, self.bias_hh)
@@ -914,13 +929,16 @@ class GRUCell(RNNCellBase):
     def __init__(self, input_size, hidden_size, bias=True, dtype=torch.qint8):
         super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, dtype=dtype)
 
+    def _get_name(self):
+        return 'DynamicGRUCell'
+
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
         self.check_forward_hidden(input, hx, '')
-        return _VF.quantized_gru_cell_dynamic(
+        return torch.ops.quantized.quantized_gru_cell_dynamic(
             input, hx,
             self._packed_weight_ih, self._packed_weight_hh,
             self.bias_ih, self.bias_hh,

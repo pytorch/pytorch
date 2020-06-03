@@ -12,7 +12,8 @@ bool NamesMode::is_enabled() {
 }
 
 void NamesMode::set_enabled(bool enabled) {
-   NamesMode_enabled = enabled;
+  NamesMode_enabled = enabled;
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Named, !enabled);
 }
 
 Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {

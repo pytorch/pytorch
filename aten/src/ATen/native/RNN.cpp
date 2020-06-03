@@ -1775,13 +1775,14 @@ return_type name( \
 return_type name( \
     const Tensor& input, \
     hx_type hx, \
-    const Tensor& w_ih, \
-    const Tensor& w_hh, \
+    c10::intrusive_ptr<LinearPackedParamsBase> _packed_w_ih, \
+    c10::intrusive_ptr<LinearPackedParamsBase> _packed_w_hh, \
     const Tensor& b_ih, \
-    const Tensor& b_hh ) { \
+    const Tensor& b_hh \
+ ) { \
   QuantizedCellParamsDynamic params( \
-      w_ih, \
-      w_hh, \
+      _packed_w_ih, \
+      _packed_w_hh, \
       b_ih, \
       b_hh); \
   return cell_type{}( \
@@ -1792,7 +1793,6 @@ return_type name( \
 using quantized_lstm_cell_type = LSTMCell<QuantizedCellParams>;
 using quantized_lstm_return_type = std::tuple<Tensor, Tensor>;
 std::tuple<Tensor, Tensor> prepare_quantized_lstm_hx(TensorList hx) {
-  TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
   return std::make_tuple(hx[0], hx[1]);
 }
 
@@ -1898,7 +1898,27 @@ static auto registry =
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(quantized_gru_data_legacy),
-                    quantized_gru_data_legacy>(DispatchKey::CPUTensorId));
+                    quantized_gru_data_legacy>(DispatchKey::CPUTensorId))
+        .op("quantized::quantized_lstm_cell_dynamic(Tensor input, Tensor[] hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh) -> (Tensor, Tensor)",
+            torch::RegisterOperators::options()
+                .kernel<
+                    decltype(quantized_lstm_cell_dynamic),
+                    quantized_lstm_cell_dynamic>(DispatchKey::CPUTensorId))
+        .op("quantized::quantized_gru_cell_dynamic(Tensor input, Tensor hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> Tensor",
+            torch::RegisterOperators::options()
+                .kernel<
+                    decltype(quantized_gru_cell_dynamic),
+                    quantized_gru_cell_dynamic>(DispatchKey::CPUTensorId))
+        .op("quantized::quantized_rnn_relu_cell_dynamic(Tensor input, Tensor hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> Tensor",
+            torch::RegisterOperators::options()
+                .kernel<
+                    decltype(quantized_rnn_relu_cell_dynamic),
+                    quantized_rnn_relu_cell_dynamic>(DispatchKey::CPUTensorId))
+        .op("quantized::quantized_rnn_tanh_cell_dynamic(Tensor input, Tensor hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> Tensor",
+            torch::RegisterOperators::options()
+                .kernel<
+                    decltype(quantized_rnn_tanh_cell_dynamic),
+                    quantized_rnn_tanh_cell_dynamic>(DispatchKey::CPUTensorId));
 
 } // namespace
 }}  // namespace at::native

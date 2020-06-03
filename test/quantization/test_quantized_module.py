@@ -658,7 +658,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Check if the module implementation matches calling the
         # ops directly
-        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack)
+        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack, reduce_range=True)
         self.assertEqual(Z_ref, Z_dq)
 
         # Test serialization of dynamic quantized Linear Module using state_dict
