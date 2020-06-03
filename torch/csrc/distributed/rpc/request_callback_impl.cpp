@@ -155,25 +155,23 @@ void RequestCallbackImpl::processRpc(
         jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
           try {
             auto valueJitFuture = jitFuture->value().toFuture();
-            valueJitFuture->addCallback([responseFuture,
-                                         messageId,
-                                         valueJitFuture]() {
-              try {
-                Message m = ScriptResp(valueJitFuture->value()).toMessage();
-                m.setId(messageId);
-                responseFuture->markCompleted(std::move(m));
-              } catch (const std::exception& e) {
-                responseFuture->setError(e.what());
-              }
-            });
+            valueJitFuture->addCallback(
+                [responseFuture, messageId, valueJitFuture]() {
+                  try {
+                    Message m = ScriptResp(valueJitFuture->value()).toMessage();
+                    m.setId(messageId);
+                    responseFuture->markCompleted(std::move(m));
+                  } catch (const std::exception& e) {
+                    responseFuture->setError(e.what());
+                  }
+                });
           } catch (const std::exception& e) {
             responseFuture->setError(e.what());
           }
         });
       } else {
         if (jitFuture->completed()) {
-          markComplete(
-              std::move(ScriptResp(jitFuture->value())).toMessage());
+          markComplete(std::move(ScriptResp(jitFuture->value())).toMessage());
           return;
         }
 
