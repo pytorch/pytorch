@@ -1051,8 +1051,7 @@ InsertObserversHelper::insertObserversFor(
           } else {
             for (auto i = 0; i < n->outputs().size(); ++i) {
               if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
-                  !block_observed_values.count(n->output(i)) &&
-                  !observed_values_.count(n->output(i))) {
+                  !isObserved(n->output(i), block_observed_values)) {
                 recordObserved(
                     n->output(i),
                     *output_observers[i],
