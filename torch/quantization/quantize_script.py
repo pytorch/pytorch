@@ -29,6 +29,7 @@ def _prepare_script(model, qconfig_dict, inplace=False, is_dynamic=False):
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
     torch._C._jit_pass_dedup_module_uses(model._c)
     model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+    print('after dedup use and fold bn:', model.graph)
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
                                                                scripted_qconfig_dict,

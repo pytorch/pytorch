@@ -134,6 +134,7 @@ bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
     }
     switch (n1->kindOf(attr_name)) {
       case AttributeKind::s:
+        GRAPH_DEBUG("regex:", n1->s(attr_name));
         if (!std::regex_match(n2->s(attr_name), std::regex(n1->s(attr_name)))) {
           GRAPH_DEBUG(
               "Nodes did not match because attribute '",

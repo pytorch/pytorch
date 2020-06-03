@@ -77,7 +77,7 @@ TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 // checks if a block will always raise an Exception
 TORCH_API bool alwaysRaisesException(Block* block);
 
-// =========== helper functions for Graph ==========
+// =========== helper functions for Module  ==========
 // TODO: remove
 TORCH_API std::vector<std::string> getModuleAccessPath(
     Value* instance,
@@ -89,7 +89,6 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
-// =========== helper functions for Module  ==========
 
 } // namespace jit
 } // namespace torch

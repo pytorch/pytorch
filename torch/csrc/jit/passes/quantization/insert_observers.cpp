@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
 #include <stack>
+#include <regex>
 
 namespace torch {
 namespace jit {
@@ -33,8 +34,25 @@ using QConfigTypePtrMap =
 using NameModuleVector = std::vector<std::pair<std::string, Module>>;
 using OptionalModuleVector = std::vector<c10::optional<Module>>;
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
+using graph_rewrite_helper::MatchFilter;
 using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithAtenConv;
+using graph_rewrite_helper::aten_add_alpha_is_one;
+using graph_rewrite_helper::is_functional_relu;
+
+auto is_relu_module = [](const Match& match,
+                         const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    Value* relu = match_vmap.at(vmap.at("relu"));
+    auto type = relu->type()->cast<ClassType>();
+    if (type && type->name()) {
+      static std::regex mangle_re("\\.___torch_mangle_\\d+");
+      auto qualified_name =
+        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
+      return qualified_name == "__torch__.torch.nn.modules.activation.ReLU";
+    }
+    return false;
+};
 
 // helper functions
 void fillQConfigMap(
@@ -130,7 +148,7 @@ class ModuleCloneHelper {
         r.register_attribute(
             type->getAttributeName(i),
             type->getAttribute(i),
-            inplace ? s : s.deepcopy(memo),
+            inplace || s.isCapsule() ? s : s.deepcopy(memo),
             type->is_parameter(i),
             type->is_buffer(i));
       }
@@ -458,35 +476,51 @@ graph(%input, %weight, %bias, %4):
      return (%second_output) )");
 
   const PatternInfo add_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b):
-     %one = prim::Constant[value=1]()
-     %first_output = aten::add(%a, %b, %one)
-     %second_module = match::module[name="ReLU"](%self)
-     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-     return (%second_output) )");
+graph(%self, %a, %b, %alpha, %relu):
+     %first_output = aten::add(%a, %b, %alpha)
+     %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
+     return (%second_output) )", {aten_add_alpha_is_one, is_relu_module});
 
   const PatternInfo add_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b, %inplace):
-     %one = prim::Constant[value=1]()
-     %first_output = aten::add(%a, %b, %one)
-     %relu = prim::Constant[name="relu"]()
+graph(%self, %a, %b, %alpha, %relu, %inplace):
+     %first_output = aten::add(%a, %b, %alpha)
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-     return (%second_output) )");
+     return (%second_output) )", {aten_add_alpha_is_one, is_functional_relu});
 
   const PatternInfo inplace_add_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b):
-     %one = prim::Constant[value=1]()
-     %first_output = aten::add_(%a, %b, %one)
-     %second_module = match::module[name="ReLU"](%self)
-     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-     return (%second_output) )");
+graph(%self, %a, %b, %alpha, %relu):
+     %first_output = aten::add_(%a, %b, %alpha)
+     %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
+     return (%second_output) )", {aten_add_alpha_is_one, is_relu_module});
 
   const PatternInfo inplace_add_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b, %inplace):
-     %one = prim::Constant[value=1]()
-     %first_output = aten::add_(%a, %b, %one)
-     %relu = prim::Constant[name="relu"]()
+graph(%self, %a, %b, %alpha, %relu, %inplace):
+     %first_output = aten::add_(%a, %b, %alpha)
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )", {aten_add_alpha_is_one, is_functional_relu});
+
+  const PatternInfo add_aten_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %alpha):
+     %first_output = aten::add(%a, %b, %alpha)
+     %second_output = aten::relu(%first_output)
+     return (%second_output) )");
+
+  const PatternInfo add_aten_relu_ = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %alpha):
+     %first_output = aten::add(%a, %b, %alpha)
+     %second_output = aten::relu_(%first_output)
+     return (%second_output) )");
+
+  const PatternInfo inplace_add_aten_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %alpha):
+     %first_output = aten::add_(%a, %b, %alpha)
+     %second_output = aten::relu(%first_output)
+     return (%second_output) )");
+
+  const PatternInfo inplace_add_aten_relu_ = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %alpha):
+     %first_output = aten::add_(%a, %b, %alpha)
+     %second_output = aten::relu_(%first_output)
      return (%second_output) )");
 
   const PatternInfo nn_bn_nn_relu = PatternInfo::parse_from_str(R"(
@@ -547,6 +581,10 @@ graph(%self, %a, %b, %inplace):
           add_f_relu,
           inplace_add_nn_relu,
           inplace_add_f_relu,
+          add_aten_relu,
+          add_aten_relu_,
+          inplace_add_aten_relu,
+          inplace_add_aten_relu_,
           nn_bn_nn_relu,
           nn_bn_f_relu,
           mul_nn_relu,
@@ -639,6 +677,9 @@ void InsertObserversHelper::delayObservingValuesInPattern(
 
   const auto& matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
+    if (!std::all_of(pattern.filters.begin(), pattern.filters.end(), [&](const MatchFilter& f) { return f(match, vmap); })) {
+      continue;
+    }
     auto first_output = match.values_map.at(vmap.at("first_output"));
     auto second_output = match.values_map.at(vmap.at("second_output"));
     GRAPH_DEBUG(
