@@ -148,7 +148,7 @@ class ModuleCloneHelper {
         r.register_attribute(
             type->getAttributeName(i),
             type->getAttribute(i),
-            inplace || s.isCapsule() ? s : s.deepcopy(memo),
+            inplace ? s : s.deepcopy(memo),
             type->is_parameter(i),
             type->is_buffer(i));
       }
