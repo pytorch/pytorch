@@ -10,6 +10,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <THC/THCAtomics.cuh>
 
 namespace at { namespace native {
 
@@ -299,8 +300,18 @@ void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Sc
   );
 }
 
+void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
+    self, dim, index, src,
+    "scatter_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
+      gpuAtomicAdd(lhs, *rhs);
+    }
+  );
+}
+
 REGISTER_DISPATCH(gather_stub, &gather_cuda_kernel);
 REGISTER_DISPATCH(scatter_stub, &scatter_cuda_kernel);
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel);
+REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel);
 
 }} // namespace at::native

@@ -15,6 +15,11 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/TypeDefault.h>
+#include <ATen/CPUType.h>
+#include <ATen/QuantizedCPUType.h>
+
 namespace at {
 
 using native::tensor;
@@ -39,7 +44,6 @@ inline Tensor from_blob(
   }
   auto storage = Storage(
       Storage::use_byte_size_t(),
-      options.dtype(),
       detail::computeStorageNbytes(sizes, strides, options.dtype().itemsize()),
       InefficientStdFunctionContext::makeDataPtr(data, deleter, device),
       /*allocator=*/nullptr,
@@ -70,7 +74,6 @@ inline Tensor from_blob(
   }
   auto storage = Storage(
       Storage::use_byte_size_t(),
-      options.dtype(),
       detail::computeStorageNbytes(sizes, strides, options.dtype().itemsize()),
       DataPtr(data, nullptr, [](void*) {}, device),
       /*allocator=*/nullptr,

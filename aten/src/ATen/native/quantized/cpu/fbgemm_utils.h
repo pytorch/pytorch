@@ -50,8 +50,8 @@ struct CAFFE2_API PackedLinearWeight : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point) override;
 
-  at::Tensor apply_dynamic(at::Tensor input) override;
-  at::Tensor apply_dynamic_relu(at::Tensor input) override;
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
@@ -71,7 +71,7 @@ struct CAFFE2_API PackedLinearWeight : public LinearPackedParamsBase {
       int64_t output_zero_point);
 
   template <bool ReluFused>
-  at::Tensor apply_dynamic_impl(at::Tensor input);
+  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);
 };
 
 struct CAFFE2_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
@@ -96,8 +96,8 @@ struct CAFFE2_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
     TORCH_INTERNAL_ASSERT(false);
   }
 
-  at::Tensor apply_dynamic(at::Tensor input) override;
-  at::Tensor apply_dynamic_relu(at::Tensor input) override;
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 

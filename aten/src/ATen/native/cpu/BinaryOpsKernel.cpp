@@ -23,7 +23,7 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
       cpu_kernel(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a + alpha * b; });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "add_cpu/sub_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "add_cpu/sub_cpu", [&]() {
       auto alpha = alpha_scalar.to<scalar_t>();
       auto alpha_vec = Vec256<scalar_t>(alpha);
       cpu_kernel_vec(iter,
@@ -56,7 +56,7 @@ void mul_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "mul_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "mul_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
@@ -397,7 +397,7 @@ void eq_kernel(TensorIterator& iter) {
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "eq_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "eq_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -419,7 +419,7 @@ void ne_kernel(TensorIterator& iter) {
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "ne_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "ne_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -522,16 +522,31 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
 }
 
 void tanh_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
-    auto one_vec = Vec256<scalar_t>((scalar_t)(1));
-    cpu_kernel_vec(iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t {
-        return a * (scalar_t(1) - b * b);
-      },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-        return a * (one_vec - b * b);
-      });
-  });
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+      auto one_vec = Vec256<scalar_t>(scalar_t{1, 0});
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a, scalar_t b) -> scalar_t {
+            return a * (scalar_t{1, 0} - b * b);
+          },
+          [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a * (one_vec - b * b);
+          });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+      auto one_vec = Vec256<scalar_t>(scalar_t{1});
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a, scalar_t b) -> scalar_t {
+            return a * (scalar_t{1} - b * b);
+          },
+          [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a * (one_vec - b * b);
+          });
+    });
+  }
 }
 
 void mse_kernel(TensorIterator& iter) {
@@ -557,6 +572,7 @@ void fmod_kernel(TensorIterator& iter) {
   if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
+        TORCH_CHECK(d != 0, "ZeroDivisionError");
         return x % d;
       });
     });
@@ -599,6 +615,55 @@ void fmod_scalar_kernel(TensorIterator& iter, Scalar divisor) {
 
 }
 
+void logaddexp_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          if (std::isinf(a) && a == b) {
+            return a;
+          } else {
+            scalar_t m = std::max(a, b);
+            return m + std::log((scalar_t)(1.0) + std::exp(-std::abs(a - b)));
+          }
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          Vec256<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
+          Vec256<scalar_t> one(1.0);
+          Vec256<scalar_t> m = maximum(a, b);
+          return Vec256<scalar_t>::blendv(
+              m + (one + (a - b).abs().neg().exp()).log(),
+              a,
+              (a == b) & (a.abs() == inf));
+        });
+  });
+}
+
+void logaddexp2_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp2_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          if (std::isinf(a) && a == b) {
+            return a;
+          } else {
+            scalar_t m = std::max(a, b);
+            return m + std::log2((scalar_t)(1.0) + std::pow((scalar_t)(2), -std::abs(a - b)));
+          }
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          Vec256<scalar_t> inf(std::numeric_limits<scalar_t>::infinity());
+          Vec256<scalar_t> one(1.0);
+          Vec256<scalar_t> two(2.0);
+          Vec256<scalar_t> m = maximum(a, b);
+          return Vec256<scalar_t>::blendv(
+              m + (one + two.pow((a - b).abs().neg())).log2(),
+              a,
+              (a == b) & (a.abs() == inf));
+        });
+  });
+}
+
 } // anonymous namespace
 
 
@@ -630,5 +695,7 @@ REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
 REGISTER_DISPATCH(mse_stub, &mse_kernel);
 REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
 REGISTER_DISPATCH(fmod_scalar_stub, &fmod_scalar_kernel);
+REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
+REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
 
 }} // namespace at::native

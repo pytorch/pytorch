@@ -944,7 +944,7 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
             worker_name((self.rank + 1) % self.world_size),
             script_fork_wait_udf,
             args=(torch.ones(2),)
-        )._then(callback)
+        ).then(callback)
         self.assertEqual(future.wait(), torch.ones(2) * 2 + 1)
 
     @dist_init
@@ -963,7 +963,7 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
 
         num_cbs = 20
         for _ in range(num_cbs):
-            fut = fut._then(callback)
+            fut = fut.then(callback)
 
         self.assertEqual(fut.wait(), torch.ones(n, n) + 1 + num_cbs)
 
@@ -988,7 +988,7 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
             worker_name((self.rank + 1) % self.world_size),
             script_fork_wait_throw,
             args=(torch.ones(2),)
-        )._then(callback)
+        ).then(callback)
 
         with self.assertRaisesRegex(RuntimeError, "Another expected error"):
             future.wait()
