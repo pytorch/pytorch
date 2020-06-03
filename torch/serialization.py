@@ -341,9 +341,12 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
         _use_new_zipfile_serialization: saves the object as a zip file rather than a binary file
     
     Note:
+        `.pt` extension is used for most of the cases.
+    
+    Note:
         The file extension does not matter while saving the object. The object can be saved using
-        .pt, .pth, .zip or any other extension. You can literally save the object as .py file and 
-        it will work as intented.
+        .pt, .zip or any other extension. (You can literally save the object as .py file and 
+        it will just work as intented). 
     
     .. warning::
         If you are using Python 2, :func:`torch.save` does NOT support :class:`StringIO.StringIO`
