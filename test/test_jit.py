@@ -11181,6 +11181,14 @@ a")
                     return x  # noqa: T484
             ''')
 
+        @torch.jit.script
+        def f(x: BroadcastingList2[int]):
+            return x
+
+        out = f(1)
+        self.assertTrue(isinstance(out[0], int))
+        self.assertEqual(out, [1, 1])
+
     def test_ntuple_builtins(self):
         from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
 
