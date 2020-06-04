@@ -66,7 +66,7 @@ VIEW_FUNCTIONS = {
     'sparse_coo_tensor_with_dims_and_tensors': 'values',
 }
 
-VIEW_FUNCTIONS_WITH_DTYPE_CHANGE = ['view_as_real', 'view_as_complex']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
 
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
