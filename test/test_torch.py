@@ -152,9 +152,9 @@ class AbstractTestCases:
                         skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                     else:
                         skip_regexes.append(r)
-                skipnames = ['copy_real', 'copy_imag']
+
                 for name in dir(ns):
-                    if name.startswith('_') or name in skipnames:
+                    if name.startswith('_'):
                         continue
                     if name in ['real', 'imag']:
                         y = torch.randn(1, dtype=torch.cfloat)
