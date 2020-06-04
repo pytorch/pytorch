@@ -440,7 +440,13 @@ class TestScriptPy3(JitTestCase):
 
     def test_unimported_type_resolution(self):
         # verify fallback from the python resolver to the c++ resolver
-        assert False, "TODO implement me, maybe in a new file?"
+
+        @ torch.jit.script
+        def fn(x):
+            # type (number) -> number
+            return x + 1
+
+        FileCheck().check('number').run(fn.graph)
 
     def test_parser_bug(self):
         def parser_bug(o: Optional[torch.Tensor]):
