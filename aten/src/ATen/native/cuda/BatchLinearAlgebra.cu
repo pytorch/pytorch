@@ -901,6 +901,31 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   }
 }
 
+std::tuple<Tensor, Tensor> _cholesky_mod_helper_cuda(const Tensor& self, const Tensor& err, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+  Tensor self_working_copy;
+  if (upper) {
+    self_working_copy = cloneBatchedColumnMajor(self.transpose(-1, -2));
+  } else {
+    self_working_copy = cloneBatchedColumnMajor(self);
+  }
+
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_mod_cuda", [&]{
+    apply_cholesky<scalar_t>(self_working_copy, false, infos);
+  });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "cholesky_mod_cuda");
+  } else {
+    singleCheckErrors(infos[0], "cholesky_mod_cuda");
+  }
+  if (upper) {
+    auto U = self_working_copy.transpose(-1, -2);
+    return std::make_tuple(U, err);
+  } else {
+    return std::make_tuple(self_working_copy, err);
+  }
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>

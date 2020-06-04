@@ -571,6 +571,65 @@ Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
   return result;
 }
 
+template<typename scalar_t>
+static void apply_cholesky_mod(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("cholesky: LAPACK library not found in compilation");
+#else
+  char uplo = upper ? 'U' : 'L';
+
+  auto self_data = self.data_ptr<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto batch_size = batchCount(self);
+  auto n = self.size(-2);
+
+  int info;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor> _cholesky_mod_helper_cpu(const Tensor& self, const Tensor& err, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_mod_cpu", [&]{
+    apply_cholesky_mod<scalar_t>(self_working_copy, upper, infos);
+  });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "cholesky_mod_cpu");
+  } else {
+    singleCheckErrors(infos[0], "cholesky_mod_cpu");
+  }
+  return std::make_tuple(self_working_copy, err);
+}
+
+std::tuple<Tensor, Tensor> cholesky_mod(const Tensor &self, bool upper) {
+  auto req_size = self.sizes().vec();
+  req_size.pop_back();
+  auto err = at::zeros(req_size, self.options().dtype(ScalarType::Double));
+  if (self.size(-1) == 0) {
+    return std::make_tuple(at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), err);
+  }
+  squareCheckInputs(self);
+
+  auto helper_out = at::_cholesky_mod_helper(self, err, upper);
+  auto raw_cholesky_output = std::get<0>(helper_out);
+  auto err_output = std::get<1>(helper_out);
+  if (upper) {
+    auto U = raw_cholesky_output.triu_();
+    return std::make_tuple(U, err_output);
+  } else {
+    auto L = raw_cholesky_output.tril_();
+    return std::make_tuple(L, err_output);
+  }
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>

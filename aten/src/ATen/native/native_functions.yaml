@@ -4892,6 +4892,17 @@
     CPU: _cholesky_helper_cpu
     CUDA: _cholesky_helper_cuda
 
+- func: cholesky_mod(Tensor self, bool upper=False) -> (Tensor result, Tensor err)
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: _cholesky_mod_helper(Tensor self, Tensor err, bool upper) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _cholesky_mod_helper_cpu
+    CUDA: _cholesky_mod_helper_cuda
+
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor

@@ -8038,6 +8038,11 @@ class TestTorchDeviceType(TestCase):
         B = torch.mm(C, C.t())
         self.assertEqual(A, B, atol=1e-14, rtol=0)
 
+        # cholesky_mod
+        C, e = torch.cholesky_mod(A)
+        B = torch.mm(C, C.t())
+        self.assertEqual(A, B, atol=1e-14+torch.max(e), rtol=0)
+
         # test Upper Triangular
         U = torch.cholesky(A, True)
         B = torch.mm(U.t(), U)

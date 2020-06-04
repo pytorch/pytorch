@@ -1325,6 +1325,70 @@ Example::
     tensor(2.3842e-07)
 """)
 
+add_docstr(torch.cholesky_mod, r"""
+cholesky_mod(input, upper=False, out=None) -> (Tensor, Tensor)
+
+Computes the modified Cholesky decomposition of a symmetric positive-semidefinite
+matrix :math:`A` or for batches of symmetric positive-semidefinite matrices.
+
+If :attr:`upper` is ``True``, the returned matrix ``U`` is upper-triangular, and
+the decomposition has the form:
+
+.. math::
+
+  A + I*e = U^TU
+
+If :attr:`upper` is ``False``, the returned matrix ``L`` is lower-triangular, and
+the decomposition has the form:
+
+.. math::
+
+    A + I*e = LL^T
+
+If :attr:`upper` is ``True``, and :math:`A` is a batch of symmetric positive-semidefinite
+matrices, then the returned tensor will be composed of upper-triangular Cholesky factors
+of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, the returned
+tensor will be composed of lower-triangular Cholesky factors of each of the individual
+matrices.
+
+Args:
+    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
+                batch dimensions consisting of symmetric positive-definite matrices.
+    upper (bool, optional): flag that indicates whether to return a
+                            upper or lower triangular matrix. Default: ``False``
+    out (Tensor, optional): the output matrix
+
+Returns:
+    out (Tensor): the output matrix
+    err (Tensor): the minimal error, that when added to `A` will make it positive-definite
+
+Example::
+
+    >>> a = torch.randn(3, 3)
+    >>> a = torch.mm(a, a.t()) # make symmetric positive-definite
+    >>> l, e = torch.cholesky_mod(a)
+    >>> a
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+    >>> l
+    tensor([[ 1.5528,  0.0000,  0.0000],
+            [-0.4821,  1.0592,  0.0000],
+            [ 0.9371,  0.5487,  0.7023]])
+    >>> e
+    tensor([0., 0., 0.])
+    >>> torch.mm(l, l.t())
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+    >>> a = torch.randn(3, 2, 2)
+    >>> a = torch.matmul(a, a.transpose(-1, -2))
+    >>> l = torch.cholesky_mod(a)
+    >>> z = torch.matmul(l, l.transpose(-1, -2))
+    >>> torch.max(torch.abs(z - a)) # Max non-zero
+    tensor(2.3842e-07)
+""")
+
 add_docstr(torch.cholesky_solve, r"""
 cholesky_solve(input, input2, upper=False, out=None) -> Tensor
 

@@ -759,6 +759,13 @@ cholesky(upper=False) -> Tensor
 See :func:`torch.cholesky`
 """)
 
+add_docstr_all('cholesky_mod',
+               r"""
+cholesky_mod(upper=False) -> (Tensor, Tensor)
+
+See :func:`torch.cholesky_mod`
+""")
+
 add_docstr_all('cholesky_solve',
                r"""
 cholesky_solve(input2, upper=False) -> Tensor
