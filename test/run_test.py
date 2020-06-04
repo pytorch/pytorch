@@ -79,6 +79,7 @@ TESTS = [
     'test_determination',
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'test_futures',
 ]
 
 WINDOWS_BLACKLIST = [
@@ -154,6 +155,7 @@ SLOW_TESTS = [
     'distributed/test_c10d_spawn',
     'test_quantization',
     'test_determination',
+    'test_futures',
 ]
 _DEP_MODULES_CACHE = {}
 
