@@ -9150,6 +9150,28 @@ class TestTorchDeviceType(TestCase):
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
+    def test_minmax_illegal_dtype(self, device):
+        x = torch.randn(5, 5, dtype=torch.float32, device=device)
+        valid_values = torch.empty(5, dtype=torch.float32, device=device)
+        valid_indices = torch.empty(5, dtype=torch.long, device=device)
+        illegal_values = torch.empty(5, dtype=torch.int, device=device)
+        illegal_indices = torch.empty(5, dtype=torch.double, device=device)
+        torch.max(x, dim=0, out=(valid_values, valid_indices))
+        torch.min(x, dim=0, out=(valid_values, valid_indices))
+        rmsg = r'scalar type|dtype'
+        with self.assertRaisesRegex(RuntimeError, rmsg):
+            torch.max(x, dim=0, out=(illegal_values, valid_indices))
+        with self.assertRaisesRegex(RuntimeError, rmsg):
+            torch.min(x, dim=0, out=(illegal_values, valid_indices))
+        with self.assertRaisesRegex(RuntimeError, rmsg):
+            torch.max(x, dim=0, out=(valid_values, illegal_indices))
+        with self.assertRaisesRegex(RuntimeError, rmsg):
+            torch.min(x, dim=0, out=(valid_values, illegal_indices))
+        with self.assertRaisesRegex(RuntimeError, rmsg):
+            torch.max(x, dim=0, out=(illegal_values, illegal_indices))
+        with self.assertRaisesRegex(RuntimeError, rmsg):
+            torch.min(x, dim=0, out=(illegal_values, illegal_indices))
+
     @dtypes(torch.float, torch.double, torch.int64, torch.int32, torch.int16)
     @dtypesIfCUDA(torch.float, torch.double, torch.int64, torch.int32, torch.int16, torch.half)
     def test_dim_arg_reduction_scalar(self, device, dtype):
@@ -16859,6 +16881,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.tensor([0, 1], dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
             a // b
+
+    @onlyCPU
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_fmod_zero(self, device, dtype):
+        a = torch.tensor([1, 0], dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
+            a.fmod(a)
 
     @onlyCPU
     def test_cat_bad_input_sizes(self, device):
