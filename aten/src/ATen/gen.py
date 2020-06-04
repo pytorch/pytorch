@@ -403,11 +403,11 @@ def gen_per_op_registration_filename(opname):
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['TensorBody.h', 'TensorMethods.cpp', 'ATenOpList.cpp']
+    core_files = ['TensorBody.h', 'TensorMethods.cpp', 'ATenOpList.cpp', 'Functions.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
-             'Functions.h', 'Functions.cpp', 'NativeFunctions.h', 'BackendSelectRegister.cpp']
+             'Functions.h', 'NativeFunctions.h', 'BackendSelectRegister.cpp']
     for f in files:
         file_manager.will_write(f)
     for backend, density in iterate_types():
@@ -525,7 +525,7 @@ def generate_outputs():
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
 
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
-    file_manager.write('Functions.cpp', FUNCTIONS_CPP, top_env)
+    core_file_manager.write('Functions.cpp', FUNCTIONS_CPP, top_env)
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
 
