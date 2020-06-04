@@ -359,17 +359,19 @@ class Fuzzer(object):
         self._tensors = Fuzzer._unpack(tensors, FuzzedTensor)
         self._constraints = constraints or ()
 
-        assert not len({p.name for p in self._parameters}
+        name_overlap = ({p.name for p in self._parameters}
             .intersection({t.name for t in self._tensors}))
+        if name_overlap:
+            raise ValueError(f"Duplicate names in parameters and tensors: {name_overlap}")
 
         self._rejections = 0
         self._total_generated = 0
 
     @staticmethod
     def _unpack(values, cls):
-        return tuple(
-            it.chain(*[[i] if isinstance(i, cls) else i
-            for i in values]))
+        return tuple(it.chain(
+            *[[i] if isinstance(i, cls) else i for i in values]
+        ))
 
     def take(self, n):
         state = np.random.RandomState(self._seed)
