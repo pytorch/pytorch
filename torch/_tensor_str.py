@@ -349,4 +349,4 @@ def _str_intern(self):
 
 def _str(self):
     with torch.no_grad():
-        _str_intern(self)
+        return _str_intern(self)
