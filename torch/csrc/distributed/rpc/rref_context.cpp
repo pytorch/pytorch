@@ -26,13 +26,23 @@ void confirmPendingUser(
 
 c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
     const FutureMessage& futureMessage) {
+  std::cout << "in finishCreatingOwnerRRef\n" << std::flush;
   RRefContext::handleException(futureMessage);
+  std::cout << "in finishCreatingOwnerRRef after handle exception\n" << std::flush;
   auto rr = RemoteRet::fromMessage(futureMessage.constValue());
+
+  std::cout << "in finishCreatingOwnerRRef got rr\n" << std::flush;
   TORCH_INTERNAL_ASSERT(
       rr->rrefId() == rr->forkId(),
       "Expecting an OwnerRRef as RemoteRet but got a fork.");
+
+  std::cout << "in finishCreatingOwnerRRef after assert\n" << std::flush;
   auto& ctx = RRefContext::getInstance();
+
+  std::cout << "in finishCreatingOwnerRRef got reference\n" << std::flush;
   auto deletedRRef = ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+
+  std::cout << "in finishCreatingOwnerRRef after delete\n" << std::flush;
   return deletedRRef;
 }
 
