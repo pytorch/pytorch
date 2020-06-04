@@ -58,9 +58,9 @@ def createResolutionCallbackFromEnv(lookup_base):
         elif '.' in qualified_name:
             parts = qualified_name.split('.')
             base = parts[0]
-            remainding_pieces = '.'.join(parts[1:])
+            remaining_pieces = '.'.join(parts[1:])
             module_value = getattr(module, base)
-            return env(remainding_pieces, module_value)
+            return env(remaining_pieces, module_value)
         elif 'int' == qualified_name:
             return int
         elif 'float' == qualified_name:
