@@ -138,13 +138,6 @@ enum class FastSetupType : uint8_t {
   NON_OVERLAPPING_DENSE
 };
 
-enum class CommonDTypeStrategy : uint8_t {
-  NONE, // Do not compute a common dtype
-  CHECK, // Compute and validate a common dtype but don't promote.
-  PROMOTE_INPUTS, // Promote common dtype but only validate inputs (comparison ops have boolean output)
-  PROMOTE // Promote to common dtype.
-};
-
 struct CAFFE2_API TensorIterator {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
@@ -220,16 +213,7 @@ struct CAFFE2_API TensorIterator {
     return operands_[arg].tensor;
   }
 
-  void cast_outputs() {
-    if (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE) {
-      for(int i=0; i < noutputs(); i++) {
-        if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
-          operands_[i].original_tensor.copy_(operands_[i].tensor);
-          operands_[i].tensor = operands_[i].original_tensor;
-        }
-      }
-    }
-  }
+  void cast_outputs();
 
   Tensor input(int arg=0) const {
     AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
@@ -339,16 +323,20 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input, device, dtype);
   }
 
-  void promote_common_dtype() {
-    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE;
+  void promote_inputs(const bool should_promote) {
+    promote_inputs_ = should_promote;
+    preserve_dtypes_ = should_promote ? false : preserve_dtypes_;
   }
 
-  void dont_compute_common_dtype() {
-    common_dtype_strategy_ = CommonDTypeStrategy::NONE;
+  void allow_copy_to_output(const bool allow_copy) {
+    allow_copy_to_output_ = allow_copy;
+    preserve_dtypes_ = allow_copy ? false : preserve_dtypes_;
   }
 
-  void compute_common_dtype_only_for_inputs() {
-    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE_INPUTS;
+  void preserve_dtypes(const bool should_preserve) {
+    preserve_dtypes_ = should_preserve;
+    TORCH_CHECK(!promote_inputs_ && !allow_copy_to_output,
+                "Can't both preserve dtypes and allow promoting inputs or copying to outputs!");
   }
 
   void dont_resize_outputs() {
@@ -399,7 +387,6 @@ protected:
   NameVector names_;
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
-  CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
   ScalarType common_dtype_ = ScalarType::Undefined;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
@@ -413,6 +400,9 @@ protected:
   bool requires_channels_last_output_ = false;
   bool requires_channels_last_3d_output_ = false;
   bool static_shape_ = false;
+  bool preserve_dtypes_ = true;
+  bool promote_inputs_ = false;
+  bool allow_copy_to_output_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

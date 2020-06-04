@@ -128,36 +128,6 @@ std::tuple<Device, ScalarType, bool> TensorIterator::compute_common_type() {
   return compute_common_type_(operands_);
 }
 
-static void validate_dtype(OperandInfo& op, ScalarType common_dtype, CommonDTypeStrategy strategy) {
-  bool check_output = strategy == CommonDTypeStrategy::CHECK || strategy == CommonDTypeStrategy::PROMOTE;
-  bool promoting = strategy == CommonDTypeStrategy::PROMOTE || (strategy == CommonDTypeStrategy::PROMOTE_INPUTS && !op.is_output);
-  if (op.tensor.defined()) {
-    // For binary_ops, we follow casting rules. For unary/nullary types
-    // we require the type to match.
-    if (op.is_output && check_output) {
-      TORCH_CHECK(canCast(common_dtype, op.current_dtype), "result type ", common_dtype,
-          " can't be cast to the desired output type ",
-          op.current_dtype);
-    }
-    TORCH_CHECK(promoting || op.target_dtype == op.current_dtype, "expected dtype ", op.target_dtype, " but got dtype ", op.current_dtype);
-  }
-}
-
-static void maybe_copy_casting_to_common_dtype(OperandInfo& op, ScalarType common_dtype) {
-  if (op.tensor.defined() && op.current_dtype != common_dtype)
-  {
-    op.target_dtype = common_dtype;
-    op.original_tensor = op.tensor;
-    if (!op.is_output) {
-      op.tensor = op.tensor.to(common_dtype);
-    } else {
-      op.tensor =
-          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-    op.current_dtype = common_dtype;
-  }
-}
-
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
   bool missing_output_dtypes = false;
@@ -181,6 +151,8 @@ void TensorIterator::compute_types() {
   bool may_have_differing_types = true;
   bool common_device_is_cuda = false;
 
+  // TODO: set target_dtype and devices of the ops (devices never change now)
+  // TODO: is this the right place to set original tensor, too? - check other places where it might be defined
   if (missing_dtypes || compute_common_dtype) {
     auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
     auto common_type = compute_common_type_(operands);
@@ -222,9 +194,13 @@ void TensorIterator::compute_types() {
     }
   }
 
+  // TODO: validate that the types are correct and, on CPU, create copies as appropriate, also validate that all tensors
+  //   have op.device == op.tensor.device() (not that all tensors are on the same device) - although that could be an additional check
+  // NOTE: maybe_copy_casting_to_common_dtype would set target_dtype, current_dtype, original_tensor and tensor
+  // TODO: it seems like this would never copy inputs to CUDA loops -- is that true? Need to check with Natalia/Xiang
+
   for (auto &op : operands_) {
     bool skip_output = compute_common_dtype_only_for_inputs && op.is_output;
-    bool is_different = op.tensor.defined() && op.current_dtype != common_dtype_;
 
     if (may_have_differing_types) {
       validate_dtype(op, common_dtype_, common_dtype_strategy_);
@@ -609,6 +585,17 @@ bool TensorIterator::is_cpu_scalar(int arg) const {
   return is_scalar(arg) && device(arg).is_cpu();
 }
 
+void TensorIterator::cast_outputs() {
+  if (allow_copy_to_output_) {
+    for(int i=0; i < noutputs(); i++) {
+      if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
+        operands_[i].original_tensor.copy_(operands_[i].tensor);
+        operands_[i].tensor = operands_[i].original_tensor;
+      }
+    }
+  }
+}
+
 void* TensorIterator::data_ptr(int arg) const {
   return operands_[arg].data;
 }
@@ -659,7 +646,8 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
-  iter.promote_common_dtype();
+  iter.promote_inputs(true);
+  iter.allow_copy_to_output(true);
   iter.build();
   return iter;
 }
@@ -672,7 +660,7 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
-  iter.compute_common_dtype_only_for_inputs();
+  iter.promote_inputs(true);
   iter.build();
   return iter;
 }
@@ -684,6 +672,7 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
   iter.add_output(out);
   iter.add_input(a);
   iter.num_outputs_ = 1;
+  iter.allow_copy_to_output(true);
   iter.build();
   return iter;
 }
@@ -706,7 +695,8 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
   // TODO: This is only really necessary for arg{min,max}
-  iter.compute_common_dtype_only_for_inputs();
+  iter.promote_inputs(true);
+  iter.allow_copy_to_output(true);
   iter.build();
   return iter;
 }
@@ -730,7 +720,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   if (promote) {
     iter.promote_gpu_output_dtypes_ = true;
   } else {
-    iter.dont_compute_common_dtype();
+    iter.preserve_dtypes(true);
   }
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
