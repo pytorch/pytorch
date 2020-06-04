@@ -407,7 +407,7 @@ class TestScriptPy3(JitTestCase):
 
         @torch.jit.script
         def fn(x: List[torch.jit.Future[int]]):
-            return x
+            return x[0]
 
         g = fn.graph
         assert "Future" in repr(g)
@@ -416,7 +416,7 @@ class TestScriptPy3(JitTestCase):
 
         @torch.jit.script
         def fn(x: Tuple[int, int, torch.jit.Future[int]]):
-            return x
+            return x[0], x[2]
 
         g = fn.graph
         assert "Future" in repr(g)
@@ -424,14 +424,21 @@ class TestScriptPy3(JitTestCase):
     def test_subexpression_Dict_int_Future(self):
 
         @torch.jit.script
-        def fn(x: Dict[int, torch.jit.Future[int]]):
-            return x
+        def fn(x: Dict[int, torch.jit.Future[int]], y: int):
+            return x[y]
 
         g = fn.graph
         assert "Future" in repr(g)
 
     def test_subexpression_Optional(self):
-        assert False, "TODO implement me"
+
+        @torch.jit.script
+        def fn(x: Optional[Dict[int, torch.jit.Future[int]]]):
+            if x is not None:
+                return x[0]
+            else:
+                return None
+
 
     def test_unimported_type_resolution(self):
         # verify fallback from the python resolver to the c++ resolver
