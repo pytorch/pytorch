@@ -18,10 +18,6 @@ using graph_rewrite_helper::getFuncName;
 using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
 
-// Map of quantization parameter name and value
-// for example _scale, _zero_point,
-// _scalar_type and _axis(for per channel quantization)
-using QParamVector = std::vector<std::pair<std::string, IValue>>;
 // dynamic quantization ops for activation: choose_qparams, quant, dequant
 using DynamicQuantOps = std::tuple<Node*, Node*, Node*>;
 
@@ -293,6 +289,30 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void RemoveRedundantDequantize(std::shared_ptr<Graph>& graph) {
+  const std::string dequantize = R"(
+    graph(%a_quant):
+        %a_dequant = aten::dequantize(%a_quant)
+        return (%a_dequant) )";
+  const std::string dequantize_replacement = R"(
+    graph(%a):
+        return (%a) )";
+  auto filter = [&](const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
+    Value* dequant_out = dequant_node->output();
+    TORCH_CHECK(
+        dequant_out->uses().size() == 1,
+        "Expect dequant output to have single use");
+    Node* user = dequant_out->uses()[0].user;
+    return isTensorInfoNode(user);
+  };
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(dequantize, dequantize_replacement);
+  rewriter.runOnGraph(graph, filter);
+}
+
 void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
   const std::string dynamic_quant_ops = R"(
     graph(%a, %reduce_range, %a_dtype):
@@ -319,17 +339,17 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph, filter);
 }
 
-void checkGetQParamsResult(const IValue& qparams) {
+void checkCalculateQParamsResult(const IValue& qparams) {
   TORCH_CHECK(
       qparams.isTuple(),
-      "`get_qparams` function is expected to return a "
+      "`calculate_qparams` function is expected to return a "
       "Tuple, but got:",
       qparams.tagKind());
   auto tp = qparams.toTuple();
   TORCH_CHECK(
-      tp->elements().size() == 2 || tp->elements().size() == 3,
-      "`get_qparams` function is expected to return a "
-      "Tuple of size 2 or 3, got Tuple of size ",
+      tp->elements().size() == 2,
+      "`calculate_qparams` function is expected to return a "
+      "Tuple of size 2, got Tuple of size ",
       tp->elements().size());
   // Expect first two elements of the tuple to be Tensor
   for (size_t i = 0; i < 2; ++i) {
@@ -339,15 +359,6 @@ void checkGetQParamsResult(const IValue& qparams) {
         i,
         " has type: ",
         tp->elements()[i].tagKind());
-  }
-  // Expect the third elements of the tuple to be int
-  if (tp->elements().size() == 3) {
-    TORCH_CHECK(
-        tp->elements()[2].isInt(),
-        "Element of Tuple is expected to be int, but element ",
-        2,
-        " has type: ",
-        tp->elements()[2].tagKind());
   }
 }
 
@@ -547,9 +558,9 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       v->debugName(),
       " exists.");
   auto observer_module = module.attr(observer_name.value()).toModule();
-  auto get_qparams = observer_module.get_method("get_qparams");
-  IValue result = get_qparams(std::vector<IValue>());
-  checkGetQParamsResult(result);
+  auto calculate_qparams = observer_module.get_method("calculate_qparams");
+  IValue result = calculate_qparams(std::vector<IValue>());
+  checkCalculateQParamsResult(result);
   auto scalar_type = observer_module.attr("dtype");
   TORCH_CHECK(
       scalar_type.toScalarType() != at::ScalarType::Undefined,
@@ -562,9 +573,10 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   QParamVector qparams;
   auto qscheme = observer_module.attr("qscheme").toQScheme();
   if (isPerChannel(qscheme)) {
+    auto axis = observer_module.attr("ch_axis");
     qparams.push_back(std::make_pair("_scale", scale));
     qparams.push_back(std::make_pair("_zero_point", zero_point));
-    qparams.push_back(std::make_pair("_axis", tp->elements()[2].toInt()));
+    qparams.push_back(std::make_pair("_axis", axis.toInt()));
   } else {
     qparams.push_back(std::make_pair("_scale", scale.item<double>()));
     qparams.push_back(
@@ -612,9 +624,11 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
   return invoked_methods;
 }
 
-void propagateQuantizationParamsFromInput(
+void propagateQParams(
     Value* original_output,
-    const std::vector<Value*>& inputs) {
+    const std::vector<Value*>& inputs,
+    const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
+        c10::nullopt) {
   Node* n = original_output->node();
   Graph* graph = n->owningGraph();
   // for ops like average pool, we'll insert quant dequant after the op
@@ -626,24 +640,42 @@ void propagateQuantizationParamsFromInput(
   Value* quantized_input = inputs[0]->node()->input(0);
   // insert ops after the general op
   WithInsertPoint ins(n->next());
-  // get quantization parameters from previous quantized op
-  Node* scale = insertQParam(
-      graph,
-      quantized_input,
-      at::Symbol::aten("q_scale"),
-      FloatType::get(),
-      "q_scale");
-  Node* zero_point = insertQParam(
-      graph,
-      quantized_input,
-      at::Symbol::aten("q_zero_point"),
-      IntType::get(),
-      "q_zero_point");
-  Node* dtype = insertQParam(
-      graph, quantized_input, prim::dtype, IntType::get(), "dtype");
-  std::vector<Value*> quant_inputs = {
-      original_output, scale->output(), zero_point->output(), dtype->output()};
-  auto quant_kind = at::Symbol::aten("quantize_per_tensor");
+  std::vector<Value*> quant_inputs;
+  auto quant_kind = Symbol::aten("quantize_per_tensor");
+  if (qparams_opt.has_value()) {
+    quant_inputs = {original_output};
+    auto qscheme = std::get<0>(*qparams_opt);
+    auto qparams = std::get<1>(*qparams_opt);
+    if (isPerChannel(qscheme)) {
+      quant_kind = Symbol::aten("quantize_per_channel");
+    }
+    for (const auto& qparam : qparams) {
+      Value* qparam_val = graph->insertConstant(qparam.second);
+      qparam_val->setDebugName(quantized_input->debugName() + qparam.first);
+      quant_inputs.push_back(qparam_val);
+    }
+  } else {
+    // Only per tensor affine quantized tensor is supported in this case
+    // get quantization parameters from previous quantized op
+    Node* scale = insertQParam(
+        graph,
+        quantized_input,
+        at::Symbol::aten("q_scale"),
+        FloatType::get(),
+        "q_scale");
+    Node* zero_point = insertQParam(
+        graph,
+        quantized_input,
+        at::Symbol::aten("q_zero_point"),
+        IntType::get(),
+        "q_zero_point");
+    Node* dtype = insertQParam(
+        graph, quantized_input, prim::dtype, IntType::get(), "dtype");
+    quant_inputs = {original_output,
+                    scale->output(),
+                    zero_point->output(),
+                    dtype->output()};
+  }
   Node* quant = insertQuant(
       graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");
   Value* quantized_output = quant->output();
@@ -702,7 +734,9 @@ void propagateQuantizationOps(Block* block) {
           continue;
         }
         if (isSingleInputGeneralValueAtenFunction(n)) {
-          propagateQuantizationParamsFromInput(output, inputs);
+          propagateQParams(output, inputs);
+        } else if (auto qparams_opt = getFixedQParams(n)) {
+          propagateQParams(output, inputs, qparams_opt);
         } else {
           propagateDequantize(output, inputs);
         }
@@ -794,6 +828,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
+  RemoveRedundantDequantize(graph);
   PropagateQuantizationOps(graph);
 }
 
@@ -928,7 +963,7 @@ Module InsertQuantDeQuant(
     const std::string& method_name,
     bool inplace,
     bool is_dynamic) {
-  Module module = inplace ? input_module : input_module.clone();
+  Module module = input_module.clone(inplace);
   InsertQuantDeQuantHelper h;
   h.setDynamicFlag(is_dynamic);
   h.run(module, method_name);

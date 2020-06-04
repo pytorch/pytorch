@@ -52,9 +52,11 @@ enum class DispatchKey : uint8_t {
   CUDA, // registered at build/aten/src/ATen/CUDAType.cpp
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
        // CUDA]
+  FPGA, // Xilinx support lives out of tree at https://gitlab.com/pytorch-complex/vitis_kernels
   MSNPU, // unused externally, but tested at
          // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
+  Vulkan,
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
@@ -112,6 +114,20 @@ enum class DispatchKey : uint8_t {
   // correct backend.
   BackendSelect,
 
+  // The named dispatch key is set for any tensors with named dimensions.
+  // Although we have a dispatch key for named tensors, for historical reasons,
+  // this dispatch key doesn't do any of the substantive functionality for named
+  // tensor (though, hypothetically, it could!)  At the moment, it's just
+  // responsible for letting us give good error messages when operations
+  // don't support named tensors.
+  //
+  // NB: If you ever consider moving named tensor functionality into
+  // this dispatch key, note that it might be necessary add another dispatch
+  // key that triggers before composite operators, in case a composite operator
+  // has named dimension propagation that doesn't match that of its
+  // constituent parts.
+  Named,
+
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AUTOGRAD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // All backends are oblivious to autograd; autograd is handled as a
   // layer which happens on top of all backends.  It inspects the autograd
@@ -122,6 +138,8 @@ enum class DispatchKey : uint8_t {
   Autograd,
 
   Profiler,
+
+  Tracer,
 
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
   // (aka Autograd) for operators which have a Variable kernel
@@ -150,6 +168,10 @@ enum class DispatchKey : uint8_t {
   // There are a number of alternative modes which may want to handle before
   // autograd; for example, error checking, tracing, profiling or vmap.  They
   // go here.
+
+  // This is the dispatch key for BatchedTensorImpl, which is used to implement
+  // batching rules for vmap.
+  Batched,
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single

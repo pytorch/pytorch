@@ -31,16 +31,66 @@ MAYBE_GLOBAL void test_pod() {
 }
 
 TEST(TestMemory, ReinterpretCast) {
+  {
   std::complex<float> z(1, 2);
   c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
   ASSERT_EQ(zz.real(), float(1));
   ASSERT_EQ(zz.imag(), float(2));
+  }
 
-  std::complex<double> zzz(1, 2);
-  c10::complex<double> zzzz = *reinterpret_cast<c10::complex<double>*>(&zzz);
-  ASSERT_EQ(zzzz.real(), double(1));
-  ASSERT_EQ(zzzz.imag(), double(2));
+  {
+  c10::complex<float> z(3, 4);
+  std::complex<float> zz = *reinterpret_cast<std::complex<float>*>(&z);
+  ASSERT_EQ(zz.real(), float(3));
+  ASSERT_EQ(zz.imag(), float(4));
+  }
+
+  {
+  std::complex<double> z(1, 2);
+  c10::complex<double> zz = *reinterpret_cast<c10::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(1));
+  ASSERT_EQ(zz.imag(), double(2));
+  }
+  
+  {
+  c10::complex<double> z(3, 4);
+  std::complex<double> zz = *reinterpret_cast<std::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(3));
+  ASSERT_EQ(zz.imag(), double(4));
+  }
 }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+TEST(TestMemory, ThrustReinterpretCast) {
+  {
+  thrust::complex<float> z(1, 2);
+  c10::complex<float> zz = *reinterpret_cast<c10::complex<float>*>(&z);
+  ASSERT_EQ(zz.real(), float(1));
+  ASSERT_EQ(zz.imag(), float(2));
+  }
+
+  {
+  c10::complex<float> z(3, 4);
+  thrust::complex<float> zz = *reinterpret_cast<thrust::complex<float>*>(&z);
+  ASSERT_EQ(zz.real(), float(3));
+  ASSERT_EQ(zz.imag(), float(4));
+  }
+
+  {
+  thrust::complex<double> z(1, 2);
+  c10::complex<double> zz = *reinterpret_cast<c10::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(1));
+  ASSERT_EQ(zz.imag(), double(2));
+  }
+  
+  {
+  c10::complex<double> z(3, 4);
+  thrust::complex<double> zz = *reinterpret_cast<thrust::complex<double>*>(&z);
+  ASSERT_EQ(zz.real(), double(3));
+  ASSERT_EQ(zz.imag(), double(4));
+  }
+}
+#endif
 
 }  // memory
 
@@ -389,6 +439,32 @@ MAYBE_GLOBAL void test_arithmetic() {
   test_arithmetic_<double>();
 }
 
+template<typename T, typename int_t>
+void test_binary_ops_for_int_type_(T real, T img, int_t num) {
+  c10::complex<T> c(real, img);
+  ASSERT_EQ(c + num, c10::complex<T>(real + num, img));
+  ASSERT_EQ(num + c, c10::complex<T>(num + real, img));
+  ASSERT_EQ(c - num, c10::complex<T>(real - num, img));
+  ASSERT_EQ(num - c, c10::complex<T>(num - real, -img));
+  ASSERT_EQ(c * num, c10::complex<T>(real * num, img * num));
+  ASSERT_EQ(num * c, c10::complex<T>(num * real, num * img));
+  ASSERT_EQ(c / num, c10::complex<T>(real / num, img / num));
+  ASSERT_EQ(num / c, c10::complex<T>(num * real / std::norm(c), -num * img / std::norm(c)));
+}
+
+template<typename T>
+void test_binary_ops_for_all_int_types_(T real, T img, int8_t i) {
+  test_binary_ops_for_int_type_<T, int8_t>(real, img, i);
+  test_binary_ops_for_int_type_<T, int16_t>(real, img, i);
+  test_binary_ops_for_int_type_<T, int32_t>(real, img, i);
+  test_binary_ops_for_int_type_<T, int64_t>(real, img, i);
+}
+
+TEST(TestArithmeticIntScalar, All) {
+  test_binary_ops_for_all_int_types_<float>(1.0, 0.1, 1);
+  test_binary_ops_for_all_int_types_<double>(-1.3, -0.2, -2);
+}
+
 } // namespace arithmetic
 
 namespace equality {
@@ -407,7 +483,7 @@ MAYBE_GLOBAL void test_equality() {
   test_equality_<float>();
   test_equality_<double>();
 }
-  
+
 } // namespace equality
 
 namespace io {

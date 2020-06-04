@@ -17,6 +17,15 @@ struct OperatorKernel;
 // boxing/unboxing codepath.
 CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
 
+// Note [named_not_supported_kernel]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// This kernel implements reporting an error message saying that named tensor is
+// not supported.  This kernel doesn't rely on the Stack, and so it is special
+// cased in the dispatcher to be triggered before we attempt boxing (so we can
+// give a good error message in cases when boxing is not supported).  When
+// boxing is universally supported this can be removed.
+[[noreturn]] CAFFE2_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
  * You can create a KernelFunction from a boxed or unboxed function/functor/lambda
@@ -172,6 +181,7 @@ public:
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
 
   static KernelFunction makeFallthrough();
+  static KernelFunction makeNamedNotSupported();
 
   /**
    * Create a KernelFunction from an unboxed lambda.
