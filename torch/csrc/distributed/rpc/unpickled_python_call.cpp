@@ -20,9 +20,11 @@ UnpickledPythonCall::~UnpickledPythonCall() {
   // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
   // decref on the PyObject again.
   // See Note [Destructing py::object] in python_ivalue.h
+  std::cout << "==== destructing UnpickledPythonCall\n" << std::flush;
   py::gil_scoped_acquire acquire;
   pythonUdf_.dec_ref();
   pythonUdf_.ptr() = nullptr;
+  std::cout << "==== done destructing UnpickledPythonCall\n" << std::flush;
 }
 
 Message UnpickledPythonCall::toMessageImpl() && {

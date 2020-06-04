@@ -360,8 +360,8 @@ void RequestCallbackImpl::processRpc(
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
 
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      IValue py_ivalue;
       try {
+        IValue py_ivalue;
         {
           py::gil_scoped_acquire acquire;
           py_ivalue = jit::toIValue(
