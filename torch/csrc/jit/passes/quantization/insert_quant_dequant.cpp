@@ -384,10 +384,8 @@ class ProcessWeightObserverSubgraph {
       const std::vector<Node*>& src,
       std::shared_ptr<Graph> dest);
 
-  // Recursively find the nodes that produce the inputs and add to subgraph.
-  void findSubgraphNodes(
-      const std::vector<Value*>& inputs,
-      std::vector<Node*>& weight_subgraph);
+  // Recursively find the nodes that produce the value and add to subgraph.
+  void findSubgraph(Value* self, Value* v, std::vector<Node*>& weight_subgraph);
 
   // Map from values in original graph to corresponding values in the extracted
   // subgraph.
@@ -586,20 +584,32 @@ void ProcessWeightObserverSubgraph::buildObserverSubgraph(
     cloneNodeInGraph(n, dest_graph);
   }
   LintGraph(dest_graph);
+
   // Add last node output value as subgraph output.
-  dest_graph->registerOutput(
-      updateInputValueInGraph(weight_subgraph.back()->output(0), dest_graph));
+  for (auto out : weight_subgraph.back()->outputs()) {
+    dest_graph->registerOutput(updateInputValueInGraph(out, dest_graph));
+  }
   GRAPH_DUMP("New weight observer subgraph: ", dest_graph);
 }
 
-void ProcessWeightObserverSubgraph::findSubgraphNodes(
-    const std::vector<Value*>& inputs,
+void ProcessWeightObserverSubgraph::findSubgraph(
+    Value* self,
+    Value* input_val,
     std::vector<Node*>& weight_subgraph) {
+  const auto& inputs = input_val->node()->inputs().vec();
   for (auto v : inputs) {
     auto n = v->node();
     if (!hitGraphInput(n->output(0))) {
       weight_subgraph.push_back(n);
-      findSubgraphNodes(n->inputs().vec(), weight_subgraph);
+      findSubgraph(self, v, weight_subgraph);
+    } else {
+      TORCH_CHECK(
+          n->output(0) == self,
+          "Unexpected value found when handling weight value "
+          " in findSubgraph, traced back to:",
+          n->output(0)->debugName(),
+          " which is not self:",
+          self->debugName());
     }
   }
 }
@@ -621,12 +631,7 @@ void ProcessWeightObserverSubgraph::extractAndRunWeightObserver(
   } else {
     // Extract the subgraph nodes.
     weight_subgraph.push_back(observer);
-    // Track values in the subgraph for which producer needs to be found.
-    std::vector<Value*> curr_node_inputs;
-    for (auto v : observer->inputs()) {
-      curr_node_inputs.push_back(v);
-    }
-    findSubgraphNodes(observer->inputs().vec(), weight_subgraph);
+    findSubgraph(self, weight_value, weight_subgraph);
 
     // Reverse to traverse subgraph in correct direction
     std::reverse(weight_subgraph.begin(), weight_subgraph.end());
