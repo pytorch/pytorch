@@ -19,20 +19,20 @@ class TORCH_API UnpickledPythonCall : public RpcCommandBase {
  public:
   UnpickledPythonCall(
       const SerializedPyObj& serializedPyObj,
-      bool isAsyncFunction);
+      bool isAsyncExecution);
 
   // toMessage() method is not implemented, as objects of this class should
   // never be directly converted into a Message object.
   Message toMessageImpl() && override;
   py::object movePythonUdf() &&;
 
-  inline bool isAsyncFunction() {
-    return isAsyncFunction_;
+  inline bool isAsyncExecution() {
+    return isAsyncExecution_;
   }
 
  private:
   py::object pythonUdf_;
-  const bool isAsyncFunction_;
+  const bool isAsyncExecution_;
 };
 
 } // namespace rpc
