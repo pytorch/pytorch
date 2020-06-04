@@ -359,8 +359,9 @@ class Fuzzer(object):
         self._tensors = Fuzzer._unpack(tensors, FuzzedTensor)
         self._constraints = constraints or ()
 
-        name_overlap = ({p.name for p in self._parameters}
-            .intersection({t.name for t in self._tensors}))
+        p_names = {p.name for p in self._parameters}
+        t_names = {t.name for t in self._tensors}
+        name_overlap = p_names.intersection(t_names)
         if name_overlap:
             raise ValueError(f"Duplicate names in parameters and tensors: {name_overlap}")
 
