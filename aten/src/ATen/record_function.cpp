@@ -293,7 +293,7 @@ RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
   }
 }
 
-void RecordFunction::_setCurrent() {
+void RecordFunction::setCurrent() {
   parent_ = current_record_func_;
   current_record_func_ = this;
   is_current_ = true;

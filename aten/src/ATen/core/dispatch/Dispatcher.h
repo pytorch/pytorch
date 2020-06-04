@@ -301,11 +301,14 @@ inline Return Dispatcher::callWithDispatchKey(const OperatorHandle& op, Dispatch
   // Check if we need to run callbacks registered with RecordFunction
   // If true and callbacks need inputs, we box the arguments and pass
   // them into the callbacks and also into the kernel call
+
+  // Note: for perf reasons we wouldn't want to pass arguments into
+  // the function call or prematurely box them
   at::RecordFunction guard(at::RecordScope::FUNCTION);
   if (guard.active) {
     // Stack-based record function with scope lifetime can be marked as 'current'
     // thread local record function; used to track nested recorded scopes
-    guard._setCurrent();
+    guard.setCurrent();
     if (guard.needs_inputs) {
       std::vector<c10::IValue> stack;
       auto boxed_all_args = impl::boxArgumentsIntoStack(stack, args...);
@@ -353,7 +356,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   // using already existing stack to record function execution in observers
   at::RecordFunction guard(at::RecordScope::FUNCTION);
   if (guard.active) {
-    guard._setCurrent();
+    guard.setCurrent();
     if (guard.needs_inputs) {
       guard.before(op.schema().name(), *stack, at::sequence_number::peek());
     } else {

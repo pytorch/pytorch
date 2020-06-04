@@ -149,7 +149,7 @@ struct TORCH_API RecordFunction {
   // (i.e. stack based RecordFunctions with scope lifetime);
   // sets this function as the current() thread local function;
   // original value of current() is restored in destructor/end
-  void _setCurrent();
+  void setCurrent();
 
   // Calls end callbacks
   void end();
@@ -324,7 +324,7 @@ class TORCH_API RecordFunctionCallback {
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
   if (guard.active) { \
-    guard._setCurrent(); \
+    guard.setCurrent(); \
     if (guard.needs_inputs) { \
       guard.before(fn, inputs, ##__VA_ARGS__); \
     } else { \
