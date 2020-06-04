@@ -1742,6 +1742,20 @@ log2_() -> Tensor
 In-place version of :meth:`~Tensor.log2`
 """)
 
+add_docstr_all('logaddexp',
+               r"""
+logaddexp(other) -> Tensor
+
+See :func:`torch.logaddexp`
+""")
+
+add_docstr_all('logaddexp2',
+               r"""
+logaddexp2(other) -> Tensor
+
+See :func:`torch.logaddexp2`
+""")
+
 add_docstr_all('log_normal_', r"""
 log_normal_(mean=1, std=2, *, generator=None)
 
@@ -2220,6 +2234,34 @@ only bounded by :attr:`self` tensor's data type. However, for floating point
 types, if unspecified, range will be ``[0, 2^mantissa]`` to ensure that every
 value is representable. For example, `torch.tensor(1, dtype=torch.double).random_()`
 will be uniform in ``[0, 2^53]``.
+""")
+
+add_docstr_all('rad2deg',
+               r"""
+rad2deg() -> Tensor
+
+See :func:`torch.rad2deg`
+""")
+
+add_docstr_all('rad2deg_',
+               r"""
+rad2deg_() -> Tensor
+
+In-place version of :meth:`~Tensor.rad2deg`
+""")
+
+add_docstr_all('deg2rad',
+               r"""
+deg2rad() -> Tensor
+
+See :func:`torch.deg2rad`
+""")
+
+add_docstr_all('deg2rad_',
+               r"""
+deg2rad_() -> Tensor
+
+In-place version of :meth:`~Tensor.deg2rad`
 """)
 
 add_docstr_all('reciprocal',
@@ -3353,7 +3395,7 @@ contiguity-like condition that :math:`\forall i = d, \dots, d+k-1`,
 Otherwise, it will not be possible to view :attr:`self` tensor as :attr:`shape`
 without copying it (e.g., via :meth:`contiguous`). When it is unclear whether a
 :meth:`view` can be performed, it is advisable to use :meth:`reshape`, which
-returns a view if the shapes are compatible, and copies (equivalent to calling 
+returns a view if the shapes are compatible, and copies (equivalent to calling
 :meth:`contiguous`) otherwise.
 
 Args:
@@ -3731,6 +3773,40 @@ Is this Tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+""")
+
+add_docstr_all('real',
+               r"""
+Returns a new tensor containing real values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`real` is only supported for tensors with complex dtypes.
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.real
+    tensor([ 0.3100, -0.5445, -1.6492, -0.0638])
+
+""")
+
+add_docstr_all('imag',
+               r"""
+Returns a new tensor containing imaginary values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`imag` is only supported for tensors with complex dtypes.
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.imag
+    tensor([ 0.3553, -0.7896, -0.0633, -0.8119])
+
 """)
 
 add_docstr_all('as_subclass',

@@ -261,6 +261,7 @@ Pointwise Ops
     conj
     cos
     cosh
+    deg2rad
     div
     digamma
     erf
@@ -279,6 +280,8 @@ Pointwise Ops
     log10
     log1p
     log2
+    logaddexp
+    logaddexp2
     logical_and
     logical_not
     logical_or
@@ -288,6 +291,7 @@ Pointwise Ops
     neg
     polygamma
     pow
+    rad2deg
     real
     reciprocal
     remainder

@@ -132,6 +132,14 @@ struct BoxedKernelWrapper<
     const OperatorHandle& opHandle,
     Args... args
   ) {
+    // Some kernels don't need to actually box, and don't return.  If that's the
+    // case, just call them anyway without a stack.  These special cases can be
+    // removed once we support boxing everything.
+    // See Note [named_not_supported_kernel]
+    if (boxed_kernel_func == &named_not_supported_kernel) {
+      named_not_supported_kernel(functor, opHandle, nullptr);  // does not return
+    }
+
     TORCH_INTERNAL_ASSERT(
       false,
       "Unboxed call (KernelFunction::call()) on a boxed kernel with "

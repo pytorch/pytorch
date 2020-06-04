@@ -19,6 +19,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/ComplexHelper.h>
 
 #include <algorithm>
 #include <cmath>
@@ -106,6 +107,29 @@ Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
+static Tensor wrapped_scalar_tensor(Scalar scalar) {
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
+
+Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
+  constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
+  return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_180_PI)));
+}
+
+Tensor rad2deg(const Tensor& self) { return unary_op_impl(self, at::rad2deg_out); }
+Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
+
+Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
+  constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
+  return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_PI_180)));
+}
+Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
+Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
+
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
@@ -135,24 +159,22 @@ Tensor angle(const Tensor& self) {
 }
 
 Tensor real(const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "real is not yet implemented for complex tensors.");
-  return self;
+  if (self.is_complex()) {
+    auto float_tensor = at::native::view_complex_as_float(self);
+    return at::select(float_tensor, float_tensor.dim() - 1, 0);
+  } else {
+    TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
+  }
 }
 
 Tensor imag(const Tensor& self) {
-  TORCH_CHECK(false, "imag is not yet implemented.");
-
-  // Note: unreachable
-  return at::zeros_like(self);
+  if (self.is_complex()) {
+    auto float_tensor = at::native::view_complex_as_float(self);
+    return at::select(float_tensor, float_tensor.dim() - 1, 1);
+  } else {
+    TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
+  }
 }
-
-Tensor& copy_real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
-
-Tensor copy_real(const Tensor& self) { return unary_op_impl(self, at::copy_real_out); }
-
-Tensor& copy_imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, imag_stub); }
-
-Tensor copy_imag(const Tensor& self) { return unary_op_impl(self, at::copy_imag_out); }
 
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
 Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
