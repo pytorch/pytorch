@@ -534,7 +534,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       const Tensor& grad_hy, const Tensor& grad_cy,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
-  if (!(grad_hy.defined() || grad_cy.defined())) {
+  if (!grad_hy.defined() && !grad_cy.defined()) {
     return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
   }
   checkLSTMBackwardSizes({grad_hy, "grad_hy", 1}, {grad_cy, "grad_cy", 2},
