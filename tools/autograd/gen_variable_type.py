@@ -386,7 +386,7 @@ ${req_inp}.fw_grad().defined()\
 """)
 
 FW_DERIVATIVE_DEFINED_TEMPLATE = CodeTemplate("""\
-auto ${inp}_fw_grad = ${inp}.fw_grad().defined() ? ${inp}.fw_grad() : ${new_val};
+auto ${inp}_fw_grad = ${inp}.fw_grad();
 """)
 
 FW_DERIVATIVE_TEMPLATE = CodeTemplate("""\
@@ -1190,10 +1190,10 @@ def emit_body(declaration):
             fw_grad_defined = ""
             for inp in differentiable_inputs:
                 if inp['name'] in derivative['required_inputs']:
-                    new_val = "at::zeros_like({})".format(inp['name'])
-                    if inp['is_nullable']:
-                        new_val = "({name}.defined()? {new_val} : Tensor())".format(name=inp['name'], new_val=new_val)
-                    fw_grad_defined += FW_DERIVATIVE_DEFINED_TEMPLATE.substitute(inp=inp['name'], new_val=new_val)
+                    # new_val = "at::zeros_like({})".format(inp['name'])
+                    # if inp['is_nullable']:
+                    #     new_val = "({name}.defined()? {new_val} : Tensor())".format(name=inp['name'], new_val=new_val)
+                    fw_grad_defined += FW_DERIVATIVE_DEFINED_TEMPLATE.substitute(inp=inp['name'])#, new_val=new_val)
             content.append(FW_DERIVATIVE_TEMPLATE.substitute(if_stmt=if_stmt, formula=derivative['formula'], out_arg=res,
                                                              fw_grad_defined=fw_grad_defined))
         return content

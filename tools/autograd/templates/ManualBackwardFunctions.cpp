@@ -2747,6 +2747,28 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
   }
 }
 
+Tensor mkldnn_convolution_forward(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad,
+        const Tensor& self, const Tensor& weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int groups) {
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = at::mkldnn_convolution(self_fw_grad, weight, Tensor(), padding, stride, dilation, groups);
+  }
+
+  if (weight_fw_grad.defined()) {
+    auto val = at::mkldnn_convolution(self, weight_fw_grad, bias_fw_grad, padding, stride, dilation, groups);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  } else {
+    TORCH_CHECK(!bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
+  }
+
+  return out_fw_grad;
+}
+
 Tensor native_batch_norm_forward(const Tensor& input_fw_grad, const Tensor& input, const Tensor& weight,
         const Tensor& running_mean, const Tensor& running_var, const Tensor& result1, const Tensor& result2,
         bool training, float eps, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad) {
