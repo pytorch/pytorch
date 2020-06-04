@@ -78,4 +78,4 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=
     return _quantize_script(model, qconfig_dict, run_fn, run_args, inplace, debug, False)
 
 def quantize_dynamic_script(model, qconfig_dict, inplace=False, debug=False):
-    return _quantize_script(model, qconfig_dict, run_args=None, inplace=inplace, debug=debug, is_dynamic=True)
+    return _quantize_script(model, qconfig_dict, inplace=inplace, debug=debug, is_dynamic=True)
