@@ -2563,6 +2563,95 @@ infinitely_differentiable_native_layer_norm_backward(
   return std::make_tuple(dX, dgamma, dbeta);
 }
 
+std::tuple<Tensor, Tensor, Tensor>
+infinitely_differentiable_native_group_norm_backward(
+    const Tensor& dY,
+    const Tensor& dmean,
+    const Tensor& drstd,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    double eps,
+    std::array<bool, 3> grad_input_mask) {
+  const int64_t G = group;
+  const int64_t D = C / G;
+  const double s = 1.0 / static_cast<double>(D * HxW);
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  const Tensor X_tensor = X.reshape({N, G, D, HxW});
+  const Tensor mean_tensor = mean.reshape({N, G, 1, 1});
+  const Tensor rstd_tensor = rstd.reshape({N, G, 1, 1});
+  Tensor dY_tensor;
+  Tensor ds;
+  Tensor db;
+  if (dY.defined()) {
+    dY_tensor = dY.reshape({N, G, D, HxW});
+    ds = (dY_tensor * X_tensor).sum(3).unsqueeze_(-1);
+    db = dY_tensor.sum(3).unsqueeze_(-1);
+  }
+  if (grad_input_mask[0]) {
+    Tensor gamma_tensor;
+    if (gamma.defined()) {
+      gamma_tensor = gamma.reshape({1, G, D, 1});
+    }
+    const Tensor var =
+        ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
+    const Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
+    Tensor dvar;
+    if (drstd.defined()) {
+      dvar = -0.5 * rstd_cube * drstd.view({N, G, 1, 1});
+    }
+    if (dY.defined()) {
+      const Tensor a =
+          gamma.defined() ? rstd_tensor * gamma_tensor : rstd_tensor;
+      Tensor b = (gamma.defined() ? (ds * gamma_tensor).sum(2) : ds.sum(2))
+                     .unsqueeze_(-2);
+      Tensor c = (gamma.defined() ? (db * gamma_tensor).sum(2) : db.sum(2))
+                     .unsqueeze_(-2);
+      b = (c * mean_tensor - b) * rstd_cube * s;
+      c = -b * mean_tensor - c * rstd_tensor * s;
+      dX = a * dY_tensor + b * X_tensor + c;
+      if (dmean.defined() && drstd.defined()) {
+        dX += var_std_mean_backward(
+            {dvar, dmean.view({N, G, 1, 1})},
+            X_tensor,
+            var,
+            mean_tensor,
+            {2, 3},
+            false,
+            true,
+            false);
+      }
+      dX = dX.reshape_as(X);
+    } else if (dmean.defined() && drstd.defined()) {
+      dX = var_std_mean_backward(
+               {dvar, dmean.view({N, G, 1, 1})},
+               X_tensor,
+               var,
+               mean_tensor,
+               {2, 3},
+               false,
+               true,
+               false)
+               .reshape_as(X);
+    }
+  }
+  if (grad_input_mask[1] && dY.defined()) {
+    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(gamma);
+  }
+  if (grad_input_mask[2] && dY.defined()) {
+    dbeta = db.sum(0).reshape_as(gamma);
+  }
+
+  return std::make_tuple(dX, dgamma, dbeta);
+}
+
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
