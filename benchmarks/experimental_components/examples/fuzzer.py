@@ -11,22 +11,30 @@ import utils as benchmark_utils
 def main():
     add_fuzzer = benchmark_utils.Fuzzer(
         parameters=[
-            benchmark_utils.FuzzedParameter("k0", 16, 16 * 1024, "loguniform"),
-            benchmark_utils.FuzzedParameter("k1", 16, 16 * 1024, "loguniform"),
-            benchmark_utils.FuzzedParameter("k2", 16, 16 * 1024, "loguniform"),
-            benchmark_utils.FuzzedParameter("d", distribution={2: 0.6, 3: 0.4}),
+            [
+                benchmark_utils.FuzzedParameter(
+                    name=f"k{i}",
+                    minval=16,
+                    maxval=16 * 1024,
+                    distribution="loguniform",
+                ) for i in range(3)
+            ],
+            benchmark_utils.FuzzedParameter(
+                name="d",
+                distribution={2: 0.6, 3: 0.4},
+            ),
         ],
         tensors=[
-            benchmark_utils.FuzzedTensor(
-                name="x", size=("k0", "k1", "k2"), dim_parameter="d",
-                probability_contiguous=0.75, min_elements=64 * 1024,
-                max_elements=128 * 1024,
-            ),
-            benchmark_utils.FuzzedTensor(
-                name="y", size=("k0", "k1", "k2"), dim_parameter="d",
-                probability_contiguous=0.75, min_elements=64 * 1024,
-                max_elements=128 * 1024,
-            ),
+            [
+                benchmark_utils.FuzzedTensor(
+                    name=name,
+                    size=("k0", "k1", "k2"),
+                    dim_parameter="d",
+                    probability_contiguous=0.75,
+                    min_elements=64 * 1024,
+                    max_elements=128 * 1024,
+                ) for name in ("x", "y")
+            ],
         ],
         seed=0,
     )

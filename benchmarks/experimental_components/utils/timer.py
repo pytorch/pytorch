@@ -35,8 +35,11 @@ class Timer(object):
         if not isinstance(stmt, str):
             raise ValueError("Currently only a `str` stmt is supported.")
 
-        if isinstance(globals, dict):
-            globals.setdefault("torch", torch)
+        # We copy `globals` to prevent mutations from leaking, (for instance,
+        # `eval` adds the `__builtins__` key) and include `torch` if not
+        # specified as a convenience feature.
+        globals = dict(globals or {})
+        globals.setdefault("torch", torch)
 
         self._stmt = stmt
         self._label = label

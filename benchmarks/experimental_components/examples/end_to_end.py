@@ -33,7 +33,7 @@ import sys
 import tempfile
 
 import torch
-from utils import FuzzedParameter, FuzzedTensor, Fuzzer, Timer
+from utils import FuzzedParameter, ParameterAlias, FuzzedTensor, Fuzzer, Timer
 
 
 _MIN_RUN_SEC = 0.5
@@ -51,10 +51,6 @@ _DTYPE_STR_TO_DTYPE = {
 }
 
 
-# Whether a dimension should be size 1 and broadcast (True) or not (False).
-_BROADCAST_DISTRIBUTION = {False: 0.8, True: 0.2}
-
-
 class MaskedFullFuzzer(Fuzzer):
     def __init__(self, dtype, seed):
         self._dtype = dtype
@@ -64,14 +60,22 @@ class MaskedFullFuzzer(Fuzzer):
                 FuzzedParameter("dim", distribution={1: 0.3, 2: 0.4, 3: 0.3}),
 
                 # Shapes for x and mask. (Values may be discarded if dim < 3)
-                FuzzedParameter("k0", minval=4, maxval=32 * 1024, distribution="loguniform"),
-                FuzzedParameter("k1", minval=4, maxval=32 * 1024, distribution="loguniform"),
-                FuzzedParameter("k2", minval=4, maxval=32 * 1024, distribution="loguniform"),
+                [
+                    FuzzedParameter(
+                        name=f"k{i}",
+                        minval=4,
+                        maxval=32 * 1024,
+                        distribution="loguniform"
+                    ) for i in range(3)
+                ],
 
-                # Should a dim be `1` for the mask.
-                FuzzedParameter("broadcast_0", distribution=_BROADCAST_DISTRIBUTION),
-                FuzzedParameter("broadcast_1", distribution=_BROADCAST_DISTRIBUTION),
-                FuzzedParameter("broadcast_2", distribution=_BROADCAST_DISTRIBUTION),
+                # Whether a dimension should match the size of `x` or be size 1
+                # and broadcast. Used when constructing `mask`.
+                [
+                    FuzzedParameter(
+                        f"mask_k{i}", distribution={ParameterAlias(f"k{i}"): 0.8, 1: 0.2}
+                    ) for i in range(3)
+                ],
 
                 FuzzedParameter("mask_fraction", minval=0.0, maxval=1.0, distribution="uniform"),
             ],
@@ -79,14 +83,14 @@ class MaskedFullFuzzer(Fuzzer):
                 FuzzedTensor(
                     name="x",
                     size=("k0", "k1", "k2"),
-                    tensor_constructor=self._x_tensor_constructor,
                     dim_parameter="dim",
                     probability_contiguous=0.75,
                     max_elements=64 * 1024 ** 2,
+                    dtype=dtype,
                 ),
                 FuzzedTensor(
                     name="mask",
-                    size=("k0", "k1", "k2"),
+                    size=("mask_k0", "mask_k1", "mask_k2"),
                     tensor_constructor=self._mask_tensor_constructor,
                     dim_parameter="dim",
                     probability_contiguous=0.75,
@@ -96,18 +100,8 @@ class MaskedFullFuzzer(Fuzzer):
             seed=seed,
         )
 
-    def _x_tensor_constructor(self, size, **kwargs):
-        if self._dtype.is_floating_point:
-            return torch.rand(size=size, dtype=self._dtype)
-        return torch.randint(0, 127, size=size, dtype=self._dtype)
-
     def _mask_tensor_constructor(self, size, mask_fraction, **kwargs):
-        # Force some dims to `1` if they are meant to be broadcast.
-        size = tuple(
-            1 if kwargs[f"broadcast_{i}"] else size[i] for i in range(len(size))
-        )
-
-        return torch.empty(size=size).uniform_(0, 1) <= mask_fraction
+        return torch.empty(size=size, dtype=torch.bool).bernoulli_(p=mask_fraction)
 
 
 def subprocess_main(env: str, result_file: str, seed: int):

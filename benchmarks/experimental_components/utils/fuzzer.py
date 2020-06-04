@@ -1,10 +1,16 @@
 import functools
+import itertools as it
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 
 
-__all__ = ["Fuzzer", "FuzzedParameter", "FuzzedTensor"]
+__all__ = [
+    "Fuzzer",
+    "FuzzedParameter", "ParameterAlias",
+    "FuzzedTensor",
+]
 
 
 _DISTRIBUTIONS = (
@@ -12,13 +18,63 @@ _DISTRIBUTIONS = (
     "uniform",
 )
 
+
 class FuzzedParameter(object):
-    def __init__(self, name, minval=None, maxval=None, distribution=None, constraint=None):
+    """Specification for a parameter to be generated during fuzzing."""
+    def __init__(
+        self,
+        name: str,
+        minval: Optional[Union[int, float]]=None,
+        maxval: Optional[Union[int, float]]=None,
+        distribution: Optional[Union[str, Dict[Any, float]]]=None,
+        strict: bool=False,
+    ):
+        """
+        Args:
+            name:
+                A string name with which to identify the parameter.
+                FuzzedTensors can reference this string in their
+                specifications.
+            minval:
+                The lower bound for the generated value. See the description
+                of `distribution` for type behavior.
+            maxval:
+                The upper bound for the generated value. Type behavior is
+                identical to `minval`.
+            distribution:
+                Specifies the distribution from which this parameter should
+                be drawn. There are three possibilities:
+                    - "loguniform"
+                        Samples between `minval` and `maxval` such that the
+                        probabilities are uniform in log space. As a concrete
+                        example, if minval=1 and maxval=100, a sample is as
+                        likely to fall in [1, 10) as it is [10, 100].
+                    - "uniform"
+                        Samples are chosen with uniform probability between
+                        `minval` and `maxval`. If either `minval` or `maxval`
+                        is a float then the distribution is the continuous
+                        uniform distribution; otherwise samples are constrained
+                        to the integers.
+                    - dict:
+                        If a dict is passed, the keys are taken to be choices
+                        for the variables and the values are interpreted as
+                        probabilities. (And must sum to one.)
+                If a dict is passed, `minval` and `maxval` must not be set.
+                Otherwise, they must be set.
+            strict:
+                If a parameter is strict, it will not be included in the
+                iterative resampling process which Fuzzer uses to find a
+                valid parameter configuration. This allows an author to
+                prevent skew from resampling for a given parameter (for
+                instance, a low size limit could inadvertantly bias towards
+                Tensors with fewer dimensions) at the cost of more iterations
+                when generating parameters.
+        """
         self._name = name
         self._minval = minval
         self._maxval = maxval
         self._distribution = self._check_distribution(distribution)
-        self._contraint = constraint
+        self.strict = strict
 
     @property
     def name(self):
@@ -33,9 +89,6 @@ class FuzzedParameter(object):
 
         if isinstance(self._distribution, dict):
             return self._custom_distribution(state)
-
-    def satisfies_constraints(self, params):
-        return self._contraint is None or self._contraint(**params)
 
     def _check_distribution(self, distribution):
         if not isinstance(distribution, dict):
@@ -67,88 +120,256 @@ class FuzzedParameter(object):
         return state.choice(tuple(self._distribution.keys()), p=tuple(self._distribution.values()))
 
 
+class ParameterAlias(object):
+    """Indicates that a parameter should alias the value of another parameter.
+
+    When used in conjunction with a custom distribution, this allows fuzzed
+    tensors to represent a broader range of behaviors. For example, the
+    following sometimes produces Tensors which broadcast:
+
+    Fuzzer(
+        parameters=[
+            FuzzedParameter("x_len", 4, 1024, distribution="uniform"),
+
+            # `y` will either be size one, or match the size of `x`.
+            FuzzedParameter("y_len", distribution={
+                0.5: 1,
+                0.5: ParameterAlias("x_len")
+            }),
+        ],
+        tensors=[
+            FuzzedTensor("x", size=("x_len",)),
+            FuzzedTensor("y", size=("y_len",)),
+        ],
+    )
+
+    Chains of alias' are allowed, but may not contain cycles.
+    """
+    def __init__(self, alias_to):
+        self.alias_to = alias_to
+
+    def __repr__(self):
+        return f"ParameterAlias[alias_to: {self.alias_to}]"
+
+
+@functools.lru_cache(64)
+def dtype_size(dtype):
+    return torch.empty((0,), dtype=dtype).element_size()
+
+
+def prod(values, base=1):
+    """np.prod can overflow, so for sizes the product should be done in Python."""
+    return functools.reduce(lambda x, y: int(x) * int(y), values, base)
+
+
 class FuzzedTensor(object):
-    def __init__(self, name, size, probability_contiguous=0.5,
-                 min_elements=None, max_elements=None,
-                 dim_parameter=None, roll_parameter=None,
-                 tensor_constructor=None):
+    def __init__(
+        self,
+        name: str,
+        size: Tuple[Union[str, int]],
+        steps: Optional[Tuple[Union[str, int]]]=None,
+        probability_contiguous: float=0.5,
+        min_elements: Optional[int]=None,
+        max_elements: Optional[int]=None,
+        max_allocation_bytes: Optional[int]=None,
+        dim_parameter: Optional[str]=None,
+        roll_parameter: Optional[str]=None,
+        dtype=torch.float32,
+        cuda=False,
+        tensor_constructor: Optional[Callable]=None
+    ):
+        """
+        Args:
+            name:
+                A string identifier for the generated Tensor.
+            size:
+                A tuple of integers or strings specifying the size of the generated
+                Tensor. String values will replaced with a concrete int during the
+                generation process, while ints are simply passed as literals.
+            steps:
+                An optional tuple with the same length as `size`. This indicates
+                that a larger Tensor should be allocated, and then sliced to
+                produce the generated Tensor. For instance, if size is (4, 8)
+                and steps is (1, 4), then a tensor `t` of size (4, 32) will be
+                created and then `t[:, ::4]` will be used. (Allowing one to test
+                Tensors with strided memory.)
+            probability_contiguous:
+                A number between zero and one representing the chance that the
+                generated Tensor has a contiguous memory layout. This is achieved by
+                randomly permuting the shape of a Tensor, calling `.contiguous()`,
+                and then permuting back. This is applied before `steps`, which can
+                also cause a Tensor to be non-contiguous.
+            min_elements:
+                The minimum number of parameters that this Tensor must have for a
+                set of parameters to be valid. (Otherwise they are resampled.)
+            max_elemnts:
+                Like `min_elements`, but setting an upper bound.
+            max_allocation_bytes:
+                Like `max_elements`, but for the size of Tensor that must be
+                allocated prior to slicing for `steps` (if applicable). For
+                example, a FloatTensor with size (1024, 1024) and steps (4, 4)
+                would have 1M elements, but would require a 64 MB allocation.
+            dim_parameter:
+                The length of `size` and `steps` will be truncated to this value.
+                This allows Tensors of varying dimensions to be generated by the
+                Fuzzer.
+            dtype:
+                The PyTorch dtype of the generated Tensor.
+            tensor_constructor:
+                Callable which will be used instead of the default Tensor
+                construction method. This allows the author to enforce properties
+                of the Tensor (e.g. it can only have certain values). The dtype and
+                concrete shape of the Tensor to be created will be passed, and
+                concrete values of all parameters will be passed as kwargs. Note
+                that transformations to the result (permuting, slicing) will be
+                performed by the Fuzzer; the tensor_constructor is only responsible
+                for creating an appropriately sized Tensor.
+        """
         self._name = name
         self._size = size
+        self._steps = steps
         self._probability_contiguous = probability_contiguous
         self._min_elements = min_elements
         self._max_elements = max_elements
+        self._max_allocation_bytes = max_allocation_bytes
         self._dim_parameter = dim_parameter
-        self._roll_parameter = roll_parameter
+        self._dtype = dtype
         self._tensor_constructor = tensor_constructor
 
     @property
     def name(self):
         return self._name
 
-    def _make_tensor(self, params, state):
-        size = self._get_concrete_size(params)
-        dim = len(size)
-        if self._tensor_constructor is None:
-            tensor = torch.rand(size=size)
+    @staticmethod
+    def default_tensor_constructor(size, dtype, **kwargs):
+        if dtype.is_floating_point:
+            return torch.rand(size=size, dtype=dtype, device="cpu")
         else:
-            tensor = self._tensor_constructor(size=size, **params)
+            return torch.randint(1, 127, size=size, dtype=dtype, device="cpu")
 
-        if self._roll_parameter is not None:
-            assert params[self._roll_parameter] < dim
-            rolled_order = tuple(np.roll(np.arange(dim), params[self._roll_parameter]))
-            tensor = tensor.permute(rolled_order).contiguous()
+    def _make_tensor(self, params, state):
+        size, steps, allocation_size = self._get_size_and_steps(params)
+        constructor = (
+            self._tensor_constructor or
+            self.default_tensor_constructor
+        )
+
+        raw_tensor = constructor(size=allocation_size, dtype=self._dtype, **params)
 
         # Randomly permute the Tensor and call `.contiguous()` to force re-ordering
         # of the memory, and then permute it back to the original shape.
+        dim = len(size)
         order = np.arange(dim)
         if state.rand() > self._probability_contiguous:
             while dim > 1 and np.all(order == np.arange(dim)):
-                order = state.permutation(tensor.dim())
+                order = state.permutation(raw_tensor.dim())
 
-            tensor = tensor.permute(tuple(order)).contiguous().permute(tuple(np.argsort(order)))
+            raw_tensor = raw_tensor.permute(tuple(order)).contiguous()
+            raw_tensor = raw_tensor.permute(tuple(np.argsort(order)))
+
+        slices = [slice(0, size, step) for size, step in zip(size, steps)]
+        tensor = raw_tensor[slices]
 
         properties = {
             "numel": int(tensor.numel()),
             "order": order,
+            "steps": steps,
             "is_contiguous": tensor.is_contiguous(),
-            "dtype": str(tensor.dtype),
+            "dtype": str(self._dtype),
         }
 
         return tensor, properties
 
-    def _get_concrete_size(self, params):
-        size = tuple(self._size)
-        if self._dim_parameter is not None:
-            dim = params[self._dim_parameter]
-            if len(size) > dim:
-                size = size[:dim]
-            if len(size) < dim:
-                size = size + tuple(1 for _ in range(dim - len(size)))
-        return tuple(params.get(i, i) for i in size)
+    def _get_size_and_steps(self, params):
+        dim = (
+            params[self._dim_parameter]
+            if self._dim_parameter is not None
+            else len(self._size)
+        )
+
+        def resolve(values, dim):
+            """Resolve values into concrete integers."""
+            values = tuple(params.get(i, i) for i in values)
+            if len(values) > dim:
+                values = values[:dim]
+            if len(values) < dim:
+                values = values + tuple(1 for _ in range(dim - len(values)))
+            return values
+
+        size = resolve(self._size, dim)
+        steps = resolve(self._steps or (), dim)
+        allocation_size = tuple(size_i * step_i for size_i, step_i in zip(size, steps))
+        return size, steps, allocation_size
 
     def satisfies_constraints(self, params):
-        size = self._get_concrete_size(params)
+        size, _, allocation_size = self._get_size_and_steps(params)
         # Product is computed in Python to avoid integer overflow.
-        num_elements = functools.reduce(lambda x, y: x * y, size, 1)
+        num_elements = prod(size)
+        if num_elements < 0:
+            import pdb
+            pdb.set_trace()
         assert num_elements >= 0
-        if self._max_elements is not None and num_elements > self._max_elements:
-            return False
-        if self._min_elements is not None and num_elements < self._min_elements:
-            return False
-        return True
+
+        allocation_bytes = prod(allocation_size, base=dtype_size(self._dtype))
+
+        def nullable_greater(left, right):
+            if left is None or right is None:
+                return False
+            return left > right
+
+        return not any((
+            nullable_greater(num_elements, self._max_elements),
+            nullable_greater(self._min_elements, num_elements),
+            nullable_greater(allocation_bytes, self._max_allocation_bytes),
+        ))
 
 
 class Fuzzer(object):
-    def __init__(self, parameters, tensors, seed=None):
+    def __init__(
+        self,
+        parameters: List[Union[FuzzedParameter, List[FuzzedParameter]]],
+        tensors: List[Union[FuzzedTensor, List[FuzzedTensor]]],
+        constraints: Optional[List[Callable]]=None,
+        seed: Optional[int]=None
+    ):
+        """
+        Args:
+            parameters:
+                List of FuzzedParameters which provide specifications
+                for generated parameters. Iterable elements will be
+                unpacked, though arbitrary nested structures will not.
+            tensors:
+                List of FuzzedTensors which define the Tensors which
+                will be created each step based on the parameters for
+                that step. Iterable elements will be unpacked, though
+                arbitrary nested structures will not.
+            constraints:
+                List of callables. They will be called with params
+                as kwargs, and if any of them return False the current
+                set of parameters will be rejected.
+            seed:
+                Seed for the RandomState used by the Fuzzer. This will
+                also be used to set the PyTorch random seed so that random
+                ops will create reproducible Tensors.
+        """
         if seed is None:
             seed = np.random.RandomState().randint(0, 2**63)
         self._seed = seed
-        self._parameters = parameters
-        self._tensors = tensors
-        assert not len({p.name for p in parameters}.intersection({t.name for t in tensors}))
+        self._parameters = Fuzzer._unpack(parameters, FuzzedParameter)
+        self._tensors = Fuzzer._unpack(tensors, FuzzedTensor)
+        self._constraints = constraints or ()
+
+        assert not len({p.name for p in self._parameters}
+            .intersection({t.name for t in self._tensors}))
 
         self._rejections = 0
         self._total_generated = 0
+
+    @staticmethod
+    def _unpack(values, cls):
+        return tuple(
+            it.chain(*[[i] if isinstance(i, cls) else i
+            for i in values]))
 
     def take(self, n):
         state = np.random.RandomState(self._seed)
@@ -170,13 +391,23 @@ class Fuzzer(object):
         return self._rejections / self._total_generated
 
     def _generate(self, state):
+        strict_params = {}
         for _ in range(1000):
             candidate_params = {}
             for p in self._parameters:
-                candidate_params[p.name] = p.sample(state)
+                if p.strict:
+                    if p.name in strict_params:
+                        candidate_params[p.name] = strict_params[p.name]
+                    else:
+                        candidate_params[p.name] = p.sample(state)
+                        strict_params[p.name] = candidate_params[p.name]
+                else:
+                    candidate_params[p.name] = p.sample(state)
+
+            candidate_params = self._resolve_aliases(candidate_params)
 
             self._total_generated += 1
-            if not all(p.satisfies_constraints(candidate_params) for p in self._parameters):
+            if not all(f(candidate_params) for f in self._constraints):
                 self._rejections += 1
                 continue
 
@@ -186,3 +417,22 @@ class Fuzzer(object):
 
             return candidate_params
         raise ValueError("Failed to generate a set of valid parameters.")
+
+    @staticmethod
+    def _resolve_aliases(params):
+        params = dict(params)
+        alias_count = sum(isinstance(v, ParameterAlias) for v in params.values())
+
+        keys = list(params.keys())
+        while alias_count:
+            for k in keys:
+                v = params[k]
+                if isinstance(v, ParameterAlias):
+                    params[k] = params[v.alias_to]
+            alias_count_new = sum(isinstance(v, ParameterAlias) for v in params.values())
+            if alias_count == alias_count_new:
+                raise ValueError(f"ParameterAlias cycle detected\n{params}")
+
+            alias_count = alias_count_new
+
+        return params

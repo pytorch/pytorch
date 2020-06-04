@@ -16,7 +16,7 @@ _MAX_SIGNIFICANT_FIGURES = 4
 _MIN_CONFIDENCE_INTERVAL = 25e-9  # 25 ns
 
 # Measurement will include a warning if the distribution is suspect. All
-# runs are expected to ahave some variation; these parameters set the
+# runs are expected to have some variation; these parameters set the
 # thresholds.
 _IQR_WARN_THRESHOLD = 0.1
 _IQR_GROSS_WARN_THRESHOLD = 0.25
@@ -105,7 +105,7 @@ class Measurement:
         uses a static z value of 1.645 since it is not expected to be used
         for small values of `n`, so z can approximate `t`.
 
-        The significant figure estimation is uses in conjunction with the
+        The significant figure estimation used in conjunction with the
         `trim_sigfig` method to provide a more human interpretable data
         summary. __repr__ does not use this method; it simply displays raw
         values. Significant figure estimation is intended for `Compare`.
@@ -117,7 +117,7 @@ class Measurement:
         std = np.std(interquartile_points)
         sqrt_n = np.sqrt(len(interquartile_points))
 
-        # Rough estimates. These are by no means statistically rigourous.
+        # Rough estimates. These are by no means statistically rigorous.
         confidence_interval = max(1.645 * std / sqrt_n, _MIN_CONFIDENCE_INTERVAL)
         relative_ci = np.log10(self._median / confidence_interval)
         num_significant_figures = int(np.floor(relative_ci))
