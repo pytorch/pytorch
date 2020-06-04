@@ -185,6 +185,9 @@ void reflection_pad1d_out_template(
   } else {
     output.resize_({nbatch, nplane, output_w});
   }
+  if (output.numel() == 0) {
+    return;
+  }
 
   dim3 block_size(output_w > 256 ? 256 : output_w);
   dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
@@ -266,9 +269,10 @@ void reflection_pad2d_out_template(
   int dim_w = 2;
   int nbatch = 1;
 
+  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
   TORCH_CHECK(
-      (input_.ndimension() == 3 && input_.size(1) != 0 && input_.size(2) != 0) ||
-      (input_.ndimension() == 4 && input_.size(1) != 0 && input_.size(2) != 0 && input_.size(3) != 0),
+      (input_.ndimension() == 3 && valid_dims) ||
+      (input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
       "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
 
   if (input_.ndimension() == 4) {
@@ -308,6 +312,9 @@ void reflection_pad2d_out_template(
     output.resize_({nplane, output_h, output_w});
   } else {
     output.resize_({nbatch, nplane, output_h, output_w});
+  }
+  if (output.numel() == 0) {
+    return;
   }
 
   Tensor input = input_.contiguous();
