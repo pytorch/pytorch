@@ -145,147 +145,6 @@ class AbstractTestCases:
                 if isinstance(ns, object):
                     ns_name = ns.__class__.__name__
                 else:
-<<<<<<< HEAD
-                    self.assertTrue(has_doc, '{} is missing documentation'.format(full_name))
-
-        # FIXME: All of the following should be marked as expected failures
-        # so that it is easier to tell when missing has been added.
-        # FIXME: fix all the skipped ones below!
-        test_namespace(torch.randn(1),
-                       'as_strided_',
-                       re.compile('^clamp_(min|max)_?$'),
-                       'coalesce',
-                       'is_coalesced',
-                       'is_distributed',
-                       'is_nonzero',
-                       'is_same_size',
-                       'log_softmax',
-                       'map2_',
-                       'new',
-                       'reinforce',
-                       'relu',
-                       'relu_',
-                       'prelu',
-                       'resize',
-                       'resize_as',
-                       'smm',
-                       'softmax',
-                       'split_with_sizes',
-                       'sspaddmm',
-                       'to_dense',
-                       'sparse_resize_',
-                       'sparse_resize_and_clear_',
-                       )
-        test_namespace(torch.nn)
-        test_namespace(torch.nn.functional, 'assert_int_or_pair')
-        # TODO: add torch.* tests when we have proper namespacing on ATen functions
-        # test_namespace(torch)
-
-    def test_linear_algebra_scalar_raises(self):
-        m = torch.randn(5, 5)
-        v = torch.randn(5)
-        s = torch.tensor(7)
-        self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
-        self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
-        self.assertRaises(RuntimeError, lambda: torch.ger(v, s))
-        self.assertRaises(RuntimeError, lambda: torch.ger(s, v))
-        self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
-        self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_mvlgamma(self):
-        from scipy.special import multigammaln
-        for d in range(1, 5):
-            input = torch.empty(10).uniform_(d, 10)
-            res_torch = torch.mvlgamma(input, d)
-            res_scipy = multigammaln(input.numpy(), d)
-            self.assertEqual(res_torch.numpy(), res_scipy, atol=1e-5)
-
-    def test_mvlgamma_argcheck(self):
-        def run_test(d):
-            input = torch.linspace((d - 2) / 2, 10, 10)
-            torch.mvlgamma(input, d)
-
-        with self.assertRaisesRegex(RuntimeError, r"All elements must be greater than \(p-1\)/2"):
-            run_test(3)
-
-    def test_msnpu_error(self):
-        with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
-            torch.zeros(1, device=torch.device('msnpu'))
-
-    def test_as_strided_neg(self):
-        error = r'as_strided: Negative strides are not supported at the ' \
-                r'moment, got strides: \[-?[0-9]+(, -?[0-9]+)*\]'
-        with self.assertRaisesRegex(RuntimeError, error):
-            torch.as_strided(torch.ones(3, 3), (1, 1), (2, -1))
-        with self.assertRaisesRegex(RuntimeError, error):
-            torch.as_strided(torch.ones(14), (2,), (-11,))
-
-    def test_polygamma_neg(self):
-        with self.assertRaisesRegex(RuntimeError, r'polygamma\(n, x\) does not support negative n\.'):
-            torch.polygamma(-1, torch.tensor([1.0, 2.0]))
-
-
-    def test_has_storage(self):
-        self.assertIsNotNone(torch.Tensor().storage())
-        self.assertIsNotNone(torch.Tensor(0).storage())
-        self.assertIsNotNone(torch.Tensor([]).storage())
-        self.assertIsNotNone(torch.Tensor().clone().storage())
-        self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
-        self.assertIsNotNone(torch.Tensor().new().storage())
-
-    def _testSelection(self, torchfn, mathfn):
-        # contiguous
-        m1 = torch.randn(100, 100)
-        res1 = torchfn(m1)
-        res2 = m1[0, 0]
-        for i, j in iter_indices(m1):
-            res2 = mathfn(res2, m1[i, j])
-        self.assertEqual(res1, res2)
-
-        # non-contiguous
-        m1 = torch.randn(10, 10, 10)
-        m2 = m1[:, 4]
-        res1 = torchfn(m2)
-        res2 = m2[0, 0]
-        for i, j in iter_indices(m2):
-            res2 = mathfn(res2, m2[i][j])
-        self.assertEqual(res1, res2)
-
-        # with indices
-        m1 = torch.randn(100, 100)
-        res1val, res1ind = torchfn(m1, 1, False)
-        res2val = m1[:, 0:1].clone().squeeze()
-        res2ind = res1ind.clone().fill_(0)
-        for i, j in iter_indices(m1):
-            if mathfn(res2val[i], m1[i, j]) != res2val[i]:
-                res2val[i] = m1[i, j]
-                res2ind[i] = j
-
-        maxerr = 0
-        for i in range(res1val.size(0)):
-            maxerr = max(maxerr, abs(res1val[i] - res2val[i]))
-            self.assertEqual(res1ind[i], res2ind[i])
-        self.assertLessEqual(abs(maxerr), 1e-5)
-
-        # NaNs
-        for index in (0, 4, 99):
-            m1 = torch.randn(100)
-            m1[index] = nan
-            res1val, res1ind = torch.max(m1, 0)
-            self.assertTrue(math.isnan(res1val))
-            self.assertEqual(res1ind, index)
-            res1val = torchfn(m1)
-            self.assertTrue(math.isnan(res1val))
-
-        # Bool
-        m1 = torch.tensor([True, False, True], dtype=torch.bool)
-        res1 = torchfn(m1)
-        res2 = m1[0]
-        for i in iter_indices(m1):
-            res2 = mathfn(res2, m1[i])
-        self.assertEqual(res1, res2)
-=======
                     ns_name = ns.__name__
                 skip_regexes = []
                 for r in skips:
@@ -293,9 +152,9 @@ class AbstractTestCases:
                         skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                     else:
                         skip_regexes.append(r)
-
+                skipnames = ['copy_real', 'copy_imag']
                 for name in dir(ns):
-                    if name.startswith('_'):
+                    if name.startswith('_') or name in skipnames:
                         continue
                     if name in ['real', 'imag']:
                         y = torch.randn(1, dtype=torch.cfloat)
@@ -379,6 +238,14 @@ class AbstractTestCases:
             with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
                 torch.zeros(1, device=torch.device('msnpu'))
 
+        def test_as_strided_neg(self):
+            error = r'as_strided: Negative strides are not supported at the ' \
+                    r'moment, got strides: \[-?[0-9]+(, -?[0-9]+)*\]'
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.as_strided(torch.ones(3, 3), (1, 1), (2, -1))
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.as_strided(torch.ones(14), (2,), (-11,))
+
         def test_polygamma_neg(self):
             with self.assertRaisesRegex(RuntimeError, r'polygamma\(n, x\) does not support negative n\.'):
                 torch.polygamma(-1, torch.tensor([1.0, 2.0]))
@@ -400,7 +267,6 @@ class AbstractTestCases:
             for i, j in iter_indices(m1):
                 res2 = mathfn(res2, m1[i, j])
             self.assertEqual(res1, res2)
->>>>>>> d137710a649b02fb8aab27c2f6ea205f72e255bb
 
             # non-contiguous
             m1 = torch.randn(10, 10, 10)
