@@ -81,7 +81,7 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
         &context_);
 
     ComputeSigmaAndFusedParams<T>(
-       M, epsilon_, mean_data, sigma_data, sigma_data, scale_data, bias_data);
+        M, epsilon_, mean_data, sigma_data, sigma_data, scale_data, bias_data);
 
     const T* gamma_data = nullptr;
     const T* beta_data = nullptr;
@@ -95,7 +95,7 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
       beta_data = beta.template data<T>();
     }
     LayerNormForward<T>(
-          M, N, X_data, scale_data, bias_data, gamma_data, beta_data, Y_data);
+        M, N, X_data, scale_data, bias_data, gamma_data, beta_data, Y_data);
 
     return true;
   }
