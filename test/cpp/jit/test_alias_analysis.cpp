@@ -752,7 +752,7 @@ graph():
   %32 : int[] = prim::ListConstruct(%0, %1)
   %fresh : Tensor = prim::MakeTestTensor()
   %foo : Tensor[] = prim::ListConstruct(%x, %y)
-  %43 : Tensor[] = aten::append(%foo, %z)
+  %43 : None = aten::append(%foo, %z)
   return ()
 )IR",
         graph.get(),
