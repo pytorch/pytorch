@@ -1,10 +1,10 @@
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
+#include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/core/function.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/StringUtil.h>
 #include <cmath>
-#include <ATen/core/Dict.h>
-#include <ATen/core/function.h>
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
@@ -518,10 +518,10 @@ IValue IValue::deepcopy(
       break;
     case IValue::Tag::Object: {
       auto class_type = type()->expect<ClassType>();
-      if (class_type->hasMethod("__getstate__") && class_type->hasMethod("__setstate__")) {
-        copy = ivalue::Object::create(c10::StrongTypePtr(
-              class_type->compilation_unit(),
-              type()),
+      if (class_type->hasMethod("__getstate__") &&
+          class_type->hasMethod("__setstate__")) {
+        copy = ivalue::Object::create(
+            c10::StrongTypePtr(class_type->compilation_unit(), type()),
             class_type->numAttributes());
         auto state = class_type->getMethod("__getstate__")({*this});
         class_type->getMethod("__setstate__")({copy, std::move(state)});
@@ -594,7 +594,6 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
     object->setSlot(i, slots_[i].deepcopy(memo));
   }
   return object;
-
 }
 
 StrongTypePtr::StrongTypePtr(
