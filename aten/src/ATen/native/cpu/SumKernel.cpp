@@ -25,7 +25,7 @@ const scalar_t &dereference(const char * C10_RESTRICT data, int64_t stride, int6
 template <typename scalar_t>
 scalar_t row_sum(const char * C10_RESTRICT in_data, const int64_t in_stride, const int64_t size) {
   constexpr int64_t num_levels = 4;
-  constexpr int64_t ilp_factor = 1;
+  constexpr int64_t ilp_factor = 8;
 
   const int64_t level_power = std::max(4l, std::lround(std::floor(std::log2(size) / num_levels)));
   const int64_t level_step = (1 << level_power);
@@ -98,11 +98,24 @@ void sum_kernel_impl(TensorIterator &iter) {
       iter.output().fill_(scalar_t(0));
       iter.parallel_reduce(
         [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
-          // Reduction is always over the 1st dim
-          TORCH_INTERNAL_ASSERT(strides[0] == 0);
+          // Move reduction to be the 1st dim
+          int64_t in_strides[2], out_stride;
+          if (strides[0] == 0) {
+            out_stride = strides[2];
+            in_strides[0] = strides[1];
+            in_strides[1] = strides[3];
+          } else {
+            TORCH_INTERNAL_ASSERT(strides[2] == 0);
+            out_stride = strides[0];
+            in_strides[0] = strides[3];
+            in_strides[1] = strides[1];
+            std::swap(size0, size1);
+          }
+
+          // TORCH_WARN(strides[0], ", ", strides[2]);
           for (int64_t j = 0; j < size1; ++j) {
-            auto ans = row_sum<scalar_t>(data[1] + j * strides[3], strides[1], size0);
-            dereference<scalar_t>(data[0], strides[2], j) += ans;
+            auto ans = row_sum<scalar_t>(data[1] + j * in_strides[1], in_strides[0], size0);
+            dereference<scalar_t>(data[0], out_stride, j) += ans;
           }
         });
     });
