@@ -755,7 +755,6 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   TORCH_CHECK(found_mul);
 }
 
-
 void checkScopeCallbacks() {
   bool found_function_scope = false;
   bool found_method_scope = false;

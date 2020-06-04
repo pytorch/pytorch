@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
@@ -573,9 +574,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         const float rpcTimeoutSeconds) {
+         const float rpcTimeoutSeconds,
+         const bool isAsyncFunction) {
         return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rpcTimeoutSeconds),
+            pyRpcPythonUdf(
+                dst,
+                pickledPythonUDF,
+                tensors,
+                rpcTimeoutSeconds,
+                isAsyncFunction),
             /* unwrap_func */ [](const py::object& value) {
               py::gil_scoped_release release;
               auto& pythonRpcHandler = PythonRpcHandler::getInstance();
@@ -670,6 +677,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
           Arguments:
             rpcTimeoutSeconds (float): Timeout value in seconds.
       )");
+
+  module.def(
+      "_enable_server_process_global_profiler",
+      &profiler::processglobal::enableServer);
+  module.def(
+      "_disable_server_process_global_profiler",
+      &profiler::processglobal::disableServer);
 
   Py_RETURN_TRUE;
 }

@@ -1961,7 +1961,7 @@ cc_library(
 
 pybind_extension(
     name = "_C",
-    srcs = ["torch/csrc/stub.cpp"],
+    srcs = ["torch/csrc/stub.c"],
     deps = [
         ":torch_python"
     ],
