@@ -327,7 +327,7 @@ static inline ScalarType toComplexType(ScalarType t) {
     case ScalarType::Double:
       return ScalarType::ComplexDouble;
     default:
-      return t;
+      AT_ERROR("Unknown Complex ScalarType");
   }
 }
 

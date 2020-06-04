@@ -21,7 +21,6 @@ Tensor view_as_real(const Tensor& self) {
   auto new_sizes = self.sizes().vec();
   // last dimension will always have two elements containing the real and imag vals
   new_sizes.emplace_back(2);
-  auto strides = self.strides().vec();
   auto new_strides = computeStrideForViewAsReal(self.strides());
   auto new_storage_offset = 2 * self.storage_offset();
   const auto float_type = c10::toValueType(self.scalar_type());

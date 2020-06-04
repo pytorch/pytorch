@@ -251,7 +251,7 @@ auto ${val} = ${arg}.value_or(${default});
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_DTYPE_CHANGE = CodeTemplate("""\
 c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
-if (!self.unsafeGetTensorImpl()->support_as_strided() || ${is_view_with_dtype_change}) {
+if (${is_view_with_dtype_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
   ${replay_view_func}
 }
 """)

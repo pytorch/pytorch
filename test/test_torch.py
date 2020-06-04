@@ -17769,7 +17769,7 @@ class TestViewOps(TestCase):
 
     @onlyOnCPUAndCUDA
     def test_views_with_dtype_change(self, device):
-        def do_transpose(x, contiguous=False, dim0=0, dim1=1):
+        def transpose_if_not_contig(x, contiguous=False, dim0=0, dim1=1):
             if contiguous:
                 return x
             else:
@@ -17779,24 +17779,24 @@ class TestViewOps(TestCase):
             t = torch.randn(3, 4, 2, device=device)
             c_t = t[:, :, 0] + 1j * t[:, :, 1]
 
-            input = do_transpose(t, contiguous_input, dim0, dim1)
+            input = transpose_if_not_contig(t, contiguous_input, dim0, dim1)
 
             if (input.size()[-1] != 2 or
                     input.stride()[-1] > 2):
-                with self.assertRaises(RuntimeError):
-                    torch.view_as_complex(input)
-                return
+                self.assertRaisesRegex(
+                    RuntimeError, "INTERNAL ASSERT FAILED",
+                    lambda: torch.view_as_complex(input))
 
             res = torch.view_as_complex(input)
-            self.assertEqual(res, do_transpose(c_t, contiguous_input, dim0, dim1))
+            self.assertEqual(res, transpose_if_not_contig(c_t, contiguous_input, dim0, dim1))
             self.assertTrue(self.is_view_of(t, res))
 
         def test_view_as_real(contiguous_input=True):
             t = torch.randn(3, 4, 2, device=device)
             c_t = t[:, :, 0] + 1j * t[:, :, 1]
 
-            res = torch.view_as_real(do_transpose(c_t, contiguous_input))
-            self.assertEqual(res, do_transpose(t, contiguous_input))
+            res = torch.view_as_real(transpose_if_not_contig(c_t, contiguous_input))
+            self.assertEqual(res, transpose_if_not_contig(t, contiguous_input))
             self.assertTrue(self.is_view_of(c_t, res))
 
         test_view_as_complex()
@@ -17833,7 +17833,7 @@ class TestViewOps(TestCase):
             self.assertEqual(re, exp)
             # for the case of contiguous_input, t=u
             # for the case of non contiguous_input, the base still remains
-            # u since we are performing a view operation to make the input non-contiguous
+            # t since we are performing a view operation to make the input non-contiguous
             self.assertTrue(self.is_view_of(t, re))
 
             im = u.imag
