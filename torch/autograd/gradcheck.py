@@ -353,10 +353,17 @@ def gradcheck(
         if check_undefined_grad:
             def check_undefined_grad_support(output_to_check):
                 grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_to_check]
-                grads_input = torch.autograd.grad(output_to_check,
-                                                  diff_input_list,
-                                                  grads_output,
-                                                  allow_unused=True)
+                try:
+                    grads_input = torch.autograd.grad(output_to_check,
+                                                      diff_input_list,
+                                                      grads_output,
+                                                      allow_unused=True)
+                except RuntimeError:
+                    raise RuntimeError((
+                        'Expected backward function to handle undefined output grads. '
+                        'Please look at "Notes about undefined output gradients" in '
+                        '"tools/autograd/derivatives.yaml"'))
+
                 for gi, i in zip(grads_input, diff_input_list):
                     if (gi is not None) and (not gi.eq(0).all()):
                         return fail_test((
