@@ -27,9 +27,12 @@ def createResolutionCallbackFromEnv(lookup_base):
     createResolutionCallbackFrom* functions.
     """
     def try_build_type(base_mod, subexp_mod):
+        if subexp_mod is None:
+            return None
         try:
             return base_mod[subexp_mod]
         except TypeError:
+            # intentional bailout, fall back to c++ parser
             return None
 
     def subexpression(subexp, base_mod, module):
@@ -64,16 +67,12 @@ def createResolutionCallbackFromEnv(lookup_base):
 
             else:
                 subexp_mod = env(subexp, module)
-                if subexp_mod is None:
-                    return None
                 return try_build_type(base_mod, subexp_mod)
         else:
             # either base or subexp could include '.' or '['
             if 'Tensor' == subexp:
                 subexp = 'torch.Tensor'
             subexp_mod = env(subexp, module)
-            if subexp_mod is None:
-                return None
             return try_build_type(base_mod, subexp_mod)
 
     def env(qualified_name, module):
@@ -85,10 +84,6 @@ def createResolutionCallbackFromEnv(lookup_base):
             first, last = qualified_name.find('['), qualified_name.rfind(']')
             base = qualified_name[:first]
             base_mod = env(base, module)
-
-            # intentional bailout, e.g. base == "Tuple" but wasn't imported in Module
-            if not base_mod or isinstance(base_mod, torch.Tensor):
-                return None
 
             # assume only subexp (between []) could contain ','
             # but allow each element of the list to be any type hence recursive env()
