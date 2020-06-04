@@ -37,7 +37,7 @@ def createResolutionCallbackFromEnv(lookup_base):
             base_mod = env(base, module)
 
             # intentional bailout, e.g. base == "Tuple" but wasn't imported in Module
-            if not base_mod:
+            if not base_mod or isinstance(base_mod, type):
                 return None
 
             # assume only subexp (between []) could contain ','
@@ -51,7 +51,10 @@ def createResolutionCallbackFromEnv(lookup_base):
                     if c == '[':
                         nest_level += 1
                     elif c == ']':
-                        assert nest_level > 0
+
+                        # fall back to c++ for unit test legacy behavior
+                        if nest_level == 0:
+                            return None
                         nest_level -= 1
                     elif c == ',' and nest_level == 0:
                         splits.append(i)
