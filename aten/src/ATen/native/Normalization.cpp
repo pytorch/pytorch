@@ -529,52 +529,6 @@ Tensor instance_norm(
   return out.view(input.sizes());
 }
 
-Tensor group_norm(const Tensor& input, int64_t num_groups,
-    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    double eps, bool cudnn_enabled) {
-
-    auto input_shape = input.sizes();
-    int64_t b = input.size(0);
-    int64_t c = input.size(1);
-
-    TORCH_CHECK(c % num_groups == 0,
-             "Expected number of channels in input to be divisible by ",
-             "num_groups, but got input of shape ", input.sizes(), " and "
-             "num_groups=", num_groups);
-
-    TORCH_CHECK(!weight.defined() || (weight.dim() == 1 && weight.numel() == c),
-             "Expected weight to be a vector of size equal to the number of ",
-             "channels in input, but got weight of shape ", weight.sizes(),
-             " and input of shape ", input.sizes());
-    TORCH_CHECK(!bias.defined() || (bias.dim() == 1 && bias.numel() == c),
-             "Expected bias to be a vector of size equal to the number of ",
-             "channels in input, but got bias of shape ", weight.sizes(),
-             " and input of shape ", input.sizes());
-
-    // Apply group norm
-    // view(..., -1) does not work for empty tensor
-    auto input_reshaped = input.contiguous().view({1, b * num_groups, b ? -1 : 1});
-
-    auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps,
-                              cudnn_enabled);
-    out = out.view(input_shape);
-
-    if (!weight.defined() && !bias.defined()) {
-      return out;
-    }
-
-    std::vector<int64_t> affine_param_shape(input.dim(), 1);
-    affine_param_shape[1] = c;
-
-    if (weight.defined() && bias.defined()) {
-      return bias.view(affine_param_shape).addcmul(out, weight.view(affine_param_shape), 1);
-    } else if (weight.defined()) {
-      return out.mul(weight.view(affine_param_shape));
-    } else {
-      return out.add(bias.view(affine_param_shape));
-    }
-}
-
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
         const Tensor& self, const Tensor& running_mean, const Tensor& running_var, double momentum) {
   return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
