@@ -2,7 +2,6 @@
 
 from __future__ import absolute_import, division, print_function
 import os
-import subprocess
 import argparse
 import sys
 sys.path.append(os.path.realpath(os.path.join(
