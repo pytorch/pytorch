@@ -3037,22 +3037,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(CrossEntropyLossMeanWeightIgnoreIndex(), input=(x, y))
 
-    def test_empty_branch(self):
-        class EmptyBranchModel(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, input):
-                out = input + 1
-                if out.dim() > 2:
-                    if out.dim() > 3:
-                        out += 3
-                    else:
-                        pass
-                else:
-                    pass
-                return out
-        x = torch.randn(1, 2, 3, requires_grad=True)
-        self.run_test(EmptyBranchModel(), x)
-
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss(self):
         class NLLModel(torch.nn.Module):
@@ -3213,6 +3197,74 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 5)
         self.run_test(ShapeModule(), (x,), rtol=1e-3, atol=1e-5)
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU(alpha=1.0)
+
+            def forward(self, input):
+                return self.celu(input)
+
+        input = torch.randn(2)
+        self.run_test(Celu(), (input,))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu_default(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU()
+
+            def forward(self, input):
+                return self.celu(input)
+
+        input = torch.randn(2)
+        self.run_test(Celu(), (input,))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu_alpha(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU(alpha=2)
+
+            def forward(self, input):
+                return self.celu(input)
+
+        input = torch.randn(2)
+        self.run_test(Celu(), (input,))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu_cast(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU()
+
+            def forward(self, input):
+                return self.celu(input)
+
+        input = torch.randn(2, 5, 7, dtype=torch.float64)
+        self.run_test(Celu(), (input,))
+
+    def test_empty_branch(self):
+        class EmptyBranchModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                out = input + 1
+                if out.dim() > 2:
+                    if out.dim() > 3:
+                        out += 3
+                    else:
+                        pass
+                else:
+                    pass
+                return out
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_test(EmptyBranchModel(), x)
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
