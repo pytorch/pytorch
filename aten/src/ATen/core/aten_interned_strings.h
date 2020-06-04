@@ -39,6 +39,9 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
+_(aten, _clamp) \
+_(aten, _clamp_max) \
+_(aten, _clamp_min) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, convolution_overrideable) \
@@ -131,21 +134,15 @@ _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
 _(aten, _sum_cuda) \
-_(aten, _sumall) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
-_(aten, _th_clamp) \
-_(aten, _th_clamp_max) \
-_(aten, _th_clamp_min) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_max) \
 _(aten, _th_median) \
-_(aten, _th_min) \
 _(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
@@ -285,6 +282,7 @@ _(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
+_(aten, deg2rad) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
@@ -332,6 +330,7 @@ _(aten, flatten) \
 _(aten, flip) \
 _(aten, floor) \
 _(aten, fmod) \
+_(aten, fmod_) \
 _(aten, frac) \
 _(aten, fractional_max_pool2d) \
 _(aten, fractional_max_pool2d_backward) \
@@ -420,6 +419,7 @@ _(aten, log_sigmoid_forward) \
 _(aten, log_softmax) \
 _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
+_(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
@@ -530,6 +530,7 @@ _(aten, ones_like) \
 _(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
+_(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
@@ -544,6 +545,7 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
+_(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
 _(aten, randint) \
@@ -715,6 +717,7 @@ _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \
 _(aten, values) \
+_(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
@@ -722,8 +725,6 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
-_(aten, copy_real) \
-_(aten, copy_imag) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

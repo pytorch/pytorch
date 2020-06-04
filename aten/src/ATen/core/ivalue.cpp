@@ -131,9 +131,9 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       subValues.insert(*this);
       auto obj_type = type()->expect<ClassType>();
       auto obj_value = toObject();
-      auto attribute_names = obj_type->attributeNames();
-      for (const auto& name: attribute_names) {
-        auto attribute = obj_value->getAttr(name);
+      auto attributes = obj_type->getAttributes();
+      for (const auto& attr: attributes) {
+        auto attribute = obj_value->getAttr(attr.getName());
         attribute.getSubValues(subValues);
       }
       break;
@@ -287,12 +287,16 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-  if (the_list.toListRef().size() == 0) {
-    out << "annotate(" << the_list.type()->python_str() << ", [])";
+  auto list_elem_type = the_list.type()->expect<ListType>()->getElementType();
+  if (the_list.toListRef().size() == 0 ||
+      !elementTypeCanBeInferredFromMembers(list_elem_type)) {
+    out << "annotate(" << the_list.type()->python_str() << ", ";
+    printList(out, the_list.toListRef(), "[", "]", formatter);
+    out << ")";
+    return out;
   } else {
     return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
-  return out;
 }
 
 template <typename Dict>
@@ -558,6 +562,14 @@ void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
 void ivalue::Object::resizeObject(size_t slot) {
   AT_ASSERT(slot < type()->numAttributes());
   slots_.resize(type()->numAttributes());
+}
+
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
+  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
+  for (auto i = 0; i < slots_.size(); ++i) {
+    object->setSlot(i, slots_[i]);
+  }
+  return object;
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {

@@ -20,7 +20,7 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.10)
 endif()
 
 # ---[ Project and semantic versioning.
-project(Caffe2 CXX C)
+project(Torch CXX C)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
@@ -31,9 +31,7 @@ endif()
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
 set(CMAKE_CXX_STANDARD 14)
-if(NOT MSVC)
-  set(CMAKE_C_STANDARD 11)
-endif()
+set(CMAKE_C_STANDARD 11)
 if(DEFINED GLIBCXX_USE_CXX11_ABI)
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
@@ -51,6 +49,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 #      find_package(Caffe2 REQUIRED)
 #    endif()
 set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
+
+# Googletest's cmake files are going to set it on once they are processed. Let's
+# set it at the very beginning so that the entire build is deterministic.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 if(NOT DEFINED BLAS_SET_BY_USER)
   if(DEFINED BLAS)
@@ -187,6 +189,9 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
+option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
+option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -204,8 +209,12 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
+    "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
+option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 
 # Linux distributions do not want too many embedded sources, in that sense we
 # need to be able to build pytorch with an (almost) empty third_party
@@ -222,6 +231,8 @@ option(USE_SYSTEM_PTHREADPOOL "Use system-provided pthreadpool." OFF)
 option(USE_SYSTEM_PSIMD "Use system-provided psimd." OFF)
 option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
+option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
+option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
   set(USE_SYSTEM_SLEEF ON)
@@ -233,6 +244,8 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_PSIMD ON)
   set(USE_SYSTEM_FXDIV ON)
   set(USE_SYSTEM_BENCHMARK ON)
+  set(USE_SYSTEM_ONNX ON)
+  set(USE_SYSTEM_XNNPACK ON)
 endif()
 
 # Used when building Caffe2 through setup.py
@@ -246,7 +259,11 @@ cmake_dependent_option(
   MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON
   "MSVC" OFF)
 
-set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+if(NOT USE_SYSTEM_ONNX)
+  set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+elseif()
+  set(ONNX_NAMESPACE "onnx" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
 set(OP_DEPENDENCY "" CACHE STRING
@@ -407,6 +424,7 @@ if(NOT TORCH_BUILD_VERSION)
 endif()
 caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
 caffe2_parse_version_str(CAFFE2 ${TORCH_BUILD_VERSION})
+set(TORCH_SOVERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}")
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
@@ -458,6 +476,18 @@ if(USE_XNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK -DUSE_INTERNAL_THREADPOOL_IMPL")
 endif()
 
+if(USE_VULKAN)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN")
+endif()
+
+if(USE_VULKAN_WRAPPER)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_WRAPPER")
+endif()
+
+if(USE_VULKAN_SHADERC_RUNTIME)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_VULKAN_SHADERC_RUNTIME")
+endif()
+
 # ---[ Whitelist file if whitelist is specified
 include(cmake/Whitelist.cmake)
 
@@ -487,6 +517,7 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-overflow")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-aliasing")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")

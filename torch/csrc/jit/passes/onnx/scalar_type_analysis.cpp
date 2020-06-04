@@ -56,11 +56,11 @@ static bool IsStandardOp(const NodeKind& nkind) {
 
 // For these operators, all inputs share the same scalar type.
 // The output scalar type is always Bool.
-static const std::unordered_set<NodeKind> comparisonOps = {
-    onnx::Greater,
-    onnx::Less,
-    onnx::Equal,
-};
+static const std::unordered_set<NodeKind> comparisonOps = {onnx::Greater,
+                                                           onnx::Less,
+                                                           onnx::Equal,
+                                                           onnx::GreaterOrEqual,
+                                                           onnx::LessOrEqual};
 
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
@@ -69,12 +69,7 @@ static bool IsComparisonOp(const NodeKind& nkind) {
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
     const TensorTypePtr& typePtr,
     const c10::ScalarType& scalar_type) {
-  return TensorType::create(
-      scalar_type,
-      typePtr->device(),
-      typePtr->sizes(),
-      typePtr->strides(),
-      typePtr->requiresGrad());
+  return typePtr->withScalarType({scalar_type});
 }
 
 static bool IsImplicitCastSupported(const NodeKind& nodeKind) {

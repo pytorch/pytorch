@@ -18,7 +18,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
-from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
+from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -43,8 +43,8 @@ def select_model_mode_for_export(model, mode):
             if is_originally_training:
                 warnings.warn("You are exporting the model to ONNX while in training mode with "
                               "'train' parameter not specified. The model will default to inference mode export. "
-                              "If you wish to export a training amenable ONNX model, specify train=TrainingMode.TRAIN or "
-                              "train=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export().")
+                              "If you wish to export a training amenable ONNX model, specify training=TrainingMode.TRAINING or "
+                              "training=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export().")
 
         # if mode == TrainingMode.EVAL or (mode == TrainingMode.PRESERVE and not is_originally_training) => is_training = False
         is_export_training = False
@@ -92,24 +92,33 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             use_external_data_format=use_external_data_format)
 
 
+def _is_constant_tensor_list(node):
+    if node.kind() != "prim::Constant":
+        return False
+    output_type = node.output().type()
+    if output_type.isSubtypeOf(ListType.ofTensors()):
+        return True
+    if output_type.isSubtypeOf(ListType(OptionalType.ofTensor())):
+        return True
+
 # ONNX can't handle constants that are lists of tensors, which can
 # get generated in constant prop. So we split them back into prim::ListConstructs
 def _split_tensor_list_constants(g, block):
     for node in block.nodes():
         for subblock in node.blocks():
             _split_tensor_list_constants(g, subblock)
-        if node.kind() == "prim::Constant":
-            output_type = node.output().type()
-            if output_type.isSubtypeOf(ListType.ofTensors()):
-                inputs = [g.create("prim::Constant").t_('value', t)
-                           .insertBefore(node).output()
-                          for t in node['value']]
-                lc = (g.create("prim::ListConstruct", inputs)
-                      .insertBefore(node)
-                      .output()
-                      .setType(ListType.ofTensors()))
-                node.output().replaceAllUsesWith(lc)
+        if _is_constant_tensor_list(node):
+            inputs = []
+            for val in node.output().toIValue():
+                input = g.insertConstant(val)
+                input.node().moveBefore(node)
+                inputs.append(input)
 
+            lc = (g.create("prim::ListConstruct", inputs)
+                  .insertBefore(node)
+                  .output()
+                  .setType(ListType.ofTensors()))
+            node.output().replaceAllUsesWith(lc)
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False, params_dict=None):
     # Inline everyting
@@ -132,7 +141,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_dce(graph)
     torch._C._jit_pass_lint(graph)
 
-    torch._C._jit_pass_canonicalize_ops(graph)
+    torch._C._jit_pass_canonicalize_graph_fuser_ops(graph)
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_peephole(graph, True)
@@ -140,11 +149,13 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
+        torch._C._jit_pass_peephole(graph, True)
+        torch._C._jit_pass_lower_all_tuples(graph)
+
+        # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
         # onnx does not support tuples, so try to remove them
-        torch._C._jit_pass_lower_all_tuples(graph)
-        torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lint(graph)
 
         # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
@@ -406,6 +417,9 @@ def _model_to_graph(model, args, verbose=False,
     if verbose:
         print(graph)
 
+    params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
+    torch._C._jit_decay_packed_param_input_types(graph)
+
     return graph, params_dict, torch_out
 
 
@@ -498,9 +512,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         # If you really know what you're doing, you can turn
         # training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
         # (to preserve whatever the original training mode was.)
+        _set_opset_version(opset_version)
+        _set_operator_export_type(operator_export_type)
         with select_model_mode_for_export(model, training):
-            _set_opset_version(opset_version)
-            _set_operator_export_type(operator_export_type)
             val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                              operator_export_type,
                                                              opset_version)
@@ -606,7 +620,7 @@ def _run_symbolic_method(op_name, symbolic_fn, args):
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
         # you need.
-        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name), )
+        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name),)
         raise
 
 
@@ -722,6 +736,15 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 # inplace annotations, but we are losing information this way.
 
 
+def _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type):
+    import torch.onnx.symbolic_registry as sym_registry
+    if not sym_registry.is_registered_op(op_name, domain, opset_version):
+        if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
+            # Use the original node directly
+            return None
+    return sym_registry.get_registered_op(op_name, domain, opset_version)
+
+
 def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
@@ -731,7 +754,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         import torch.onnx.symbolic_registry as sym_registry
 
         sym_registry.register_version('', opset_version)
-        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+
+        # Quantized op symbolics are registered for opset 9 only.
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9:
             import torch.onnx.symbolic_caffe2
             torch.onnx.symbolic_caffe2.register_quantized_ops('caffe2', opset_version)
 
@@ -756,16 +781,14 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 outputs = n.outputsSize()
                 attrs["outputs"] = outputs
                 return _graph_at(g, op_name, *inputs, aten=True, **attrs)
-
             else:
                 # Export it regularly
+                domain = ''
+                symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
+                if symbolic_fn is None:
+                    return None
                 attrs = {k: n[k] for k in n.attributeNames()}
-                if not is_exportable_aten_op:
-                    warnings.warn("ONNX export failed on ATen operator {} because "
-                                  "torch.onnx.symbolic_opset{}.{} does not exist"
-                                  .format(op_name, opset_version, op_name))
-                op_fn = sym_registry.get_registered_op(op_name, '', opset_version)
-                return op_fn(g, *inputs, **attrs)
+                return symbolic_fn(g, *inputs, **attrs)
 
         elif ns == "prim":
             if op_name == "Constant" and not n.mustBeNone():
@@ -773,11 +796,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     return g.op("Constant", value_t=n["value"])
                 if n.kindOf("value") == "s":
                     return g.op("Constant", value_s=n["value"])
-                elif n.kindOf("value") == "is":
-                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
-                    return g.op("Constant", value_t=value)
-                elif n.kindOf("value") == "fs":
-                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
+                elif n.output().type().isSubtypeOf(ListType.ofInts()) or n.output().type().isSubtypeOf(ListType.ofFloats()):
+                    vals = n.output().toIValue()
+                    value = torch.stack([torch.tensor(v) for v in vals]) if len(vals) else []
                     return g.op("Constant", value_t=value)
                 elif n.output().type().kind() == "DeviceObjType":
                     return None
@@ -786,9 +807,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                         n.kindOf("value")))
             elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack":
                 # None is not an ONNX operator; keep it as None
-                # let the exporter handle finally eliminating these
-
-                # For ListConstruct/ListUnpack, it will be erased in the ONNX peephole pass
+                # Let the exporter handle and finally eliminate these ops
+                # ListConstruct and ListUnpack will be erased in the ONNX peephole pass
                 return None
             elif op_name == 'Loop' or op_name == 'If':
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())
@@ -798,12 +818,12 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
                 return new_op_outputs
             else:
-                # TODO: we sould lift prim's symbolic out
                 symbolic_name = 'prim_' + op_name
-                is_exportable = sym_registry.is_registered_op(symbolic_name, '', opset_version)
-                if not is_exportable:
-                    warnings.warn("ONNX export failed on primitive operator {}; please report a bug".format(op_name))
-                symbolic_fn = sym_registry.get_registered_op(symbolic_name, '', opset_version)
+                domain = ''
+                symbolic_fn = _find_symbolic_in_registry(domain, symbolic_name, opset_version,
+                                                         operator_export_type)
+                if symbolic_fn is None:
+                    return None
                 attrs = {k: n[k] for k in n.attributeNames()}
                 return symbolic_fn(g, *inputs, **attrs)
 
@@ -811,38 +831,33 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             domain = ''
             if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
                 domain = 'caffe2'
-            attrs = {k: n[k] for k in n.attributeNames()}
-
-            if not sym_registry.is_registered_op(op_name, domain, opset_version):
-                warnings.warn("ONNX export failed on quantized operator {}::{} because "
-                              "torch.onnx.symbolic_opset{}.{} does not exist. "
-                              .format(ns, op_name, opset_version, op_name))
-            op_fn = sym_registry.get_registered_op(op_name, domain, opset_version)
-            return op_fn(g, *inputs, **attrs)
-
-        # custom ops
-        elif sym_registry.is_registered_version(ns, opset_version):
-            if not sym_registry.is_registered_op(op_name, ns, opset_version):
-                warnings.warn("ONNX export failed on custom operator {}::{} because "
-                              "torch.onnx.symbolic_opset{}.{} does not exist. "
-                              "Have you registered your symbolic function with "
-                              "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
-                              .format(ns, op_name, opset_version, op_name))
-            symbolic_fn = sym_registry.get_registered_op(op_name, ns, opset_version)
+            symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
+            if symbolic_fn is None:
+                return None
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
 
+        # custom ops
+        elif sym_registry.is_registered_version(ns, opset_version):
+            domain = ns
+            symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
+            if symbolic_fn is None:
+                return None
+            attrs = {k: n[k] for k in n.attributeNames()}
+            return symbolic_fn(g, *inputs, **attrs)
         else:
-            warnings.warn("ONNX export failed on an operator with unrecognized namespace {}::{}; "
-                          "If you are trying to export a custom operator, make sure you registered "
-                          "it with the right domain and version."
-                          "Otherwise please report a bug".format(ns, op_name))
+            raise RuntimeError("ONNX export failed on an operator with unrecognized namespace {}::{}. "
+                               "If you are trying to export a custom operator, make sure you registered "
+                               "it with the right domain and version. "
+                               "Otherwise, please report a bug.".format(ns, op_name))
+    except RuntimeError:
+        if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
-
+        raise
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
         # Otherwise, the backtrace will have the clues you need.
-        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name), )
+        e.args = ("{} \n(Occurred when translating {}).".format(e.args[0], op_name),)
         raise
 
 

@@ -122,7 +122,7 @@ Tensor& set_storage_quantized_(
     IntArrayRef sizes,
     IntArrayRef strides) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_storage(storage);
+  self_->set_storage_keep_dtype(storage);
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;

@@ -239,6 +239,7 @@ class FCTest(unittest.TestCase):
                 assert(0)
 
     @given(seed=st.integers(0, 65535))
+    @settings(max_examples=5)
     def test_fc_num0(self, seed):
         """ Test numerics, fix a dimension and determine the ranges of error.
             Use Fp16FCAcc16 as a reference.

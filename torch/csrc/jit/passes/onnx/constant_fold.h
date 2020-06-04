@@ -11,8 +11,9 @@ const int ONNX_OPSET_11 = 11;
 const int ONNX_OPSET_12 = 12;
 void ConstantFoldONNX(
     Block* b,
-    std::map<std::string, at::Tensor>& paramDict,
+    std::map<std::string, IValue>& paramDict,
     int opset_version);
 
 } // namespace jit
+
 } // namespace torch

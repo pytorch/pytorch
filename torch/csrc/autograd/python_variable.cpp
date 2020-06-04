@@ -6,6 +6,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Size.h>
 #include <torch/csrc/Types.h>
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
@@ -392,7 +393,7 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj, void *unused
     THPUtils_setError(autograd::utils::requires_grad_leaf_error(obj == Py_True).c_str());
     return -1;
   }
-  if (requires_grad && !(var.is_floating_point() || var.is_complex())) {
+  if (requires_grad && !isDifferentiableType(at::typeMetaToScalarType((var.dtype())))) {
     THPUtils_setError("only Tensors of floating point and complex dtype can require gradients");
     return -1;
   }
@@ -498,20 +499,38 @@ static PyObject *THPVariable_dtype(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getDtype(self_.scalar_type()));
+  return torch::autograd::utils::wrap(torch::getTHPDtype(self_.scalar_type()));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_layout(THPVariable* self, void *unused) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getLayout(self_.options().backend()));
+  return torch::autograd::utils::wrap(torch::getTHPLayout(self_.layout()));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_device(THPVariable* self, void *unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata.device());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_get_real(THPVariable* self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto real = at::real(self_);
+  return THPVariable_Wrap(real);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto imag = at::imag(self_);
+  return THPVariable_Wrap(imag);
   END_HANDLE_TH_ERRORS
 }
 
@@ -544,6 +563,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
+  {"real", (getter)THPVariable_get_real, nullptr, nullptr, nullptr},
+  {"imag", (getter)THPVariable_get_imag, nullptr, nullptr, nullptr},
   {nullptr}
 };
 

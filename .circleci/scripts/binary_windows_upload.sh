@@ -17,21 +17,32 @@ PIP_UPLOAD_FOLDER=${PIP_UPLOAD_FOLDER:-nightly/}
 #       The only difference is the trailing slash
 # Strip trailing slashes if there
 CONDA_UPLOAD_CHANNEL=$(echo "${PIP_UPLOAD_FOLDER}" | sed 's:/*$::')
+BACKUP_BUCKET="s3://pytorch-backup"
 
 pushd /root/workspace/final_pkgs
 # Upload the package to the final location
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda install -yq anaconda-client
   retry anaconda -t "${CONDA_PYTORCHBOT_TOKEN}" upload  "$(ls)" -u "pytorch-${CONDA_UPLOAD_CHANNEL}" --label main --no-progress --force
+  # Fetch  platform (eg. win-64, linux-64, etc.) from index file
+  # Because there's no actual conda command to read this
+  subdir=$(tar -xOf ./*.bz2 info/index.json | grep subdir  | cut -d ':' -f2 | sed -e 's/[[:space:]]//' -e 's/"//g' -e 's/,//')
+  BACKUP_DIR="conda/${subdir}"
 elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
   retry conda install -c conda-forge -yq awscli
   s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
   for pkg in $(ls); do
     retry aws s3 cp "$pkg" "$s3_dir" --acl public-read
   done
+  BACKUP_DIR="libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
 else
   retry conda install -c conda-forge -yq awscli
   s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
   retry aws s3 cp "$(ls)" "$s3_dir" --acl public-read
+  BACKUP_DIR="whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
 fi
 
+if [[ -n "${CIRCLE_TAG:-}" ]]; then
+  s3_dir="${BACKUP_BUCKET}/${CIRCLE_TAG}/${BACKUP_DIR}"
+  retry aws s3 cp . "$s3_dir"
+fi

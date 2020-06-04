@@ -467,13 +467,12 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
 
   alias_into_sparse(r_, r_indices_, r_values_);
 
-  // FIXME: add some heuristic about when to call coalesce() here, so that
-  // tensors don't totally blow up in size by concatenation; e.g.
-  //   r->minUnique = max(a->minUnique + b->minUnique);
-  //   if (r->nnz / r->minUnique > COMPACTION_THRESHOLD) {
-  //     THCSTensor_(contiguous)(r);
-  //     r->minUnique = r->nnz;
-  //   }
+  // Prevent unbounded growth of nnz
+  // TODO: Improved heuristic on when to coalesce or remove need to coalesce
+  if (r_._nnz() > r_.numel()) {
+    auto c = r_.coalesce();
+    alias_into_sparse(r_, c._indices(), c._values());
+  }
 
   return r_;
 }

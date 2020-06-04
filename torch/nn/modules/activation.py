@@ -72,7 +72,7 @@ class ReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ReLU.png
+    .. image:: ../scripts/activation_images/ReLU.png
 
     Examples::
 
@@ -184,7 +184,7 @@ class Hardtanh(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Hardtanh.png
+    .. image:: ../scripts/activation_images/Hardtanh.png
 
     Examples::
 
@@ -232,7 +232,7 @@ class ReLU6(Hardtanh):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ReLU6.png
+    .. image:: ../scripts/activation_images/ReLU6.png
 
     Examples::
 
@@ -261,7 +261,7 @@ class Sigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Sigmoid.png
+    .. image:: ../scripts/activation_images/Sigmoid.png
 
     Examples::
 
@@ -281,7 +281,7 @@ class Hardsigmoid(Module):
         \text{Hardsigmoid}(x) = \begin{cases}
             0 & \text{if~} x \le -3, \\
             1 & \text{if~} x \ge +3, \\
-            x / 6 & \text{otherwise}
+            x / 6 + 1 / 2 & \text{otherwise}
         \end{cases}
 
 
@@ -312,7 +312,7 @@ class Tanh(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Tanh.png
+    .. image:: ../scripts/activation_images/Tanh.png
 
     Examples::
 
@@ -334,7 +334,7 @@ class Hardswish(Module):
         \text{Hardswish}(x) = \begin{cases}
             0 & \text{if~} x \le -3, \\
             x & \text{if~} x \ge +3, \\
-            x^2/6 & \text{otherwise}
+            x \cdot (x + 3) /6 & \text{otherwise}
         \end{cases}
 
     Shape:
@@ -371,7 +371,7 @@ class ELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ELU.png
+    .. image:: ../scripts/activation_images/ELU.png
 
     Examples::
 
@@ -411,7 +411,7 @@ class CELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/CELU.png
+    .. image:: ../scripts/activation_images/CELU.png
 
     Examples::
 
@@ -456,7 +456,7 @@ class SELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/SELU.png
+    .. image:: ../scripts/activation_images/SELU.png
 
     Examples::
 
@@ -515,8 +515,8 @@ class GLU(Module):
 class GELU(Module):
     r"""Applies the Gaussian Error Linear Units function:
 
-    .. math::
-        \text{GELU}(x) = x * \Phi(x)
+    .. math:: \text{GELU}(x) = x * \Phi(x)
+
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     Shape:
@@ -524,7 +524,7 @@ class GELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/GELU.png
+    .. image:: ../scripts/activation_images/GELU.png
 
     Examples::
 
@@ -555,7 +555,7 @@ class Hardshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Hardshrink.png
+    .. image:: ../scripts/activation_images/Hardshrink.png
 
     Examples::
 
@@ -601,7 +601,7 @@ class LeakyReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/LeakyReLU.png
+    .. image:: ../scripts/activation_images/LeakyReLU.png
 
     Examples::
 
@@ -635,7 +635,7 @@ class LogSigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/LogSigmoid.png
+    .. image:: ../scripts/activation_images/LogSigmoid.png
 
     Examples::
 
@@ -669,7 +669,7 @@ class Softplus(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Softplus.png
+    .. image:: ../scripts/activation_images/Softplus.png
 
     Examples::
 
@@ -710,7 +710,7 @@ class Softshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Softshrink.png
+    .. image:: ../scripts/activation_images/Softshrink.png
 
     Examples::
 
@@ -749,7 +749,7 @@ class MultiheadAttention(Module):
         add_zero_attn: add a new batch of zeros to the key and
                        value sequences at dim=1.
         kdim: total number of features in key. Default: None.
-        vdim: total number of features in key. Default: None.
+        vdim: total number of features in value. Default: None.
 
         Note: if kdim and vdim are None, they will be set to embed_dim such that
         query, key, and value have the same number of features.
@@ -835,8 +835,10 @@ class MultiheadAttention(Module):
         query, key, value: map a query and a set of key-value pairs to an output.
             See "Attention Is All You Need" for more details.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. This is an binary mask. When the value is True,
-            the corresponding value on the attention layer will be filled with -inf.
+            be ignored by the attention. When given a binary mask and a value is True,
+            the corresponding value on the attention layer will be ignored. When given
+            a byte mask and a value is non-zero, the corresponding value on the attention
+            layer will be ignored
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
@@ -930,7 +932,7 @@ class PReLU(Module):
     Attributes:
         weight (Tensor): the learnable weights of shape (:attr:`num_parameters`).
 
-    .. image:: scripts/activation_images/PReLU.png
+    .. image:: ../scripts/activation_images/PReLU.png
 
     Examples::
 
@@ -963,7 +965,7 @@ class Softsign(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Softsign.png
+    .. image:: ../scripts/activation_images/Softsign.png
 
     Examples::
 
@@ -987,7 +989,7 @@ class Tanhshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/Tanhshrink.png
+    .. image:: ../scripts/activation_images/Tanhshrink.png
 
     Examples::
 
@@ -1035,9 +1037,16 @@ class Softmin(Module):
         super(Softmin, self).__init__()
         self.dim = dim
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
     def forward(self, input):
         return F.softmin(input, self.dim, _stacklevel=5)
 
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
 
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
@@ -1048,6 +1057,9 @@ class Softmax(Module):
 
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
+
+    When the input Tensor is a sparse tensor then the unspecifed
+    values are treated as ``-inf``.
 
     Shape:
         - Input: :math:`(*)` where `*` means, any number of additional
@@ -1072,6 +1084,7 @@ class Softmax(Module):
         >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
+
     """
     __constants__ = ['dim']
 
@@ -1156,3 +1169,6 @@ class LogSoftmax(Module):
 
     def forward(self, input):
         return F.log_softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)

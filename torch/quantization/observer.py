@@ -15,7 +15,7 @@ def _with_args(cls_or_self, **kwargs):
     This can be useful when there is a need to create classes with the same
     constructor arguments, but different instances.
 
-    .. Example::
+    Example::
 
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_args(a=3, b=4).with_args(answer=42)
@@ -64,14 +64,6 @@ class ObserverBase(ABC, nn.Module):
 
     @abstractmethod
     def calculate_qparams(self, **kwargs):
-        pass
-
-    # Returns all quantization parameters that's needed
-    # for a quantize function call
-    # For instance, per channel obsserver will return
-    # scales, zero_points and axis
-    @abstractmethod
-    def get_qparams(self, **kwargs):
         pass
 
     with_args = classmethod(_with_args)
@@ -185,19 +177,17 @@ class _ObserverBase(ObserverBase):
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
-        # if len(scale.shape) == 0:
-        #     scale = torch.tensor(scale)
-        #     scale = torch.tensor([scale])
-        # if len(zero_point.shape) == 0:
-        #     zero_point = torch.tensor(zero_point)
-        #     zero_point = torch.tensor([zero_point])
+        # For scalar values, cast them to Tensors of size 1 to keep the shape
+        # consistent with default values in FakeQuantize.
+        if len(scale.shape) == 0:
+            # TODO: switch to scale.item() after adding JIT support
+            scale = torch.tensor([float(scale)], dtype=scale.dtype)
+        if len(zero_point.shape) == 0:
+            # TODO: switch to zero_point.item() after adding JIT support
+            zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype)
 
         return scale, zero_point
 
-    @torch.jit.export
-    def get_qparams(self):
-        r"""Get all quantization parameters needed for quantize call"""
-        return self.calculate_qparams()
 
 class MinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
@@ -284,6 +274,7 @@ class MinMaxObserver(_ObserverBase):
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""
         x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
         if min_val.numel() == 0 or max_val.numel() == 0:
@@ -292,8 +283,10 @@ class MinMaxObserver(_ObserverBase):
         else:
             min_val = torch.min(torch.min(x), min_val)
             max_val = torch.max(torch.max(x), max_val)
-        self.min_val = min_val
-        self.max_val = max_val
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
     @torch.jit.export
@@ -375,6 +368,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
         if min_val.numel() == 0 or max_val.numel() == 0:
@@ -383,8 +377,10 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         else:
             min_val = min_val + self.averaging_constant * (torch.min(x) - min_val)
             max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
-        self.min_val = min_val
-        self.max_val = max_val
+        self.min_val.resize_(min_val.shape)
+        self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
 
@@ -465,52 +461,6 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
 
         return scale.to(dtype=torch.float), torch.tensor([nudged_zero_point])
 
-# This observer is a temporary solution for quantizing modules with tensor lists as inputs.
-# If we decide to support more observers with TensorList this should be refactored
-# to work with multiple observer types.
-class _MinMaxTensorListObserver(MinMaxObserver):
-    r"""Observer module that works on lists of tensors.
-    It uses MinMaxObserver for computing the quantization parameters based on the
-    tensor min and max values.
-    This observer is used currently for dynamic quantization of LSTM modules that
-    require list of tensors for weight inputs.
-    """
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=False):
-        super(_MinMaxTensorListObserver, self).__init__(dtype=dtype,
-                                                        qscheme=qscheme,
-                                                        reduce_range=reduce_range)
-
-    def forward(self, tensor_list):
-        # type: (List[Tensor]) -> (List[Tensor])
-        r"""Records the running minimum and maximum of ``tensor_list``."""
-        min_val = self.min_val
-        max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val = torch.empty(len(tensor_list), dtype=torch.float32)
-            max_val = torch.empty(len(tensor_list), dtype=torch.float32)
-            for i in range(len(tensor_list)):
-                x = tensor_list[i].detach()
-                min_val[i] = torch.min(x)
-                max_val[i] = torch.max(x)
-        else:
-            for i in range(len(tensor_list)):
-                x = tensor_list[i].detach()
-                min_val[i] = torch.min(torch.min(x), min_val[i])
-                max_val[i] = torch.max(torch.max(x), max_val[i])
-        self.min_val = min_val
-        self.max_val = max_val
-        return tensor_list
-
-    def calculate_qparams(self):
-        scales = []
-        zero_points = []
-        for i in range(self.min_val.numel()):
-            x, y = self._calculate_qparams(self.min_val[i], self.max_val[i])
-            scales.append(x)
-            zero_points.append(y)
-        return scales, zero_points
-
-
 class PerChannelMinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
     running per channel min and max values.
@@ -566,6 +516,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
         new_axis_list[self.ch_axis] = 0
         new_axis_list[0] = self.ch_axis
         y = x.permute(tuple(new_axis_list))
+        # Need to match dtype of min/max because the updates to buffers
+        # are done in place and types need to match for comparisons
+        y = y.to(self.min_vals.dtype)
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
             min_vals = torch.min(y, 1)[0]
@@ -573,18 +526,15 @@ class PerChannelMinMaxObserver(_ObserverBase):
         else:
             min_vals = torch.min(torch.min(y, 1)[0], min_vals)
             max_vals = torch.max(torch.max(y, 1)[0], max_vals)
-        self.min_vals = min_vals
-        self.max_vals = max_vals
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):
         return self._calculate_qparams(self.min_vals, self.max_vals)
-
-    @torch.jit.export
-    def get_qparams(self):
-        scales, zero_points = self.calculate_qparams()
-        return scales, zero_points, self.ch_axis
 
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
@@ -641,6 +591,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.min_vals.dtype)
         min_vals = self.min_vals
         max_vals = self.max_vals
         x_dim = x.size()
@@ -656,8 +607,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         else:
             min_vals = min_vals + self.averaging_constant * (torch.min(y, 1)[0] - min_vals)
             max_vals = max_vals + self.averaging_constant * (torch.max(y, 1)[0] - max_vals)
-        self.min_vals = min_vals
-        self.max_vals = max_vals
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
 class HistogramObserver(_ObserverBase):
@@ -880,9 +833,11 @@ class HistogramObserver(_ObserverBase):
         if min_val.numel() == 0 or max_val.numel() == 0:
             min_val = torch.min(x)
             max_val = torch.max(x)
-            self.min_val = min_val
-            self.max_val = max_val
-            self.histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
+            self.min_val.resize_(min_val.shape)
+            self.min_val.copy_(min_val)
+            self.max_val.resize_(max_val.shape)
+            self.max_val.copy_(max_val)
+            torch.histc(x, self.bins, min=min_val, max=max_val, out=self.histogram)
         else:
             new_min = torch.min(x)
             new_max = torch.max(x)
@@ -905,9 +860,12 @@ class HistogramObserver(_ObserverBase):
                     start_idx,
                     self.bins)
 
-            self.histogram = combined_histogram
-            self.min_val = combined_min
-            self.max_val = combined_max
+            self.histogram.resize_(combined_histogram.shape)
+            self.histogram.copy_(combined_histogram)
+            self.min_val.resize_(combined_min.shape)
+            self.min_val.copy_(combined_min)
+            self.max_val.resize_(combined_max.shape)
+            self.max_val.copy_(combined_max)
         return x_orig
 
     @torch.jit.export
@@ -993,11 +951,9 @@ class NoopObserver(ObserverBase):
     def forward(self, x):
         return x
 
+    @torch.jit.export
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
-
-    def get_qparams(self):
-        return self.calculate_qparams()
 
 
 # Restrict activations to be in the range (0,127)

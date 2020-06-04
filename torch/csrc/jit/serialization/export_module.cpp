@@ -132,9 +132,9 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
-    Function* setstate = type->getMethod("__setstate__");
-    if (setstate->isGraphFunction()) {
-      elements.push_back(getFunctionTuple(*setstate));
+    Function& setstate = type->getMethod("__setstate__");
+    if (setstate.isGraphFunction()) {
+      elements.push_back(getFunctionTuple(setstate));
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
@@ -178,7 +178,7 @@ class ScriptModuleSerializer {
     writeExtraFiles(module, extra_files);
     // Serialize the model object
     writeArchive("data", module._ivalue());
-    // Then we werialize all code info.
+    // Then we serialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
@@ -354,6 +354,38 @@ void ExportModule(
     bool bytecode_format) {
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(module, extra_files, bytecode_format);
+}
+
+namespace {
+void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
+  std::vector<c10::IValue> elements;
+  moduleMethodsTuple(m, elements);
+  for (const auto& element : elements) {
+    auto table = element.toTuple()->elements()[1];
+    auto row =
+        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
+    TORCH_INTERNAL_ASSERT(
+        row->elements().at(0).toStringRef() == "operators",
+        "Expected operators but found ",
+        row->elements().at(0).toStringRef());
+    const auto& ops_list = row->elements().at(1).toTuple()->elements();
+    for (const auto& op : ops_list) {
+      auto op_item = op.toTuple()->elements();
+      TORCH_CHECK(
+          op_item.size() == 2,
+          "There should be two parts in an operator name.");
+      auto opname = op_item[0].toString()->string();
+      auto overload = op_item[1].toString()->string();
+      opnames.emplace(overload.empty() ? opname : opname + "." + overload);
+    }
+  }
+}
+} // namespace
+
+std::vector<std::string> export_opnames(const script::Module& m) {
+  std::set<std::string> names;
+  export_opnames(m, names);
+  return std::vector<std::string>(names.begin(), names.end());
 }
 
 } // namespace jit

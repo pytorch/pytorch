@@ -63,6 +63,27 @@ RRefForkData RRef::fork() const {
       getTypeStr(type_));
 }
 
+void RRef::handleError(
+    RPCErrorType errorType,
+    const FutureMessage& futMessage) {
+  static std::unordered_map<
+      RPCErrorType,
+      std::function<void(const FutureMessage& fm)>,
+      std::hash<int>>
+      errorHandlers = {
+          {RPCErrorType::TIMEOUT,
+           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::INTENTIONAL_FAILURE,
+           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::UNKNOWN_ERROR, [](const FutureMessage& fm) {
+             // Default error handler, equivalent to
+             // RRefContext::handleException().
+             VLOG(1) << "Got exception: " << fm.error()->what();
+             throw std::runtime_error(fm.error()->what());
+           }}};
+  errorHandlers.find(errorType)->second(futMessage);
+}
+
 //////////////////////////  UserRRef  /////////////////////////////////////
 
 UserRRef::UserRRef(
@@ -106,7 +127,12 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere() {
+IValue UserRRef::toHere(const float timeoutSeconds) const {
+  if (this->getTimedOut()) {
+    throw std::runtime_error(
+        "RRef creation via rpc.remote() timed out, and it "
+        "is possible that the RRef on the owner node does not exist.");
+  }
   // see Note [Best-Effort Check on Deleted UserRRefs]
   TORCH_CHECK(
       !deletedOnOwner_,
@@ -146,8 +172,11 @@ IValue UserRRef::toHere() {
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
-      true /* forceGradRecording */);
+      true /* forceGradRecording */,
+      timeoutSeconds);
 
+  // TODO: we should ideally be able to interrupt this blocking wait if we check
+  // isTimedOut() and it is true.
   const Message& message = futureResponse->wait();
   MessageType msgType = message.type();
   auto response = deserializeResponse(message, msgType);
@@ -202,61 +231,32 @@ RRefForkData UserRRef::fork() const {
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
-  std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(
-      lock, [this] { return value_.has_value() || error_.has_value(); });
-  if (error_) {
-    std::runtime_error err(*error_);
-    throw err;
+  if (this->getTimedOut()) {
+    throw std::runtime_error(
+        "RRef creation via rpc.remote() to self timed out, and it "
+        "is possible that the RRef on the owner node does not exist.");
   }
-  return value_.value();
+  future_->wait();
+  if (future_->hasError()) {
+    (void)future_->value(); // Throws the error.
+  }
+  return future_->constValue();
 }
 
 bool OwnerRRef::hasValue() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return value_.has_value() || error_.has_value();
+  return future_->completed();
 }
 
-std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (future_.get()) {
-    return future_;
-  }
-  future_ = std::make_shared<FutureMessage>();
-  std::shared_ptr<FutureMessage> ret = future_;
-  if (value_.has_value()) {
-    lock.unlock();
-    ret->markCompleted(Message());
-  } else if (error_.has_value()) {
-    auto err = *error_;
-    lock.unlock();
-    ret->setError(std::move(err));
-  }
-  return ret;
+std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
+  return future_;
 }
 
 void OwnerRRef::setValue(IValue&& value) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  value_ = std::move(value);
-  std::shared_ptr<FutureMessage> future;
-  future.swap(future_);
-  lock.unlock();
-  valueCV_.notify_all();
-  if (future.get() && !future->completed()) {
-    future->markCompleted(Message());
-  }
+  future_->markCompleted(value);
 }
 
 void OwnerRRef::setError(const std::string& error) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  error_ = error;
-  std::shared_ptr<FutureMessage> future;
-  future.swap(future_);
-  lock.unlock();
-  valueCV_.notify_all();
-  if (future.get()) {
-    future->setErrorIfNeeded(error);
-  }
+  future_->setErrorIfNeeded(error);
 }
 
 } // namespace rpc

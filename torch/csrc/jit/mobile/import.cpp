@@ -14,21 +14,18 @@
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
-//  (('__torch__.m.add_it',
-//    (('instructions',
-//      (('STOREN', 1, 2),
-//       ('MOVE', 1, 0),
-//       ('GET_ATTR', 0, 0),
-//       ('MOVE', 2, 0),
-//       ('LOADC', 0, 0),
-//       ('OP', 0, 0),
-//       ('LOADC', 1, 0),
-//       ('LOADC', 0, 0),
-//       ('OP', 1, 0),
-//       ('RET', 0, 0))),
-//     ('operators', (('_aten::add', 'Tensor'), ('_aten::add', 'Scalar'))),
-//     ('constants', (1, 4)),
-//     ('register_size', 2))),)
+// (3,
+//   ('__torch__.m.forward',
+//     (('instructions',
+//       (('STOREN', 1, 2),
+//        ('DROPR', 1, 0),
+//        ('MOVE', 2, 0),
+//        ('OP', 0, 0),
+//        ('RET', 0, 0))),
+//      ('operators', (('aten::Int', 'Tensor'),)),
+//      ('constants', ()),
+//      ('types', ()),
+//      ('register_size', 2))))
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisted and redesigned if we want to
@@ -88,7 +85,14 @@ void parseMethods(
   TORCH_CHECK(
       vals.size() > 0,
       "Bytecode has no elements. At least one element of version number is required.");
-  auto model_version = vals[0].toInt();
+  // Initialized with the version number when kProducedBytecodeVersion was introduced.
+  // The old models (some of them already in production) without version number don't have to be re-generated.
+  int64_t model_version = 0x3L;
+  size_t method_i_start = 0;
+  if (vals[0].isInt()) {
+    model_version = vals[0].toInt();
+    method_i_start = 1;
+  }
   TORCH_CHECK(
       model_version == caffe2::serialize::kProducedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
@@ -97,7 +101,7 @@ void parseMethods(
       " but the model version is ",
       model_version);
 
-  for (size_t i = 1; i < vals.size(); ++i) {
+  for (size_t i = method_i_start; i < vals.size(); ++i) {
     const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
@@ -218,13 +222,23 @@ c10::IValue BytecodeDeserializer::readArchive(
     return len;
   };
 
-  auto class_resolver = [&](const c10::QualifiedName& qn) {
-    if (compilation_unit_->get_class(qn) == nullptr) {
-      auto typeptr = ClassType::create(qn, compilation_unit_, true);
-      compilation_unit_->register_type(typeptr);
+  static const c10::QualifiedName torchPrefix = "__torch__";
+  auto type_resolver = [&](const c10::QualifiedName& qn) {
+    TypePtr type;
+    // HACK: first we check whether the name starts with `__torch__` to tell if
+    // it's "supposed" to be a class type. This is a reliable check today, but
+    // there is no guarantee that this is the case. The real solution is to
+    // merge type parsers so we can share class resolution logic.
+    if (torchPrefix.isPrefixOf(qn)) {
+      if (compilation_unit_->get_class(qn) == nullptr) {
+        auto typeptr = ClassType::create(qn, compilation_unit_, true);
+        compilation_unit_->register_type(typeptr);
+      }
+      type = compilation_unit_->get_class(qn);
+    } else {
+      type = c10::parseType(qn.qualifiedName());
     }
-    return c10::StrongTypePtr(
-        compilation_unit_, compilation_unit_->get_class(qn));
+    return c10::StrongTypePtr(compilation_unit_, type);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
@@ -234,7 +248,7 @@ c10::IValue BytecodeDeserializer::readArchive(
     auto setstate = mcu->find_function(method_name);
     auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
       auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
-      if (custom_class_type && custom_class_type->getMethod("__setstate__")) {
+      if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
         return custom_class_type;
       }
       return nullptr;
@@ -248,7 +262,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       auto obj = c10::ivalue::Object::create(
           c10::StrongTypePtr(nullptr, custom_class_type), 1);
       Stack stack({obj, input});
-      custom_class_type->getMethod("__setstate__")->run(stack);
+      custom_class_type->getMethod("__setstate__").run(stack);
       return obj;
     } else {
       auto dict = std::move(input).toGenericDict();
@@ -271,7 +285,7 @@ c10::IValue BytecodeDeserializer::readArchive(
 
   Unpickler unpickler(
       reader,
-      std::move(class_resolver),
+      std::move(type_resolver),
       std::move(obj_loader),
       std::move(read_record),
       device_);

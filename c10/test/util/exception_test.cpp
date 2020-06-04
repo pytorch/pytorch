@@ -2,9 +2,23 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 
+using c10::Error;
+
 namespace {
 bool throw_func() {
   throw std::runtime_error("I'm throwing...");
+}
+
+template<class Functor>
+inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
+  try {
+    std::forward<Functor>(functor)();
+  } catch (const Error& e) {
+    EXPECT_STREQ(e.what_without_backtrace(), expectedMessage);
+    return;
+  }
+  ADD_FAILURE() << "Expected to throw exception with message \""
+    << expectedMessage << "\" but didn't throw";
 }
 } // namespace
 
@@ -21,4 +35,33 @@ TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
 
 TEST(WarningTest, JustPrintWarning) {
   TORCH_WARN("I'm a warning");
+}
+
+TEST(ExceptionTest, ErrorFormatting) {
+  expectThrowsEq([]() {
+    TORCH_CHECK(false, "This is invalid");
+  }, "This is invalid");
+
+  expectThrowsEq([]() {
+    try {
+      TORCH_CHECK(false, "This is invalid");
+    } catch (Error& e) {
+      TORCH_RETHROW(e, "While checking X");
+    }
+  }, "This is invalid (While checking X)");
+
+  expectThrowsEq([]() {
+    try {
+      try {
+        TORCH_CHECK(false, "This is invalid");
+      } catch (Error& e) {
+        TORCH_RETHROW(e, "While checking X");
+      }
+    } catch (Error& e) {
+      TORCH_RETHROW(e, "While checking Y");
+    }
+  },
+R"msg(This is invalid
+  While checking X
+  While checking Y)msg");
 }
