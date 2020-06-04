@@ -731,18 +731,21 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   }
 
   // Add output size hints
+  auto* output_shape_info_arg = op.add_arg();
+  output_shape_info_arg->set_name("output_shape_info");
+  auto* output_qshape_info_arg = op.add_arg();
+  output_qshape_info_arg->set_name("output_qshape_info");
   for (int i = 0; i < op.output_size(); ++i) {
     const auto& o = op.output(i);
     const auto it = shape_hints.find(o);
     if (it != shape_hints.end()) {
-      const auto& shape = it->second.shape;
-      auto* output_shape_hint_arg = op.add_arg();
-      output_shape_hint_arg->set_name(c10::str("output_shape_hint_", i));
-      output_shape_hint_arg->add_ints(onnxifiDataType(shape.data_type()));
-      for (const auto& d : shape.dims()) {
-        output_shape_hint_arg->add_ints(d);
+      if (!it->second.is_quantized) {
+        output_shape_info_arg->mutable_tensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoTensorProto(o, it->second));
+      } else {
+        output_qshape_info_arg->mutable_qtensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoQTensorProto(o, it->second));
       }
-
       VLOG(2) << "Adding output hint: " << o;
     }
   }
