@@ -11192,6 +11192,7 @@ class TestNNDeviceType(NNTestCase):
             for p in conv.parameters():
                 p.data = torch.randint_like(p, -3, 3)
 
+            # use FP64 channels-first conv as reference
             ref_input = input.detach().clone().contiguous().double().requires_grad_()
             ref_conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups)
             # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
@@ -11207,14 +11208,12 @@ class TestNNDeviceType(NNTestCase):
             out.backward(grad)
             ref_out.backward(ref_grad)
 
-            rtol, atol = 0, 0
-
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
             self.assertTrue(ref_out.is_contiguous())
-            self.assertEqual(out, ref_out, rtol=rtol, atol=atol, exact_dtype=False)
-            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, rtol=rtol, atol=atol, exact_dtype=False)
-            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, rtol=rtol, atol=atol, exact_dtype=False)
-            self.assertEqual(input.grad, ref_input.grad, rtol=rtol, atol=atol, exact_dtype=False)
+            self.assertEqual(out, ref_out, exact_dtype=False)
+            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, exact_dtype=False)
+            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
+            self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
 
         helper(2, 8, 4, 4, out_channels=4, kernel_size=3, groups=1)
         helper(2, 8, 4, 4, out_channels=8, kernel_size=3, groups=8)
