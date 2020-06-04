@@ -1081,8 +1081,8 @@ class Module(object):
                 if module is None:
                     continue
 
-                print("Prefix: ")
-                print(prefix)
+                # print("Prefix: ")
+                # print(prefix)
                 submodule_prefix = prefix + ('.' if prefix else '')
                 submodule_prefix = submodule_prefix + name
                 for m in module.named_modules(memo, submodule_prefix):

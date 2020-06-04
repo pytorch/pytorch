@@ -1911,6 +1911,12 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributes_.at(slot).getKind() == AttributeKind::BUFFER;
   }
 
+  bool is_module(size_t slot) const {
+    TORCH_INTERNAL_ASSERT(
+        is_module(), "asking for bufferWrittenSlots of non-Module");
+    return attributes_.at(slot).getType()->is_module();
+  }
+
   void addMethod(torch::jit::Function* method);
   torch::jit::Function* findMethod(const std::string& name) const;
   torch::jit::Function& getMethod(const std::string& name) const;

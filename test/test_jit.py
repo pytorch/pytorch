@@ -17173,7 +17173,6 @@ a")
                 names = [""]
                 vals = []
                 for name, buffer in self.named_parameters(recurse=False):
-                    print("name: " + str(name))
                     names.append(name)
                     vals.append(buffer + 2)
 
@@ -17182,9 +17181,7 @@ a")
             def forward(self, x):
                 return x
 
-        model = MyMod()
-        model.method()
-        x = torch.jit.script(model)
+        x = torch.jit.script(MyMod())
         z = self.getExportImportCopy(x)
         self.assertEqual(z.method(), x.method())
         self.assertEqual(z.method(), model.method())
@@ -17220,22 +17217,21 @@ a")
                 names = [""]
                 vals = []
                 for name, buffer in self.named_buffers(recurse=True):
-                    print("name: " + str(name))
                     names.append(name)
                     vals.append(buffer + 2)
 
                 return names, vals
 
+            @torch.jit.export
+            def method2(self):
+                return self.mod
+
             def forward(self, x):
                 return x
 
-        model = MyMod()
-        x = torch.jit.script(model)
+        x = torch.jit.script(MyMod())
         z = self.getExportImportCopy(x)
-        print(z.method())
         self.assertEqual(z.method(), x.method())
-        self.assertEqual(z.method(), model.method())
-        self.assertEqual(x.method(), model.method())
 
     def test_static_if_prop(self):
         class MaybeHasAttr(torch.nn.Module):

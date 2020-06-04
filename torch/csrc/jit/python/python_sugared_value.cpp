@@ -272,18 +272,14 @@ void recurseThroughNestedModules(
 
     auto keys_value = keys_iter->tup_.at(i);
     auto key_string = toIValue(keys_value->asValue(loc, m))->toStringRef();
-    std::string submodule_prefix = prefix;
-    if (prefix != "") {
-      submodule_prefix = prefix + ".";
-    }
-    submodule_prefix = submodule_prefix + key_string;
+    
     recurseThroughNestedModules(
         loc,
         m,
         keys,
         values,
         module_value,
-        submodule_prefix,
+        prefix,
         field,
         onModuleCallback);
   };

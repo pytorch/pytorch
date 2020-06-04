@@ -321,9 +321,9 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
     auto iterator = std::make_shared<IterableTree>();
 
     std::map<std::string, NamedValue> inputMap;
-    for (const auto& input : inputs) {
-      if (input.hasName()) {
-        inputMap.insert({input.name(), input});
+    for (const auto& attr : attributes) {
+      if (attr.hasName()) {
+        inputMap.insert({attr.name(), attr});
       } else {
         throw ErrorReport(loc)
             << "Please explicitly name all parameters passed to: " << name_
@@ -331,9 +331,16 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
       }
     }
 
+    std::string prefix = "";
     if (inputMap.find("prefix") != inputMap.end()) {
-      throw ErrorReport(loc)
-          << "Prefix is not currently supported yet for: " << name_ << "()";
+      auto prefixInputValue =
+          inputMap.find("prefix")->second.value(*f.graph());
+      if (prefixInputValue->type()->kind() == TypeKind::StringType) {
+        prefix = constant_as<std::string>(prefixInputValue).value();
+      } else {
+        throw ErrorReport(loc)
+            << "prefix must be a string";
+      }
     }
 
     if (inputMap.find("recurse") != inputMap.end()) {
@@ -369,8 +376,12 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
             }
 
             for (const auto& item_name : names) {
+              auto name = item_name;
+              if (prefix != "") {
+                name = prefix + "." + item_name;
+              }
               auto name_v = std::make_shared<SimpleValue>(
-                  insertConstant(*f.graph(), item_name));
+                  insertConstant(*f.graph(),  name));
               Value* tensor_v =
                   f.graph()->insertGetAttr(m->getSelf(), item_name);
               iterValues.push_back(m->tryGetAttr(loc, f, item_name));
@@ -378,7 +389,7 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
             }
           };
           recurseThroughNestedModules(
-              loc, f, moduleKeys, moduleValues, module_, "", name_, lambda);
+              loc, f, moduleKeys, moduleValues, module_, prefix, name_, lambda);
           auto iterator = std::make_shared<IterableTree>();
           iterator->addChild(
               loc, f, std::make_shared<SugaredTupleValue>(iterKeys));
