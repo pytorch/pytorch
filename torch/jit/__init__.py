@@ -43,8 +43,6 @@ except ImportError:
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
 
-T_co = TypeVar('T_co', covariant=True)
-
 def _parse_env(name, default, true_message, false_message):
     value = os.environ.get(name)
     if value is None:
