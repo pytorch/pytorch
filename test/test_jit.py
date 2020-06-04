@@ -3487,7 +3487,7 @@ graph(%Ra, %Rb):
         mul_events = defaultdict(int)
         other_fn_events = defaultdict(int)
         for e in prof.function_events:
-            if e.name == "mul":
+            if e.name == "aten::mul":
                 self.assertTrue(e.thread not in mul_events)
                 mul_events[e.thread] = e.cpu_interval.elapsed_us()
             elif e.name == "other_fn":
