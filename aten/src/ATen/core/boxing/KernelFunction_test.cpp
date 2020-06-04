@@ -311,12 +311,10 @@ TEST(KernelFunctionTest, givenBoxedFunction_withTensorRefReturn_whenCallingUnbox
   kernels::expectUnboxedCallingWithTensorRefReturnWorks(func);
 }
 
-#if 0
 TEST(KernelFunctionTest, givenBoxedFunction_withTensorRefTupleReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_tensor_ref_tuple_return>();
   kernels::expectUnboxedCallingWithTensorRefTupleReturnWorks(func);
 }
-#endif
 
 TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));

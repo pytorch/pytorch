@@ -9,10 +9,52 @@
 
 #include <ATen/core/Dimname.h>
 
-
 namespace c10 {
 namespace impl {
 
+//
+// utils
+//
+
+// is_specialization_of
+//
+template <template <typename...> class T, typename U>
+struct is_specialization_of: std::false_type {};
+
+template <template <typename...> class T, typename... Us>
+struct is_specialization_of<T, T<Us...>>: std::true_type {};
+
+// is_tuple_of_lvalue_refs
+//
+template<class T, bool = is_specialization_of<std::tuple, T>::value>
+struct is_tuple_of_lvalue_refs :
+  guts::typelist::all<
+    std::is_lvalue_reference, guts::typelist::from_tuple_t<T>
+  >
+{};
+
+template<class T>
+struct is_tuple_of_lvalue_refs<T, false> : std::false_type {};
+
+// tuple_elements
+//
+template <class Tuple, size_t... ns>
+constexpr auto tuple_elements(Tuple t, std::index_sequence<ns...>) {
+    return std::tuple<std::tuple_element_t<ns, Tuple>...>(std::get<ns>(t)...);
+}
+
+// tuple_take
+//
+template <class Tuple, size_t n>
+constexpr auto tuple_take(Tuple t) {
+    return tuple_elements(t, std::make_index_sequence<n>{});
+}
+
+//
+// boxing predicates
+//
+
+// A boxable arg type is one that IValue has a constructor for.
 // Assume T is decayed
 template <typename T>
 using boxable_arg =
@@ -29,8 +71,9 @@ using boxable_args =
     boxable_arg<std::decay_t<Args>>...
   >;
 
+// an unboxable result is one that can be extracted from an IValue
 template <typename T>
-using boxable_result =
+using unboxable_result =
   guts::conjunction<
     guts::disjunction<
       // using IValue(T) as a proxy for IValue.to<T>() here
@@ -38,31 +81,50 @@ using boxable_result =
       // void returns are ok
       std::is_same<void, T>
     >,
-    guts::negation<std::is_same<IntArrayRef, T>>
+    guts::negation<std::is_same<IntArrayRef, T>>,
+    guts::negation<std::is_lvalue_reference<T>>
   >;
 
-template <class Result, class... Args>
-using supports_boxing =
-  guts::conjunction<
-    boxable_args<Args...>,
-    boxable_result<Result>
-  >;
+//
+// BoxedKernelWrapper
+//
+// For a given function type FT, BoxedKernelWrapper<FT> implements
+// a `call` method that
+// - takes a boxed kernel and unboxed arguments as specified by FT
+// - boxes the arguments
+// - calls the boxed kernel
+// - unboxes and returns the result
+//
+// The partial specializations below handle various cases: in
+// particular, not all types appearing in op signatures are supported,
+// and ops returning references have nonstandard wrapper implementations.
+//
 
-// base definition establishes template arity.
-// should never be instantiated - the partial specializations that
-// follow should cover all FuncType instances, both supported and
-// unsupported. "no call method defined on BoxAndCallBoxedFunc"
-// errors are a sign that this coverage is incomplete.
+// base definition should never be instantiated.
+// A "no call method defined on BoxedKernelWrapper" compile error means that
+// an op signature has failed to trigger any of the partial specialiations
+// that follow.
 //
 template<class FuncType, class Enable = void>
-struct BoxAndCallBoxedFunc {};
+struct BoxedKernelWrapper {};
 
-// ops whose signatures include types not (yet) supported by our
-// boxing machinery will generate instances of this class
+// 1. unsupported signatures, except inplace/outplace
+// Ops whose signatures include unsupported types will generate instances
+// of this class, unless their only transgression is returning one or more
+// lvalue references. These are handled by special cases, below.
+//
 template<class Result, class... Args>
-struct BoxAndCallBoxedFunc<
+struct BoxedKernelWrapper<
   Result(Args...),
-  std::enable_if_t<!supports_boxing<Result, Args...>::value, void>
+  std::enable_if_t<
+    // either not all args are boxable
+    !boxable_args<Args...>::value ||
+    // or the result is unboxable and not lvalue ref(s)
+    (!unboxable_result<Result>::value &&
+      !std::is_lvalue_reference<Result>::value &&
+      !is_tuple_of_lvalue_refs<Result>::value),
+    void
+  >
 > {
   static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
@@ -72,24 +134,18 @@ struct BoxAndCallBoxedFunc<
   ) {
     TORCH_INTERNAL_ASSERT(
       false,
-      "Tried to call KernelFunction::call() for a kernel that does not support unboxed calling."
+      "Unboxed call (KernelFunction::call()) on a boxed kernel with "
+      "parameter or result types unsupported by BoxedKernelWrapper."
     );
   }
 };
 
-// supported signatures generate instances of this definition, with
-// the exception of ops that return (one or more) references. These
-// must be handled differently due to ownership issues - see partial
-// specializations that follow.
+// 2. supported signatures.
 //
 template<class Result, class... Args>
-struct BoxAndCallBoxedFunc<
+struct BoxedKernelWrapper<
   Result(Args...),
-  std::enable_if_t<
-    supports_boxing<Result, Args...>::value &&
-      !std::is_lvalue_reference<Result>::value,
-    void
-  >
+  std::enable_if_t<boxable_args<Args...>::value && unboxable_result<Result>::value, void>
 > {
   static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
@@ -107,7 +163,7 @@ struct BoxAndCallBoxedFunc<
       [&] (auto delay_check) {
         TORCH_INTERNAL_ASSERT(
           stack.size() == 1,
-          "Boxed kernel was expected to push exactly one return to the stack."
+          "Boxed kernel was expected to push exactly one return value to the stack."
         );
         return delay_check(std::move(stack[0]).to<Result>());
       },
@@ -122,21 +178,25 @@ struct BoxAndCallBoxedFunc<
   }
 };
 
-// a signature returning a reference of the same type as its initial
-// argument is assumed to return a reference to that argument (e.g.
-// a method that returns a self-reference, or a function that takes
-// and returns an out argument)
+// 3. signatures returning a single reference of the same type as
+// their initial argument.
+// Note that the passed kernels are assumed to be for inplace/outplace ops,
+// and the generated BoxedKernelWrapper specializations will simply return
+// the initial argument.
 //
 template<class Result, class... OtherArgs>
-struct BoxAndCallBoxedFunc<
-  Result&(Result&, OtherArgs...),
-  std::enable_if_t<boxable_args<OtherArgs...>::value, void>
+struct BoxedKernelWrapper<
+  Result(Result, OtherArgs...),
+  std::enable_if_t<
+    boxable_args<Result, OtherArgs...>::value && std::is_lvalue_reference<Result>::value,
+    void
+  >
 > {
-  static Result& call(
+  static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
-    Result& outArg,
+    Result outArg,
     OtherArgs... otherArgs
   ) {
     // TODO Reuse stack vector instead of allocating?
@@ -155,52 +215,43 @@ struct BoxAndCallBoxedFunc<
   }
 };
 
-#if 0
-// a signature returning a tuple of references, of the same type as
-// the equivalent number of initial arguments, is assumed to return
-// references to those arguments (e.g., a function that takes and
-// returns a tuple of out arguments).
+// 4. signatures returning a tuple of references, of the same type as
+// the equivalent number of initial arguments.
+// Note that the passed kernels are assumed to be for inplace/outplace ops,
+// and the generated BoxedKernelWrapper specializations will return a tuple
+// of those initial arguments.
 //
-template<class... Results, class... Args>
-struct BoxAndCallBoxedFunc<
-  std::tuple<Results...>(Args...),
+template<class Result, class... Args>
+struct BoxedKernelWrapper<
+  Result(Args...),
   std::enable_if_t<
-    boxable_args<Args...>::value &&
-      guts::conjunction<std::is_lvalue_reference<Results>...>::value,
+    boxable_args<Args...>::value && is_tuple_of_lvalue_refs<Result>::value,
     void
   >
 > {
-  using ResultsTuple = std::tuple<Results...>;
-
-  static ResultsTuple call(
+  static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
     Args... args
   ) {
-
-    TORCH_INTERNAL_ASSERT(
-      false,
-      "Tried to call KernelFunction::call() for a kernel that returns multiple "
-      "out args, which is not supported when calling from an unboxed API."
-    );
-
     // TODO Reuse stack vector instead of allocating?
     torch::jit::Stack stack;
     torch::jit::push(stack, std::forward<Args>(args)...);
 
     (*boxed_kernel_func)(functor, opHandle, &stack);
 
-    constexpr size_t num_results = std::tuple_size<ResultsTuple>::value;
-    TORCH_INTERNAL_ASSERT(
-      stack.size() == num_results,
-      "Boxed kernel pushed incorrect number of return values."
+    using ArgTuple = std::tuple<Args...>;
+    constexpr int n = std::tuple_size<Result>();
+    auto result = tuple_take<ArgTuple, n>(ArgTuple{args...});
+    static_assert(
+        std::is_same<Result, decltype(result)>::value,
+        "The parameter list of an op returning a tuple of references "
+            "must begin with an equal number of parameters of the same types."
     );
-
-    return ResultsTuple(args...);
+    return result;
   }
 };
-#endif
 
 } // impl
 } // c10

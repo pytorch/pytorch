@@ -61,7 +61,7 @@ inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args)
         "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
     );
 
-    return impl::BoxAndCallBoxedFunc<Return(Args...)>::call(
+    return impl::BoxedKernelWrapper<Return(Args...)>::call(
         boxed_kernel_func_,
         functor_.get(),
         opHandle,
