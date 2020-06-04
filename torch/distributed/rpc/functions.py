@@ -50,8 +50,8 @@ def async_execution(fn):
         >>> )
         >>> print(ret)  # prints tensor([3., 3.])
 
-        When combined with TorchScript functions, this decorator must be the
-        outmost one.
+        When combined with TorchScript decorators (or any other decorators),
+        this decorator must be the outmost one.
 
         >>> from torch.distributed import rpc
         >>>
