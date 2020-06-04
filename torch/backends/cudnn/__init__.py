@@ -7,7 +7,7 @@ from torch.backends import ContextProp, PropModule, __allow_nonbracketed_mutatio
 try:
     from torch._C import _cudnn
 except ImportError:
-    _cudnn = None
+    _cudnn = None  # type: ignore
 
 # Write:
 #
@@ -83,11 +83,7 @@ def is_acceptable(tensor):
     return True
 
 
-_handles = {}
-
-
 def set_flags(_enabled, _benchmark, _deterministic):
-    global benchmark, deterministic
     orig_flags = (torch._C._get_cudnn_enabled(),
                   torch._C._get_cudnn_benchmark(),
                   torch._C._get_cudnn_deterministic())
@@ -124,3 +120,8 @@ class CudnnModule(PropModule):
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
 sys.modules[__name__] = CudnnModule(sys.modules[__name__], __name__)
+
+# Add type annotation for the replaced module
+enabled: bool
+deterministic: bool
+benchmark: bool
