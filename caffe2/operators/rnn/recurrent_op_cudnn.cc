@@ -99,7 +99,7 @@ void RecurrentBaseOp<T>::initialize(
   // RNN setup
   {
 #if CUDNN_VERSION_MIN(7, 0, 0)
-    CUDNN_ENFORCE(cudnnSetRNNDescriptor(
+    CUDNN_ENFORCE(cudnnSetRNNDescriptor_v6(
         cudnn_wrapper_.inline_cudnn_handle(),
         rnnDesc_,
         hiddenSize,
