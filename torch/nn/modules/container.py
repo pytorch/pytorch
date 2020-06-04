@@ -5,7 +5,6 @@ from itertools import islice
 import operator
 
 import torch
-from torch import Tensor
 from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 

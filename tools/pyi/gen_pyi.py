@@ -1,7 +1,6 @@
 from __future__ import print_function
 import os
 import collections
-import glob
 import yaml
 import re
 import argparse

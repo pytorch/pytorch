@@ -1401,7 +1401,8 @@ class TestQuantizedOps(TestCase):
                         mode=mode, align_corners=align_corners)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+                                       msg="{} results are off: qX_hat={} X_ref={}"
+                                           .format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1455,7 +1456,8 @@ class TestQuantizedOps(TestCase):
                         mode=mode, align_corners=align_corners)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+                                       msg="{} results are off: qX_hat={}, X_ref={}"
+                                           .format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),

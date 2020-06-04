@@ -123,33 +123,43 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("layer_norm", [](
     Tensor input,
     std::vector<int64_t> normalized_shape,  // because IntArrayRef doesn't work
-    Tensor weight /* optional */,
-    Tensor bias /* optional */,
+    c10::optional<Tensor> weight,
+    c10::optional<Tensor> bias /* optional */,
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-      return quantized_layer_norm_impl(input, normalized_shape, weight, bias, eps, output_scale, output_zero_point);
+      return quantized_layer_norm_impl(
+          input, normalized_shape,
+          weight.has_value() ? *weight : Tensor(),
+          bias.has_value() ? *bias : Tensor(),
+          eps, output_scale, output_zero_point);
   });
   m.impl("group_norm", [](
       Tensor qx,
       int64_t num_groups,
-      Tensor weight,
-      Tensor bias,
+      c10::optional<Tensor> weight,
+      c10::optional<Tensor> bias,
       double eps,
       double output_scale,
       int64_t output_zero_point) {
     return quantized_group_norm_impl(
-        qx, num_groups, weight, bias, eps, output_scale, output_zero_point);
+        qx, num_groups,
+        weight.has_value() ? *weight : Tensor(),
+        bias.has_value() ? *bias : Tensor(),
+        eps, output_scale, output_zero_point);
   });
   m.impl("instance_norm", [](
       Tensor qx,
-      Tensor weight,
-      Tensor bias,
+      c10::optional<Tensor> weight,
+      c10::optional<Tensor> bias,
       double eps,
       double output_scale,
       int64_t output_zero_point) {
     return quantized_instance_norm_impl(
-        qx, weight, bias, eps, output_scale, output_zero_point);
+        qx,
+        weight.has_value() ? *weight : Tensor(),
+        bias.has_value() ? *bias : Tensor(),
+        eps, output_scale, output_zero_point);
   });
 }
 
