@@ -51,6 +51,10 @@ struct TypeHash {
 struct Fusion;
 struct TensorView;
 
+namespace cuda {
+struct CudaKernel;
+}
+
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
 struct TORCH_CUDA_API FusionGuard {
@@ -59,6 +63,7 @@ struct TORCH_CUDA_API FusionGuard {
 
   // Set the active fusion so it can be manipulated.
   FusionGuard(Fusion* fusion);
+  FusionGuard(const cuda::CudaKernel* cuda_kernel);
 
   ~FusionGuard();
 

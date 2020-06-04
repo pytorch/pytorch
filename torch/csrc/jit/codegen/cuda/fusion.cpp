@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 
 namespace torch {
 namespace jit {
@@ -11,6 +12,11 @@ static thread_local Fusion* ACTIVE_FUSION = nullptr;
 FusionGuard::FusionGuard(Fusion* fusion) {
   prev_fusion = ACTIVE_FUSION;
   ACTIVE_FUSION = fusion;
+}
+
+FusionGuard::FusionGuard(const cuda::CudaKernel* cuda_kernel) {
+  prev_fusion = ACTIVE_FUSION;
+  ACTIVE_FUSION = cuda_kernel->fusion_.get();
 }
 
 FusionGuard::~FusionGuard() {

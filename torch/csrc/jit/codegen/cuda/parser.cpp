@@ -39,11 +39,8 @@ class IrParser {
   static const int unroll_factor = 4;
 
  public:
-  IrParser(
-      std::shared_ptr<Graph> graph,
-      Fusion& fusion,
-      CudaKernel* cuda_kernel)
-      : graph_(std::move(graph)), fusion_(&fusion), cuda_kernel_(cuda_kernel) {
+  IrParser(std::shared_ptr<Graph> graph, CudaKernel* cuda_kernel)
+      : graph_(std::move(graph)), cuda_kernel_(cuda_kernel) {
     if (init_registry_) {
       registerJitOperator();
       init_registry_ = false;
@@ -52,7 +49,7 @@ class IrParser {
 
   // Fuses pointwise ops with loop unrolling (factor = 4).
   void parse() {
-    FusionGuard fg(fusion_);
+    FusionGuard fg(cuda_kernel_->fusion_.get());
     auto block = graph_->block();
 
     // in case of broadcast, we don't support explicit broadcast, so we need to
@@ -67,7 +64,7 @@ class IrParser {
     // we only explicitly register inputs in the graph.
     for (auto val : block->inputs()) {
       TORCH_CHECK(registerValue(val, broadcast_dim));
-      fusion_->addInput(value_map_[val->unique()]);
+      cuda_kernel_->fusion_->addInput(value_map_[val->unique()]);
 
       auto opt_dtype = value_map_[val->unique()]->getDataType();
       // computation promotion, we cast fp16 inputs to fp32 and use promoted
@@ -103,7 +100,7 @@ class IrParser {
         out = static_cast<TensorView*>(castOp(DataType::Half, out));
       }
 
-      fusion_->addOutput(out);
+      cuda_kernel_->fusion_->addOutput(out);
 
       // Merge all dimensions because we're only supporting pointwise
       while (out->nDims() > 1)
@@ -120,11 +117,11 @@ class IrParser {
 
     // Run through outputs, grab all inputs of outputs
     // squeeze with computeAt to set overall structure.
-    for (auto output : fusion_->outputs()) {
+    for (auto output : cuda_kernel_->fusion_->outputs()) {
       if (output->getValType() != ValType::TensorView)
         continue;
       TensorView* out_tv = static_cast<TensorView*>(output);
-      for (Val* inp : fusion_->inputsOf(output)) {
+      for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
         if (inp->getValType().value() == ValType::TensorView)
           static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
       }
@@ -132,7 +129,7 @@ class IrParser {
     }
 
     // Run through intermediates, unroll, and bind their axes
-    for (auto val : fusion_->vals()) {
+    for (auto val : cuda_kernel_->fusion_->vals()) {
       if (val->getValType().value() != ValType::TensorView)
         continue;
       TensorView* tv = static_cast<TensorView*>(val);
@@ -539,7 +536,6 @@ class IrParser {
   }
 
   std::shared_ptr<Graph> graph_;
-  Fusion* fusion_;
   CudaKernel* cuda_kernel_;
 
   // maps from JitValue::unique() to fusion Val;
@@ -564,11 +560,8 @@ bool isNodeParsible(const Node* const node) {
   return IrParser::canParseNode(node);
 }
 
-void parseJitIR(
-    std::shared_ptr<Graph>& graph,
-    Fusion& fusion,
-    CudaKernel* cuda_kernel) {
-  IrParser parser(graph, fusion, cuda_kernel);
+void parseJitIR(std::shared_ptr<Graph>& graph, CudaKernel* cuda_kernel) {
+  IrParser parser(graph, cuda_kernel);
   parser.parse();
 }
 
