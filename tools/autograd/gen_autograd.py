@@ -210,8 +210,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
 
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
-    gen_variable_factories(
-        out, aten_decls, template_path, disable_autograd=disable_autograd)
+    gen_variable_factories(out, aten_decls, template_path)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):
