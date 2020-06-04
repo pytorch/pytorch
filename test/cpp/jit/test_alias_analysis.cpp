@@ -377,17 +377,20 @@ void testAliasAnalysis() {
     AT_ASSERT(aliasDb.moveBeforeTopologicallyValid(print2, print1));
     AT_ASSERT(aliasDb.moveAfterTopologicallyValid(print1, print2));
 
-    auto non_side_effectful = graph->insertNode(graph->create(prim::MakeTestTensor, {}, 1));
+    auto non_side_effectful =
+        graph->insertNode(graph->create(prim::MakeTestTensor, {}, 1));
     AliasDb aliasDb2(graph);
 
     // test moving with a side effectful node between
-    AT_ASSERT(!aliasDb2.moveAfterTopologicallyValid(non_side_effectful, print1));
-    AT_ASSERT(!aliasDb2.moveBeforeTopologicallyValid(non_side_effectful, print1));
-    AT_ASSERT(!aliasDb2.moveAfterTopologicallyValid(print1, non_side_effectful));
-    AT_ASSERT(!aliasDb2.moveBeforeTopologicallyValid(print1, non_side_effectful));
-
+    AT_ASSERT(
+        !aliasDb2.moveAfterTopologicallyValid(non_side_effectful, print1));
+    AT_ASSERT(
+        !aliasDb2.moveBeforeTopologicallyValid(non_side_effectful, print1));
+    AT_ASSERT(
+        !aliasDb2.moveAfterTopologicallyValid(print1, non_side_effectful));
+    AT_ASSERT(
+        !aliasDb2.moveBeforeTopologicallyValid(print1, non_side_effectful));
   }
-
 
   {
     // Test moves across inner blocks

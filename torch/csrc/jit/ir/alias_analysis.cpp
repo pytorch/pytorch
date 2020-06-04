@@ -1349,15 +1349,17 @@ bool AliasDb::tryMove(
 
   auto curNode = toMove->next_in_graph[direction];
 
-  bool toMoveIsOnMoveSide = (moveSide == MoveSide::BEFORE && toMove->isBefore(movePoint)) ||
-    (moveSide == MoveSide::AFTER && toMove->isAfter(movePoint));
+  bool toMoveIsOnMoveSide =
+      (moveSide == MoveSide::BEFORE && toMove->isBefore(movePoint)) ||
+      (moveSide == MoveSide::AFTER && toMove->isAfter(movePoint));
 
   if (toMoveIsOnMoveSide && curNode == movePoint) {
     return true;
   }
 
   // it is never valid to move reorder a node with side effects
-  if (toMove->hasSideEffects() || (!toMoveIsOnMoveSide && movePoint->hasSideEffects())) {
+  if (toMove->hasSideEffects() ||
+      (!toMoveIsOnMoveSide && movePoint->hasSideEffects())) {
     return false;
   }
 
@@ -1374,8 +1376,6 @@ bool AliasDb::tryMove(
     }
     curNode = curNode->next_in_graph[direction];
   }
-
-
 
   // 2. Decide whether we can move it all to `movePoint`.
 
