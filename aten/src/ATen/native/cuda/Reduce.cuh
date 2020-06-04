@@ -22,6 +22,16 @@
 
 namespace at { namespace native {
 
+#ifdef __HIP_PLATFORM_HCC__
+template<typename T, int size>
+struct ROCm_Bug {
+  char bytes[sizeof(T) * size];
+  __device__ T& operator[](int i) {
+    return *reinterpret_cast<T *>(&bytes[i * sizeof(T)]);
+  }
+};
+#endif
+
 using at::detail::Array;
 
 static inline int64_t div_up(int64_t a, int64_t b) {
@@ -429,15 +439,23 @@ struct ReduceOp {
     const index_t stride = config.step_input;
 
     // Multiple accumulators to remove dependency between unrolled loops.
+#ifndef __HIP_PLATFORM_HCC__
     arg_t value_list[vec_size];
+#else
+    ROCm_Bug<arg_t, vec_size> value_list;
+#endif
     value_list[0] = value;
     #pragma unroll
     for (int i = 1; i < vec_size; i++) {
       value_list[i] = ident;
     }
 
+#ifndef __HIP_PLATFORM_HCC__
     scalar_t values[vec_size];
-    load_t *values_vector = reinterpret_cast<load_t*>(values);
+#else
+    ROCm_Bug<scalar_t, vec_size> values;
+#endif
+    load_t *values_vector = reinterpret_cast<load_t*>(&values[0]);
 
     while (idx * vec_size + vec_size - 1 < end) {
       *values_vector = reinterpret_cast<const load_t*>(data)[idx];
@@ -472,13 +490,23 @@ struct ReduceOp {
     const index_t stride = config.step_input;
 
     // Multiple accumulators to remove dependency between unrolled loops.
+
+#ifndef __HIP_PLATFORM_HCC__
     arg_t value_list[vt0];
+#else
+    ROCm_Bug<arg_t, vt0> value_list;
+#endif
+
     #pragma unroll
     for (int i = 0; i < vt0; i++) {
       value_list[i] = ident;
     }
 
+#ifndef __HIP_PLATFORM_HCC__
     scalar_t values[vt0];
+#else
+    ROCm_Bug<scalar_t, vt0> values;
+#endif
 
     while (idx + (vt0 - 1) * stride < end) {
       #pragma unroll
@@ -632,6 +660,19 @@ struct ReduceOp {
     if (noutputs >= 2) {
       auto res1 = (out_scalar_t *) ((char *) dst[1] + base_offset);
       *res1 = thrust::get<1>(x);
+    }
+  }
+  template<class T1, class T2>
+  C10_DEVICE void set_results(const thrust::pair<T1, T2> x, const index_t base_offset) const {
+    if (noutputs >= 1) {
+      auto res0 = (T1*)((char*)dst[0] + base_offset);
+      *res0 = x.first;
+    }
+    if (noutputs >= 2) {
+      // base offset is computed assuming element size being sizeof(T1), so we need to make a
+      // correction to obtain the correct base offset
+      auto res1 = (T2*) ((char *) dst[1] + base_offset / sizeof(T1) * sizeof(T2));
+      *res1 = x.second;
     }
   }
 

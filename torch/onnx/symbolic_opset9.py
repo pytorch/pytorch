@@ -274,6 +274,7 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
             return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
     return symbolic
 
+
 def overload_by_arg_count(fn):
     @wraps(fn)
     def wrapper(g, *args):
@@ -285,6 +286,7 @@ def overload_by_arg_count(fn):
                 return overload(g, *args)
         raise NotImplementedError("Unknown aten::{} signature".format(fn.__name__))
     return wrapper
+
 
 def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
     symbolic = _reduce_op_symbolic(onnx_op, allow_multi_dim_support=allow_multi_dim_support)
@@ -307,29 +309,40 @@ def _reduce_with_dtype(onnx_op, name, allow_multi_dim_support=True):
         return reduce_nodim, reduce_dim
     return reduce
 
+
 sum = _reduce_with_dtype('ReduceSum', 'sum')
 mean = _reduce_with_dtype('ReduceMean', 'mean')
 prod = _reduce_with_dtype('ReduceProd', 'prod', allow_multi_dim_support=False)  # torch.prod does not support multidimensional 'dim'
 
+
 @parse_args('v', 'i', 'none')
 def cumsum(g, input, dim, dtype):
-    if dtype.node().kind() != 'prim::Constant':
-        return _unimplemented(name, "dtype")
-    return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        if dtype.node().kind() != 'prim::Constant':
+            return _unimplemented(name, "dtype")
+        return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
+    else:
+        sym_help._onnx_opset_unsupported('cumsum', 9, 11)
 
 
 def _sample_dirichlet(g, self, generator):
-    if not sym_help._is_none(generator):
-        return _unimplemented('_sample_dirichlet',
-                              'We are not able to export generator')
-    return g.op("ATen", self, operator_s="_sample_dirichlet")
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        if not sym_help._is_none(generator):
+            return _unimplemented('_sample_dirichlet',
+                                  'We are not able to export generator')
+        return g.op("ATen", self, operator_s="_sample_dirichlet")
+    else:
+        return sym_help._onnx_unsupported('_sample_dirichlet')
 
 
 def _standard_gamma(g, self, generator):
-    if not sym_help._is_none(generator):
-        return _unimplemented('_standard_gamma',
-                              'We are not able to export generator')
-    return g.op("ATen", self, operator_s="_standard_gamma")
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        if not sym_help._is_none(generator):
+            return _unimplemented('_standard_gamma',
+                                  'We are not able to export generator')
+        return g.op("ATen", self, operator_s="_standard_gamma")
+    else:
+        return sym_help._onnx_unsupported('_standard_gamma')
 
 
 def t(g, self):
@@ -372,18 +385,20 @@ def embedding_bag(g,
                   per_sample_weights,
                   include_last_offset):
     if not sym_help._is_none(per_sample_weights):
-        raise RuntimeError('Unsupported: ONNX export of embedding_bag '
-                           'with per_sample_weights')
-    return g.op("ATen",
-                embedding_matrix,
-                indices,
-                offsets,
-                operator_s="embedding_bag",
-                outputs=4,
-                scale_grad_by_freq_i=scale_grad_by_freq,
-                mode_i=mode,
-                sparse_i=sparse,
-                include_last_offset_i=include_last_offset)
+        return sym_help._onnx_unsupported('embedding_bag  with per_sample_weights')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen",
+                    embedding_matrix,
+                    indices,
+                    offsets,
+                    operator_s="embedding_bag",
+                    outputs=4,
+                    scale_grad_by_freq_i=scale_grad_by_freq,
+                    mode_i=mode,
+                    sparse_i=sparse,
+                    include_last_offset_i=include_last_offset)
+    else:
+        return sym_help._onnx_unsupported('embedding_bag')
 
 
 def size(g, self, dim=None):
@@ -410,7 +425,11 @@ def transpose(g, self, dim0, dim1):
     else:
         # if we don't have dim information we cannot
         # output a permute so use ATen instead
-        return g.op("ATen", self, operator_s="transpose", dim0_i=dim0, dim1_i=dim1)
+        if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            return g.op("ATen", self, operator_s="transpose", dim0_i=dim0, dim1_i=dim1)
+        else:
+            raise RuntimeError('Unsupported: ONNX export of transpose for tensor '
+                               'of unknown rank.')
 
 
 @parse_args('v', 'is')
@@ -584,19 +603,35 @@ def softmax(g, input, dim, dtype=None):
     #           [0.167, 0.167, 0.167]]
     # So only when dim and axis both equal to ndim - 1 (the last dimension),
     # their semantics are equivalent.
-    # So use softmax when dim and axis both equal to ndim - 1
-    # otherwise compute softmax using a subgraph with other operators
+    # So use softmax when dim and axis both equal to ndim - 1,
+    # otherwise transpose the input to put the vectors to be normalized to the last dimension.
+    # When input rank is not known at export time we compute softmax using a subgraph
+    # with other operators
     input_dim = input.type().dim()
-    if input_dim:
+    if input_dim is not None:
         # TODO: remove this as onnx opset 11 spec allows negative axes
         if dim < 0:
             dim = input_dim + dim
-        if input_dim == dim + 1:
-            softmax = g.op('Softmax', input, axis_i=dim)
-            if dtype and dtype.node().kind() != 'prim::Constant':
-                parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-                softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
-            return softmax
+
+        is_transpose_required = (input_dim != dim + 1)
+
+        if is_transpose_required:
+            axes = list(range(input_dim))
+            axes[dim], axes[-1] = axes[-1], axes[dim]
+            input = g.op("Transpose", input, perm_i=axes)
+            dim = input_dim - 1
+
+        softmax = g.op('Softmax', input, axis_i=dim)
+        if dtype and dtype.node().kind() != 'prim::Constant':
+            parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
+            softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+
+        if is_transpose_required:
+            softmax = g.op("Transpose", softmax, perm_i=axes)
+        return softmax
+
+    # Apply max normalization.
+    input = g.op('Sub', input, g.op('ReduceMax', input, axes_i=[dim], keepdims_i=1))
 
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
@@ -1173,9 +1208,12 @@ def index_select(g, self, dim, index):
 
 
 def index_put(g, self, indices_list_value, values, accumulate):
-    indices_list = sym_help._unpack_list(indices_list_value)
-    args = [self] + indices_list + [values, accumulate]
-    return g.op("ATen", *args, operator_s='index_put')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        indices_list = sym_help._unpack_list(indices_list_value)
+        args = [self] + indices_list + [values, accumulate]
+        return g.op("ATen", *args, operator_s='index_put')
+    else:
+        sym_help._onnx_opset_unsupported('index_put', 9, 11)
 
 
 def index_fill(g, self, dim, index, value):
@@ -1201,18 +1239,24 @@ def index_copy(g, self, dim, index, source):
 def type_as(g, self, other):
     if self.isCompleteTensor() and other.isCompleteTensor() and self.type().scalarType() == other.type().scalarType():
         return self
-
     if other.isCompleteTensor():
         other_type_name = other.type().scalarType()
         return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other_type_name])
     else:
-        # We don't know the type of other, bail by emitting ATen
-        return g.op("ATen", self, other, operator_s="type_as")
+        if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            # We don't know the type of other, bail by emitting ATen
+            return g.op("ATen", self, other, operator_s="type_as")
+        else:
+            raise RuntimeError('Unsupported: ONNX export of type_as for tensor '
+                               'of unknown dtype.')
 
 
 @parse_args('v', 'v', 'i', 'f')
 def cosine_similarity(g, x1, x2, dim, eps):
-    return g.op("ATen", x1, x2, dim_i=dim, eps_f=eps, operator_s="cosine_similarity")
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", x1, x2, dim_i=dim, eps_f=eps, operator_s="cosine_similarity")
+    else:
+        return sym_help._onnx_unsupported('cosine_similarity')
 
 
 # ignore clone operators that are inserted by PyTorch autograd
@@ -1221,10 +1265,6 @@ def clone(g, input, unused_memory_format):
 
 
 def abs(g, self):
-    return g.op("Abs", self)
-
-
-def absolute(g, self):
     return g.op("Abs", self)
 
 
@@ -1237,7 +1277,16 @@ def log1p(g, self):
 
 
 def pow(g, self, exponent):
-    return g.op("Pow", self, exponent)
+    f_dtype = self_dtype = self.type().scalarType()
+    if not sym_help._is_fp(self):
+        f_dtype = 'Float'
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[f_dtype])
+    if not sym_help._is_fp(exponent):
+        exponent = g.op("Cast", exponent, to_i=sym_help.cast_pytorch_to_onnx[f_dtype])
+    pow = g.op("Pow", self, exponent)
+    if self_dtype and self_dtype != f_dtype:
+        pow = g.op("Cast", pow, to_i=sym_help.cast_pytorch_to_onnx[self_dtype])
+    return pow
 
 
 def clamp(g, self, min, max):
@@ -1347,20 +1396,29 @@ def norm(g, self, p, dim, keepdim):
 
 @parse_args('v', 'v', 'v', 'i')
 def conv_tbc(g, input, weight, bias, pad):
-    return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
+    else:
+        return sym_help._onnx_unsupported('conv_tbc')
 
 
 @parse_args('v', 'i', 'i')
 def _unique(g, input, sorted, return_inverse):
-    return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
-                return_inverse_i=return_inverse, outputs=2)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
+                    return_inverse_i=return_inverse, outputs=2)
+    else:
+        return sym_help._onnx_unsupported('_unique')
 
 
 @parse_args('v', 'i', 'i', 'i')
 def _unique2(g, input, sorted, return_inverse, return_counts):
-    return g.op("ATen", input, operator_s="_unique2", sorted_i=sorted,
-                return_inverse_i=return_inverse, return_counts_i=return_counts,
-                outputs=3)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, operator_s="_unique2", sorted_i=sorted,
+                    return_inverse_i=return_inverse, return_counts_i=return_counts,
+                    outputs=3)
+    else:
+        sym_help._onnx_opset_unsupported('_unique2', 9, 11)
 
 
 for k, v in sym_help.cast_pytorch_to_onnx.items():
@@ -2234,6 +2292,7 @@ def remainder(g, input, other):
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
 
+
 def gelu(g, self):
     _sqrt2 = 1.4142135623730951
     erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
@@ -2296,8 +2355,12 @@ def _weight_norm(g, weight_v, weight_g, dim):
         norm_v = norm(g, weight_v, 2, axes, 1)
         div = g.op("Div", weight_v, norm_v)
         return g.op("Mul", div, weight_g)
-    else:
+    elif sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")
+    else:
+        raise RuntimeError('Unsupported: ONNX export of _weight_norm for tensor '
+                           'of unknown rank.')
+
 
 def dim(g, self):
     '''Implement the dim functionality available for a pytorch tensor in ONNX'''
@@ -2305,8 +2368,10 @@ def dim(g, self):
     shape = g.op('Shape', self)
     return g.op('Size', shape)
 
+
 def __getitem_(g, self, i):
     return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
+
 
 def take(g, self, index):
     self_flattened = g.op('Reshape', self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))

@@ -56,9 +56,16 @@ class Lock {
 
   Lock(const Lock& that) = delete;
 
+  Lock& operator=(Lock&& other) noexcept {
+    if (this != &other) {
+      fd_ = other.fd_;
+      other.fd_ = -1;
+    }
+    return *this;
+  }
+
   Lock(Lock&& other) noexcept {
-    fd_ = other.fd_;
-    other.fd_ = -1;
+    *this = std::move(other);
   }
 
   void unlock() {
@@ -69,7 +76,7 @@ class Lock {
   }
 
  protected:
-  int fd_;
+  int fd_{-1};
 
   void flock(int operation) {
     auto rv = syscall(std::bind(::flock, fd_, operation));
@@ -291,9 +298,9 @@ int64_t FileStore::addHelper(const std::string& key, int64_t i) {
   return ti;
 }
 
-int64_t FileStore::add(const std::string& key, int64_t i) {
+int64_t FileStore::add(const std::string& key, int64_t value) {
   std::string regKey = regularPrefix_ + key;
-  return addHelper(regKey, i);
+  return addHelper(regKey, value);
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {

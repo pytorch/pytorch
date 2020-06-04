@@ -1,22 +1,12 @@
-import contextlib
 import numpy as np
 import torch
 import torch.nn.functional as F
 import unittest
 
-from torch.testing._internal.common_utils import suppress_warnings
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
 
 from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
-
-@contextlib.contextmanager
-def num_profiled_runs(num_runs):
-    old_num_runs = torch._C._jit_set_num_profiled_runs(num_runs)
-    try:
-        yield
-    finally:
-        torch._C._jit_set_num_profiled_runs(old_num_runs)
-
 
 class BaseTestClass(unittest.TestCase):
     def setUp(self):
@@ -522,6 +512,42 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(
             traced(a, b), np.maximum(np.minimum(a.numpy(), b.numpy()), [4.0])
         )
+
+
+    def test_min_max_reduction(self):
+        def test(x):
+            return torch.min(x) + torch.max(x)
+
+        traced = torch.jit.trace(test, (torch.zeros(1024)))
+        a = 8.0 * torch.rand(1024)
+        np.testing.assert_allclose(traced(a), np.amin(a.numpy()) + np.amax(a.numpy()))
+
+
+    def test_min_max_reduction2(self):
+        def test(x):
+            return x.min() + x.max()
+
+        traced = torch.jit.trace(test, (torch.zeros(1024)))
+        a = 8.0 * torch.rand(1024)
+        np.testing.assert_allclose(traced(a), np.amin(a.numpy()) + np.amax(a.numpy()))
+
+
+    def test_min_max_reduction_dim1(self):
+        def test(x):
+            return torch.min(x, 1)[0] + torch.max(x, 1)[0]
+
+        traced = torch.jit.trace(test, (torch.zeros(16, 16)))
+        a = 8.0 * torch.rand(16, 16)
+        np.testing.assert_allclose(traced(a), np.amin(a.numpy(), axis=1) + np.amax(a.numpy(), axis=1))
+
+
+    def test_min_max_reduction_dim1_2(self):
+        def test(x):
+            return torch.min(x, 1)
+
+        traced = torch.jit.trace(test, (torch.zeros(16, 16)))
+        a = 8.0 * torch.rand(16, 16)
+        np.testing.assert_allclose(traced(a)[0], np.amin(a.numpy(), axis=1))
 
 
     def test_clamp(self):

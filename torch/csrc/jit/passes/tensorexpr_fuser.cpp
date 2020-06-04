@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -53,6 +53,28 @@ value_list sortReverseTopological(
   return result;
 }
 
+bool allShapesAreKnown(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return true;
+  }
+  return v->isCompleteTensor();
+}
+
+bool allShapesAreKnown(Node* node) {
+  // TODO: Relax the checks to support dynamic shapes
+  for (torch::jit::Value* output : node->outputs()) {
+    if (!allShapesAreKnown(output)) {
+      return false;
+    }
+  }
+  for (torch::jit::Value* input : node->inputs()) {
+    if (!allShapesAreKnown(input)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool isSupported(Node* node) {
   // TODO:
   switch (node->kind()) {
@@ -68,8 +90,6 @@ bool isSupported(Node* node) {
     case aten::gt:
     case aten::le:
     case aten::lt:
-    case aten::min:
-    case aten::max:
     case aten::pow:
     case aten::clamp:
     case aten::lerp:
@@ -112,7 +132,8 @@ bool isSupported(Node* node) {
     case aten::slice:
     case aten::unsqueeze:
     case aten::frac:
-    case aten::rand_like:
+    // TODO: uncomment once we can handle rand+broadcasts
+    // case aten::rand_like:
     case aten::_sigmoid_backward:
     case aten::_tanh_backward:
     case aten::__and__:
@@ -122,6 +143,17 @@ bool isSupported(Node* node) {
     case aten::__rshift__:
     case aten::where:
       return true;
+    // Operators that can be both elementwise or reductions:
+    case aten::min:
+    case aten::max:
+      if (node->inputs().size() != 2) {
+        return false;
+      }
+      if (!node->inputs()[0]->type()->cast<TensorType>() ||
+          !node->inputs()[1]->type()->cast<TensorType>()) {
+        return false;
+      }
+      return true;
     default:
       return false;
   }
@@ -129,10 +161,27 @@ bool isSupported(Node* node) {
 
 bool canHandle(Node* node, AliasDb& aliasDb) {
   if (node->kind() == prim::Constant) {
+    if (node->output()->type()->cast<TensorType>()) {
+      // TODO: add support for tensor constants.
+      return false;
+    }
     return true;
   }
   if (node->kind() == prim::Loop) {
     return false; // TODO
+  }
+  if (!allShapesAreKnown(node)) {
+    return false;
+  }
+
+  // Don't include nodes whose inputs are tensor constants - we cannot handle
+  // them at the moment.
+  // TODO: actually support tensor constants and remove this.
+  for (torch::jit::Value* input : node->inputs()) {
+    if (input->node()->kind() == prim::Constant &&
+        input->type()->cast<TensorType>()) {
+      return false;
+    }
   }
   return isSupported(node);
 }
@@ -159,7 +208,7 @@ bool canMerge(Node* consumer, Node* producer, AliasDb& aliasDb) {
        consumer->kind() == getTensorExprSymbol()));
 
   // Alias checks
-  REQ(aliasDb.couldMoveAfterTopologically(consumer, producer));
+  REQ(aliasDb.couldMoveBeforeTopologically(producer, consumer));
 
   // Ops that return aliases can only be folded if this is the only use.
   if (producer->kind() == aten::slice || producer->kind() == aten::unsqueeze ||
@@ -225,17 +274,17 @@ c10::optional<Node*> tryMerge(
   if (producer->kind() == aten::cat) {
     Node* listconstruct = producer->inputs()[0]->node();
 
-    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
 
-    aliasDb.moveAfterTopologicallyValid(consumer, listconstruct);
+    aliasDb.moveBeforeTopologicallyValid(listconstruct, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(listconstruct), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(listconstruct, consumer);
   } else {
-    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
@@ -265,10 +314,7 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   return {++(++iter), false};
 }
 
-void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
-  if (!tensorExprFuserEnabled()) {
-    return;
-  }
+void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
@@ -326,6 +372,11 @@ Operation createTensorExprOp(const Node* node) {
       std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
   return [kernel](Stack& stack) {
     RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
+    if (!tensorexpr::fallbackAllowed()) {
+      kernel->run(stack);
+      return 0;
+    }
+
     try {
       kernel->run(stack);
     } catch (const std::runtime_error& e) {

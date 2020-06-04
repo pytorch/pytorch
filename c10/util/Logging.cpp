@@ -44,7 +44,7 @@ void ThrowEnforceNotMet(
     const void* caller) {
   c10::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
   if (FLAGS_caffe2_use_fatal_for_enforce) {
-    LOG(FATAL) << e.msg_stack()[0];
+    LOG(FATAL) << e.msg();
   }
   throw e;
 }
@@ -63,8 +63,8 @@ void ThrowEnforceFiniteNotMet(
 
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
-Error::Error(SourceLocation source_location, const std::string& msg)
-    : Error(msg, str(" (", source_location, ")\n", (*GetFetchStackTrace())())) {
+Error::Error(SourceLocation source_location, std::string msg)
+    : Error(std::move(msg), str("Exception raised from ", source_location, " (most recent call first):\n", (*GetFetchStackTrace())())) {
 }
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;

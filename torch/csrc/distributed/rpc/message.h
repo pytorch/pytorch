@@ -93,6 +93,7 @@ class TORCH_API Message final {
   std::vector<char>&& movePayload() &&;
   std::vector<torch::Tensor>&& moveTensors() &&;
 
+  std::vector<char>& payload();
   const std::vector<char>& payload() const;
   std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
@@ -128,7 +129,10 @@ TORCH_API Message createExceptionResponse(const std::exception& e, int64_t id);
 TORCH_API Message
 createExceptionResponse(const std::string& exceptionStr, int64_t id);
 
-typedef torch::utils::Future<Message> FutureMessage;
+// FutureMessage is an internal type used in the communication layer. All
+// user-facing surface APIs should use JitFuture instead.
+using FutureMessage = torch::utils::Future<Message>;
+using JitFuture = c10::ivalue::Future;
 
 } // namespace rpc
 } // namespace distributed

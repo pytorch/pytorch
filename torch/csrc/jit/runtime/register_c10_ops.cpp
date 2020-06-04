@@ -1,6 +1,6 @@
 #include <ATen/core/ATenOpList.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -147,6 +147,9 @@ Operator createOperatorFromC10_withTracingHandledHere(
             throw std::runtime_error(
                 "unsupported ouptut list type: " + elem_type->str());
           }
+        } else if (type->kind() == TypeKind::ClassType) {
+          AT_ASSERT(iter->isObject());
+          tracer::addOutput(node, iter->toObject());
         } else {
           throw std::runtime_error("unsupported output type: " + type->str());
         }

@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/api/module.h>
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -163,17 +163,24 @@ void Module::clone_method(const Module& orig, const std::string& name) {
   return clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
+Module Module::copy() const {
+  return Module(_ivalue()->copy());
+}
+
 Module Module::deepcopy() const {
   return Module(_ivalue()->deepcopy());
 }
 
-Module Module::clone() const {
+Module Module::clone(bool inplace) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  return clone_impl(type_remap);
+  IValue::HashAliasedIValueMap memo;
+  return clone_impl(type_remap, inplace, memo);
 }
 
 Module Module::clone_impl(
-    std::unordered_map<TypePtr, TypePtr>& type_remap) const {
+    std::unordered_map<TypePtr, TypePtr>& type_remap,
+    bool inplace,
+    IValue::HashAliasedIValueMap memo) const {
   // Create a new _ivalue in the same compilation unit.
   // Since now we have shared ClassType, we need to preserve the shared
   // ClassType during cloning, so we first need to check if the type
@@ -198,7 +205,7 @@ Module Module::clone_impl(
     IValue s = _ivalue()->getSlot(i);
     if (type()->getAttribute(i)->is_module()) {
       const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_impl(type_remap);
+      Module cloned = orig.clone_impl(type_remap, inplace, memo);
       type_remap[orig.type()] = cloned.type();
       r.register_module(type()->getAttributeName(i), cloned);
     } else {
@@ -208,8 +215,10 @@ Module Module::clone_impl(
       r.register_attribute(
           type()->getAttributeName(i),
           type()->getAttribute(i),
-          s,
-          type()->is_parameter(i));
+          // we'll deepcopy the IValue in non inplace option
+          inplace ? s : s.deepcopy(memo),
+          type()->is_parameter(i),
+          type()->is_buffer(i));
     }
   }
 
@@ -228,22 +237,7 @@ Module Module::clone_impl(
 }
 
 Module Module::clone_instance() const {
-  Module r(_ivalue()->compilation_unit(), type());
-
-  // Copy slots. If a slot is a module - recursively clone it.
-  size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
-    IValue s = _ivalue()->getSlot(i);
-    if (type()->getAttribute(i)->is_module()) {
-      const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_instance();
-      r._ivalue()->setAttr(type()->getAttributeName(i), cloned._ivalue());
-    } else {
-      r._ivalue()->setAttr(type()->getAttributeName(i), s);
-    }
-  }
-
-  return r;
+  return Module(_ivalue()->copy());
 }
 
 void Module::train(bool on) {
@@ -279,7 +273,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   }
   // Note: following Python, `__init__()` modifies its first parameter in-place
   // and returns nothing.
-  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
+  classType->getMethod("__init__").operator()(std::move(stackWithSelf));
 
   return obj;
 }

@@ -992,9 +992,9 @@ struct PythonPrintImpl {
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
           registerDependency(selfClass);
-          const auto method = selfClass->getMethod(node->s(attr::name));
+          const Function& method = selfClass->getMethod(node->s(attr::name));
           TORCH_INTERNAL_ASSERT(
-              method->qualname() ==
+              method.qualname() ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));
         } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
           registerDependency(selfInterface);
@@ -1229,11 +1229,15 @@ struct PythonPrintImpl {
       // attributes and parameters.
       if (is_module) {
         std::vector<std::string> params;
+        std::vector<std::string> buffers;
         // Populate the __parameters__ field. This tells the importer which
         // attributes are parameters.
         for (size_t i = 0; i < numAttrs; i++) {
           if (classType->is_parameter(i)) {
             params.push_back(classType->getAttributeName(i));
+          }
+          if (classType->is_buffer(i)) {
+            buffers.push_back(classType->getAttributeName(i));
           }
         }
         indent();
@@ -1242,6 +1246,15 @@ struct PythonPrintImpl {
           body_ << "\"" << param << "\", ";
         }
         body_ << "]\n";
+#ifndef FBCODE_CAFFE2
+        // Note: Forward compat gated. TODO: @voznesenskym to remove when ready.
+        indent();
+        body_ << "__buffers__ = [";
+        for (const auto& buffer : buffers) {
+          body_ << "\"" << buffer << "\", ";
+        }
+        body_ << "]\n";
+#endif
       }
 
       for (size_t i = 0; i < numAttrs; i++) {

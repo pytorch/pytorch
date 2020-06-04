@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
-#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -24,7 +24,6 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -776,12 +775,13 @@ void runNondiffOptimization(
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  // Fuse the dequant - op - quant patterns into quantized ops
-  QuantFusion(graph);
-
-  FuseGraph(graph, strict_fuser_check);
-
-  fuseTensorExprs(graph);
+  if (getProfilingMode()) {
+    if (tensorExprFuserEnabled()) {
+      FuseTensorExprs(graph);
+    }
+  } else {
+    FuseGraph(graph, strict_fuser_check);
+  }
 
   // Run custom post-fusion passes
   for (const auto& passPair : getCustomPostPasses()) {

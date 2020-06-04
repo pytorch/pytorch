@@ -12,6 +12,9 @@
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
 #endif
+#ifdef USE_VULKAN
+#include <ATen/native/vulkan/VulkanAten.h>
+#endif
 
 
 constexpr int MIOPEN_DIM_MAX = 5;
@@ -47,6 +50,7 @@ struct ConvParams {
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
   bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool use_vulkan(const at::Tensor& input, const at::Tensor& weight) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -256,7 +260,9 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-#ifdef C10_MOBILE
+// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
+// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
+#if defined(C10_MOBILE) && !defined(__APPLE__)
   if (!transposed) {
     return (input.size(1) == groups) &&
             xnnpack::use_convolution2d(
@@ -270,6 +276,20 @@ auto ConvParams::use_xnnpack(
   }
 #endif
   return false;
+}
+
+auto ConvParams::use_vulkan(
+        const at::Tensor &input, const at::Tensor& weight) const -> bool {
+#ifdef USE_VULKAN
+  if (!(input.is_vulkan() && input.scalar_type() == kFloat &&
+        !transposed && input.ndimension() == 4)) {
+    return false;
+  }
+  return (groups == 1) || (input.size(1) == groups && groups > 1 &&
+                           weight.size(0) % input.size(1) == 0);
+#else
+  return false;
+#endif
 }
 
 // We currently only have depthwise support for the case where groups ==
@@ -630,7 +650,7 @@ at::Tensor _convolution(
     auto weight_view = at::_unsafe_view(weight, -1);
     auto out = input*weight_view[0];
     if (bias.defined())
-      out = out + bias[0];
+      out.add_(bias[0]);
     return out.view(o);
   }
 
@@ -660,13 +680,19 @@ at::Tensor _convolution(
             input.contiguous(cudnn_memory_format), weight,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
         if (bias.defined()) {
-          output = output + reshape_bias(input.dim(), bias);
+          output.add_(reshape_bias(input.dim(), bias));
         }
 
       } else if (params.use_miopen(input, weight, bias.defined())){
         output = at::miopen_depthwise_convolution(
             input.contiguous(), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
+#ifdef USE_VULKAN
+      } else if (params.use_vulkan(input, weight)) {
+        output = at::native::vulkan_convolution(
+            input, weight, bias,
+            params.padding, params.stride, params.dilation, params.groups);
+#endif
       } else {
           output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
       }
@@ -683,14 +709,14 @@ at::Tensor _convolution(
           input.contiguous(cudnn_memory_format), weight,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
       if (bias.defined()) {
-        output = output + reshape_bias(input.dim(), bias);
+        output.add_(reshape_bias(input.dim(), bias));
       }
     } else {
       output = at::cudnn_convolution(
           input.contiguous(cudnn_memory_format), weight,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
       if (bias.defined()) {
-        output = output + reshape_bias(input.dim(), bias);
+        output.add_(reshape_bias(input.dim(), bias));
       }
     }
   } else if (params.use_miopen(input, weight, bias.defined())) {
@@ -727,7 +753,6 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
-#if !defined(C10_IOS)
   } else if (params.use_xnnpack(input, weight, bias)) {
     // Using prepacked conv is preferred, but XNNPACK is still the fastest
     // option for NHWC.
@@ -739,7 +764,6 @@ at::Tensor _convolution(
         params.stride,
         params.dilation,
         params.groups);
-#endif
   } else if (params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
     output = convolution_depthwise3x3_winograd_stub(
         input.device().type(),
@@ -761,6 +785,12 @@ at::Tensor _convolution(
           bias,
           params.stride,
           params.padding);
+#ifdef USE_VULKAN
+  } else if (params.use_vulkan(input, weight)) {
+    output = at::native::vulkan_convolution(
+        input, weight, bias,
+        params.padding, params.stride, params.dilation, params.groups);
+#endif
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(

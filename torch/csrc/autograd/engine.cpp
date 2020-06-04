@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/engine.h>
 
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -227,9 +228,9 @@ Engine::~Engine() {
     // Because CRT terminates DLL threads before calling
     // global object destructors
 #if !defined(_WIN32) || !defined(C10_BUILD_SHARED_LIBS)
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {
-      non_reentrant_device_thread_finish_.wait(lk);
+      non_reentrant_device_thread_condvar_.wait(lk);
     }
 #endif
   }
@@ -237,12 +238,22 @@ Engine::~Engine() {
 }
 
 void Engine::release_workers() {
-  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
   non_reentrant_device_thread_count_.store(0);
-  non_reentrant_device_thread_finish_.notify_one();
+  non_reentrant_device_thread_condvar_.notify_one();
 }
 
-auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) -> void {
+void Engine::increment_non_reentrant_thread_count() {
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+  non_reentrant_device_thread_count_.fetch_add(1);
+  non_reentrant_device_thread_condvar_.notify_one();
+}
+
+void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
+  if (should_increment) {
+    increment_non_reentrant_thread_count();
+  }
+
   at::init_num_threads();
   // thread_init should only be called by device threads other than CPU_DEVICE
   TORCH_INTERNAL_ASSERT(device != CPU_DEVICE);
@@ -274,9 +285,9 @@ auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
   thread_main(graph_task, /* reentrant_thread */ false);
   // Notify about shutdown
   {
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     non_reentrant_device_thread_count_.fetch_sub(1);
-    non_reentrant_device_thread_finish_.notify_one();
+    non_reentrant_device_thread_condvar_.notify_one();
   }
 }
 
@@ -587,45 +598,51 @@ void validate_outputs(
     if (!edge.is_valid()) continue;
 
     const auto& metadata = edge.function->input_metadata(edge.input_nr);
-    const auto& output = grads[i];
-    if (!output.defined()) {
+    auto& grad = grads[i];
+    if (!grad.defined()) {
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
       // AT_ERROR(format_error(ss.str()));
       continue;
     }
-    if (!grads[i].sizes().equals(metadata.shape())) {
-      if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
+    if (!grad.sizes().equals(metadata.shape())) {
+      if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - got ";
-        ss << grads[i].sizes() << " but expected shape compatible with ";
+        ss << grad.sizes() << " but expected shape compatible with ";
         ss << metadata.shape();
         AT_ERROR(format_error(ss.str()));
       }
-      grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
+      grad = at::sum_to(std::move(grad), metadata.shape());
     }
 
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
-    bool grad_is_complex = isComplexType(grads[i].scalar_type());
+    bool grad_is_complex = isComplexType(grad.scalar_type());
 
-    TORCH_CHECK(isFloatingType(grads[i].scalar_type()) || (input_is_complex == grad_is_complex));
-    if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
-      grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
+    TORCH_CHECK(isFloatingType(grad.scalar_type()) || (input_is_complex == grad_is_complex));
+    if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
+      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (!is_compatible_type(metadata.options(), grads[i].options())) {
+    if (grad.device() != metadata.device() &&
+        grad.dim() == 0) {
+      grad = grad.to(metadata.device());
+    }
+    if (!is_compatible_type(metadata.options(), grad.options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.options() << " but got " << grads[i].options();
+       ss << metadata.options() << " but got " << grad.options();
        AT_ERROR(format_error(ss.str()));
     }
-    auto output_device = output.device();
-    if (output_device != metadata.device()) {
+    auto grad_device = grad.device();
+    if (grad_device != metadata.device()) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected device ";
-      ss << metadata.device() << " but got " << output_device;
+      ss << metadata.device() << " but got " << grad_device;
       AT_ERROR(format_error(ss.str()));
     }
+    // We should not build graph for Tensors that are not differentiable
+    TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
   }
 }
 
@@ -1039,17 +1056,23 @@ auto Engine::start_device_threads() -> void {
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
-  non_reentrant_device_thread_count_.store(num_devices);
   for (int i = 0; i < num_devices; ++i) {
-    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i]);
+    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
     t.detach();
+  }
+  // Wait for the threads to start
+  {
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+    while(non_reentrant_device_thread_count_.load() != num_devices) {
+      non_reentrant_device_thread_condvar_.wait(lk);
+    }
   }
 }
 
 void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
-  // threads but not enough workers to get to the the new task that will be
+  // threads but not enough workers to get to the new task that will be
   // added
   bool create_thread = (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size());
   thread_pool_shared_->graphtasks_queue_.push(graph_task);

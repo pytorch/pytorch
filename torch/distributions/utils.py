@@ -20,15 +20,15 @@ def broadcast_all(*values):
         ValueError: if any of the values is not a `numbers.Number` or
             `torch.*Tensor` instance
     """
-    if not all(torch.is_tensor(v) or isinstance(v, Number) for v in values):
+    if not all(isinstance(v, torch.Tensor) or isinstance(v, Number) for v in values):
         raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
-    if not all(map(torch.is_tensor, values)):
+    if not all([isinstance(v, torch.Tensor) for v in values]):
         options = dict(dtype=torch.get_default_dtype())
         for value in values:
-            if torch.is_tensor(value):
+            if isinstance(value, torch.Tensor):
                 options = dict(dtype=value.dtype, device=value.device)
                 break
-        values = [v if torch.is_tensor(v) else torch.tensor(v, **options)
+        values = [v if isinstance(v, torch.Tensor) else torch.tensor(v, **options)
                   for v in values]
     return torch.broadcast_tensors(*values)
 

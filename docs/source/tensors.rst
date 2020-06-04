@@ -8,21 +8,33 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-Torch defines nine CPU tensor types and nine GPU tensor types:
+Torch defines 10 tensor types with CPU and GPU variants:
 
-========================   ===========================================   ===========================   ================================
+========================== ===========================================   ============================= ================================
 Data type                  dtype                                         CPU tensor                    GPU tensor
-========================   ===========================================   ===========================   ================================
+========================== ===========================================   ============================= ================================
 32-bit floating point      ``torch.float32`` or ``torch.float``          :class:`torch.FloatTensor`    :class:`torch.cuda.FloatTensor`
 64-bit floating point      ``torch.float64`` or ``torch.double``         :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
-16-bit floating point      ``torch.float16`` or ``torch.half``           :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
+16-bit floating point [1]_ ``torch.float16`` or ``torch.half``           :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
+16-bit floating point [2]_ ``torch.bfloat16``                            :class:`torch.BFloat16Tensor` :class:`torch.cuda.BFloat16Tensor`
+32-bit complex             ``torch.complex32``
+64-bit complex             ``torch.complex64``
+128-bit complex            ``torch.complex128`` or ``torch.cdouble``
 8-bit integer (unsigned)   ``torch.uint8``                               :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
 8-bit integer (signed)     ``torch.int8``                                :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
 Boolean                    ``torch.bool``                                :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
-========================   ===========================================   ===========================   ================================
+========================== ===========================================   ============================= ================================
+
+.. [1]
+  Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
+  significand bits. Useful when precision is important at the expense of range.
+.. [2]
+  Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
+  significand bits. Useful when range is important, since it has the same
+  number of exponent bits as ``float32``
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
 
@@ -229,6 +241,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cpu
    .. automethod:: cross
    .. automethod:: cuda
+   .. automethod:: logcumsumexp
    .. automethod:: cummax
    .. automethod:: cummin
    .. automethod:: cumprod
@@ -313,6 +326,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: inverse
    .. automethod:: irfft
    .. automethod:: isclose
+   .. automethod:: isfinite
+   .. automethod:: isinf
+   .. automethod:: isnan
    .. automethod:: is_contiguous
    .. automethod:: is_complex
    .. automethod:: is_floating_point
@@ -342,6 +358,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log2
    .. automethod:: log2_
    .. automethod:: log_normal_
+   .. automethod:: logaddexp
+   .. automethod:: logaddexp2
    .. automethod:: logsumexp
    .. automethod:: logical_and
    .. automethod:: logical_and_

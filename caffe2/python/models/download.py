@@ -80,8 +80,6 @@ def downloadFromURLToFile(url, filename, show_progress=True):
     except URLError as e:
         raise Exception("Could not download model. [URL Error] {reason}."
                         .format(reason=e.reason))
-    except Exception as e:
-        raise e
 
 
 def getURLFromName(name, filename):

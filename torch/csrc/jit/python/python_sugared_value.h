@@ -126,7 +126,7 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
   const std::string name_;
 };
 
-struct SugaredModuleDict;
+struct SugaredDict;
 
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
@@ -146,10 +146,20 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   Value* asValue(const SourceRange& loc, Function& m) override;
 
   // select an attribute on it, e.g. `this.field`
+  std::shared_ptr<SugaredValue> tryGetAttr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field);
+
+  // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       Function& m,
       const std::string& field) override;
+
+  // select an attribute on it, e.g. `this.field`
+  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+      override;
 
   // call module.forward
   std::shared_ptr<SugaredValue> call(
@@ -162,7 +172,11 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
         ->call(loc, caller, inputs, attributes, n_binders);
   }
 
-  std::shared_ptr<SugaredModuleDict> getSugaredModuleDict(
+  std::shared_ptr<SugaredDict> getSugaredDict(
+      const SourceRange& loc,
+      Function& m);
+
+  std::shared_ptr<SugaredDict> getSugaredNamedBufferDict(
       const SourceRange& loc,
       Function& m);
 
@@ -197,8 +211,8 @@ void recurseThroughNestedModules(
     const std::string& field);
 
 // Used to support named_modules()
-struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
-  explicit SugaredModuleDict(
+struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
+  explicit SugaredDict(
       std::shared_ptr<ModuleValue> self,
       std::shared_ptr<SugaredTupleValue> keys,
       std::shared_ptr<SugaredTupleValue> modules) {
@@ -264,6 +278,9 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
       const SourceRange& loc,
       Function& m,
       const std::string& field) override;
+
+  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+      override;
 
  private:
   py::object py_type_;
