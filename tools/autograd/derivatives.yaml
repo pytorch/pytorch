@@ -122,13 +122,13 @@
 #     However, if your derivative formula calculates multiple input gradients,
 #     you will need to add support explicitly.
 #
-#     It is usually preferable to add undefined grad support in the backward
-#     function itself (if you're using one), rather than in the derivative
-#     formula in this file.
+#     If your derivative formula uses more than one output grad, it is usually
+#     preferable to add undefined grad support in the backward function itself
+#     (if you're using one), rather than in the derivative formula in this file.
 #
-#     Undefined Tensors are created with the base constructor `at::Tensor()`.
+#     Undefined Tensors are created with the default constructor `at::Tensor()`.
 #     It is an efficient way to represent a Tensor filled with zeros because
-#     the Tensor holds no sizing information and its Storage is left empty.
+#     the Tensor holds no sizing information and no Storage data is allocated.
 #     But consequentially, Tensor operations cannot be performed on them.
 #     Therefore, your backward function should treat an undefined output grad as
 #     a zero, and it needs to be a special case.
