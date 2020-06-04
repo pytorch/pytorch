@@ -162,14 +162,6 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
 
 TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   if (expr.kind() == TK_SUBSCRIPT) {
-
-    if (resolver_) {
-      if (auto typePtr =
-              resolver_->resolveType(expr.range().text(), expr.range())) {
-        return typePtr;
-      }
-    }
-
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
     if (!value_name) {
@@ -288,7 +280,13 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         type = maybe_broad_list->first;
         N = maybe_broad_list->second;
       } else {
-        type = parseTypeFromExpr(decl_arg.type().get());
+        if (resolver_) {
+          type = resolver_->resolveType(
+              type_expr.range().text(), type_expr.range());
+        }
+        if (!type) {
+          type = parseTypeFromExpr(decl_arg.type().get());
+        }
       }
     }
     c10::optional<IValue> default_value = c10::nullopt;
@@ -319,7 +317,16 @@ std::vector<Argument> ScriptTypeParser::parseReturnFromDecl(const Decl& decl) {
   if (parseBroadcastList(decl.return_type().get()))
     throw ErrorReport(decl.return_type().range())
         << "Broadcastable lists cannot appear as a return type";
-  auto parsed_type = parseTypeFromExpr(decl.return_type().get());
+
+  TypePtr parsed_type;
+  Expr type_expr = decl.return_type().get();
+  if (resolver_) {
+    parsed_type =
+        resolver_->resolveType(type_expr.range().text(), type_expr.range());
+  }
+  if (!parsed_type) {
+    parsed_type = parseTypeFromExpr(type_expr);
+  }
   return {Argument(
       "",
       parsed_type,
