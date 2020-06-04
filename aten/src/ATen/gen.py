@@ -161,7 +161,7 @@ TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
 TENSOR_METHODS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.cpp")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
-FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.cpp")
+TENSOR_FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorFunctions.cpp")
 
 LEGACY_TH_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctions.h")
 LEGACY_TH_FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctions.cpp")
@@ -403,7 +403,7 @@ def gen_per_op_registration_filename(opname):
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['TensorBody.h', 'TensorMethods.cpp', 'ATenOpList.cpp', 'Functions.cpp']
+    core_files = ['TensorBody.h', 'TensorMethods.cpp', 'ATenOpList.cpp', 'TensorFunctions.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
@@ -525,7 +525,7 @@ def generate_outputs():
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
 
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
-    core_file_manager.write('Functions.cpp', FUNCTIONS_CPP, top_env)
+    core_file_manager.write('TensorFunctions.cpp', TENSOR_FUNCTIONS_CPP, top_env)
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
 

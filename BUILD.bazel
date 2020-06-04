@@ -139,7 +139,7 @@ genrule(
         "aten/src/ATen/SparseCPUType.cpp",
         "aten/src/ATen/TypeDefault.h",
         "aten/src/ATen/TypeDefault.cpp",
-        "aten/src/ATen/core/Functions.cpp",
+        "aten/src/ATen/core/TensorFunctions.cpp",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
