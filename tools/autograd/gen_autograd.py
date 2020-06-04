@@ -190,6 +190,7 @@ def load_deprecated_signatures(aten_decls, deprecated_path):
 
 def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_op_list=None):
     full_aten_decls = load_aten_declarations(aten_path)
+
     def filter_decls(aten_decls, selected_op_list):
         if selected_op_list is None:
             return aten_decls
