@@ -205,11 +205,19 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "to_here",
               &PyRRef::toHere,
+              py::arg("timeout") = py::cast(kUnsetRpcTimeout),
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Blocking call that copies the value of the RRef from the owner
                   to the local node and returns it. If the current node is the
                   owner, returns a reference to the local value.
+
+                  Arguments:
+                        timeout (float, optional): Timeout for ``to_here``. If
+                        the call does not complete within this timeframe, an
+                        exception indicating so will be raised. If this argument
+                        is not provided, the default RPC timeout (60s) will be
+                        used.
               )")
           .def(
               "local_value",
@@ -534,9 +542,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
   });
 
   module.def(
-      "_delete_all_user_rrefs",
+      "_delete_all_user_and_unforked_owner_rrefs",
       [](std::chrono::milliseconds timeoutMillis) {
-        RRefContext::getInstance().delAllUsers(timeoutMillis);
+        RRefContext::getInstance().delAllUsersAndUnforkedOwners(timeoutMillis);
       },
       py::arg("timeout") = kDeleteAllUsersTimeout);
 
@@ -628,7 +636,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
       py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
-      py::arg("tensors"));
+      py::arg("tensors"),
+      py::arg("timeout"));
 
   module.def(
       "_invoke_remote_torchscript",
