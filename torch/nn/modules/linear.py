@@ -103,8 +103,9 @@ class Linear(Module):
 # that bias is never None, which appeases TorchScript
 class _LinearWithBias(Linear):
     bias: Tensor
+
     def __init__(self, in_features: int, out_features: int):
-        super().__init__(in_features, out_features, bias = True)
+        super().__init__(in_features, out_features, bias=True)
 
 
 class Bilinear(Module):

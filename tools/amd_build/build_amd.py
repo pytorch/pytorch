@@ -109,12 +109,6 @@ ignores = [
     "torch/include/*",
 ]
 
-if not args.out_of_place_only:
-    # Apply patch files in place (PyTorch only)
-    patch_folder = os.path.join(amd_build_dir, "patches")
-    for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
-        subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
-
 # Check if the compiler is hip-clang.
 def is_hip_clang():
     try:
