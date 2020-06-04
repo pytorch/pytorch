@@ -2660,9 +2660,12 @@ class TestAutograd(TestCase):
         self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
-        names = ['is_complex', 'mul', 'to', 'empty_strided', 'copy_', 'empty', 'is_complex',
-                 'add', 'to', 'empty_strided', 'copy_', 'empty']
-        top_level_names = ['is_complex', 'mul', 'is_complex', 'add']
+        names = ['aten::is_complex', 'aten::mul', 'aten::to',
+                 'aten::empty_strided', 'aten::copy_', 'aten::empty',
+                 'aten::is_complex', 'aten::add', 'aten::to',
+                 'aten::empty_strided', 'aten::copy_', 'aten::empty']
+        top_level_names = ['aten::is_complex', 'aten::mul',
+                           'aten::is_complex', 'aten::add']
         top_level_iter = iter(top_level_names)
         self.assertEqual(len(p.function_events), len(names))
         for info, expected_name in zip(p.function_events, names):
@@ -2685,8 +2688,11 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile() as prof:
             torch.ops._TorchScriptTesting.take_an_instance(inst)
 
-        self.assertEqual(len(prof.function_events), 1)
-        self.assertEqual(prof.function_events[0].name, '_TorchScriptTesting::take_an_instance')
+        found_event = False
+        for e in prof.function_events:
+            if e.name == '_TorchScriptTesting::take_an_instance':
+                found_event = True
+        self.assertTrue(found_event)
 
     def test_profiler_propagation(self):
         def foo(x):
@@ -2824,9 +2830,9 @@ class TestAutograd(TestCase):
 
         top_level_expected_events_and_shapes = [
             (None, [[30, 20]]),
-            ('addmm', [[30], [128, 20], [20, 30], [], []]),
+            ('aten::addmm', [[30], [128, 20], [20, 30], [], []]),
             (None, [[40, 30]]),
-            ('addmm', [[40], [128, 30], [30, 40], [], []])
+            ('aten::addmm', [[40], [128, 30], [30, 40], [], []])
         ]
 
         expected_iter = iter(top_level_expected_events_and_shapes)
@@ -2927,8 +2933,8 @@ class TestAutograd(TestCase):
             stats,
             "cpu_memory_usage",
             allocs=[
-                "empty",
-                "rand",
+                "aten::empty",
+                "aten::rand",
                 "test_user_scope_alloc",
             ],
             deallocs=[
@@ -2945,8 +2951,8 @@ class TestAutograd(TestCase):
                 "cuda_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
-                    "to",
-                    "empty_strided",
+                    "aten::to",
+                    "aten::empty_strided",
                 ],
                 deallocs=[
                     "test_user_scope_dealloc",
@@ -2956,8 +2962,8 @@ class TestAutograd(TestCase):
                 stats,
                 "cpu_memory_usage",
                 allocs=[
-                    "rand",
-                    "empty",
+                    "aten::rand",
+                    "aten::empty",
                 ]
             )
 
@@ -2970,9 +2976,9 @@ class TestAutograd(TestCase):
                 "cpu_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
-                    "rand",
-                    "empty",
-                    "to_mkldnn",
+                    "aten::rand",
+                    "aten::empty",
+                    "aten::to_mkldnn",
                 ],
                 deallocs=[
                     "test_user_scope_dealloc",
@@ -2990,8 +2996,8 @@ class TestAutograd(TestCase):
             stats,
             "cpu_memory_usage",
             allocs=[
-                "rand",
-                "empty",
+                "aten::rand",
+                "aten::empty",
             ]
         )
 
@@ -3013,11 +3019,11 @@ class TestAutograd(TestCase):
         events = p.function_events
         important_events = [
             'outer',
-            'mul',
-            'add',
+            'aten::mul',
+            'aten::add',
             'inner',
-            'sub',
-            'div'
+            'aten::sub',
+            'aten::div'
         ]
         idx = 0
         for info in events:

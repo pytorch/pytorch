@@ -795,9 +795,9 @@ def parse_cpu_trace(thread_records):
     filtered_out_names = [
         "profiler::_record_function_enter",
         "profiler::_record_function_exit",
-        "is_leaf",
-        "output_nr",
-        "_version",
+        "aten::is_leaf",
+        "aten::output_nr",
+        "aten::_version",
     ]
 
     # cuda start events and the overall profiler start event don't happen
