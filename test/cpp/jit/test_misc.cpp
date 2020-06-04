@@ -1710,8 +1710,7 @@ void testFutures() {
     auto s3 = c10::make_intrusive<Future>(IntType::get());
 
     // Empty case
-    List<intrusive_ptr<ivalue::Future>> futures(
-      FutureType::create(AnyType::get()));
+    std::vector<intrusive_ptr<ivalue::Future>> futures;
     auto c1 = collectAll(futures);
     ASSERT_TRUE(c1->completed());
     ASSERT_EQ(c1->value().toList().size(), 0);
@@ -1759,13 +1758,6 @@ void testFutures() {
     } catch (const std::exception& e) {
       ASSERT_EQ(std::string(e.what()), "Failed");
     }
-
-    auto f1 = make_intrusive<Future>(IntType::get());
-    c10::impl::GenericList genericList(AnyType::get());
-    genericList.push_back(f1);
-
-    List<intrusive_ptr<ivalue::Future>> typedList(FutureType::create(AnyType::get()));
-    typedList.push_back(f1);
   }
 }
 
