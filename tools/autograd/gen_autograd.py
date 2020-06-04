@@ -58,6 +58,7 @@ VIEW_FUNCTIONS = {
     'indices': 'self',
     'values': 'self',
     'view_as_real': 'self',
+    'view_as_complex': 'self',
     # sparse_coo ctor output should really be views of both indices and values,
     # but we only supports making as view of a single variable, and indices is
     # discrete anyways.
@@ -65,7 +66,7 @@ VIEW_FUNCTIONS = {
     'sparse_coo_tensor_with_dims_and_tensors': 'values',
 }
 
-# add view_as_real
+VIEW_FUNCTIONS_WITH_DTYPE_CHANGE = ['view_as_real', 'view_as_complex']
 
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed

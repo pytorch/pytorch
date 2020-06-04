@@ -122,8 +122,10 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
         auto prev_fn = diff_view_meta->view_fn();
         if (prev_fn == nullptr) {
           view_func = [=](const at::Tensor& root_base) {
-            // auto temp = as_strided(root_base, ...);
-            auto temp = fn(root_base);
+            auto sizes = root_base.sizes().vec();
+            auto strides = root_base.strides().vec();
+            auto storage_offset = root_base.storage_offset();
+            auto temp = root_base.as_strided(sizes, strides, storage_offset);
             return fn(temp);
           };
         } else {
@@ -153,8 +155,10 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
       auto prev_view_fn = diff_view_meta->view_fn();
       view_func = [=](const at::Tensor& root_base) {
         auto temp = prev_view_fn(root_base);
-        return prev_view_fn(temp);
-        // return as_strided(temp, temp.size(), temp.storage().strides);
+        auto sizes = temp.sizes().vec();
+        auto strides = temp.strides().vec();
+        auto storage_offset = temp.storage_offset();
+        return temp.as_strided(sizes, strides, storage_offset);
       };
     }
     base_var = base_var._base();

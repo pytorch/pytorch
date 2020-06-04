@@ -971,8 +971,11 @@
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
 
-# - name: view_as_real(Tensor(a) self) -> Tensor(a)
-#   self: at::view_as_complex(grad).conj()
+- name: view_as_real(Tensor(a) self) -> Tensor(a)
+  self: at::view_as_complex(grad)
+
+- name: view_as_complex(Tensor(a) self) -> Tensor(a)
+  self: at::view_as_real(grad)
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable

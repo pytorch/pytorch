@@ -24,7 +24,7 @@
 #
 from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
-from .gen_autograd import VIEW_FUNCTIONS
+from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_DTYPE_CHANGE
 from .gen_autograd_functions import uses_single_grad
 
 # These functions we don't want to record for tracing, because we always want
@@ -906,7 +906,7 @@ def emit_body(declaration):
             input_base=input_base,
             replay_view_call=replay_view_call)
 
-        is_view_with_dtype_change = 'true' if name in ['view_as_real'] else 'false'
+        is_view_with_dtype_change = 'true' if name in VIEW_FUNCTIONS_WITH_DTYPE_CHANGE else 'false'
 
         return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_DTYPE_CHANGE.substitute(
             is_view_with_dtype_change=is_view_with_dtype_change,
