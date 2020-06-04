@@ -126,11 +126,11 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, c10::optional<Generato
 }
 
 Tensor bernoulli(const Tensor& self, c10::optional<Generator> gen) {
-  return at::native::templates::bernoulli_impl<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, gen);
+  return at::native::bernoulli(self, gen);
 }
 
 Tensor bernoulli_p(const Tensor& self, double p, c10::optional<Generator> gen) {
-  return at::native::templates::bernoulli_impl<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p, gen);
+  return at::native::bernoulli(self, p, gen);
 }
 
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
@@ -415,7 +415,7 @@ TEST_F(RNGTest, Bernoulli) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = at::bernoulli(torch::full({3,3}, p), gen);
+  auto actual = torch::full({3,3}, p).bernoulli(gen);
 
   auto expected = torch::empty_like(actual);
   native::templates::cpu::bernoulli_kernel(expected, torch::full({3,3}, p), check_generator<TestCPUGenerator>(gen));
@@ -427,7 +427,7 @@ TEST_F(RNGTest, Bernoulli_p) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  auto actual = at::bernoulli(torch::empty({3, 3}), p, gen);
+  auto actual = torch::empty({3, 3}).bernoulli(p, gen);
 
   auto expected = torch::empty_like(actual);
   native::templates::cpu::bernoulli_kernel(expected, p, check_generator<TestCPUGenerator>(gen));

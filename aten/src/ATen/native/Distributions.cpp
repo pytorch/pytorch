@@ -140,11 +140,15 @@ struct BernoulliStub {
 };
 
 Tensor bernoulli(const Tensor& self, c10::optional<Generator> gen) {
-  return at::native::templates::bernoulli_impl<BernoulliStub, Generator>(self, gen);
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  result.bernoulli_(self, gen);
+  return result;
 }
 
 Tensor bernoulli(const Tensor& self, double p, c10::optional<Generator> gen) {
-  return at::native::templates::bernoulli_impl<BernoulliStub, Generator>(self, p, gen);
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  result.bernoulli_(p, gen);
+  return result;
 }
 
 Tensor& bernoulli_out(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {

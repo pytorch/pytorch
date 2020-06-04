@@ -354,23 +354,6 @@ Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 }
 
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
-Tensor bernoulli_impl(const Tensor& self, c10::optional<Generator> gen) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  bernoulli_impl_<bernoulli_tensor_kernel, RNG>(result, self, gen);
-  return result;
-}
-
-template<template<typename> class bernoulli_scalar_kernel, typename RNG>
-Tensor bernoulli_impl(const Tensor& self, double p, c10::optional<Generator> gen) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  //  bernoulli_impl_<bernoulli_scalar_kernel, RNG>(result, p, gen);
-  //  Segmentation fault would occurred in CI test while handling above method.
-  //  use result.bernoulli_(p, gen) instead.
-  result.bernoulli_(p, gen);
-  return result;
-}
-
-template<template<typename> class bernoulli_tensor_kernel, typename RNG>
 Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
   // result.resize_as_(self) requires self to have same dtype as result, so we
   // use resize_ instead.
