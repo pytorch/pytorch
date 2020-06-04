@@ -24,10 +24,10 @@ class FuzzedParameter(object):
     def __init__(
         self,
         name: str,
-        minval: Optional[Union[int, float]]=None,
-        maxval: Optional[Union[int, float]]=None,
-        distribution: Optional[Union[str, Dict[Any, float]]]=None,
-        strict: bool=False,
+        minval: Optional[Union[int, float]] = None,
+        maxval: Optional[Union[int, float]] = None,
+        distribution: Optional[Union[str, Dict[Any, float]]] = None,
+        strict: bool = False,
     ):
         """
         Args:
@@ -167,16 +167,16 @@ class FuzzedTensor(object):
         self,
         name: str,
         size: Tuple[Union[str, int]],
-        steps: Optional[Tuple[Union[str, int]]]=None,
-        probability_contiguous: float=0.5,
-        min_elements: Optional[int]=None,
-        max_elements: Optional[int]=None,
-        max_allocation_bytes: Optional[int]=None,
-        dim_parameter: Optional[str]=None,
-        roll_parameter: Optional[str]=None,
+        steps: Optional[Tuple[Union[str, int]]] = None,
+        probability_contiguous: float = 0.5,
+        min_elements: Optional[int] = None,
+        max_elements: Optional[int] = None,
+        max_allocation_bytes: Optional[int] = None,
+        dim_parameter: Optional[str] = None,
+        roll_parameter: Optional[str] = None,
         dtype=torch.float32,
         cuda=False,
-        tensor_constructor: Optional[Callable]=None
+        tensor_constructor: Optional[Callable] = None
     ):
         """
         Args:
@@ -329,8 +329,8 @@ class Fuzzer(object):
         self,
         parameters: List[Union[FuzzedParameter, List[FuzzedParameter]]],
         tensors: List[Union[FuzzedTensor, List[FuzzedTensor]]],
-        constraints: Optional[List[Callable]]=None,
-        seed: Optional[int]=None
+        constraints: Optional[List[Callable]] = None,
+        seed: Optional[int] = None
     ):
         """
         Args:
