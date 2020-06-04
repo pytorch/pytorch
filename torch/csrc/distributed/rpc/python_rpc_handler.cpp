@@ -9,6 +9,8 @@ namespace rpc {
 
 namespace {
 
+constexpr auto kInternalModule = "torch.distributed.rpc.internal";
+
 // A macro that grabs the GIL, profiling the acquisition time. The average GIL
 // acquisition time will be recorded in RpcAgent's getMetrics().
 #define PROFILE_GIL_SCOPED_ACQUIRE                                       \
@@ -68,7 +70,7 @@ void cleanupPyObj(py::object& obj) {
 
 PythonRpcHandler::PythonRpcHandler() {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  py::object rpcInternal = py::module::import("torch.distributed.rpc.internal");
+  py::object rpcInternal = py::module::import(kInternalModule);
   py::object rpcApi = py::module::import("torch.distributed.rpc.api");
   py::object rrefProxy = py::module::import("torch.distributed.rpc.rref_proxy");
 
@@ -156,6 +158,15 @@ void PythonRpcHandler::handleException(const py::object& obj) {
 void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
   TORCH_CHECK(PyGILState_Check(), "GIL should be held");
   pyHandleException_(obj);
+}
+
+bool PythonRpcHandler::isRemoteException(const py::object& obj) {
+  PROFILE_GIL_SCOPED_ACQUIRE;
+  auto type = obj.get_type();
+  auto moduleName = type.attr("__module__").cast<std::string>();
+  auto qualName = type.attr("__qualname__").cast<std::string>();
+  return moduleName.compare(kInternalModule) == 0 &&
+      qualName.compare("RemoteException") == 0;
 }
 
 TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {

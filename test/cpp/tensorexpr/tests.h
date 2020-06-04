@@ -64,12 +64,15 @@ namespace jit {
   _(Reduce3DRfactorRepeated)                \
   _(ReduceRfactorInsertionPoint)            \
   _(Reduce3DRfactorInsertionPoint)          \
+  _(ReduceRepeatedInternalRfactor)          \
   _(ReduceSplitTail)                        \
   _(ReduceSplitNoTail)                      \
   _(ReduceOverSplitTail)                    \
   _(ReduceSplitMask)                        \
   _(ReduceSplitNoMask)                      \
   _(ReduceOverSplitMask)                    \
+  _(ReduceSplitRfactor)                     \
+  _(ReduceOverSplitRfactor)                 \
   _(SplitReduceAxis)                        \
   _(SplitNonReduceAxis)                     \
   _(TypeTest01)                             \
@@ -125,6 +128,7 @@ namespace jit {
   _(HashEquivalenceAfterFolding)            \
   _(HashDifferenceTypes)                    \
   _(HashLargeExpression)                    \
+  _(HashForLoopOptions)                     \
   _(SimplifyAdd)                            \
   _(SimplifySub)                            \
   _(SimplifyMultiLayer)                     \
@@ -159,6 +163,7 @@ namespace jit {
   _(SimplifyForCleansUp)                    \
   _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
+  _(SimplifyEliminateZeroLengthAlloc)       \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
@@ -179,6 +184,7 @@ namespace jit {
   _(LoopNestReorderLongStringOfPreOrphans)  \
   _(LoopNestReorderLongStringOfPostOrphans) \
   _(LoopNestReorderLongStringFull)          \
+  _(LoopNestReorderInternalLoopNest)        \
   _(OuterLoopVectorization)                 \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
