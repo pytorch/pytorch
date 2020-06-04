@@ -138,7 +138,7 @@ class EventList(list):
             f.write("[")
             for evt in self:
                 # Skip over remote events in trace for now.
-                if self.is_remote:
+                if evt.is_remote:
                     continue
 
                 f.write('{"name": "%s", '
