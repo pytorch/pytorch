@@ -202,9 +202,6 @@ class CallbackManager {
 std::atomic<uint64_t> next_thread_id_ {0};
 thread_local uint64_t current_thread_id_ = 0;
 
-// Points to the currently active RecordFunction
-thread_local RecordFunction* current_record_func_ = nullptr;
-
 inline CallbackManager& manager() {
   static CallbackManager _manager;
   return _manager;
@@ -293,12 +290,6 @@ RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
   }
 }
 
-void RecordFunction::setCurrent() {
-  parent_ = current_record_func_;
-  current_record_func_ = this;
-  is_current_ = true;
-}
-
 /* static */
 uint64_t RecordFunction::currentThreadId() {
   if (!current_thread_id_) {
@@ -339,15 +330,6 @@ void RecordFunction::end() {
     manager().runEndCallbacks(*this);
     active = false;
   }
-  if (is_current_) {
-    current_record_func_ = parent_;
-    is_current_ = false;
-  }
-}
-
-/* static */
-RecordFunction* RecordFunction::current() {
-  return current_record_func_;
 }
 
 } // namespace at

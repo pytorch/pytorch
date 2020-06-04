@@ -306,9 +306,6 @@ inline Return Dispatcher::callWithDispatchKey(const OperatorHandle& op, Dispatch
   // the function call or prematurely box them
   at::RecordFunction guard(at::RecordScope::FUNCTION);
   if (guard.active) {
-    // Stack-based record function with scope lifetime can be marked as 'current'
-    // thread local record function; used to track nested recorded scopes
-    guard.setCurrent();
     if (guard.needs_inputs) {
       std::vector<c10::IValue> stack;
       auto boxed_all_args = impl::boxArgumentsIntoStack(stack, args...);
@@ -356,7 +353,6 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   // using already existing stack to record function execution in observers
   at::RecordFunction guard(at::RecordScope::FUNCTION);
   if (guard.active) {
-    guard.setCurrent();
     if (guard.needs_inputs) {
       guard.before(op.schema().name(), *stack, at::sequence_number::peek());
     } else {
