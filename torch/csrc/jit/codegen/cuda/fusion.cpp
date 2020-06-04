@@ -39,7 +39,7 @@ void InputsOf::handle(Val* v) {
     inputs.emplace(v);
 }
 
-std::set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
+std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
   TORCH_CHECK(
       fusion->hasOutput(output_),
       "Asked for the inputs of ",
@@ -122,11 +122,31 @@ void Fusion::removeVal(Val* val) {
 
 void Fusion::addInput(Val* const input) {
   assertInFusion(input, "Cannot register input ");
+
+  if (input->getValType().value() == ValType::TensorView) {
+    TensorView* tv = static_cast<TensorView* const>(input);
+    if (tv->hasReduction())
+      TORCH_WARN_ONCE(
+          "Registered input ",
+          input,
+          " has a reduction axis, but this does nothing in the fusion.");
+  }
+
   IRInputOutput::addInput(input);
 }
 
 void Fusion::addOutput(Val* const output) {
   assertInFusion(output, "Cannot register output ");
+  if (output->getValType().value() == ValType::TensorView) {
+    TensorView* tv = static_cast<TensorView* const>(output);
+    if (TensorDomain::hasBroadcast(tv->getRootDomain()))
+      // Go to the root as we can merge bcast and
+      // non-bcast dims, making a non-bcast dim.
+      TORCH_CHECK( // Should we warn instead?
+          false,
+          output,
+          " cannot be registered as an output as it has a broadcast axis.");
+  }
   IRInputOutput::addOutput(output);
 }
 
@@ -157,12 +177,12 @@ std::vector<Expr*> Fusion::exprs(bool from_outputs_only, bool breadth_first) {
   return ExprSort::getExprs(this, from_outputs_only, breadth_first);
 }
 
-std::set<Val*> Fusion::inputsOf(Val* val) {
+std::unordered_set<Val*> Fusion::inputsOf(Val* val) {
   return InputsOf::output(this, val);
 }
 
 void Fusion::validateInputs() {
-  std::set<Val*> all_inputs;
+  std::unordered_set<Val*> all_inputs;
   for (Val* out : outputs()) {
     auto outs_inputs = inputsOf(out);
     std::set_union(
@@ -229,7 +249,7 @@ StmtNameType Fusion::registerExpr(Expr* expr) {
   }
 
   for (Val* input : expr->inputs()) {
-    registerVal(input);
+    assertInFusion(input, "Input to expr is invalid, ");
     if (uses_.find(input) == uses_.end()) {
       uses_[input] = {expr};
     } else {
@@ -238,7 +258,7 @@ StmtNameType Fusion::registerExpr(Expr* expr) {
   }
 
   for (Val* output : expr->outputs()) {
-    registerVal(output);
+    assertInFusion(output, "Output to expr is invalid, ");
     auto it = origin_.find(output);
     if (it != origin_.end()) {
       removeExpr(it->second); // will also remove origin entry
@@ -273,7 +293,7 @@ bool Fusion::used(Val* val) const {
       (uses_.find(val)->second.size() > 0);
 }
 
-const std::set<Val*>& Fusion::vals() const noexcept {
+const std::unordered_set<Val*>& Fusion::vals() const noexcept {
   return val_set_;
 }
 
@@ -281,17 +301,17 @@ const std::deque<Val*>& Fusion::deterministic_vals() const noexcept {
   return val_deque_;
 }
 
-const std::set<Expr*>& Fusion::unordered_exprs() const noexcept {
+const std::unordered_set<Expr*>& Fusion::unordered_exprs() const noexcept {
   return expr_set_;
 }
 
-std::set<Expr*> Fusion::uses(Val* val) const {
+std::unordered_set<Expr*> Fusion::uses(Val* val) const {
   assertInFusion(val, "Cannot detect where val was used, ");
   if (uses_.find(val) != uses_.end()) {
     auto ret = uses_.find(val)->second;
     return ret;
   }
-  return std::set<Expr*>();
+  return std::unordered_set<Expr*>();
 }
 
 Expr* Fusion::origin(Val* val) const {

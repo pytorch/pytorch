@@ -18,10 +18,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// Promotion logic between two values, returns a new val from resulting type
-// promotion.
-TORCH_CUDA_API Val* promoteNew(Val* v1, Val* v2);
-
 // Insertion of casting op to dtype, returns new resulting val
 TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1);
 TORCH_CUDA_API TensorView* castOp(DataType dtype, TensorView* v1);
@@ -54,6 +50,17 @@ TORCH_CUDA_API TensorView* neg(TensorView* v);
 
 // BINARY OPERATIONS
 // add
+/*
+ * Broadcasts v1 based on bool vector. Size of broadcast bool vector should be
+ * the number of dims desired in the broadcasted tensor. This vector should be
+ * true if output dim should be a broadcasted dim, and false if it is not a
+ * broadcasted dim. Number of false entires must match the number of input dims.
+ */
+TORCH_CUDA_API TensorView* broadcast(
+    TensorView* inp,
+    const std::vector<bool>& is_broadcast_dim);
+
+// BINARY OPAERATIONS
 TORCH_CUDA_API Val* add(Val* v1, Val* v2);
 TORCH_CUDA_API TensorView* add(TensorView* v1, Val* v2);
 TORCH_CUDA_API TensorView* add(Val* v1, TensorView* v2);

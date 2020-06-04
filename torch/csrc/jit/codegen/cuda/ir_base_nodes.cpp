@@ -30,14 +30,14 @@ Expr* Statement::asExpr() {
 }
 
 // When we create a Val we immediately register them with the active fusion.
-Val::Val(ValType _vtype, DataType _dtype) : vtype_{_vtype}, dtype_{_dtype} {
+Val::Val(ValType _vtype, DataType _dtype, bool register_val)
+    : vtype_{_vtype}, dtype_{_dtype} {
   Fusion* fusion = FusionGuard::getCurFusion();
-  if (fusion != nullptr) {
-    this->name_ = fusion->registerVal(this);
-    this->fusion_ = fusion;
-  } else {
-    TORCH_CHECK(false, "No active fusion group found when creating a Val.");
-  }
+  TORCH_CHECK(
+      fusion != nullptr, "No active fusion group found when creating a Val.");
+  this->fusion_ = fusion;
+  if (register_val)
+    this->name_ = this->fusion_->registerVal(this);
 }
 
 // Traverse origin of all values involved in constructing the provided val.

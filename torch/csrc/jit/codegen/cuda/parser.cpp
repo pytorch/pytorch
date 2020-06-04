@@ -107,7 +107,7 @@ class IrParser {
 
       // Merge all dimensions because we're only supporting pointwise
       while (out->nDims() > 1)
-        out->merge(0);
+        out->merge(0, 1);
       // Split into 128 which will be bockDim.x
       out->split(0, nthreads);
       // Split by another 4 which will be our unroll factor

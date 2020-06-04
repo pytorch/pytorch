@@ -173,10 +173,9 @@ bool validateKernelArgTensor(
   }
   // Check the rank of the tensors.
   size_t arg_dim = arg.dim();
-  size_t param_dim = static_cast<const TensorView*>(param)
-                         ->getRootDomain()
-                         ->noReductions()
-                         ->nDims();
+  size_t param_dim = TensorDomain::noReductions(
+                         static_cast<const TensorView*>(param)->getRootDomain())
+                         .size();
   if (arg_dim != param_dim) {
     msg << "Argument tensor's rank is " << arg_dim << ", but the parameter is "
         << param_dim;
@@ -361,7 +360,6 @@ void compileKernel(Fusion& fusion, CudaKernel* entry) {
 
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
-
   const std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 
@@ -540,6 +538,12 @@ void runTestKernel(
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
+      TORCH_INTERNAL_ASSERT(
+          input.toTensor().device().index() == entry->device_,
+          "input to kernel on device that is not compiled for");
+      TORCH_INTERNAL_ASSERT(
+          !entry->outputs.empty(),
+          "No output found for this kernel, aborting.");
       if (has_reduction) {
         kernel_args.push(input.toTensor());
       } else {

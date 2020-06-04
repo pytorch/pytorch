@@ -7,12 +7,10 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// Will return a new value of type val with the DataType dtype, if it's a
-// tensorview it will propagate the shape information from val.
-TORCH_CUDA_API Val* newValLike(const Val* val, DataType dtype) {
-  switch (val->getValType().value()) {
-    case (ValType::TensorView):
-      return val->as<TensorView>()->newForOutput(dtype);
+namespace {
+// Will return a new value of type val with the DataType dtype.
+Val* newScalar(ValType vtype, DataType dtype) {
+  switch (vtype) {
     case (ValType::NamedScalar):
     case (ValType::Scalar):
       switch (dtype) {
@@ -33,36 +31,92 @@ TORCH_CUDA_API Val* newValLike(const Val* val, DataType dtype) {
 
   TORCH_CHECK(
       false,
-      "Could not generate a new value of type ",
-      val->getValType().value(),
-      " with data type ",
-      val->getDataType().value());
+      "Was expecting a scalar type, but received ValType: ",
+      vtype,
+      " with DataType:",
+      dtype);
 }
 
-TORCH_CUDA_API Val* newValLike(const Val* val) {
-  return newValLike(val, val->getDataType().value());
-}
+TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
+  std::vector<TensorView*> tvs;
+  for (auto val : vals)
+    if (val->getValType() == ValType::TensorView)
+      tvs.push_back(static_cast<TensorView*>(val));
 
-TORCH_CUDA_API Val* promoteNew(Val* v1, Val* v2) {
-  // Can't promote two types if they aren't both
-  // values with valid data types.
-  TORCH_CHECK(v1->isVal() && v2->isVal());
   TORCH_CHECK(
-      v1->getDataType() != DataType::Null &&
-      v2->getDataType() != DataType::Null);
+      !tvs.empty(),
+      "Tried to create new output TensorView but received empty list.");
 
-  ValType out_vtype =
-      promote_type(v1->getValType().value(), v2->getValType().value());
-  DataType out_dtype =
-      promote_type(v1->getDataType().value(), v2->getDataType().value());
+  std::vector<IterDomain*> out_domain(
+      tvs[0]->domain()->noReductions().size(), nullptr);
 
-  if (out_vtype == v2->getValType().value())
-    return newValLike(v2, out_dtype);
+  for (auto tv : tvs) {
+    auto dom = tv->domain()->noReductions();
+    TORCH_INTERNAL_ASSERT(
+        dom.size() == out_domain.size(),
+        "Invalid tensor view found while producing and output, it has ",
+        dom.size(),
+        " dimensions but expected ",
+        out_domain.size());
+    for (size_t i = 0; i < dom.size(); i++) {
+      if (out_domain[i] != nullptr)
+        continue;
+      if (dom[i]->isBroadcast())
+        continue;
+      out_domain[i] = new IterDomain(dom[i]->start(), dom[i]->extent());
+    }
+  }
 
-  return newValLike(v1, out_dtype);
+  std::transform(
+      out_domain.begin(),
+      out_domain.end(),
+      out_domain.begin(),
+      [](IterDomain* dom) {
+        if (dom == nullptr)
+          return new IterDomain(
+              new Int(0), new Int(1), ParallelType::Serial, false, false, true);
+        return dom;
+      });
+
+  return new TensorView(new TensorDomain(out_domain), dtype);
 }
 
-Val* newConstScalar(DataType dtype, int val) {
+Val* newOutputVal(const std::vector<Val*>& vals) {
+  TORCH_INTERNAL_ASSERT(
+      !vals.empty(), "Cannot promote values if there aren't any.");
+
+  ValType out_vtype = vals[0]->getValType().value();
+  DataType out_dtype = vals[0]->getDataType().value();
+
+  for (auto val : vals) {
+    TORCH_CHECK(val->isVal(), "Invalid statement found during promotion.");
+    TORCH_CHECK(
+        val->getDataType().value() != DataType::Null,
+        "Invalid datatype found during prmotion.");
+    out_vtype = promote_type(out_vtype, val->getValType().value());
+    out_dtype = promote_type(out_dtype, val->getDataType().value());
+  }
+
+  if (out_vtype == ValType::TensorView)
+    return newOutputTV(vals, out_dtype);
+
+  return newScalar(out_vtype, out_dtype);
+}
+
+Val* newValLike(Val* val, DataType dtype) {
+  TORCH_CHECK(val->isVal(), "Invalid statement provided to create new value.");
+  TORCH_CHECK(
+      dtype != DataType::Null, "Invalid datatype provided for new value.");
+
+  ValType vtype = val->getValType().value();
+
+  if (vtype == ValType::TensorView)
+    return newOutputTV({val}, dtype);
+
+  return newScalar(vtype, dtype);
+}
+
+Val* newConstScalar(DataType dtype, long int val) {
   switch (dtype) {
     case (DataType::Int):
       return new Int(val);
@@ -77,7 +131,7 @@ Val* newConstScalar(DataType dtype, int val) {
       val);
 }
 
-Val* newConstScalar(DataType dtype, float val) {
+Val* newConstScalar(DataType dtype, double val) {
   switch (dtype) {
     case (DataType::Float):
       return new Float(val);
@@ -91,6 +145,8 @@ Val* newConstScalar(DataType dtype, float val) {
       "and constant value: ",
       val);
 }
+
+} // namespace
 
 TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {
   if (v1->getDataType().value() == dtype)
@@ -118,7 +174,7 @@ TORCH_CUDA_API TensorView* castOp(DataType dtype, TensorView* v1) {
 // UNARY OPERATIONS
 
 TORCH_CUDA_API Val* unaryOp(UnaryOpType type, Val* v1) {
-  Val* out = newValLike(v1);
+  Val* out = newOutputVal({v1});
   new UnaryOp(type, out, v1);
   return out;
 }
@@ -177,7 +233,7 @@ TensorView* arithOpOverloads(
 } // namespace
 
 TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
-  Val* out = promoteNew(v1, v2);
+  Val* out = newOutputVal({v1, v2});
   if (is_logical_op(type)) {
     if (out->getDataType().value() != DataType::Bool)
       out = newValLike(out, DataType::Bool);
@@ -322,39 +378,73 @@ TORCH_CUDA_API TensorView* andOp(TensorView* v1, TensorView* v2) {
 
 // REDUCTION OPERATIONS
 
+namespace {
+// TODO: How do we adjust this so we can reduce to a single scalar value?
+TensorView* newForReduction(TensorView* tv, std::vector<unsigned int> axes) {
+  auto orig_domain = TensorDomain::noReductions(tv->getRootDomain());
+  std::set<unsigned int> axes_set(axes.begin(), axes.end());
+
+  std::vector<IterDomain*> new_domain;
+
+  TORCH_INTERNAL_ASSERT(
+      !axes_set.empty(),
+      "Asked for ouput of reduction, but no reduction axis provided.");
+  TORCH_INTERNAL_ASSERT(
+      (*(axes_set.rbegin())) < orig_domain.size(),
+      "Error setting up reduction, reduction axis is outside nDims. Keep in mind reductions are relative to root domains, not modified views.");
+
+  for (decltype(orig_domain.size()) dim = 0; dim < orig_domain.size(); dim++) {
+    IterDomain* id = orig_domain[dim];
+
+    bool isReduction = false;
+    if ((*axes_set.begin()) == dim) {
+      isReduction = true;
+      axes_set.erase(axes_set.begin());
+    }
+
+    new_domain.push_back(new IterDomain(
+        id->start(), id->extent(), ParallelType::Serial, isReduction));
+  }
+
+  TensorDomain* td = new TensorDomain(new_domain);
+  return new TensorView(td, tv->getDataType().value());
+}
+
+} // namespace
+
 TensorView* reductionOp(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,
-    TensorView* v1) {
+    TensorView* tv) {
   TORCH_CHECK(
       init->isConstScalar(),
       "Cannot create a reduction operation where the initial value is not a const scalar.");
 
   TORCH_CHECK(
-      v1->getRootDomain() == v1->domain(),
-      "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/reorder/computeAt.");
+      TensorDomain::sameAs(tv->getRootDomain(), tv->domain()->domain()),
+      "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/computeAt.");
 
   std::vector<unsigned int> uint_axes;
   for (int axis : axes) {
     if (axis < 0)
-      axis += int(v1->nDims());
+      axis += int(tv->nDims());
 
     TORCH_CHECK(
-        axis >= 0 && (unsigned int)axis < v1->nDims(),
+        axis >= 0 && (unsigned int)axis < tv->nDims(),
         "Reduction on invalid axis, recieved: ",
         axis,
         " however tensor view only has ",
-        v1->nDims(),
+        tv->nDims(),
         " dims.");
 
     uint_axes.push_back((unsigned int)axis);
   }
 
-  TensorView* out = v1->newForReduction(uint_axes);
-  if (init->getDataType().value() != v1->getDataType().value())
-    init = castOp(v1->getDataType().value(), init);
-  new ReductionOp(reduction_op_type, init, out, v1);
+  TensorView* out = newForReduction(tv, uint_axes);
+  if (init->getDataType().value() != tv->getDataType().value())
+    init = castOp(tv->getDataType().value(), init);
+  new ReductionOp(reduction_op_type, init, out, tv);
   return out;
 }
 
@@ -375,6 +465,48 @@ TORCH_CUDA_API TensorView* sum(TensorView* v1, const std::vector<int>& axes) {
   }
 
   return reductionOp(BinaryOpType::Add, axes, init, v1);
+}
+
+TORCH_CUDA_API TensorView* broadcast(
+    TensorView* inp,
+    const std::vector<bool>& is_broadcast_dim) {
+  auto nBCastDims = is_broadcast_dim.size();
+  // Validate is_broadcast_dim
+  unsigned int n_broadcasts = 0;
+  for (auto ent : is_broadcast_dim)
+    if (ent)
+      n_broadcasts++;
+  TORCH_CHECK(
+      nBCastDims - n_broadcasts == inp->nDims(),
+      "Invalid broadcast, number of false entries in is_broadcast_dim expected to be ",
+      inp->nDims(),
+      " but received ",
+      nBCastDims - n_broadcasts);
+
+  if (n_broadcasts == 0) {
+    auto identity = unaryOp(UnaryOpType::Set, inp);
+    TORCH_INTERNAL_ASSERT(
+        identity->getValType().value() == ValType::TensorView,
+        "Expected identity op, but didn't get a TensorView back.");
+    return static_cast<TensorView*>(identity);
+  }
+
+  std::vector<IterDomain*> out_domain;
+  size_t iinp = 0, ibdim = 0;
+  while (ibdim < is_broadcast_dim.size()) {
+    if (is_broadcast_dim[ibdim]) {
+      out_domain.push_back(new IterDomain(
+          new Int(0), new Int(1), ParallelType::Serial, false, false, true));
+    } else {
+      out_domain.push_back(inp->axis(iinp));
+      iinp++;
+    }
+    ibdim++;
+  }
+  TensorView* out_tensor =
+      new TensorView(new TensorDomain(out_domain), inp->getDataType().value());
+  new BroadcastOp(out_tensor, inp);
+  return out_tensor;
 }
 
 // COMPOUND OPERATIONS
@@ -504,7 +636,7 @@ TORCH_CUDA_API Val* where(Val* c, Val* v1, Val* v2) {
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
-  Val* out = promoteNew(v1, v2);
+  Val* out = newOutputVal({v1, v2});
   new TernaryOp(TernaryOpType::Where, out, c, v1, v2);
   return out;
 }
@@ -533,6 +665,8 @@ TORCH_CUDA_API TensorView* where(
   return arithOpOverloads(where, v1, v2, v3);
 }
 
+// TERNARY OPERATIONS
+
 TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
   TORCH_CHECK(
       in->getDataType().value() == thresh->getDataType().value() &&
@@ -544,7 +678,7 @@ TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
           value->getValType().value() == ValType::Scalar,
       "Thresh and Value values should be Scalars");
 
-  Val* out = newValLike(in);
+  Val* out = newOutputVal({in});
 
   new TernaryOp(TernaryOpType::Threshold, out, in, thresh, value);
   return out;
@@ -565,7 +699,7 @@ TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val) {
           max_val->getValType().value() == ValType::Scalar,
       "Min and Max values should be Scalars");
 
-  Val* out = newValLike(in);
+  Val* out = newOutputVal({in});
 
   new TernaryOp(TernaryOpType::Clamp, out, in, min_val, max_val);
   return out;

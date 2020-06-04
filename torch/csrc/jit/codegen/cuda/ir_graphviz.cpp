@@ -90,20 +90,13 @@ class IrNodeLabel : private OptInConstDispatch {
   }
 
   void handle(const Split* split) override {
-    label_ << "Split(axis=" << split->axis()
+    label_ << "Split(IterDomain=" << split->in()
            << ", factor=" << IrNodeLabel::gen(split->factor()) << ")";
   }
 
   void handle(const Merge* merge) override {
-    label_ << "Merge(axis=" << merge->axis() << ")";
-  }
-
-  void handle(const Reorder* reorder) override {
-    label_ << "Reorder( ";
-    for (const int old_pos : reorder->new2old()) {
-      label_ << old_pos << " ";
-    }
-    label_ << ")";
+    label_ << "Merge(IterDomainOuter=" << merge->outer()
+           << ", IterDomainInner=" << merge->inner() << ")";
   }
 
  private:
@@ -270,11 +263,21 @@ void IrGraphGenerator::generateScheduleGraph() {
 
   // Connect TensorView with their TensorDomain
   // (this will trigger the traversal of the schedule graph)
+
   for (auto tv : tensor_views_) {
     addArc(tv->domain(), tv, "[style=dashed, arrowhead=none]");
     if (detail_level_ >= DetailLevel::Explicit) {
-      const auto root_domain = tv->getRootDomain();
-      addArc(tv, root_domain, "[style=dashed, color=green, arrowhead=none]");
+      // Maybe not the best way to handle the root domain, but should be okay
+      addArc(
+          tv,
+          new TensorDomain(tv->getRootDomain()),
+          "[style=dashed, color=green, arrowhead=none]");
+
+      if (tv->domain()->hasRFactor())
+        addArc(
+            tv,
+            new TensorDomain(tv->domain()->rfactorDomain()),
+            "[style=dashed, color=green, arrowhead=none]");
     }
   }
 
@@ -378,7 +381,7 @@ void IrGraphGenerator::handle(const TensorView* tv) {
   if (const auto* compute_at_view = tv->getComputeAtView()) {
     std::stringstream arc_style;
     arc_style << "[color=red, style=dashed, label=\""
-              << "ComputeAt(" << tv->getComputeAtAxis() << ")\"]";
+              << "ComputeAt(" << tv->getRelativeComputeAtAxis() << ")\"]";
     addArc(tv, compute_at_view, arc_style.str());
   }
 
@@ -434,19 +437,15 @@ void IrGraphGenerator::handle(const Allocate* allocate) {
 void IrGraphGenerator::handle(const Split* split) {
   printExpr(split, IrNodeLabel::gen(split));
   addArc(split->in(), split);
-  addArc(split, split->out());
+  addArc(split, split->outer());
+  addArc(split, split->inner());
 }
 
 void IrGraphGenerator::handle(const Merge* merge) {
   printExpr(merge, IrNodeLabel::gen(merge));
-  addArc(merge->in(), merge);
+  addArc(merge->outer(), merge);
+  addArc(merge->inner(), merge);
   addArc(merge, merge->out());
-}
-
-void IrGraphGenerator::handle(const Reorder* reorder) {
-  printExpr(reorder, IrNodeLabel::gen(reorder));
-  addArc(reorder->in(), reorder);
-  addArc(reorder, reorder->out());
 }
 
 } // namespace fuser

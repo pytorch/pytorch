@@ -70,7 +70,8 @@ Statement* OptOutMutator::mutate(TensorView* tv) {
       (tv->hasComputeAt() && !tv->getComputeAtView()->sameAs(computeAtView))) {
     TensorView* mutated_tv = new TensorView(td, tv->getDataType().value());
     if (tv->hasComputeAt()) {
-      mutated_tv->setComputeAt(computeAtView, (int)(tv->getComputeAtAxis()));
+      mutated_tv->setComputeAt(
+          computeAtView, (int)(tv->getRelativeComputeAtAxis()));
     }
     registerMutation(tv, mutated_tv);
     return mutated_tv;
@@ -134,36 +135,28 @@ Statement* OptOutMutator::mutate(Allocate* a) {
 }
 
 Statement* OptOutMutator::mutate(Split* s) {
-  TensorDomain* o = static_cast<TensorDomain*>(mutateAsVal(s->out()));
-  TensorDomain* i = static_cast<TensorDomain*>(mutateAsVal(s->in()));
+  IterDomain* ot = static_cast<IterDomain*>(mutateAsVal(s->outer()));
+  IterDomain* inr = static_cast<IterDomain*>(mutateAsVal(s->inner()));
+  IterDomain* in = static_cast<IterDomain*>(mutateAsVal(s->in()));
   Int* fact = static_cast<Int*>(mutateAsVal(s->factor()));
 
-  if (o->sameAs(s->out()) && i->sameAs(s->in()) && fact->sameAs(s->factor()))
+  if (ot->sameAs(s->outer()) && inr->sameAs(s->inner()) &&
+      in->sameAs(s->in()) && fact->sameAs(s->factor()))
     return s;
   FusionGuard::getCurFusion()->removeExpr(s);
-  return new Split(o, i, s->axis(), fact);
+  return new Split(ot, inr, in, fact);
 }
 
 Statement* OptOutMutator::mutate(Merge* m) {
-  TensorDomain* o = static_cast<TensorDomain*>(mutateAsVal(m->out()));
-  TensorDomain* i = static_cast<TensorDomain*>(mutateAsVal(m->in()));
+  IterDomain* ot = static_cast<IterDomain*>(mutateAsVal(m->out()));
+  IterDomain* otr = static_cast<IterDomain*>(mutateAsVal(m->outer()));
+  IterDomain* in = static_cast<IterDomain*>(mutateAsVal(m->inner()));
 
-  if (o->sameAs(m->out()) && i->sameAs(m->in()))
+  if (ot->sameAs(m->out()) && otr->sameAs(m->outer()) && in->sameAs(m->inner()))
     return m;
 
   FusionGuard::getCurFusion()->removeExpr(m);
-  return new Merge(o, i, m->axis());
-}
-
-Statement* OptOutMutator::mutate(Reorder* ro) {
-  TensorDomain* o = static_cast<TensorDomain*>(mutateAsVal(ro->out()));
-  TensorDomain* i = static_cast<TensorDomain*>(mutateAsVal(ro->in()));
-
-  if (o->sameAs(ro->out()) && i->sameAs(ro->in()))
-    return ro;
-
-  FusionGuard::getCurFusion()->removeExpr(ro);
-  return new Reorder(o, i, ro->new2old());
+  return new Merge(ot, otr, in);
 }
 
 Statement* OptOutMutator::mutate(UnaryOp* uop) {
@@ -199,14 +192,27 @@ Statement* OptOutMutator::mutate(TernaryOp* top) {
 }
 
 Statement* OptOutMutator::mutate(ReductionOp* rop) {
-  Val* out = static_cast<Val*>(mutate(rop->out()));
-  Val* in = static_cast<Val*>(mutate(rop->in()));
+  Val* out = mutateAsVal(rop->out())->asVal();
+  Val* in = mutateAsVal(rop->in())->asVal();
   Val* init = rop->init();
   if (out->sameAs(rop->out()) && in->sameAs(rop->in()) &&
       init->sameAs(rop->init()))
     return rop;
 
   return new ReductionOp(rop->getReductionOpType(), init, out, in);
+}
+
+Statement* OptOutMutator::mutate(BroadcastOp* bop) {
+  Val* out = mutateAsVal(bop->out())->asVal();
+  Val* in = mutateAsVal(bop->in())->asVal();
+  if (out->sameAs(bop->out()) && in->sameAs(bop->in()))
+    return bop;
+
+  TORCH_INTERNAL_ASSERT(
+      out->getValType().value() == ValType::TensorView &&
+      in->getValType().value() == ValType::TensorView)
+  return new BroadcastOp(
+      static_cast<TensorView*>(out), static_cast<TensorView*>(in));
 }
 
 Statement* OptOutMutator::mutate(ForLoop* fl) {

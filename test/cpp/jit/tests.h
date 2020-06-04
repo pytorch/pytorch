@@ -135,7 +135,9 @@ namespace jit {
   _(GPU_FusionScalarInputs)      \
   _(GPU_FusionRFactorReplay)     \
   _(GPU_FusionReduction)         \
-  _(GPU_FusionReduction2)
+  _(GPU_FusionReduction2)        \
+  _(GPU_FusionReduction3)        \
+  _(GPU_FusionSimpleBCast)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

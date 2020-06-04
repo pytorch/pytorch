@@ -176,7 +176,15 @@ struct TORCH_CUDA_API Val : public Statement {
   virtual ~Val() = default;
 
   Val() = delete;
-  Val(ValType _vtype, DataType _dtype = DataType::Null);
+
+  // We may not want to register this value during Val's constructor. The reason
+  // for this is that if we register the val, then ina derived constructor try
+  // to throw, fusion's destructor will get called, but the pointer to this Val
+  // will be invalid. When fusion tries to delete this value it will cause a seg
+  // fault, instead of showing the thrown error.
+  Val(ValType _vtype,
+      DataType _dtype = DataType::Null,
+      bool register_val = true);
 
   // TODO: Values are unique and not copyable
   Val(const Val& other) = delete;

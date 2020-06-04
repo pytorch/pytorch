@@ -81,7 +81,6 @@ class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
 
   void handle(const Split*) override;
   void handle(const Merge*) override;
-  void handle(const Reorder*) override;
 
   // lookup the graph id, creating one if not found
   std::string getid(const Statement* stm);

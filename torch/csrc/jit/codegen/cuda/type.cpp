@@ -57,12 +57,15 @@ static _enum_unordered_map<ExprType, std::string> expr_type_string_map{
     {ExprType::UnaryOp, "UnaryOp"},
     {ExprType::BinaryOp, "BinaryOp"},
     {ExprType::TernaryOp, "TernaryOp"},
+    {ExprType::ReductionOp, "ReductionOp"},
+    {ExprType::BroadcastOp, "BroadcastOp"},
     {ExprType::ForLoop, "ForLoop"},
     {ExprType::IfThenElse, "IfThenElse"},
     {ExprType::Allocate, "Allocate"},
     {ExprType::Split, "Split"},
     {ExprType::Merge, "Merge"},
-    {ExprType::Reorder, "Reorder"}};
+};
+
 static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Abs, "fabs"},
     {UnaryOpType::Acos, "acosf"},
@@ -191,13 +194,11 @@ struct _enum_pair_hash {
     return static_cast<size_t>(p.first) ^ static_cast<size_t>(p.second);
   }
 };
-
 template <typename KeyType, typename ValType>
 using _enum_pair_unordered_map = std::unordered_map<
     std::pair<KeyType, KeyType>,
     ValType,
     _enum_pair_hash<KeyType>>;
-
 static _enum_pair_unordered_map<DataType, std::string> supported_casts{
     {{DataType::Float, DataType::Half}, "__float2half"},
     {{DataType::Half, DataType::Float}, "__half2float"}};

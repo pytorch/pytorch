@@ -5,7 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 
 #include <deque>
-#include <set>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -43,6 +43,7 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   IterVisitor(IterVisitor&& other) = default;
   IterVisitor& operator=(IterVisitor&& other) = default;
 
+ protected:
   // Functions return nodes in reverse order to be added to the to_visit queue
   // These functions will start at outputs and propagate up through the DAG
   // to inputs based on depth first traversal. Next could be called on a node
@@ -106,6 +107,84 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
       Fusion* const fusion,
       bool from_outputs_only = false,
       bool breadth_first = false);
+
+  static std::unordered_set<Val*> getTerminatingOutputs(Fusion* const);
+
+  static std::unordered_set<Val*> getInputsTo(const std::vector<Val*>& vals);
+};
+
+/*
+ * Backward visitor IterVisitor calls handle in reverse order from outputs
+ * to inputs It would be really nice to unify this with IterVisitor, however,
+ * the challenge there is that we specify traversal from outputs towards inputs
+ * because it implicitly provides DCE. However, if users are not careful, they
+ * could miss necessary outputs to do a backward traversal.
+ *
+ * BackwardVisitor checks that all outputs of an Expr is visited before visiting
+ * the Expr. If we don't provide nodes to start from on all backward paths of
+ * those outputs we will never visit the Expr.
+ *
+ * The first step of BackwardVisitor is to make sure we've specified enough
+ * outputs to guarentee that we will traverse all outputs of all exprs during
+ * the backward traversal.
+ */
+struct TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
+  virtual ~BackwardVisitor() = default;
+
+  BackwardVisitor() = default;
+
+  BackwardVisitor(const BackwardVisitor& other) = default;
+  BackwardVisitor& operator=(const BackwardVisitor& other) = default;
+
+  BackwardVisitor(BackwardVisitor&& other) = default;
+  BackwardVisitor& operator=(BackwardVisitor&& other) = default;
+
+  // Functions return nodes in reverse order to be added to the to_visit queue
+  // These functions will start at outputs and propagate up through the DAG
+  // to inputs based on depth first traversal. Next could be called on a node
+  // multiple times.
+  virtual std::vector<Statement*> next(Statement* stmt);
+
+  virtual std::vector<Statement*> next(Expr* expr);
+
+  virtual std::vector<Statement*> next(Val* val);
+
+  // This handle functions is called on every Statement* in topological order,
+  // starting from outputs to inputs.
+  virtual void handle(Statement* stmt) override {
+    OptOutDispatch::handle(stmt);
+  }
+  // This handle functions is called on every Expr* in topological order,
+  // starting from outputs to inputs.
+  virtual void handle(Expr* expr) override {
+    OptOutDispatch::handle(expr);
+  }
+  // This handle functions is called on every Val* in topological order,
+  // starting from outputs to inputs.
+  virtual void handle(Val* val) override {
+    OptOutDispatch::handle(val);
+  }
+
+  // All exprs that need to be visited in this traversal. Labeled in topological
+  // order (size_t).
+  std::unordered_map<Expr*, size_t> traversal_exprs_;
+
+  // The entire stack during traversal. stmt_stack.back().back() is the node
+  // that is being called in handle(). stmt_stack.back() contains siblings (not
+  // guarenteed to be all siblings throughout traversal). stmt_stack.front()
+  // contains the inputs we started with (not guarenteed to be all outputs
+  // throughout traversal).
+  std::deque<std::deque<Statement*>> stmt_stack_;
+
+  // Starts at nodes provided in from, traverses from these nodes to inputs.
+  // Calls handle on all Statement*s in topological sorted order.
+  // traverseAllPaths = false only call handle on each Statement* once
+  // traverseAllPaths = true traverses all paths from nodes in from to inputs.
+  //   Handle on a Statement* for every path from "from" nodes, to inputs.
+  void traverseFrom(
+      Fusion* const fusion,
+      const std::vector<Val*>& from,
+      bool traverseAllPaths = false);
 };
 
 struct TORCH_CUDA_API DependencyCheck {
@@ -128,8 +207,6 @@ struct TORCH_CUDA_API DependencyCheck {
   // paths. deque[i].back() are leaf nodes, and deque[i][0] is "dependency".
   // Returns an empty deque if there are no uses of dependency found.
   static std::deque<std::deque<Val*>> getAllDependencyChainsTo(Val* dependency);
-
-  static std::vector<Val*> getTerminatingOutputs(Fusion* const);
 };
 
 } // namespace fuser
