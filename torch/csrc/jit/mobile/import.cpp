@@ -85,8 +85,9 @@ void parseMethods(
   TORCH_CHECK(
       vals.size() > 0,
       "Bytecode has no elements. At least one element of version number is required.");
-  // Initialized with the version number when kProducedBytecodeVersion was introduced.
-  // The old models (some of them already in production) without version number don't have to be re-generated.
+  // Initialized with the version number when kProducedBytecodeVersion was
+  // introduced. The old models (some of them already in production) without
+  // version number don't have to be re-generated.
   int64_t model_version = 0x3L;
   size_t method_i_start = 0;
   if (vals[0].isInt()) {
