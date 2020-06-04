@@ -4,7 +4,7 @@
 
 namespace at { namespace native {
 
-inline std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
+inline std::vector<int64_t> computeStrideForViewAsReal(IntArrayRef oldstride) {
   auto res = oldstride.vec();
   for(size_t i = 0; i < res.size(); i++) {
     res[i] = res[i] * 2;
@@ -17,12 +17,12 @@ inline std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
 // with corresponding real dtype containing the complex values
 // in the last two dimensions
 Tensor view_as_real(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(self.is_complex());
+  TORCH_CHECK(self.is_complex(), "view_as_real is only supported for complex tensors");
   auto new_sizes = self.sizes().vec();
   // last dimension will always have two elements containing the real and imag vals
   new_sizes.emplace_back(2);
   auto strides = self.strides().vec();
-  auto new_strides = computeStrideForComplex(self.strides());
+  auto new_strides = computeStrideForViewAsReal(self.strides());
   auto new_storage_offset = 2 * self.storage_offset();
   const auto float_type = c10::toValueType(self.scalar_type());
   return at::empty({0}, self.options().dtype(float_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
@@ -30,6 +30,11 @@ Tensor view_as_real(const Tensor& self) {
 
 inline std::vector<int64_t> computeStrideForViewAsComplex(IntArrayRef oldstride) {
   auto res = oldstride.vec();
+  int dim = res.size();
+
+  TORCH_INTERNAL_ASSERT(res[dim-1] == 1 || res[dim-1] == 0);
+  res.pop_back();
+
   for(size_t i = 0; i < res.size(); i++) {
     TORCH_INTERNAL_ASSERT(res[i] % 2 == 0);
     res[i] = res[i] / 2;
@@ -37,19 +42,18 @@ inline std::vector<int64_t> computeStrideForViewAsComplex(IntArrayRef oldstride)
   return res;
 }
 
-// expects as input a float or double tensor (with last dimension of size 2)
+// expects as input a float or double tensor with last dimension of size 2
 // and returns back a tensor with corresponding complex dtype
 Tensor view_as_complex(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(self.scalar_type() == kFloat || self.scalar_type() == kDouble);
+  TORCH_INTERNAL_ASSERT(
+    self.scalar_type() == kFloat || self.scalar_type() == kDouble,
+    "view_as_complex is only supported for float and double tensors");
 
   auto new_sizes = self.sizes().vec();
   TORCH_INTERNAL_ASSERT(new_sizes[self.dim()-1] == 2);
   new_sizes.pop_back();
 
-  auto strides = self.strides().vec();
-  TORCH_INTERNAL_ASSERT(strides[self.dim()-1] == 1 || strides[self.dim()-1] == 0);
-  strides.pop_back();
-  auto new_strides = computeStrideForViewAsComplex(strides);
+  auto new_strides = computeStrideForViewAsComplex(self.strides());
 
   const auto complex_type = c10::toComplexType(self.scalar_type());
   return at::empty({0}, self.options().dtype(complex_type)).set_(self.storage(), self.storage_offset(), new_sizes, new_strides);

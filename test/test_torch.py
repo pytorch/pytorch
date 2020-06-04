@@ -17797,6 +17797,45 @@ class TestViewOps(TestCase):
         return True
 
     @onlyOnCPUAndCUDA
+    def test_views_with_dtype_change(self, device):
+        def do_transpose(x, contiguous=False, dim0=0, dim1=1):
+            if contiguous:
+                return x
+            else:
+                return x.transpose(dim0, dim1)
+
+        def test_view_as_complex(contiguous_input=True, dim0=0, dim1=1):
+            t = torch.randn(3, 4, 2, device=device)
+            c_t = t[:, :, 0] + 1j * t[:, :, 1]
+
+            input = do_transpose(t, contiguous_input, dim0, dim1)
+
+            if (input.size()[-1] != 2 or
+                    input.stride()[-1] > 2):
+                with self.assertRaises(RuntimeError):
+                    torch.view_as_complex(input)
+                return
+
+            res = torch.view_as_complex(input)
+            self.assertEqual(res, do_transpose(c_t, contiguous_input, dim0, dim1))
+            self.assertTrue(self.is_view_of(t, res))
+
+        def test_view_as_real(contiguous_input=True):
+            t = torch.randn(3, 4, 2, device=device)
+            c_t = t[:, :, 0] + 1j * t[:, :, 1]
+
+            res = torch.view_as_real(do_transpose(c_t, contiguous_input))
+            self.assertEqual(res, do_transpose(t, contiguous_input))
+            self.assertTrue(self.is_view_of(c_t, res))
+
+        test_view_as_complex()
+        test_view_as_complex(contiguous_input=False)
+        test_view_as_complex(contiguous_input=False, dim0=0, dim1=2)
+
+        test_view_as_real()
+        test_view_as_real(contiguous_input=False)
+
+    @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_real_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
