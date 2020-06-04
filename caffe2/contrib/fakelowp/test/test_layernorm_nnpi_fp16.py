@@ -13,6 +13,9 @@ from caffe2.python import workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.onnx.tests.test_utils import TestCase
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
+from hypothesis import given, settings
+from hypothesis import strategies as st
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2",
                  "--glow_global_fp16=1",
@@ -23,15 +26,17 @@ GLOW_LOWERED_BATCHNORM = False
 
 
 # Test the lowered LayerNorm op
-class LayerNorm(TestCase):
-    def _test_layernorm(self):
-        size = 3
-        input_channels = 2
-        batch_size = 4
-        seed = int(time.time())
+class LayerNorm(serial.SerializedTestCase):
+    @given(seed=st.integers(0, 65535),
+        size = st.integers(2,8),
+        input_channels=st.integers(1, 4),
+        batch_size=st.integers(2,8),
+        epsilon=st.floats(min_value=1e-5, max_value=1e-2))
+    @settings(max_examples=100)
+    def test_layernorm(self, seed, size, input_channels, batch_size, epsilon):
         np.random.seed(seed)
-
-        epsilon = 1e-3
+        # Reset the workspace
+        workspace.ResetWorkspace()
 
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
@@ -48,7 +53,7 @@ class LayerNorm(TestCase):
         )
 
         pred_net_ref = caffe2_pb2.NetDef()
-        pred_net_ref.name = "pred"
+        pred_net_ref.name = "pred_ref"
         pred_net_ref.external_input.extend(["X"])
         pred_net_ref.external_output.extend(["Y", "mean", "rstd"])
         pred_net_ref.op.add().CopyFrom(
@@ -77,7 +82,7 @@ class LayerNorm(TestCase):
 
         workspace.FeedBlob("X", X)
 
-        workspace.CreateNet(pred_net_onnxified)
+        workspace.CreateNet(pred_net)
         workspace.CreateNet(pred_net_ref)
 
         workspace.RunNet(pred_net_ref.name)
@@ -85,7 +90,7 @@ class LayerNorm(TestCase):
         mean_c2 = workspace.FetchBlob("mean")
         std_c2 = workspace.FetchBlob("rstd")
 
-        workspace.RunNet(pred_net_onnxified.name)
+        workspace.RunNet(pred_net.name)
         Y_glow = workspace.FetchBlob("Y")
         mean_glow = workspace.FetchBlob("mean")
         std_glow = workspace.FetchBlob("rstd")
@@ -98,12 +103,20 @@ class LayerNorm(TestCase):
                 "layernorm",
                 {
                     "seed": seed,
+                    "size": size,
+                    "input_channels": input_channels,
+                    "batch_size": batch_size,
+                    "epsilon": epsilon,
                     "X": X,
                     "Y_glow": Y_glow,
+                    "mean_glow": mean_glow,
+                    "std_glow": std_glow,
                     "Y_c2": Y_c2,
-                    "Y": diff_Y,
-                    "mean": diff_mean,
-                    "std": diff_std,
+                    "mean_c2": mean_c2,
+                    "std_c2": std_c2,     
+                    "diff_Y": diff_Y,
+                    "diff_mean": diff_mean,
+                    "diff_std": diff_std,
                 }
             )
             assert(0)
