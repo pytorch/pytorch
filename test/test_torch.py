@@ -8057,15 +8057,16 @@ class TestTorchDeviceType(TestCase):
             data = (torch.randn(*shape).to(dtype) * random.randint(50, 100)).tolist()
             # Use _np_compare_func as it copies the output of np_func,
             # which takes care of negative strides if present.
-            self._np_compare_func(funcs, data, device, dtype)
+            torch_fn, np_fn = funcs
+            self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
 
-    @dtypes(torch.float, torch.double, torch.int16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
+    @dtypes(torch.int64, torch.double, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_fliplr(self, device, dtype):
         funcs = (torch.fliplr, np.fliplr)
         self._test_fliplr_flipud(funcs, 2, 4, device, dtype)
 
-    @dtypes(torch.float, torch.double, torch.int16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
+    @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_fliplr_invalid(self, device, dtype):
         x = torch.randn(42).to(dtype)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
@@ -8073,13 +8074,13 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(torch.tensor(42))
 
-    @dtypes(torch.float, torch.double, torch.int16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
+    @dtypes(torch.int64, torch.double, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_flipud(self, device, dtype):
         funcs = (torch.flipud, np.flipud)
         self._test_fliplr_flipud(funcs, 1, 4, device, dtype)
 
-    @dtypes(torch.float, torch.double, torch.int16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
+    @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_flipud_invalid(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 1-d."):
             torch.flipud(torch.tensor(42))
