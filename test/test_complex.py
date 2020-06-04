@@ -15,8 +15,10 @@ class TestComplexTensor(TestCase):
     @dtypes(torch.float32, torch.float64)
     def test_dtype_inference(self, device, dtype):
         # issue: https://github.com/pytorch/pytorch/issues/36834
+        default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(dtype)
         x = torch.tensor([3., 3. + 5.j], device=device)
+        torch.set_default_dtype(default_dtype)
         self.assertEqual(x.dtype, torch.cdouble if dtype == torch.float64 else torch.cfloat)
 
 instantiate_device_type_tests(TestComplexTensor, globals())

@@ -11040,27 +11040,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False) +
-              torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_half=True) +
-                    torch.testing.get_all_complex_dtypes()))
-    def test_exp(self, device, dtype):
-        for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
-            if dtype == torch.bfloat16:
-                # Currently multiply a bfloat16 type with floating-point causes error:
-                #   RuntimeError: dtype != ScalarType::Undefined INTERNAL ASSERT FAILED at
-                #   "/pytorch/aten/src/ATen/native/TensorIterator.cpp":125, please report a bug to PyTorch.
-                # We skip bfloat16 for now, but we should fix it.
-                with self.assertRaises(RuntimeError):
-                    torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device)
-                continue
-
-            a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi
-            expected = np.exp(a.cpu().numpy())
-            actual = torch.exp(a)
-            self.assertEqual(actual, torch.from_numpy(expected))
-
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_uniform_kstest(self, device, dtype):
@@ -19243,7 +19222,7 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('sqrt'),
                   _TorchMathTestMeta('erf', ref_backend='scipy'),
                   _TorchMathTestMeta('erfc', ref_backend='scipy'),
-                  _TorchMathTestMeta('exp'),
+                  _TorchMathTestMeta('exp', dtypes=_float_types_no_half + _complex_types, atol=0, rtol=1e-7),
                   _TorchMathTestMeta('expm1'),
                   _TorchMathTestMeta('floor'),
                   _TorchMathTestMeta('ceil'),
