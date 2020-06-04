@@ -42,11 +42,6 @@ class Transformer(Module):
     https://github.com/pytorch/examples/tree/master/word_language_model
     """
 
-    encoder: Any
-    decoder: Any
-    d_model: Any
-    nhead: Any
-
     def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
                  num_decoder_layers: int = 6, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: str = "relu", custom_encoder: Optional[Any] = None, custom_decoder: Optional[Any] = None) -> None:

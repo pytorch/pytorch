@@ -3,7 +3,7 @@ from typing import Tuple, Optional
 
 import torch
 from torch import Tensor
-from . import Linear
+from .linear import _LinearWithBias
 from torch.nn.init import xavier_uniform_
 from torch.nn.init import constant_
 from torch.nn.init import xavier_normal_
@@ -800,7 +800,8 @@ class MultiheadAttention(Module):
         'bias_k': torch._jit_internal.Optional[torch.Tensor],
         'bias_v': torch._jit_internal.Optional[torch.Tensor],
     }
-    __constants__ = ['q_proj_weight', 'k_proj_weight', 'v_proj_weight', 'in_proj_weight']
+    __constants__ = ['q_proj_weight', 'k_proj_weight', 'v_proj_weight', 'in_proj_weight',
+                     'out_proj_weight', 'out_proj_bias']
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
         super(MultiheadAttention, self).__init__()
@@ -829,7 +830,7 @@ class MultiheadAttention(Module):
             self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
         else:
             self.register_parameter('in_proj_bias', None)
-        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+        self.out_proj = _LinearWithBias(embed_dim, embed_dim)
 
         if add_bias_kv:
             self.bias_k = Parameter(torch.empty(1, 1, embed_dim))

@@ -1387,7 +1387,12 @@ def interface(obj):
     if not _is_new_style_class(obj):
         raise RuntimeError("TorchScript interfaces must inherit from 'object'")
 
-    is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
+    # Expected MRO is:
+    #   User module
+    #   torch.nn.modules.module.Module
+    #   typing.Generic
+    #   object
+    is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 4
 
     if not is_module_interface and len(obj.mro()) > 2:
         raise RuntimeError("TorchScript interface does not support inheritance yet. "
