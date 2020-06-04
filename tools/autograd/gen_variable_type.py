@@ -338,11 +338,12 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
+# TODO(iliacher): remove Profile wrappers
 # ProfiledType templates
 PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
 TORCH_INTERNAL_ASSERT(op);
-return c10::Dispatcher::singleton().callUnboxedRedispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
+return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
 FACTORY_FUNCTION_NAMES = None

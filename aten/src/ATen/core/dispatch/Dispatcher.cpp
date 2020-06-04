@@ -31,7 +31,6 @@ private:
   std::list<std::unique_ptr<OpRegistrationListener>> listeners_;
 };
 
-void convert_to_ivalue_vector(std::vector<c10::IValue>& stack) {}
 }
 
 OpRegistrationListener::~OpRegistrationListener() {}

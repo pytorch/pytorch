@@ -1,6 +1,8 @@
 #pragma once
 
-#include <ATen/FunctionSequenceNumber.h>
+#include <ATen/SequenceNumber.h>
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/record_function.h>
@@ -289,24 +291,6 @@ private:
 
 namespace detail {
 template<class... Args> inline void unused_arg_(const Args&...) {}
-
-template <typename T, std::enable_if_t<c10::impl::not_ok_to_box<T>::value>* = nullptr>
-inline void push_ivalue_copy(std::vector<c10::IValue>& stack, const T& v) {}
-template <typename T, std::enable_if_t<!c10::impl::not_ok_to_box<T>::value>* = nullptr>
-inline void push_ivalue_copy(std::vector<c10::IValue>& stack, const T& v) {
-  torch::jit::push(stack, v);
-}
-
-template<typename Item>
-void convert_to_ivalue_vector(std::vector<c10::IValue>& stack, const Item& item) {
-  push_ivalue_copy(stack, item);
-}
-template<typename Item, typename... Rest>
-void convert_to_ivalue_vector(std::vector<c10::IValue>& stack, const Item& item, Rest... other_items) {
-  push_ivalue_copy(stack, item);
-  convert_to_ivalue_vector(stack, other_items...);
-}
-void CAFFE2_API convert_to_ivalue_vector(std::vector<c10::IValue>& stack);
 }
 
 template<class Return, class... Args>
@@ -318,22 +302,22 @@ inline Return Dispatcher::callWithDispatchKey(const OperatorHandle& op, Dispatch
   // If true and callbacks need inputs, we box the arguments and pass
   // them into the callbacks and also into the kernel call
   at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (guard.active_) {
-    // Stack-based record function with scope lifetime can be markee as 'current'
+  if (guard.active) {
+    // Stack-based record function with scope lifetime can be marked as 'current'
     // thread local record function; used to track nested recorded scopes
     guard._setCurrent();
-    if (guard.needs_inputs_) {
+    if (guard.needs_inputs) {
       std::vector<c10::IValue> stack;
-      detail::convert_to_ivalue_vector(stack, args...);
+      auto boxed_all_args = impl::boxArgumentsIntoStack(stack, args...);
 
-      guard._before(op.schema().name(), stack, at::FunctionSequenceNumber::peek());
+      guard.before(op.schema().name(), stack, at::sequence_number::peek());
 
       // if we could convert all the arguments, also pass the stack into the kernel call
-      if (stack.size() == sizeof...(args)) {
-        return kernel.template callUnboxedWithStack<Return, Args...>(op, stack, std::forward<Args>(args)...);
+      if (boxed_all_args) {
+        return kernel.template callBoxedOrUnboxed<Return, Args...>(op, stack, std::forward<Args>(args)...);
       }
     } else {
-      guard._before(op.schema().name(), at::FunctionSequenceNumber::peek());
+      guard.before(op.schema().name(), at::sequence_number::peek());
     }
   }
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
@@ -356,7 +340,7 @@ inline Return Dispatcher::redispatch(const OperatorHandle& op, DispatchKey curre
     DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
     args...);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  // Note: not attempting to use RECORD_FUNCTION to avoid double logging
+  // Note: not attempting to use RecordFunction to avoid double logging in observers
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
@@ -367,7 +351,15 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
 
   // using already existing stack to record function execution in observers
-  RECORD_FUNCTION(op.schema().name(), *stack, at::FunctionSequenceNumber::peek());
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  if (guard.active) {
+    guard._setCurrent();
+    if (guard.needs_inputs) {
+      guard.before(op.schema().name(), *stack, at::sequence_number::peek());
+    } else {
+      guard.before(op.schema().name(), at::sequence_number::peek());
+    }
+  }
 
   kernel.callBoxed(op, stack);
 }

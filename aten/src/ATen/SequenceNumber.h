@@ -7,13 +7,10 @@ namespace at {
 
 // A simple thread local enumeration, used to link forward and backward pass
 // ops and is used by autograd and observers framework
+namespace sequence_number {
 
-class TORCH_API FunctionSequenceNumber {
- public:
-  static uint64_t peek();
-  static uint64_t get_and_increment();
- private:
-  FunctionSequenceNumber() {};
-};
+TORCH_API uint64_t peek();
+TORCH_API uint64_t get_and_increment();
 
+} // namespace sequence_number
 } // namespace at

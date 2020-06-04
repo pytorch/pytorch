@@ -88,10 +88,10 @@ public:
 
 
   /**
-   * Like callUnboxed, but with a stack of inputs already passed
+   * Like call, but with a stack of inputs already passed
    */
   template<class Return, class... Args>
-  Return callUnboxedWithStack(
+  Return callBoxedOrUnboxed(
       const OperatorHandle& opHandle, std::vector<c10::IValue>& stack, Args... args) const;
 
   /**

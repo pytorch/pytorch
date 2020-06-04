@@ -35,6 +35,33 @@ using supports_boxing =
     not_ok_to_box<std::decay_t<Args>>...
   >>;
 
+template <typename T, std::enable_if_t<c10::impl::not_ok_to_box<T>::value>* = nullptr>
+inline bool pushIValueOrCannotBox(std::vector<c10::IValue>& stack, const T& v) {
+  torch::jit::push(stack, "cannot box");
+  return false;
+}
+template <typename T, std::enable_if_t<!c10::impl::not_ok_to_box<T>::value>* = nullptr>
+inline bool pushIValueOrCannotBox(std::vector<c10::IValue>& stack, const T& v) {
+  torch::jit::push(stack, v);
+  return true;
+}
+
+// boxArgumentsIntoStack takes the arguments and pushes them as IValues onto the stack.
+// In case the argument cannot be converted to IValue, the function pushes "cannot box"
+// IValue string. Return value - whether all of the arguments could be converted to IValues
+inline bool boxArgumentsIntoStack(std::vector<c10::IValue>& stack) {
+  return true;
+}
+template<typename Item>
+inline bool boxArgumentsIntoStack(std::vector<c10::IValue>& stack, const Item& item) {
+  return pushIValueOrCannotBox(stack, item);
+}
+template<typename Item, typename... Rest>
+inline bool boxArgumentsIntoStack(std::vector<c10::IValue>& stack, const Item& item, Rest... other_items) {
+  auto res = pushIValueOrCannotBox(stack, item);
+  return boxArgumentsIntoStack(stack, other_items...) && res;
+}
+
 template<class Result, class... Args>
 Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args, std::enable_if_t<!supports_boxing<Result, Args...>::value, int> = 0) {
   // Some kernels don't need to actually box, and don't return.  If that's the
@@ -78,7 +105,7 @@ boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_fu
 template<class Result>
 std::enable_if_t<!supports_boxing<Result, c10::IValue>::value, Result>
 callBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, torch::jit::Stack& stack) {
-  TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxedWithStack() for a kernel that only has a boxed kernel and doesn't support calling from an unboxed API yet.");
+  TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxedFunc() but return result cannot be boxed");
 }
 
 template<class Result>
@@ -93,7 +120,7 @@ template<class Result>
 std::enable_if_t<supports_boxing<Result, c10::IValue>::value && std::is_same<void, Result>::value, Result>
 callBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, torch::jit::Stack& stack) {
   (*boxed_kernel_func)(functor, opHandle, &stack);
-  TORCH_INTERNAL_ASSERT(stack.size() == 0, "A boxed kernel returned a value but when we called it with KernelFunction::callUnboxedWithStack(), we expected it to return void.");
+  TORCH_INTERNAL_ASSERT(stack.size() == 0, "A boxed kernel returned a value but when we called it with KernelFunction::callBoxedFunc(), we expected it to return void.");
 }
 
 }

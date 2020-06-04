@@ -6,7 +6,7 @@
 #include <unordered_set>
 #include <exception>
 #include <ATen/ATen.h>
-#include <ATen/FunctionSequenceNumber.h>
+#include <ATen/SequenceNumber.h>
 #include <pybind11/pybind11.h>
 
 #include <torch/csrc/THP.h>
@@ -620,7 +620,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,
     std::vector<c10::IValue>(),
-    at::FunctionSequenceNumber::peek());
+    at::sequence_number::peek());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
