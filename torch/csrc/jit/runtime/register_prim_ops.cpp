@@ -319,7 +319,7 @@ RegisterOperators reg(
          listSelect,
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::append.t(t[](a!) self, t(c -> *) el) -> t[](a!)",
+         "aten::append.t(t[](a!) self, t(c -> *) el) -> None",
          listAppend,
          aliasAnalysisFromSchema()),
      Operator(
