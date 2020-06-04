@@ -1238,7 +1238,7 @@ def emit_body(declaration):
         # requires that the counter is incremented before it is called
         body.append(emit_history())
 
-    if is_out_fn or declaration['inplace']:
+    if is_out_fn:
         body.append(emit_forbid_fw_derivatives(is_inplace=True))
     else:
         if requires_fw_derivatives:

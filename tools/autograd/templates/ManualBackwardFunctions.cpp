@@ -2785,3 +2785,52 @@ Tensor native_batch_norm_forward(const Tensor& input_fw_grad, const Tensor& inpu
   return out_fw_grad;
 }
 
+Tensor max_pool2d_with_indices_forward(const Tensor& self_fw_grad, const Tensor& indices) {
+  // Do the same indexing as the one done during the forward
+  auto out_size = indices.sizes();
+  auto linearized_fw_grad = self_fw_grad.view({out_size[0], out_size[1], -1});
+  auto linearized_ind = indices.view({out_size[0], out_size[1], -1});
+
+  auto res = linearized_fw_grad.gather(-1, linearized_ind);
+
+  return res.view(out_size);
+}
+
+Tensor addmm_forward(const Tensor& self_fw_grad, const Tensor& mat1_fw_grad, const Tensor& mat2_fw_grad,
+        Scalar beta, Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
+
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = maybe_multiply(self_fw_grad, beta);
+  }
+
+  if (mat1_fw_grad.defined()) {
+    auto val = maybe_multiply(mat1_fw_grad.mm(mat2), alpha);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  if (mat2_fw_grad.defined()) {
+    auto val = maybe_multiply(mat1.mm(mat2_fw_grad), alpha);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  }
+
+  return out_fw_grad;
+}
+
+Tensor _log_softmax_foward(const Tensor& self_fw_grad, const Tensor& result, int dim) {
+  // dyi/dw = dxi/dw - sum_j (e(yj) * dxj/dw)
+  auto sum = at::sum(self_fw_grad * result.exp(), dim, true);
+
+  auto out_fw_grad = self_fw_grad - sum;
+
+  return out_fw_grad;
+}

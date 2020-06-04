@@ -475,7 +475,21 @@ def match_declarations_with_differentiability_info(declarations, differentiabili
 
     for declaration in declarations:
         info = find_info(declaration)
+
+        # For functions that have a single def for out of place and inplace (like exp())
+        fw_info = []
+        if info:
+            fw_info = copy.deepcopy(info['autograd_fw_info'])
+            if fw_info and declaration['inplace']:
+                assert len(fw_info) == 1 # Only single output inplace should exist
+                d = fw_info[0]
+                # replace "result" from the formula by self
+                def repl(m):
+                    return "{}self{}".format(m.group(1), m.group(2))
+                d['formula'] = re.sub(IDENT_REGEX.format("result"), repl, d['formula'])
+                d['out_arg'] = "self"
+
         declaration['derivative'] = info['autograd_fn'] if info else None
         declaration['non_differentiable_arg_names'] = info['non_differentiable_arg_names'] if info else []
         declaration['output_differentiability'] = info['output_differentiability'] if info else None
-        declaration['autograd_fw_info'] = info['autograd_fw_info'] if info else []
+        declaration['autograd_fw_info'] = fw_info

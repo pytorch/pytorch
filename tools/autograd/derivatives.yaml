@@ -194,6 +194,7 @@
   self: maybe_multiply(grad, beta)
   mat1: mm_mat1_backward(grad, mat2, mat1, alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
+  result: addmm_forward(self_fw_grad, mat1_fw_grad, mat2_fw_grad, beta, alpha, mat1, mat2)
 
 - name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
@@ -691,9 +692,11 @@
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
+  result: linear
 
 - name: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
+  result: linear
 
 - name: median(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
@@ -1026,6 +1029,7 @@
 
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
+  result: linear
 
 - name: one_hot(Tensor self, int num_classes=-1) -> Tensor
   self: non_differentiable
@@ -1122,6 +1126,7 @@
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
+  result: linear
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
   self: at::view_as_complex(grad.contiguous()).conj() # gx0 - i gx1
@@ -1244,10 +1249,12 @@
 
 - name: relu(Tensor self) -> Tensor
   self: threshold_backward(grad, self, 0)
+  result: element_wise
 
 # NB: `output` instead of `self` saves memory. It avoids saving a copy of self.
 - name: relu_(Tensor(a!) self) -> Tensor(a!)
   self: threshold_backward(grad, result, 0)
+  result: element_wise
 
 - name: silu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
@@ -1288,6 +1295,7 @@
 
 - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _log_softmax_backward_data(grad, result, dim, self)
+  result: _log_softmax_foward(self_fw_grad, result, dim)
 
 - name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_log_softmax_backward_data(grad, result, dim, self)
@@ -1405,6 +1413,7 @@
 
 - name: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
+  result0: max_pool2d_with_indices_forward(self_fw_grad, result1)
   output_differentiability: [True, False]
 
 - name: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
