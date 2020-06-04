@@ -152,6 +152,34 @@ Example::
     tensor([ 1.2294,  2.2004,  1.3690,  1.7298])
 """.format(**common_args))
 
+add_docstr(torch.acosh,
+           r"""
+acosh(input, out=None) -> Tensor
+
+Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
+
+Note:
+    The domain of the inverse hyperbolic cosine is `[1, inf)` and values outside this range
+    will be mapped to ``NaN``, except for `+ INF` for which the output is mapped to `+ INF`.
+
+.. math::
+    \text{out}_{i} = \cosh^{-1}(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4).uniform_(1, 2)
+    >>> a
+    tensor([ 1.3192, 1.9915, 1.9674, 1.7151 ])
+    >>> torch.acosh(a)
+    tensor([ 0.7791, 1.3120, 1.2979, 1.1341 ])
+""".format(**common_args))
+
 add_docstr(torch.add,
            r"""
 add(input, other, out=None)
@@ -612,6 +640,30 @@ Example::
     tensor([-0.6387,     nan, -0.4552,     nan])
 """.format(**common_args))
 
+add_docstr(torch.asinh,
+           r"""
+asinh(input, out=None) -> Tensor
+
+Returns a new tensor with the inverse hyperbolic sine of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \sinh^{-1}(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([ 0.1606, -1.4267, -1.0899, -1.0250 ])
+    >>> torch.asinh(a)
+    tensor([ 0.1599, -1.1534, -0.9435, -0.8990 ])
+""".format(**common_args))
+
 add_docstr(torch.atan,
            r"""
 atan(input, out=None) -> Tensor
@@ -660,6 +712,35 @@ Example::
     tensor([ 0.9041,  0.0196, -0.3108, -2.4423])
     >>> torch.atan2(a, torch.randn(4))
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
+""".format(**common_args))
+
+add_docstr(torch.atanh,
+           r"""
+atanh(input, out=None) -> Tensor
+
+Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`.
+
+Note:
+    The domain of the inverse hyperbolic tangent is `(-1, 1)` and values outside this range
+    will be mapped to ``NaN``, except for the values `1` and `-1` for which the output is
+    mapped to `+/-INF` respectively.
+
+.. math::
+    \text{out}_{i} = \tanh^{-1}(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4).uniform_(-1, 1)
+    >>> a
+    tensor([ -0.9385, 0.2968, -0.8591, -0.1871 ])
+    >>> torch.atanh(a)
+    tensor([ -1.7253, 0.3060, -1.2899, -0.1893 ])
 """.format(**common_args))
 
 add_docstr(torch.baddbmm,
