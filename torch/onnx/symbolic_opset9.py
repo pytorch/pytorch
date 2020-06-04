@@ -578,20 +578,23 @@ def squeeze(g, self, dim=None):
 
     input_shape = self.type().sizes()
     if input_shape is None:
-        warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + " on an input with unknown shape. " +
-                      "Note that if the size of dimension " + str(squeeze_dim) + " of the input is not 1, the ONNX model will return an error." +
-                      "Opset version 11 supports squeezing on non-singleton dimensions, it is recommended to export this model using " +
-                      "opset version 11 or higher.")
+        warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + " on an input " +
+                      "with unknown shape. Note that if the size of dimension " + str(squeeze_dim) + " of the input " +
+                      "is not 1, the ONNX model will return an error. Opset version 11 supports squeezing on " +
+                      "non-singleton dimensions, it is recommended to export this model using opset " +
+                      "version 11 or higher.")
         return g.op("Squeeze", self, axes_i=[squeeze_dim])
     if input_shape[squeeze_dim] > 1:
-        warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". The size of this dimension in the given " +
-                      "input is " + str(input_shape[squeeze_dim]) + ". The model will be exported without the squeeze node. If the model is " +
-                      "intended to be used with different input shapes than the shapes passed at export time, please use opset version 11 to " +
+        warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". The size of " +
+                      "this dimension in the given input is " + str(input_shape[squeeze_dim]) + ". The model will " +
+                      "be exported without the squeeze node. If the model is intended to be used with different " +
+                      "input shapes than the shapes passed at export time, please use opset version 11 to " +
                       "export the model.")
         return self
 
-    warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". If the model is intended to be used with " +
-                  "different input shapes than the shapes passed at export time, please use opset version 11 to export the model.")
+    warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". If the model is " +
+                  "intended to be used with different input shapes than the shapes passed at export time, please " +
+                  "use opset version 11 to export the model.")
     return g.op("Squeeze", self, axes_i=[squeeze_dim])
 
 def prelu(g, self, weight):
