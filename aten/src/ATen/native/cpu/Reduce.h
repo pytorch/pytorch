@@ -36,30 +36,35 @@ static inline void reduction128(char** data, int64_t n, int64_t stride, func_t o
   VEC_LOOP_HEADER(func_t, data)
   const char* in1_ptr = data[1];
   Vec acc[4];
-  for  (int j = 0; j < 4; j++) {
-    acc[j] = Vec::loadu(in1_ptr + j * Vec::size() * sizeof(scalar_t));
-  }
-  for (int64_t i = 1; i < n; i++) {
-    const char* ptr = in1_ptr + stride * i;
-    acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size() * sizeof(scalar_t))));
-    acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size() * sizeof(scalar_t))));
-    acc[2] = vop(acc[2], Vec::loadu(ptr + (2 * Vec::size() * sizeof(scalar_t))));
-    acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size() * sizeof(scalar_t))));
-  }
-  if (reduce) {
-    scalar_t buffer[Vec::size()];
-    acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
-    acc[0].store(buffer);
-    for (int j = 1; j < Vec::size(); j++) {
-      buffer[0] = op(buffer[0], buffer[j]);
+  uint64_t block_size = 256;
+  // Batch the reduction to avoid precission issues in some routines
+  for (int64_t start = 0; start < n; start += block_size) {
+    for  (int j = 0; j < 4; j++) {
+      acc[j] = Vec::loadu(in1_ptr + stride * start + j * Vec::size() * sizeof(scalar_t));
     }
-    auto dst = (scalar_t*)out_ptr;
-    *dst = op(*dst, buffer[0]);
-  } else {
-    for (int j = 0; j < 4; j++) {
-      auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
-      acc[j] = vop(acc[j], Vec::loadu(dst));
-      acc[j].store(dst);
+    int64_t end = (start + block_size > n ? n : start + block_size);
+    for (int64_t i = start + 1; i < end; i++) {
+      const char* ptr = in1_ptr + stride * i;
+      acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size() * sizeof(scalar_t))));
+      acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size() * sizeof(scalar_t))));
+      acc[2] = vop(acc[2], Vec::loadu(ptr + (2 * Vec::size() * sizeof(scalar_t))));
+      acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size() * sizeof(scalar_t))));
+    }
+    if (reduce) {
+      scalar_t buffer[Vec::size()];
+      acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
+      acc[0].store(buffer);
+      for (int j = 1; j < Vec::size(); j++) {
+        buffer[0] = op(buffer[0], buffer[j]);
+      }
+      auto dst = (scalar_t*)out_ptr;
+      *dst = op(*dst, buffer[0]);
+    } else {
+      for (int j = 0; j < 4; j++) {
+        auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
+        acc[j] = vop(acc[j], Vec::loadu(dst));
+        acc[j].store(dst);
+      }
     }
   }
 }
@@ -104,7 +109,12 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
   UNARY_OUTER_LOOP(data, step, remaining, [&] {
     char* ptrs[3] = { data[0], data[0], data[1] };
     int64_t strides[] = { 0, 0, inner_stride };
-    basic_loop(ptrs, strides, 0, size0, op);
+    // Batch the reduction to avoid precission issues in some routines
+    int64_t block_size = 256;
+    for (int64_t start = 0; start < size0; start += block_size) {
+      int64_t end = (start + block_size > size0 ? size0 : start + block_size);
+      basic_loop(ptrs, strides, start, end, op);
+    }
   });
 }
 
