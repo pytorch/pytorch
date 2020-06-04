@@ -261,6 +261,7 @@ Pointwise Ops
     conj
     cos
     cosh
+    deg2rad
     div
     digamma
     erf
@@ -290,6 +291,7 @@ Pointwise Ops
     neg
     polygamma
     pow
+    rad2deg
     real
     reciprocal
     remainder
