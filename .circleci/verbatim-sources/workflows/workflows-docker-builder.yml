@@ -62,3 +62,6 @@
       - docker_build_job:
           name: "pytorch-linux-xenial-pynightly"
           image_name: "pytorch-linux-xenial-pynightly"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-rocm-py3.6-clang7"
+          image_name: "pytorch-linux-xenial-rocm-py3.6-clang7"
