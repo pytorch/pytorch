@@ -735,16 +735,17 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   for (const auto& input : inputs) {
     const auto& fn = std::get<0>(input);
     const auto& sizes = std::get<1>(input);
+
     if (fn == "test") {
       found_test = true;
       TORCH_CHECK(sizes.size() == 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-    } else if (fn == "pow") {
+    } else if (fn == "aten::pow") {
       found_pow = true;
       TORCH_CHECK(sizes.size() == 2);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
       TORCH_CHECK(sizes[1].empty());
-    } else if (fn == "mul") {
+    } else if (fn == "aten::mul") {
       found_mul = true;
       TORCH_CHECK(sizes.size() > 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));

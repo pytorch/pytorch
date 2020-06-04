@@ -113,9 +113,6 @@ struct TORCH_API RecordFunction {
     return scope_;
   }
 
-  // Current returns the currently active RecordFunction in this thread.
-  static RecordFunction* current();
-
   // Returns logical thread_id for the current thread
   static uint64_t currentThreadId();
 
@@ -145,12 +142,6 @@ struct TORCH_API RecordFunction {
     before(fn, current_sequence_nr);
   }
 
-  // Internal, only for the use within RECORD_FUNCTION macro
-  // (i.e. stack based RecordFunctions with scope lifetime);
-  // sets this function as the current() thread local function;
-  // original value of current() is restored in destructor/end
-  void _setCurrent();
-
   // Calls end callbacks
   void end();
 
@@ -176,17 +167,6 @@ struct TORCH_API RecordFunction {
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
-
-  // parent_ points to the parent RecordFunction and must out live this;
-  // only to be used together with RECORD_FUNCTION macro
-  // (with stack based RecordFunction instances with scope lifetime)
-  RecordFunction* parent_ = nullptr;
-
-  // is_current_ true means that this record function updates thread local
-  // current record function pointer;
-  // true only in case of scope-based record functions, i.e.
-  // RECORD_FUNCTION macro
-  bool is_current_ = false;
 
   // Kind of scope this RecordFunction is observing
   const RecordScope scope_;
@@ -324,7 +304,6 @@ class TORCH_API RecordFunctionCallback {
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
   if (guard.active) { \
-    guard._setCurrent(); \
     if (guard.needs_inputs) { \
       guard.before(fn, inputs, ##__VA_ARGS__); \
     } else { \

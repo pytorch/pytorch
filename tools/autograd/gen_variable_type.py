@@ -281,10 +281,6 @@ if (${cond}) {
 }
 """)
 
-RECORD_FUNCTION = CodeTemplate("""\
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
-""")
-
 SELECT = CodeTemplate("""\
 
 if (${cond}) {
@@ -342,11 +338,11 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
+# TODO(iliacher): remove Profile wrappers
 # ProfiledType templates
 PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
 TORCH_INTERNAL_ASSERT(op);
-RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
