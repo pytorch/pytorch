@@ -78,7 +78,7 @@ TypePtr IValue::type() const {
     case Tag::GenericList:
       return ListType::create(toList().elementType());
     case Tag::Future:
-      return toFuture()->type();
+      return FutureType::create(toFuture()->elementType());
     case Tag::RRef:
       return RRefType::create(toRRef()->type());
     case Tag::Device:
@@ -636,7 +636,19 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
 
 CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
     std::vector<intrusive_ptr<ivalue::Future>> srcs) {
-  List<intrusive_ptr<ivalue::Future>> asList(FutureType::create(AnyType::get()));
+  auto consistentTypePtr =
+      [](const std::vector<intrusive_ptr<ivalue::Future>>& srcs) -> TypePtr {
+    if (srcs.empty()) {
+      return FutureType::create(AnyType::get());
+    }
+    TypePtr res = srcs[0]->elementType();
+    for (size_t i = 1, len = srcs.size(); i < len; ++i) {
+      if (*srcs[i]->elementType() != *res) {
+        return FutureType::create(AnyType::get());
+      }
+    }
+    return FutureType::create(res);
+  };  List<intrusive_ptr<ivalue::Future>> asList(consistentTypePtr(srcs));
   asList.reserve(srcs.size());
   for (auto&& s : srcs) {
     asList.push_back(std::move(s));

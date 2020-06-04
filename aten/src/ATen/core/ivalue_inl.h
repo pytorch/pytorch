@@ -380,7 +380,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       std::ostream& out,
       const Future& v);
 
-  TypePtr type() const {
+  TypePtr elementType() const {
     return type_;
   }
 

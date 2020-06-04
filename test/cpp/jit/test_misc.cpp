@@ -1714,6 +1714,9 @@ void testFutures() {
     auto c1 = collectAll(futures);
     ASSERT_TRUE(c1->completed());
     ASSERT_EQ(c1->value().toList().size(), 0);
+    ASSERT_TRUE(
+        *(c1->value().toList().elementType()) ==
+        *FutureType::create(AnyType::get()));
 
     // 1-element, initially not completed.
     futures.push_back(s1);
@@ -1722,6 +1725,9 @@ void testFutures() {
     s1->markCompleted(5);
     ASSERT_TRUE(c2->completed());
     ASSERT_EQ(c2->value().toList().size(), 1);
+    ASSERT_TRUE(
+        *(c2->value().toList().elementType()) ==
+        *FutureType::create(IntType::get()));
     ASSERT_EQ(c2->value().toList().get(0).toFuture()->value().toInt(), 5);
 
     // 1-element, already completed
@@ -1743,6 +1749,9 @@ void testFutures() {
     ASSERT_EQ(c4->value().toList().get(0).toFuture()->value().toInt(), 5);
     ASSERT_EQ(c4->value().toList().get(1).toFuture()->value().toInt(), 6);
     ASSERT_EQ(c4->value().toList().get(2).toFuture()->value().toInt(), 7);
+    ASSERT_TRUE(
+        *(c4->value().toList().elementType()) ==
+        *FutureType::create(IntType::get()));
 
     // Handle exception in the list.
     auto s4 = c10::make_intrusive<Future>(IntType::get());
