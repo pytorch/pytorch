@@ -86,6 +86,15 @@ def optimized_execution(should_optimize):
 
 @contextlib.contextmanager
 def fuser(name):
+    """
+    A context manager that facilitates switching between
+    backend fusers.
+
+    Valid names:
+    * ``fuser0`` - enables only legacy fuser
+    * ``fuser1`` - enables only NNC
+    * ``fuser2`` - enables only nvFuser
+    """
     old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
     old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
     old_texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()

@@ -840,6 +840,7 @@ Q: Is tensor list exportable to ONNX?
 Functions
 --------------------------
 .. autofunction:: export
+.. autofunction:: export_to_pretty_string
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: torch.onnx.operators.shape_as_tensor
 .. autofunction:: select_model_mode_for_export
