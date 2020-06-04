@@ -48,21 +48,11 @@ def createResolutionCallbackFromEnv(lookup_base):
                 no_whitespace = "".join(subexp.split())
                 parts = no_whitespace.split(',')
                 types = [env(p, module) for p in parts]
-
-                # HACK for now - must be a better way to approximate base_mod[*types]
-                if len(types) == 1:
-                    return base_mod[types[0]]
-                elif len(types) == 2:
-                    return base_mod[types[0], types[1]]
-                elif len(types) == 3:
-                    return base_mod[types[0], types[1], types[2]]
-                elif len(types) == 4:
-                    return base_mod[types[0], types[1], types[2], types[3]]
-                else:
-                    raise ValueError("tuples beyond length 4 not supported yet.")
-
+                return base_mod[tuple(types)]
             else:
                 # either base or subexp could include '.' or '['
+                if 'Tensor' == subexp:
+                    subexp = 'torch.Tensor'
                 subexp_mod = env(subexp, module)
                 return base_mod[subexp_mod]
         elif '.' in qualified_name:
