@@ -203,8 +203,6 @@ struct TORCH_API RecordFunction {
   // and end of ranges
   RecordFunctionHandle handle_ {0};
 
-  // Default node ID to be used in conjunction with distributed profiling.
-  static int64_t defaultNodeId_;
 };
 
 //

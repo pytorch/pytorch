@@ -208,7 +208,6 @@ struct ProfilerThreadLocalState
       // called on a different thread than pushRange
       // As a convention, we put the async pop on the original
       // thread and save current thread id in pop event
-      std::vector<std::vector<int64_t>> shapes;
       Event evt(EventKind::PopRange,
           at::StringView(""),
           at::RecordFunction::currentThreadId(),

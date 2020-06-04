@@ -373,6 +373,8 @@ class record_function(ContextDecorator):
 
     Arguments:
         name (str): Label assigned to the block of code.
+        node_id (int): ID of node, for distributed profiling. Unset in
+        non-distributed cases.
 
     Example:
         >>> x = torch.randn((1, 1), requires_grad=True)
@@ -800,13 +802,14 @@ class StringTable(defaultdict):
 ################################################################################
 # CPU checkpoints
 
-def get_record_key(record):
-    """ Returns a tuple to be used by parse_cpu_trace for correlating start and
-    end records.
-    """
-    return (record.handle(), record.node_id())
-
 def parse_cpu_trace(thread_records):
+    def get_record_key(record):
+        """
+        Returns a tuple to be used by parse_cpu_trace for correlating start and
+        end records.
+        """
+        return (record.handle(), record.node_id())
+
     next_id = 0
     start_record = None
     cuda_records = {}
