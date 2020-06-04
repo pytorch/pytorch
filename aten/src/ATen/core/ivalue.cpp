@@ -633,15 +633,4 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
   }
   return ctx->dstFuture;
 }
-
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
-    std::vector<intrusive_ptr<ivalue::Future>> srcs) {
-  auto typePtr = FutureType::create(AnyType::get());
-  List<intrusive_ptr<ivalue::Future>> asList(typePtr);
-  asList.reserve(srcs.size());
-  for (auto&& s : srcs) {
-    asList.push_back(std::move(s));
-  }
-  return collectAll(asList);
-}
 } // namespace c10
