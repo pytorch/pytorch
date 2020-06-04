@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 
@@ -807,7 +808,19 @@ void TensorIterator::compute_shape() {
     if (tensor.defined() && !tensor.sizes().equals(shape_)) {
       if (resize_outputs_ && !operands_[i].is_read_write) {
         // Preserve legacy resizing behavior of out=... arguments
-        // TODO: issue warning
+        // NOTE: we don't warn when resizing tensors with zero elements
+        // since this is how many functions pass a tensor meant to be
+        // resized to TensorIterator, and is useful if the output shape
+        // of the operation is difficult to know in advance.
+        if (tensor.numel() != 0) {
+          TORCH_CHECK(false, "The given output was resized since it had "
+                          "shape ", tensor.sizes(), ", which does not match "
+                          "the required output shape ", shape_, ". "
+                          "This behavior is deprecated for tensors with "
+                          "a nonzero number of elements, "
+                          "and will not be supported in a future PyTorch release. "
+                          "This warning will only appear once per process.");
+        }
         tensor.resize_(shape_);
         if (requires_channels_last_output_ && tensor.dim() == 4) {
           // Temporary stick to 4d tensor, will update with arbitrary batched later on
