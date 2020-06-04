@@ -579,7 +579,6 @@ def configure_extension_build():
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++14',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',
@@ -604,9 +603,9 @@ def configure_extension_build():
     library_dirs.append(lib_path)
 
     main_compile_args = []
-    main_libraries = ['shm', 'torch_python']
+    main_libraries = ['torch_python']
     main_link_args = []
-    main_sources = ["torch/csrc/stub.cpp"]
+    main_sources = ["torch/csrc/stub.c"]
 
     if cmake_cache_vars['USE_CUDA']:
         library_dirs.append(
@@ -647,7 +646,7 @@ def configure_extension_build():
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
-                  language='c++',
+                  language='c',
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
@@ -661,7 +660,7 @@ def configure_extension_build():
         extensions.append(DL)
 
     # These extensions are built by cmake and copied manually in build_extensions()
-    # inside the build_ext implementaiton
+    # inside the build_ext implementation
     extensions.append(
         Extension(
             name=str('caffe2.python.caffe2_pybind11_state'),
