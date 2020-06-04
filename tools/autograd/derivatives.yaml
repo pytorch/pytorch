@@ -276,6 +276,9 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
+- name: logcumsumexp(Tensor self, int dim) -> Tensor
+  self: logcumsumexp_backward(grad, self, result, dim)
+
 - name: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   self: cumprod_backward(grad.to(self.scalar_type()), self, dim)
 
@@ -430,9 +433,6 @@
 - name: imag(Tensor self) -> Tensor
   self: Scalar(std::complex<double>{0.0, 1.0})*grad.to(self.scalar_type())
 
-- name: copy_imag(Tensor self) -> Tensor
-  self: Scalar(std::complex<double>{0.0, 1.0})*grad.to(self.scalar_type())
-
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
@@ -513,6 +513,14 @@
 
 - name: log2(Tensor self) -> Tensor
   self: grad / (self * 0.6931471805599453)
+
+- name: logaddexp(Tensor self, Tensor other) -> Tensor
+  self: grad / (1 + exp(other - self))
+  other: grad / (1 + exp(self - other))
+
+- name: logaddexp2(Tensor self, Tensor other) -> Tensor
+  self: grad / (1 + pow(2, other - self))
+  other: grad / (1 + pow(2, self - other))
 
 - name: logdet(Tensor self) -> Tensor
   self: logdet_backward(grad, self, result)
@@ -745,9 +753,6 @@
 
 - name: real(Tensor self) -> Tensor
   self: at::real(grad)
-
-- name: copy_real(Tensor self) -> Tensor
-  self: grad.copy_real()
 
 - name: reciprocal(Tensor self) -> Tensor
   self: -grad * result * result
@@ -1126,6 +1131,9 @@
 - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _log_softmax_backward_data(grad, result, dim, self)
 
+- name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  self: _sparse_log_softmax_backward_data(grad, result, dim, self)
+
 - name: prelu(Tensor self, Tensor weight) -> Tensor
   self, weight: prelu_backward(grad, self, weight)
 
@@ -1140,6 +1148,9 @@
 
 - name: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _softmax_backward_data(grad, result, dim, self)
+
+- name: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  self: _sparse_softmax_backward_data(grad, result, dim, self)
 
 - name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   self: softplus_backward(grad, self, beta, threshold, result)

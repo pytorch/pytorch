@@ -30,7 +30,7 @@ void Int8QuantizeNNPI(
   float inv_scale_fp16 = 0;
   fbgemm::RoundToFloat16(
       &inv_scale, &inv_scale_fp16, 1, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-  float offset_tmp = -Y_offset;
+  float offset_tmp = Y_offset;
   fbgemm::RoundToFloat16(
       &offset_tmp, &offset_tmp, 1, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
@@ -46,7 +46,6 @@ void Int8QuantizeNNPI(
   for (int i = 0; i < N; i++) {
     float r = round(offsetv[i]);
     int32_t int_result = static_cast<int32_t>(r);
-
     int_result = std::max(int_result, qmin);
     int_result = std::min(int_result, qmax);
     out[i] = static_cast<uint8_t>(int_result);
@@ -59,7 +58,6 @@ class Int8QuantizeNNPIOp final : public Operator<CPUContext> {
   using Operator<CPUContext>::Operator;
 
   bool RunOnDevice() override {
-    LOG(INFO) << "In int8Quantize op";
     const auto& X = Input(0);
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
     Y->t.ResizeLike(X);

@@ -46,6 +46,10 @@ parser.add_argument(
     action='store_true',
     help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
 parser.add_argument(
+    '--vulkan',
+    action='store_true',
+    help='Generate Vulkan backend functions')
+parser.add_argument(
     '--op_registration_whitelist',
     nargs='*',
     help='filter op registrations by the whitelist (if set); '
@@ -67,6 +71,7 @@ parser.add_argument(
     help='force it to generate schema-only registrations for all ops, including'
          'those that are not listed on --op_registration_whitelist')
 options = parser.parse_args()
+
 # NB: It is mandatory to NOT use os.path.join here, as the install directory
 # will eventually be ingested by cmake, which does not respect Windows style
 # path slashes.  If you switch this to use os.path.join, you'll get an error
@@ -153,7 +158,7 @@ OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/ATenOpLi
 BACKEND_SELECT_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/BackendSelectRegister.cpp")
 SCHEMA_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SchemaRegister.cpp")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
-TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
+TENSOR_METHODS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.cpp")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 
@@ -207,7 +212,6 @@ top_env = {
     'function_definitions': [],
     'type_ids': [],
     'native_function_declarations': [],
-    'meta_function_declarations': [],
 }
 
 
@@ -366,7 +370,7 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
         fm.write(env['Type'] + ".cpp", SPARSE_TYPE_DERIVED_CPP, env)
     fm.write(env['Type'] + ".h", TYPE_DERIVED_H, env)
 
-    if env['DeviceType'] == 'CPU':
+    if env['DeviceType'] == 'CPU' or env['DeviceType'] == 'Vulkan':
         top_env['cpu_type_headers'].append(
             '#include <ATen/{}.h>'.format(env['Type']))
     else:
@@ -385,6 +389,8 @@ def iterate_types():
                 yield (backend, density)
     for backend in quantized_backends:
         yield (backend, 'Dense')
+    if options.vulkan:
+        yield('Vulkan', 'Dense')
 
 
 def gen_per_op_registration_filename(opname):
@@ -396,7 +402,7 @@ def gen_per_op_registration_filename(opname):
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['TensorBody.h', 'TensorMethods.h', 'ATenOpList.cpp']
+    core_files = ['TensorBody.h', 'TensorMethods.cpp', 'ATenOpList.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
@@ -507,7 +513,7 @@ def generate_outputs():
 
     core_files = {
         'TensorBody.h': TENSOR_H,
-        'TensorMethods.h': TENSOR_METHODS_H,
+        'TensorMethods.cpp': TENSOR_METHODS_CPP,
         'ATenOpList.cpp': OPS_ALREADY_MOVED_TO_C10_CPP,
     }
 

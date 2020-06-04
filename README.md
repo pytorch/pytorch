@@ -154,7 +154,7 @@ You will get a high-quality BLAS library (MKL) and you get controlled dependency
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9 or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9.2 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
@@ -174,7 +174,7 @@ conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 | magma-cuda101 ] depending on your cuda version
+conda install -c pytorch magma-cuda102  # or [ magma-cuda101 | magma-cuda100 | magma-cuda92 ] depending on your cuda version
 ```
 
 #### Get the PyTorch Source
@@ -226,7 +226,6 @@ CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 201
 
 | CUDA version | Newest supported VS version                             |
 | ------------ | ------------------------------------------------------- |
-| 9.0 / 9.1    | Visual Studio 2017 Update 4 (15.4) (`_MSC_VER` <= 1911) |
 | 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |
 | 10.0         | Visual Studio 2017 (15.X) (`_MSC_VER` < 1920)           |
 | 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |
@@ -323,6 +322,19 @@ Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
+
+## Resources
+
+* [PyTorch.org](https://pytorch.org/)
+* [PyTorch Tutorials](https://pytorch.org/tutorials/)
+* [PyTorch Examples](https://github.com/pytorch/examples)
+* [PyTorch Models](https://pytorch.org/hub/)
+* [Intro to Deep Learning with PyTorch from Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
+* [Intro to Machine Learning with PyTorch from Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
+* [Deep Neural Networks with PyTorch from Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
+* [PyTorch Twitter](https://twitter.com/PyTorch)
+* [PyTorch Blog](https://pytorch.org/blog/)
+* [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
 ## Communication
 * forums: discuss implementations, research, etc. https://discuss.pytorch.org

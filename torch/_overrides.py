@@ -139,6 +139,7 @@ def get_ignored_functions():
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
         torch.nn.functional.hardswish,
+        torch.is_vulkan_available,
     )
 
 def get_testing_overrides():
@@ -245,6 +246,7 @@ def get_testing_overrides():
         torch.cummin: lambda input, dim, out=None: -1,
         torch.cumprod: lambda input, dim, out=None, dtype=None: -1,
         torch.cumsum: lambda input, dim, out=None, dtype=None: -1,
+        torch.logcumsumexp: lambda input, dim, out=None: -1,
         torch.dequantize: lambda input: -1,
         torch.det: lambda input: -1,
         torch.detach: lambda input: -1,
@@ -260,7 +262,6 @@ def get_testing_overrides():
         torch.dsmm: lambda input, mat2: -1,
         torch.hsmm: lambda mat1, mat2: -1,
         torch.eig: lambda input, eigenvectors=False, out=None: -1,
-        torch.einsum: lambda equation, *operands: -1,
         torch.einsum: lambda equation, *operands: -1,
         torch.embedding: (lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False,
                           sparse=False: -1),
@@ -312,7 +313,6 @@ def get_testing_overrides():
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
         torch.hspmm: lambda mat1, mat2, out=None: -1,
         torch.ifft: lambda input, signal_ndim, normalized=False: -1,
-        torch.copy_imag: lambda input, out=None: -1,
         torch.imag: lambda input, out=None: -1,
         torch.index_add: lambda input, dim, index, source: -1,
         torch.index_copy: lambda input, dim, index, source: -1,
@@ -349,6 +349,8 @@ def get_testing_overrides():
         torch.log10: lambda input, out=None: -1,
         torch.log1p: lambda input, out=None: -1,
         torch.log2: lambda input, out=None: -1,
+        torch.logaddexp: lambda input, other, out=None: -1,
+        torch.logaddexp2: lambda input, other, out=None: -1,
         torch.logdet: lambda input: -1,
         torch.logical_and: lambda input, other, out=None: -1,
         torch.logical_not: lambda input, out=None: -1,
@@ -572,7 +574,6 @@ def get_testing_overrides():
         torch.randint_like: lambda input, low, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.real: lambda input, out=None: -1,
-        torch.copy_real: lambda input, out=None: -1,
         torch.reciprocal: lambda input, out=None: -1,
         torch.relu: lambda input, inplace=False: -1,
         torch.remainder: lambda input, other, out=None: -1,

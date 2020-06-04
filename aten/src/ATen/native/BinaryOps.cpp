@@ -7,6 +7,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 
+#include <torch/library.h>
+
 namespace at {
 namespace native {
 
@@ -36,6 +38,8 @@ DEFINE_DISPATCH(max_elementwise_stub);
 DEFINE_DISPATCH(min_elementwise_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(fmod_scalar_stub);
+DEFINE_DISPATCH(logaddexp_stub);
+DEFINE_DISPATCH(logaddexp2_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -742,6 +746,28 @@ Tensor& fmod_(Tensor& self, Scalar other) {
   return at::fmod_out(self, self, other);
 }
 
+Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  logaddexp_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logaddexp(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logaddexp_out(result, self, other);
+}
+
+Tensor& logaddexp2_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  logaddexp2_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logaddexp2(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logaddexp2_out(result, self, other);
+}
+
 Tensor true_divide(const Tensor& self, Scalar divisor) {
   return self.true_divide(wrapped_scalar_tensor(divisor)); // redispatch!
 }
@@ -754,6 +780,38 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
 // It is undocumented and should not be used outside of tests.
 Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
   return self - (other * alpha);
+}
+
+// TODO: Deduplicate this with the TensorIterator logic.  This would
+// also fix the TODOs below.
+Tensor binary_op_meta(const Tensor& self, const Tensor& other) {
+  // TODO: Doesn't do type promotion correctly
+  // TODO: Doesn't do strides correctly
+  int64_t dim = std::max(self.dim(), other.dim());
+  std::vector<int64_t> sizes(dim);
+  for (int64_t i = 0; i < dim; i++) {
+    int64_t j = -1 - i;
+    if (i >= self.dim() || self.size(j) == 1) {
+      sizes[dim + j] = other.size(j);
+    } else if (i >= other.dim() || self.size(i) == 1) {
+      sizes[dim + j] = self.size(j);
+    } else {
+      TORCH_CHECK(
+        self.size(j) == other.size(j),
+        "Expected self.size(", j, ") == other.size(", j, "), but got ", self.size(j), " != ", other.size(j)
+      );
+      sizes[dim + j] = self.size(j);
+    }
+  }
+  return at::empty_meta(sizes, self.options());
+}
+
+Tensor binary_op_with_scalar_meta(const Tensor& self, const Tensor& other, Scalar x) {
+  return binary_op_meta(self, other);
+}
+
+TORCH_LIBRARY_IMPL(aten, Meta, m) {
+  m.impl("add.Tensor", binary_op_with_scalar_meta);
 }
 
 

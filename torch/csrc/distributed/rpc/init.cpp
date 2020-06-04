@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
@@ -337,6 +338,29 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   on the remote node. This is for internal use cases such as profiling
                   only.
               )")
+          .def(
+              "_get_profiling_future",
+              [](const PyRRef& self) {
+                return std::make_shared<jit::PythonFutureWrapper>(
+                    self.getProfilingFuture());
+              },
+              py::call_guard<py::gil_scoped_acquire>(),
+              R"(
+                  Returns future that completes when the profiling event corresponding
+                  to the creation of this RRef on the remote node has been recorded.
+              )")
+          .def(
+              "_set_profiling_future",
+              [](PyRRef& self,
+                 const std::shared_ptr<jit::PythonFutureWrapper>&
+                     wrappedFuture) {
+                self.setProfilingFuture(wrappedFuture->fut);
+              },
+              py::call_guard<py::gil_scoped_acquire>(),
+              R"(
+                  Set future that is completed when the profiling event corresponding
+                  to the creation of this RRef on the remote node has been recorded.
+              )")
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 
@@ -445,15 +469,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
           py::init<
-              std::shared_ptr<::c10d::Store> /* addressStore */,
+              const std::shared_ptr<::c10d::Store>& /* store */,
               std::string /* selfName */,
               worker_id_t /* selfId */,
               int /* worldSize */,
+              std::shared_ptr<::c10d::ProcessGroup> /* processGroup */,
               TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
           py::arg("store"),
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
+          py::arg("process_group"),
           py::arg("rpc_backend_options"))
       .def(
           "join",
@@ -548,9 +574,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         const float rpcTimeoutSeconds) {
+         const float rpcTimeoutSeconds,
+         const bool isAsyncFunction) {
         return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rpcTimeoutSeconds),
+            pyRpcPythonUdf(
+                dst,
+                pickledPythonUDF,
+                tensors,
+                rpcTimeoutSeconds,
+                isAsyncFunction),
             /* unwrap_func */ [](const py::object& value) {
               py::gil_scoped_release release;
               auto& pythonRpcHandler = PythonRpcHandler::getInstance();
@@ -645,6 +677,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
           Arguments:
             rpcTimeoutSeconds (float): Timeout value in seconds.
       )");
+
+  module.def(
+      "_enable_server_process_global_profiler",
+      &profiler::processglobal::enableServer);
+  module.def(
+      "_disable_server_process_global_profiler",
+      &profiler::processglobal::disableServer);
 
   Py_RETURN_TRUE;
 }

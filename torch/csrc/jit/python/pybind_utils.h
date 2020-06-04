@@ -71,7 +71,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
       : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
 
-  PythonFutureWrapper(const PythonFutureWrapper&) = delete;
+  explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
   PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
 
   py::object wait() {
@@ -136,6 +136,14 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         PyObjectType::get()));
   }
 
+  void markCompleted(const py::object& pyValue) {
+    DCHECK(PyGILState_Check());
+    IValue value = toIValue(pyValue, PyObjectType::get());
+
+    py::gil_scoped_release release;
+    fut->markCompleted(std::move(value));
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> fut;
   // unwrap_func works like a callback for the value returned by
   // PythonFutureWrapper::wait().
@@ -148,7 +156,11 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
     ~PythonFunctionGuard() {
       pybind11::gil_scoped_acquire ag;
-      func_ = py::none();
+      func_.dec_ref();
+      // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+      // decref on the PyObject again.
+      // See Note [Destructing py::object] in python_ivalue.h
+      func_.ptr() = nullptr;
     }
 
     py::function func_;
@@ -1117,17 +1129,6 @@ inline py::object invokeScriptMethodFromPython(
       [&](Graph& graph, const MatchedSchema& match) {
         return graph.insertMethodCall(callee.name(), match);
       });
-}
-
-inline py::object invokeScriptMethodFromPython(
-    Object& object,
-    const std::string& method_name,
-    tuple_slice args,
-    py::kwargs kwargs) {
-  auto type = object.type();
-  Method init_method(object._ivalue(), &type->getMethod(method_name));
-  invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
-  return py::cast(Object(object));
 }
 
 inline py::object invokeOperatorFromPython(

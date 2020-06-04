@@ -1052,10 +1052,10 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     # type: (Tensor, float, bool, bool) -> Tensor
     r"""
-    Randomly masks out entire channels (a channel is a feature map, 
-    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input 
-    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of 
-    setting activations to zero, as in regular Dropout, the activations are set 
+    Randomly masks out entire channels (a channel is a feature map,
+    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
+    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
+    setting activations to zero, as in regular Dropout, the activations are set
     to the negative saturation value of the SELU activation function.
 
     Each element will be masked independently on every forward call with
@@ -2907,7 +2907,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
-        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to be an integer.
+        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
         mode (string): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'``. Default: ``'nearest'``
@@ -3947,7 +3947,8 @@ def multi_head_attention_forward(query,                           # type: Tensor
                 v_proj_weight=v_proj_weight, static_k=static_k, static_v=static_v)
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
-    assert key.size() == value.size()
+    # allow MHA to have different sizes for the feature dimension
+    assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
 
     head_dim = embed_dim // num_heads
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
