@@ -202,6 +202,20 @@ acos_() -> Tensor
 In-place version of :meth:`~Tensor.acos`
 """)
 
+add_docstr_all('acosh',
+               r"""
+acosh() -> Tensor
+
+See :func:`torch.acosh`
+""")
+
+add_docstr_all('acosh_',
+               r"""
+acosh_() -> Tensor
+
+In-place version of :meth:`~Tensor.acosh`
+""")
+
 add_docstr_all('add',
                r"""
 add(other, *, alpha=1) -> Tensor
@@ -481,6 +495,19 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('asinh', r"""
+asinh() -> Tensor
+
+See :func:`torch.asinh`
+""")
+
+add_docstr_all('asinh_',
+               r"""
+asinh_() -> Tensor
+
+In-place version of :meth:`~Tensor.asinh`
+""")
+
 add_docstr_all('as_strided', r"""
 as_strided(size, stride, storage_offset=0) -> Tensor
 
@@ -513,6 +540,18 @@ add_docstr_all('atan_',
 atan_() -> Tensor
 
 In-place version of :meth:`~Tensor.atan`
+""")
+
+add_docstr_all('atanh',
+               r"""
+atanh() -> Tensor
+
+See :func:`torch.atanh`
+""")
+
+add_docstr_all('atanh_',
+               r"""
+In-place version of :meth:`~Tensor.atanh`
 """)
 
 add_docstr_all('baddbmm',
