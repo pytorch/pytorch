@@ -416,14 +416,14 @@ TensorView* reductionOp(
   std::vector<unsigned int> uint_axes;
   for (int axis : axes) {
     if (axis < 0)
-      axis += int(v1->nDims());
+      axis += int(tv->nDims());
 
     TORCH_CHECK(
-        axis >= 0 && (unsigned int)axis < v1->nDims(),
+        axis >= 0 && (unsigned int)axis < tv->nDims(),
         "Reduction on invalid axis, recieved: ",
         axis,
         " however tensor view only has ",
-        v1->nDims(),
+        tv->nDims(),
         " dims.");
 
     uint_axes.push_back((unsigned int)axis);
@@ -652,8 +652,6 @@ TORCH_CUDA_API TensorView* where(
     TensorView* v3) {
   return arithOpOverloads(where, v1, v2, v3);
 }
-
-DEFINE_TERNARY_OP_OVERLOADS(where)
 
 TORCH_CUDA_API Val* threshold(Val* in, Val* thresh, Val* value) {
   TORCH_CHECK(

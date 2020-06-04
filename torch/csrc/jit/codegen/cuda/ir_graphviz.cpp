@@ -267,8 +267,17 @@ void IrGraphGenerator::generateScheduleGraph() {
   for (auto tv : tensor_views_) {
     addArc(tv->domain(), tv, "[style=dashed, arrowhead=none]");
     if (detail_level_ >= DetailLevel::Explicit) {
-      const auto root_domain = tv->getRootDomain();
-      addArc(tv, root_domain, "[style=dashed, color=green, arrowhead=none]");
+      // Maybe not the best way to handle the root domain, but should be okay
+      addArc(
+          tv,
+          new TensorDomain(tv->getRootDomain()),
+          "[style=dashed, color=green, arrowhead=none]");
+
+      if (tv->domain()->hasRFactor())
+        addArc(
+            tv,
+            new TensorDomain(tv->domain()->rfactorDomain()),
+            "[style=dashed, color=green, arrowhead=none]");
     }
   }
 
