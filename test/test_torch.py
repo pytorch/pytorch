@@ -6368,6 +6368,34 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
+    @unittest.skipIf(not, TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.float)
+    def test_nanprod(self, device, dtype):
+        x   = torch.tensor([[float('nan'), 1.23], [2.06, float('nan')]], dtype=dtype, device=device)
+        x_  = torch.tensor([[float('nan'), float('nan')], [1.23, 2.06]], dtype=dtype, device=device)
+        x__ = torch.tensor([float('nan')], dtype=dtype, device=device)
+
+        torch_fn_with_axis  = partial(torch.nanprod, axis=0) 
+        torch_fn_with_axis_ = partial(torch.nanprod, axis=1)
+        np_fn_with_axis     = partial(np.nanprod, axis=0)
+        np_fn_with_axis_    = partial(np.nanprod, axis=1)
+
+        torch_fn_without_axis = partial(torch.nanprod)
+        np_fn_without_axis    = partial(np.nanprod)
+
+        torch_fn_keep_dims    = partial(torch.nanprod, keepdims=True)
+        np_fn_keep_dims       = partial(np.nanprod, keepdims=True)
+
+        torch_fns = [torch_fn_with_axis, torch_fn_with_axis_, torch_fn_without_axis, torch_fn_keep_dims]
+        np_fns    = [np_fn_with_axis, np_fn_with_axis_, np_fn_without_axis, np_fn_keep_dims]
+
+        for i in range(0, 4):
+            torch_fn = torch_fns[i]
+            np_fn = np_fns[i]
+            self.compare_with_numpy(torch_fn, np_fn, x,   device, dtype)
+            self.compare_with_numpy(torch_fn, np_fn, x_,  device, dtype)
+            self.compare_with_numpy(torch_fn, np_fn, x__, device, dtype)
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float)
     def test_isfinite_isinf_isnan(self, device, dtype):
