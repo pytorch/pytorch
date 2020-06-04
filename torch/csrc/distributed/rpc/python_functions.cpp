@@ -314,11 +314,13 @@ PyRRef pyRemotePythonUdf(
     ownerRRef->registerOwnerCreationFuture(fm);
 
     fm->addCallback([](const FutureMessage& fm) {
+      std::cout << "==== in callback of remote udf\n" << std::flush;
       auto deletedRRef = callback::finishCreatingOwnerRRef(fm);
       if (deletedRRef && deletedRRef->isPyObj()) {
         py::gil_scoped_acquire ag;
         deletedRRef.reset();
       }
+      std::cout << "==== done callback of remote udf\n" << std::flush;
     });
     return PyRRef(ownerRRef);
   }

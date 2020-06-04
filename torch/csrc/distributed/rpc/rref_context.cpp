@@ -656,6 +656,7 @@ void RRefContext::addForkOfOwnerIfNotPresent(
 c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
     const RRefId& rrefId,
     const ForkId& forkId) {
+  std::cout << "==== in delForkOfOwner\n" << std::flush;
   c10::intrusive_ptr<RRef> deletedRRef;
   bool ownerReduced = false;
   // There were previously multiple TORCH_CHECKs in this function that checked
@@ -693,7 +694,9 @@ c10::intrusive_ptr<RRef> RRefContext::delForkOfOwner(
     }
   }
   if (ownerReduced) {
+    std::cout << "==== in delForkOfOwner before notify\n" << std::flush;
     deleteAllUsersCV_.notify_all();
+    std::cout << "==== in delForkOfOwner after notify\n" << std::flush;
   }
   return deletedRRef;
 }
