@@ -550,7 +550,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_method_definition_dispatch': str,
     'type_method_formals': List[str],
     'variants': str,
-    'with_gil': bool,
     'zero_dim_dispatch_when_scalar': str,
 })
 
