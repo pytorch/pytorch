@@ -11,18 +11,19 @@ namespace jit {
 
 bool ShapeSymbolTable::bindSymbolicShapes(
     at::IntArrayRef new_sizes,
-    const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes) {
-  if (!sym_shapes.size().has_value()) {
+    const c10::SymbolicShape& sym_shapes) {
+  if (!sym_shapes.rank().has_value()) {
     return true;
   }
-  if (*sym_shapes.size() != new_sizes.size()) {
+  if (*sym_shapes.rank() != new_sizes.size()) {
     return false;
   }
   for (size_t i = 0; i < new_sizes.size(); i++) {
-    if (!sym_shapes[i].has_value()) {
+    auto symbol = (*sym_shapes.sizes())[i];
+    if (!symbol.is_static()) {
       continue;
     }
-    auto symbol = *sym_shapes[i];
+
     if (!isBound(symbol)) {
       assign(symbol, new_sizes[i]);
       continue;
@@ -76,29 +77,29 @@ static void unprofileBlock(Block* start_block) {
   }
 }
 
-std::vector<c10::optional<c10::ShapeSymbol>> ProfilingRecord::
-    mergeSymbolicShapes(
-        const c10::VaryingShape<c10::ShapeSymbol>& new_sizes,
-        const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes,
-        SetPartitioningHelper& partition_helper) {
-  std::vector<c10::optional<c10::ShapeSymbol>> new_symbols;
+c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
+    const c10::SymbolicShape& new_sizes,
+    const c10::SymbolicShape& sym_shapes,
+    SetPartitioningHelper& partition_helper) {
+  std::vector<c10::ShapeSymbol> new_symbols;
   TORCH_INTERNAL_ASSERT(
-      new_sizes.size().has_value() && sym_shapes.size().has_value() &&
-      *new_sizes.size() == *sym_shapes.size());
-  for (size_t i = 0; i < new_sizes.size(); i++) {
-    if (!sym_shapes[i].has_value() || !new_sizes[i].has_value()) {
-      new_symbols.emplace_back(c10::nullopt);
+      new_sizes.rank().has_value() && sym_shapes.rank().has_value() &&
+      *new_sizes.rank() == *sym_shapes.rank());
+
+  for (size_t i = 0; i < *new_sizes.rank(); i++) {
+    if (!(*sym_shapes.sizes())[i].is_static() ||
+        !(*new_sizes.sizes())[i].is_static()) {
+      new_symbols.emplace_back();
       continue;
     }
-    auto symbol = *sym_shapes[i];
-    TORCH_INTERNAL_ASSERT(new_sizes[i]->is_static());
-    Dimension new_size = new_sizes[i]->static_size();
+    auto symbol = (*sym_shapes.sizes())[i];
+    Dimension new_size = (*new_sizes.sizes())[i].static_size();
     GRAPH_DEBUG("Merging symbol ", symbol);
     auto new_sym = partition_helper.partitionSetByDimension(new_size, symbol);
     new_symbols.emplace_back(new_sym);
   }
 
-  return new_symbols;
+  return c10::SymbolicShape(new_symbols);
 }
 
 void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
