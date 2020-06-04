@@ -516,19 +516,41 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
-        is_async_fn = hasattr(func, "_wrapped_async_rpc_function")
+        is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
+
+        if is_async_exec:
+            wrapped = func._wrapped_async_rpc_function
+            if isinstance(wrapped, torch.jit.ScriptFunction):
+                func = wrapped
 
         if qualified_name is not None:
-            fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
+            fut = _invoke_rpc_builtin(
+                dst_worker_info,
+                qualified_name,
+                rpc_timeout,
+                *args,
+                **kwargs
+            )
         elif isinstance(func, torch.jit.ScriptFunction):
             fut = _invoke_rpc_torchscript(
-                dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
+                dst_worker_info.name,
+                torch.jit._qualified_name(func),
+                args,
+                kwargs,
+                rpc_timeout,
+                is_async_exec
             )
         else:
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
-            fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rpc_timeout, is_async_fn)
+            fut = _invoke_rpc_python_udf(
+                dst_worker_info,
+                pickled_python_udf,
+                tensors,
+                rpc_timeout,
+                is_async_exec
+            )
         if should_profile:
             assert torch.autograd._profiler_enabled()
             assert rf is not None
