@@ -26,6 +26,12 @@ def createResolutionCallbackFromEnv(lookup_base):
     You should not use this directly, it should only be used from the other
     createResolutionCallbackFrom* functions.
     """
+    def try_build_type(base_mod, subexp_mod):
+        try:
+            return base_mod[subexp_mod]
+        except TypeError:
+            return None
+
     def subexpression(subexp, base_mod, module):
         if ',' in subexp:
             subexp = "".join(subexp.split())
@@ -54,13 +60,13 @@ def createResolutionCallbackFromEnv(lookup_base):
                 types = [env(p, module) for p in parts]
                 if None in types:
                     return None
-                return base_mod[tuple(types)]
+                return try_build_type(base_mod, tuple(types))
 
             else:
                 subexp_mod = env(subexp, module)
                 if subexp_mod is None:
                     return None
-                return base_mod[subexp_mod]
+                return try_build_type(base_mod, subexp_mod)
         else:
             # either base or subexp could include '.' or '['
             if 'Tensor' == subexp:
@@ -68,7 +74,7 @@ def createResolutionCallbackFromEnv(lookup_base):
             subexp_mod = env(subexp, module)
             if subexp_mod is None:
                 return None
-            return base_mod[subexp_mod]
+            return try_build_type(base_mod, subexp_mod)
 
     def env(qualified_name, module):
         # We may need to resolve a qualified name, something like `torch.device`
@@ -81,7 +87,7 @@ def createResolutionCallbackFromEnv(lookup_base):
             base_mod = env(base, module)
 
             # intentional bailout, e.g. base == "Tuple" but wasn't imported in Module
-            if not base_mod:
+            if not base_mod or isinstance(base_mod, torch.Tensor):
                 return None
 
             # assume only subexp (between []) could contain ','
