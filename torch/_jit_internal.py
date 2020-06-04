@@ -43,17 +43,44 @@ def createResolutionCallbackFromEnv(lookup_base):
             # assume only subexp (between []) could contain ','
             # but allow each element of the list to be any type hence recursive env()
             subexp = qualified_name[first + 1: last]
-            if ',' in subexp and (subexp.find('[') == -1 or
-                                  subexp.find('[') > subexp.find(',')):
-                no_whitespace = "".join(subexp.split())
-                parts = no_whitespace.split(',')
-                types = [env(p, module) for p in parts]
-                return base_mod[tuple(types)]
+            if ',' in subexp:
+                subexp = "".join(subexp.split())
+                splits = []
+                nest_level = 0
+                for i, c in enumerate(subexp):
+                    if c == '[':
+                        nest_level += 1
+                    elif c == ']':
+                        assert nest_level > 0
+                        nest_level -= 1
+                    elif c == ',' and nest_level == 0:
+                        splits.append(i)
+
+                parts = []
+                if len(splits):
+                    last_idx = 0
+                    for idx in splits:
+                        parts.append(subexp[last_idx:idx])
+                        last_idx = idx + 1
+                    parts.append(subexp[last_idx:])
+
+                    types = [env(p, module) for p in parts]
+                    if None in types:
+                        return None
+                    return base_mod[tuple(types)]
+
+                else:
+                    subexp_mod = env(subexp, module)
+                    if subexp_mod is None:
+                        return None
+                    return base_mod[subexp_mod]
             else:
                 # either base or subexp could include '.' or '['
                 if 'Tensor' == subexp:
                     subexp = 'torch.Tensor'
                 subexp_mod = env(subexp, module)
+                if subexp_mod is None:
+                    return None
                 return base_mod[subexp_mod]
         elif '.' in qualified_name:
             parts = qualified_name.split('.')
@@ -61,10 +88,6 @@ def createResolutionCallbackFromEnv(lookup_base):
             remaining_pieces = '.'.join(parts[1:])
             module_value = getattr(module, base)
             return env(remaining_pieces, module_value)
-        elif 'int' == qualified_name:
-            return int
-        elif 'float' == qualified_name:
-            return float
         else:
             return getattr(module, qualified_name)
 
