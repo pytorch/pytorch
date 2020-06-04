@@ -37,7 +37,7 @@ def createResolutionCallbackFromEnv(lookup_base):
             base_mod = env(base, module)
 
             # intentional bailout, e.g. base == "Tuple" but wasn't imported in Module
-            if not base_mod or isinstance(base_mod, type):
+            if not base_mod:
                 return None
 
             # assume only subexp (between []) could contain ','
