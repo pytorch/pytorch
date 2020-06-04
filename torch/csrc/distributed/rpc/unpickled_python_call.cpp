@@ -9,8 +9,8 @@ namespace rpc {
 
 UnpickledPythonCall::UnpickledPythonCall(
     const SerializedPyObj& serializedPyObj,
-    bool isAsyncFunction)
-    : isAsyncFunction_(isAsyncFunction) {
+    bool isAsyncExecution)
+    : isAsyncExecution_(isAsyncExecution) {
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   pybind11::gil_scoped_acquire ag;
   pythonUdf_ = pythonRpcHandler.deserialize(serializedPyObj);
