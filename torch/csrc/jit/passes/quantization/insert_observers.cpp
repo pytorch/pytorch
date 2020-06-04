@@ -421,7 +421,7 @@ graph(%self, %input, %inplace, %relu):
 graph(%self, %input, %relu):
     %first_module = match::module[name=".Conv1d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_output = prim::CallMethod[name="forward"](%relu, %first_output)
+    %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
     return (%second_output) )", {is_relu_module});
 
   const PatternInfo nn_conv1d_aten_relu = PatternInfo::parse_from_str(R"(
@@ -447,9 +447,9 @@ graph(%self, %input, %inplace, %relu):
 
   const PatternInfo nn_conv2d_nn_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input, %relu):
-    %first_module = match::module[name=".Conv2d"](%self)
+    %first_module = match::module[name="Conv2d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_output = prim::CallMethod[name="forward"](%relu, %first_output)
+    %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
     return (%second_output) )", {is_relu_module});
 
   const PatternInfo nn_conv2d_aten_relu = PatternInfo::parse_from_str(R"(
@@ -477,7 +477,7 @@ graph(%self, %input, %inplace, %relu):
 graph(%self, %input, %relu):
     %first_module = match::module[name=".Conv3d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_output = prim::CallMethod[name="forward"](%relu, %first_output)
+    %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
     return (%second_output) )", {is_relu_module});
 
   const PatternInfo nn_conv3d_aten_relu = PatternInfo::parse_from_str(R"(
