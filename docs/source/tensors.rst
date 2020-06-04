@@ -247,6 +247,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
+   .. automethod:: deg2rad
    .. automethod:: dequantize
    .. automethod:: det
    .. automethod:: dense_dim
@@ -427,6 +428,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: q_per_channel_scales
    .. automethod:: q_per_channel_zero_points
    .. automethod:: q_per_channel_axis
+   .. automethod:: rad2deg
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_

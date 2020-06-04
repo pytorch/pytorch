@@ -2236,6 +2236,34 @@ value is representable. For example, `torch.tensor(1, dtype=torch.double).random
 will be uniform in ``[0, 2^53]``.
 """)
 
+add_docstr_all('rad2deg',
+               r"""
+rad2deg() -> Tensor
+
+See :func:`torch.rad2deg`
+""")
+
+add_docstr_all('rad2deg_',
+               r"""
+rad2deg_() -> Tensor
+
+In-place version of :meth:`~Tensor.rad2deg`
+""")
+
+add_docstr_all('deg2rad',
+               r"""
+deg2rad() -> Tensor
+
+See :func:`torch.deg2rad`
+""")
+
+add_docstr_all('deg2rad_',
+               r"""
+deg2rad_() -> Tensor
+
+In-place version of :meth:`~Tensor.deg2rad`
+""")
+
 add_docstr_all('reciprocal',
                r"""
 reciprocal() -> Tensor

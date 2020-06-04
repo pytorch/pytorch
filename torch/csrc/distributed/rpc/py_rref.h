@@ -23,7 +23,9 @@ class PyRRef {
   bool confirmedByOwner() const;
   WorkerInfo owner() const;
   std::string ownerName() const;
-  py::object toHere() const;
+  py::object toHere(
+      const float timeoutSeconds =
+          torch::distributed::rpc::kUnsetRpcTimeout) const;
   py::object localValue() const;
   std::string str() const;
   py::tuple pickle() const;
