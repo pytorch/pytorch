@@ -40,7 +40,8 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
   switch (messageType) {
     case MessageType::PYTHON_CALL: {
       auto& pc = static_cast<PythonCall&>(rpc);
-      return std::make_unique<UnpickledPythonCall>(pc.serializedPyObj());
+      return std::make_unique<UnpickledPythonCall>(
+          pc.serializedPyObj(), pc.isAsyncExecution());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -150,34 +151,112 @@ void RequestCallbackImpl::processRpc(
                            ->get_function(scriptCall.qualifiedName())
                            .runAsync(stack);
 
-      if (jitFuture->completed()) {
-        markComplete(
-            std::move(ScriptResp(std::move(jitFuture->value()))).toMessage());
-        return;
-      }
-      jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
-        try {
-          Message m = ScriptResp(std::move(jitFuture->value())).toMessage();
-          m.setId(messageId);
-          responseFuture->markCompleted(std::move(m));
-        } catch (const std::exception& e) {
-          responseFuture->setError(e.what());
+      if (scriptCall.isAsyncExecution()) {
+        jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
+          try {
+            auto valueJitFuture = jitFuture->value().toFuture();
+            valueJitFuture->addCallback(
+                [responseFuture, messageId, valueJitFuture]() {
+                  try {
+                    Message m = ScriptResp(valueJitFuture->value()).toMessage();
+                    m.setId(messageId);
+                    responseFuture->markCompleted(std::move(m));
+                  } catch (const std::exception& e) {
+                    responseFuture->setError(e.what());
+                  }
+                });
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
+      } else {
+        if (jitFuture->completed()) {
+          markComplete(std::move(ScriptResp(jitFuture->value())).toMessage());
+          return;
         }
-      });
+
+        jitFuture->addCallback([responseFuture, messageId, jitFuture]() {
+          try {
+            Message m = ScriptResp(jitFuture->value()).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          } catch (const std::exception& e) {
+            responseFuture->setError(e.what());
+          }
+        });
+      }
+
       return;
     }
     case MessageType::PYTHON_CALL: {
       auto& upc = static_cast<UnpickledPythonCall&>(rpc);
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      std::shared_ptr<SerializedPyObj> serializedPyObj = nullptr;
-      {
-        py::gil_scoped_acquire acquire;
-        serializedPyObj =
-            std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
-                pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf())));
+      if (upc.isAsyncExecution()) {
+        std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
+        {
+          py::gil_scoped_acquire acquire;
+          auto result =
+              pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf());
+
+          if (pythonRpcHandler.isRemoteException(result)) {
+            // Hit exception when running the user function.
+            // Not releasing GIL before serialize to avoid an additional
+            // context switch.
+            auto serializedPyObj = pythonRpcHandler.serialize(result);
+            py::gil_scoped_release release;
+            markComplete(
+                std::move(PythonResp(std::move(serializedPyObj))).toMessage());
+            return;
+          }
+
+          try {
+            pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
+          } catch (const py::cast_error& e) {
+            auto type = result.get_type();
+            auto errMsg = c10::str(
+                e.what(),
+                ". Functions decorated with @rpc.async_function must return a "
+                "torch.futures.Future object, but got ",
+                type.attr("__module__").cast<std::string>(),
+                ".",
+                type.attr("__qualname__").cast<std::string>());
+
+            {
+              py::gil_scoped_release release;
+              responseFuture->markCompleted(
+                  createExceptionResponse(errMsg, messageId));
+            }
+            return;
+          }
+        }
+        pyFuture->fut->addCallback([msgId = messageId,
+                                    responseFuture = responseFuture,
+                                    jitFuture = pyFuture->fut,
+                                    &pythonRpcHandler]() {
+          std::shared_ptr<SerializedPyObj> serializedPyObj;
+          {
+            py::gil_scoped_acquire acquire;
+            serializedPyObj =
+                std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
+                    jit::toPyObject(jitFuture->value())));
+          }
+          auto m =
+              std::move(PythonResp(std::move(*serializedPyObj))).toMessage();
+          m.setId(msgId);
+          responseFuture->markCompleted(std::move(m));
+        });
+      } else {
+        std::shared_ptr<SerializedPyObj> serializedPyObj;
+        {
+          py::gil_scoped_acquire acquire;
+          serializedPyObj = std::make_shared<SerializedPyObj>(
+              pythonRpcHandler.serialize(pythonRpcHandler.runPythonUdf(
+                  std::move(upc).movePythonUdf())));
+        }
+        markComplete(
+            std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
       }
-      markComplete(
-          std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
+
       return;
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
