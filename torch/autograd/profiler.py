@@ -56,7 +56,12 @@ class EventList(list):
             sync_events,
             key=attrgetter("thread"),
         )
-        threads = itertools.groupby(events, key=attrgetter("thread"))
+        # Group by both thread and and node_id, so that events that happen to have
+        # the same thread_id but are from different nodes aren't incorrectly
+        # grouped together.
+        threads = itertools.groupby(
+            events, key=lambda event: (event.thread, event.node_id)
+        )
 
         # For each thread we keep a stack of current nested parents.
         # We maintain the invariant that each interval is a subset of all other
