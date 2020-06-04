@@ -19,9 +19,50 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#include <fmt/format.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+const std::string kRPCErrorPrefix = std::string("RPCErr");
+
+RPCErrorType getRPCErrorType(const FutureMessage& fm) {
+  TORCH_INTERNAL_ASSERT(
+      fm.hasError(),
+      "FutureMessage passed to getRPCErrorType does not have an error.");
+
+  // Attempt to parse for error string given by makeRPCError, otherwise return
+  // unknown error.
+  // Note that this function expects errors formatted with makeRPCError().
+  auto err = std::string(fm.error()->what());
+  size_t pos = err.find(kRPCErrorPrefix);
+  if (pos != std::string::npos) {
+    // Parse the RPCErrorType.
+    auto errStartIdx =
+        pos + torch::distributed::rpc::kRPCErrorPrefix.size() + 1;
+    auto errEndIdx = err.find(':', errStartIdx);
+    if (errEndIdx == std::string::npos) {
+      // Indicates error was not formatted correctly.
+      return RPCErrorType::UNKNOWN_ERROR;
+    }
+    auto errStr = err.substr(errStartIdx, errEndIdx - errStartIdx);
+    auto errType = static_cast<RPCErrorType>(std::stoi(errStr));
+    return errType;
+  } else {
+    return RPCErrorType::UNKNOWN_ERROR;
+  }
+}
+
+std::string makeRPCError(
+    const std::string& rpcErrorStr,
+    RPCErrorType errorType) {
+  return fmt::format(
+      "{}:{}:{}",
+      torch::distributed::rpc::kRPCErrorPrefix,
+      errorType,
+      rpcErrorStr);
+}
 
 std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
   switch (request.type()) {
@@ -134,7 +175,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       auto fromWorker = rpcWithProfilingResp.fromWorkerId();
       wrappedMsgType = rpcWithProfilingResp.wrappedMessageType();
 
-      torch::autograd::profiler::addEventList(std::move(events), fromWorker);
+      torch::autograd::profiler::addEventList(std::move(events));
 
       auto wrappedRPC = std::move(rpcWithProfilingResp).moveWrappedRpc();
       return wrappedRPC;
@@ -542,7 +583,7 @@ Message tensorpipeDeserialize(
       *buffers.id);
 }
 
-void generateWrappedPayload(
+void writeWrappedPayload(
     std::vector<char>& originalPayload,
     std::vector<char>& additionalPayload) {
   originalPayload.insert(
@@ -561,10 +602,10 @@ void generateWrappedPayload(
       1);
 }
 
-std::vector<at::IValue> readPayload(
+std::vector<at::IValue> readWrappedPayload(
     std::vector<char>& payload,
     const rpc::Message& message) {
-  // Read the autograd payload remove it from the payload.
+  // Read the additional payload remove it from the payload.
   int64_t additionalPayloadSize;
   size_t indexToRead = payload.size() - sizeof(int64_t);
   TORCH_INTERNAL_ASSERT(indexToRead >= 0);
@@ -581,12 +622,12 @@ std::vector<at::IValue> readPayload(
       payload.size(),
       " but additional payload size is ",
       additionalPayloadSize);
-  auto autogradPayLoadBegin =
+  auto wrappedPayloadBegin =
       static_cast<const char*>(message.payload().data()) + payload.size() -
       additionalPayloadSize;
   std::vector<torch::Tensor> tensorTable;
   IValue tuple = jit::unpickle(
-      autogradPayLoadBegin,
+      wrappedPayloadBegin,
       additionalPayloadSize,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       &tensorTable);

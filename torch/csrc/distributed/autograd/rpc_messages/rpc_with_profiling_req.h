@@ -47,15 +47,15 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
 
  private:
   // the worker id
-  rpc::worker_id_t fromWorkerId_;
+  const rpc::worker_id_t fromWorkerId_;
   // message type
-  rpc::MessageType messageType_;
+  const rpc::MessageType messageType_;
   // wrapped message
   rpc::Message wrappedMessage_;
   std::unique_ptr<RpcCommandBase> wrappedRpc_;
   rpc::MessageType wrappedMessageType_;
   std::vector<torch::Tensor> tensors_;
-  torch::autograd::profiler::ProfilerConfig profilerConfig_;
+  const torch::autograd::profiler::ProfilerConfig profilerConfig_;
 };
 } // namespace autograd
 } // namespace distributed

@@ -79,10 +79,10 @@ Message getMessageWithProfiling(
     torch::distributed::rpc::Message&& wrappedRpcMessage,
     MessageType msgType,
     const torch::autograd::profiler::ProfilerConfig& profilerConfig) {
-  auto wrappedProfilingMsg = std::make_unique<RpcWithProfilingReq>(
+  auto wrappedProfilingMsg = RpcWithProfilingReq(
       dstId, msgType, std::move(wrappedRpcMessage), profilerConfig);
 
-  auto msgWithProfiling = std::move(*wrappedProfilingMsg).toMessage();
+  auto msgWithProfiling = std::move(wrappedProfilingMsg).toMessage();
   return msgWithProfiling;
 }
 
@@ -102,6 +102,7 @@ Message getMessageWithAutograd(
       (!forceGradRecording && !tensorsRequireGrad)) {
     return std::move(wrappedRpcMsg);
   }
+
   // Retrieve the appropriate context to modify.
   auto autogradContext = autogradContainer.currentContext();
 

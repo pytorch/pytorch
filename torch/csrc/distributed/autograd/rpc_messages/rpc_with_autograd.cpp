@@ -71,7 +71,7 @@ Message RpcWithAutograd::toMessageImpl() && {
 
   // This wraps additionalPayload into payload and takes care of resizing,
   // encoding.
-  rpc::generateWrappedPayload(payload, additionalPayload);
+  rpc::writeWrappedPayload(payload, additionalPayload);
 
   return Message(
       std::move(payload), std::move(tensors_), messageType_, messageId);
@@ -89,7 +89,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   // Decode message type, autograd context id, autograd message id and worker
   // id from which we received this message.
   auto payload = message.payload();
-  auto tupleElements = rpc::readPayload(payload, message);
+  auto tupleElements = rpc::readWrappedPayload(payload, message);
 
   // Gather all the fields.
   TORCH_INTERNAL_ASSERT(tupleElements.size() == 4);

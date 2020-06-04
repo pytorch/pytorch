@@ -3058,6 +3058,13 @@ class TestAutograd(TestCase):
         keys = dir(x)
         self.assertIn('shape', keys)
 
+        # real and imag are only implemented for complex tensors.
+        y = torch.randn(10, 10, dtype=torch.cfloat)
+        for key in ['real', 'imag']:
+            self.assertRaises(RuntimeError, lambda: hasattr(x, key))
+            self.assertTrue(hasattr(y, key))
+            keys.remove(key)
+
         for key in keys:
             self.assertTrue(hasattr(x, key))
 
@@ -4320,7 +4327,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
                 '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
-                '__radd__', 'repeat', 'expand', 'mul', 'tanh'] + separate_complex_tests
+                '__radd__', 'repeat', 'expand', 'mul', 'tanh', 'flip', 'rot90'] + separate_complex_tests
 
 def add_test(
         name,
@@ -4510,7 +4517,7 @@ class TestAutogradFunctional(TestCase):
     def _assert_interleaved_struct(self, res, base1, base2):
         # base1 and base2 can be Tensors or tuples of Tensors.
         # If they are tuples, res should be a tuple as well.
-        # The indexing works as follow for base1, base2 being
+        # The indexing works as follows for base1, base2 being
         # - tuple, tuple: res[i][j][k][l] = (base1[i][k], base2[j][l])
         # - tuple, Tensor: res[i][k][l] = (base1[i][k], base2[l])
         # - Tensor, tuple: res[i][j][l] = (base1[i], base2[j][l])

@@ -137,6 +137,10 @@ class EventList(list):
             # this technique is proven to give a 4x speedup.
             f.write("[")
             for evt in self:
+                # Skip over remote events in trace for now.
+                if self.is_remote:
+                    continue
+
                 f.write('{"name": "%s", '
                         '"ph": "X", '
                         '"ts": %s, '
@@ -632,7 +636,7 @@ class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
             self, id, node_id, name, thread, cpu_start, cpu_end, input_shapes=None,
-            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False):
+            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True):
         self.id = id
         self.node_id = node_id
         self.name = name
@@ -645,6 +649,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cpu_memory_usage = cpu_memory_usage
         self.cuda_memory_usage = cuda_memory_usage
         self.is_async = is_async
+        self.is_remote = is_remote
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
@@ -701,7 +706,7 @@ class FunctionEvent(FormattedTimesMixin):
         return (
             '<FunctionEvent id={} node_id={} cpu_time={} cpu_start={} cpu_end={} '
             'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
-            'cpu_memory_usage={} cuda_memory_usage={}>'.format(
+            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={}>'.format(
                 self.id,
                 self.node_id,
                 self.cpu_time_str,
@@ -713,7 +718,9 @@ class FunctionEvent(FormattedTimesMixin):
                 self.thread,
                 str(self.input_shapes),
                 self.cpu_memory_usage,
-                self.cuda_memory_usage
+                self.cuda_memory_usage,
+                self.is_async,
+                self.is_remote,
             )
         )
 
@@ -724,6 +731,8 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.key = None
         self.count = 0
         self.node_id = 0
+        self.is_async = False
+        self.is_remote = False
         self.cpu_time_total = 0
         self.cuda_time_total = 0
         self.self_cpu_time_total = 0
@@ -735,8 +744,12 @@ class FunctionEventAvg(FormattedTimesMixin):
 
     def add(self, other, group_by_input_shapes=False):
         if self.key is None:
+            # First function being recorded as part of FunctionEventAvg, propagate
+            # fields.
             self.key = other.key
             self.node_id = other.node_id
+            self.is_async = other.is_async
+            self.is_remote = other.is_remote
             if group_by_input_shapes:
                 self.input_shapes = other.input_shapes
 
@@ -788,8 +801,10 @@ class StringTable(defaultdict):
 # CPU checkpoints
 
 def get_record_key(record):
+    """ Returns a tuple to be used by parse_cpu_trace for correlating start and
+    end records.
+    """
     return (record.handle(), record.node_id())
-
 
 def parse_cpu_trace(thread_records):
     next_id = 0
@@ -862,7 +877,8 @@ def parse_cpu_trace(thread_records):
             elif record.kind() == 'pop':
                 assert (
                     get_record_key(record) in range_starts
-                ), "Expected record (name={}) with key {} to exist in range_starts".format(
+                ), """Expected record (name={}) with key {} to exist in range_starts.
+                    This means that the pop event did not have a corresponding push.""".format(
                     record.name(), get_record_key(record)
                 )
 
@@ -871,20 +887,34 @@ def parse_cpu_trace(thread_records):
                 cpu_memory_usage = cpu_memory_allocs[get_record_key(record)]
                 cuda_memory_usage = cuda_memory_allocs[get_record_key(record)]
                 is_async = start.thread_id() != record.thread_id()
+                is_remote_event = False
+                precomputed_cpu_start = None
+                precomputed_cpu_end = None
+                if record.get_elapsed_cpu_ns() >= 0:
+                    is_remote_event = True
+                    # Start and end records have precomputed cpu_start and cpu_end.
+                    assert start.get_elapsed_cpu_ns() >= 0
+                    precomputed_cpu_end = record.get_elapsed_cpu_ns()
+                    precomputed_cpu_start = start.get_elapsed_cpu_ns()
 
                 fe = FunctionEvent(
                     id=record.handle(),
                     node_id=record.node_id(),
                     name=string_table[start.name()],
                     thread=start.thread_id(),
-                    cpu_start=start_record.cpu_elapsed_us(start),
-                    cpu_end=start_record.cpu_elapsed_us(record),
+                    cpu_start=start_record.cpu_elapsed_us(start)
+                    if precomputed_cpu_start is None
+                    else precomputed_cpu_start,
+                    cpu_end=start_record.cpu_elapsed_us(record)
+                    if precomputed_cpu_end is None
+                    else precomputed_cpu_end,
                     input_shapes=start.shapes(),
                     cpu_memory_usage=cpu_memory_usage,
                     cuda_memory_usage=cuda_memory_usage,
-                    is_async=is_async)
+                    is_async=is_async, is_remote=is_remote_event)
                 # note: async events have only cpu total time
-                if not is_async and start.has_cuda():
+                # TODO: CUDA support for remote events.
+                if not is_async and not is_remote_event and start.has_cuda():
                     cuda_start = adjusted_time(start)
                     cuda_end = adjusted_time(record)
                     fe.append_kernel(
@@ -1094,12 +1124,12 @@ def build_table(
     for evt in events:
         row_values = [
             evt.key,  # Name
-            # Self CPU total %
+            # Self CPU total, 0 for async events. %
             format_time_share(evt.self_cpu_time_total,
                               self_cpu_time_total),
             evt.self_cpu_time_total_str,  # Self CPU total
-            # CPU total %
-            format_time_share(evt.cpu_time_total, self_cpu_time_total),
+            # CPU total %, 0 for async events.
+            format_time_share(evt.cpu_time_total, self_cpu_time_total) if not evt.is_async else 0,
             evt.cpu_time_total_str,  # CPU total
             evt.cpu_time_str,  # CPU time avg
         ]
@@ -1129,7 +1159,7 @@ def build_table(
         )
 
         if append_node_id:
-            row_values.append(evt.node_id)  # node id
+            row_values.append(evt.node_id)
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:SHAPES_COLUMN_WIDTH])
         append(row_format.format(*row_values))

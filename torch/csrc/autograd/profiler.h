@@ -112,6 +112,31 @@ struct TORCH_API ProfilerConfig {
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;
+
+  // Returns IValues corresponding to ProfilerConfig struct, to be used for
+  // serialization.
+  at::IValue toIValues() const {
+    c10::impl::GenericList eventIValueList(at::AnyType::get());
+    eventIValueList.push_back(at::IValue(static_cast<int64_t>(state)));
+    eventIValueList.push_back(at::IValue(report_input_shapes));
+    eventIValueList.push_back(at::IValue(profile_memory));
+    return eventIValueList;
+  }
+
+  // Reconstructs a ProfilerConfig from IValues given by toIValues.
+  static ProfilerConfig fromIValue(at::IValue profilerConfigIValue) {
+    TORCH_INTERNAL_ASSERT(
+      profilerConfigIValue.isList(),
+      "Expected IValue to containt ype c10::impl::GenericList");
+    auto ivalues = profilerConfigIValue.toList();
+    ProfilerConfig cfg(
+      static_cast<ProfilerState>(ivalues.get(0).toInt()),
+      ivalues.get(1).toBool(),
+      ivalues.get(2).toBool()
+    );
+    return cfg;
+  }
+
 };
 
 enum class TORCH_API EventKind : uint16_t {
@@ -131,32 +156,31 @@ struct TORCH_API Event final {
       uint16_t thread_id,
       bool record_cuda,
       at::RecordFunctionHandle handle = 0,
-      std::vector<std::vector<int64_t>>&& shapes = {}, int node_id = -1)
+      std::vector<std::vector<int64_t>>&& shapes = {}, int node_id = -1, double relative_elapsed_cpu_us = -1)
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes), node_id_(node_id) {
+        shapes_(shapes), node_id_(node_id), relative_elapsed_cpu_us_(relative_elapsed_cpu_us) {
     record(record_cuda);
-  }
-
-  void setNodeId(int node_id) {
-    node_id_ = node_id;
   }
 
   // Returns IValues corresponding to event structure, to be used for
   // serialization.
-  at::IValue getEventIValues() const {
+  at::IValue toIValues() const {
     c10::impl::GenericList eventIValueList(at::AnyType::get());
     eventIValueList.push_back(at::IValue(static_cast<int64_t>(kind_)));
     eventIValueList.push_back(at::IValue(std::string(name_.str())));
     eventIValueList.push_back(at::IValue(thread_id_));
     eventIValueList.push_back(at::IValue(static_cast<double>(handle_)));
     eventIValueList.push_back(at::IValue(node_id_));
+    eventIValueList.push_back(at::IValue(relative_elapsed_cpu_us_));
+    // CPU memory usage
+    eventIValueList.push_back(at::IValue(cpu_memory_usage_));
     return at::IValue(eventIValueList);
   }
 
-  // Reconstructs an event from IValues given by getEventIValues.
+  // Reconstructs an event from IValues given by toIValues.
   static Event fromIValue(at::IValue eventIValue) {
     TORCH_INTERNAL_ASSERT(
         eventIValue.isList(),
@@ -170,8 +194,10 @@ struct TORCH_API Event final {
       false, // TODO: record_cuda
       static_cast<at::RecordFunctionHandle>(ivalues.get(3).toDouble()),
       {}, // TODO: record shapes
-      ivalues.get(4).toInt()
+      ivalues.get(4).toInt(),
+      ivalues.get(5).toDouble() // relative time difference computed by remote end.
     );
+    evt = evt.setCPUMemoryUsage(ivalues.get(6).toInt());
     return evt;
   }
 
@@ -200,8 +226,14 @@ struct TORCH_API Event final {
   std::vector<std::vector<int64_t>> shapes() const {
     return shapes_;
   }
-  double cpu_elapsed_us(const Event & e) {
+  double cpu_elapsed_us(const Event & e) const {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
+  }
+  double getElapsedCpuNs() const {
+    // returns a pre-computed difference in cpu_ns with another event,
+    // generally the __start_profile event. This is expected to be set for
+    // remote events.
+    return relative_elapsed_cpu_us_;
   }
   double cuda_elapsed_us(const Event & e);
   bool has_cuda() const {
@@ -237,8 +269,24 @@ struct TORCH_API Event final {
   }
 
   // Node ID corresponding to this event.
-  int node_id( )const {
+  int node_id( ) const {
     return node_id_;
+  }
+
+  // Set Node ID on this event.
+  void setNodeId(int node_id) {
+    node_id_ = node_id;
+  }
+
+  // Set CPU memory usage on this event
+  Event& setCPUMemoryUsage(int64_t cpu_memory_usage) {
+    cpu_memory_usage_ = cpu_memory_usage;
+    return *this;
+  }
+
+  // Set relative_elapsed_cpu_ns
+  void setRelativeElapsedCpuUs(double relative_elapsed_cpu_us) const {
+    relative_elapsed_cpu_us_ = relative_elapsed_cpu_us;
   }
 
 private:
@@ -254,6 +302,7 @@ private:
   int device_ = -1;
   struct CUevent_st* cuda_event = nullptr;
   int node_id_ = 0;
+  mutable double relative_elapsed_cpu_us_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -302,7 +351,7 @@ TORCH_API void enableProfiler(const ProfilerConfig&);
 TORCH_API thread_event_lists disableProfiler();
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
-TORCH_API void addEventList(std::vector<Event> profiledEvents, int fromNodeId = -1);
+TORCH_API void addEventList(std::vector<Event>&& profiledEvents);
 // Returns if the profiler is currently enabled in the current thread.
 TORCH_API bool profilerEnabled();
 // Retrieve the thread_local ProfilerConfig.
@@ -333,27 +382,27 @@ private:
 // Usage:
 // {
 //   TLSProfilerGuard g([](thread_event_lists profilerResults) {
-//     // process profilerResuls
+//     // process profilerResults
 //   });
 //   Code to profile
 // }
 struct TORCH_API TLSProfilerGuard {
   explicit TLSProfilerGuard(
-      const ProfilerConfig& cfg, c10::optional<std::function<void(thread_event_lists)>> resultCallback =
-          c10::nullopt)
+      const ProfilerConfig& cfg,
+      c10::optional<std::function<void(const thread_event_lists&)>>
+          resultCallback = c10::nullopt)
       : cb_(std::move(resultCallback)) {
-    enableProfiler(
-        cfg);
+    enableProfiler(cfg);
   }
   ~TLSProfilerGuard() {
     thread_event_lists event_lists = disableProfiler();
     if (cb_) {
-      (*cb_)(std::move(event_lists));
+      (*cb_)(event_lists);
     }
   }
 
  private:
-  c10::optional<std::function<void(thread_event_lists)>> cb_;
+  c10::optional<std::function<void(const thread_event_lists&)>> cb_;
 };
 
 } // namespace profiler

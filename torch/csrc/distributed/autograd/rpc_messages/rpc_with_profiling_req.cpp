@@ -7,6 +7,8 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
+constexpr auto profilingResponseElementExpectedSize = 3;
+
 using rpc::RpcCommandBase;
 
 // This constructor is called when creating the RpcWithProfilingReq on the
@@ -67,18 +69,15 @@ rpc::Message RpcWithProfilingReq::toMessageImpl() && {
       !wrappedPayload.empty(), "Wrapped payload should not be empty.");
   // Create the ivalues to send over. We need to send the original message type
   // and id, as well as some profiling metadata.
-  // TODO: send profiling key
-  std::vector<at::IValue> ivalues{wrappedMsgType,
-                                  static_cast<int64_t>(profilerConfig_.state),
-                                  profilerConfig_.report_input_shapes,
-                                  profilerConfig_.profile_memory,
-                                  fromWorkerId_};
+  std::vector<at::IValue> ivalues{wrappedMsgType, fromWorkerId_};
+  // Attach serialized profilerConfig.
+  ivalues.emplace_back(profilerConfig_.toIValues());
   // Pickle it into a char payload to be sent over the wire.
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> profilingPayload =
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
   // add the profiling payload to the wrapped payload
-  rpc::generateWrappedPayload(wrappedPayload, profilingPayload);
+  rpc::writeWrappedPayload(wrappedPayload, profilingPayload);
   // Put the wrapped payload into a message to return.
   auto returnMsg = rpc::Message(
       std::move(wrappedPayload),
@@ -109,24 +108,23 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
   std::vector<torch::Tensor> tensors = message.tensors();
   int64_t msgId = message.id();
   auto payload = message.payload();
-  auto tupleElements = rpc::readPayload(payload, message);
+  auto tupleElements = rpc::readWrappedPayload(payload, message);
   // Ensure that we have the expected number of elements
-  TORCH_INTERNAL_ASSERT(tupleElements.size() == 5);
+  TORCH_INTERNAL_ASSERT(
+      tupleElements.size() == profilingResponseElementExpectedSize,
+      c10::str(
+          "Expected payload of size ",
+          profilingResponseElementExpectedSize,
+          " but got ",
+          tupleElements.size()));
   rpc::MessageType wrappedMsgType =
       static_cast<rpc::MessageType>(tupleElements[0].toInt());
-  int profilerStateType = tupleElements[1].toInt();
-  // cast to ProfilerState
-  torch::autograd::profiler::ProfilerState clientProfilerState =
-      static_cast<torch::autograd::profiler::ProfilerState>(profilerStateType);
+  int fromWorkerId = tupleElements[1].toInt();
+  // Create a config to be enabled on this node that is a replica of the
+  // state on the requesting node.
+  torch::autograd::profiler::ProfilerConfig cfg =
+      torch::autograd::profiler::ProfilerConfig::fromIValue(tupleElements[2]);
 
-  bool clientReportInputShapes = tupleElements[2].toBool();
-  bool profileMemory = tupleElements[3].toBool();
-  // Create a config to be enabled on this node that is a replica of the state
-  // on the requesting node.
-  // TODO: set profile_memory properly.
-  torch::autograd::profiler::ProfilerConfig cfg(
-      clientProfilerState, clientReportInputShapes, profileMemory);
-  int fromWorkerId = tupleElements[4].toInt();
   // Create new message type and build wrapped RPC
   rpc::Message wrappedMessage(
       std::move(payload), std::move(tensors), wrappedMsgType, msgId);

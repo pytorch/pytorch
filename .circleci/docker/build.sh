@@ -295,7 +295,11 @@ if [ -n "$CLANG_VERSION" ]; then
   if !(drun clang --version 2>&1 | grep -qF "clang version $CLANG_VERSION"); then
     echo "CLANG_VERSION=$CLANG_VERSION, but:"
     drun clang --version
-    exit 1
+    if [[ "$image" == *-rocm* ]]; then
+      echo "For ROCm builds, version mismatch expected."
+    else
+      exit 1
+    fi
   fi
 fi
 

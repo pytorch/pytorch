@@ -1,7 +1,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/serialization/pickle.h>
-// #include <aten/src/ATen/core/List.h>
 
 namespace torch {
 namespace distributed {
@@ -81,12 +80,12 @@ rpc::Message RpcWithProfilingResp::toMessageImpl() && {
   ivalues.emplace_back(
       at::IValue(static_cast<int32_t>(profiledEvents_.size())));
   for (const auto& e : profiledEvents_) {
-    ivalues.emplace_back(e.getEventIValues());
+    ivalues.emplace_back(e.toIValues());
   }
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> profilingPayload =
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
-  rpc::generateWrappedPayload(wrappedPayload, profilingPayload);
+  rpc::writeWrappedPayload(wrappedPayload, profilingPayload);
 
   auto returnMsg = rpc::Message(
       std::move(wrappedPayload),
@@ -107,10 +106,16 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   std::vector<torch::Tensor> tensors = message.tensors();
   int64_t msgId = message.id();
   auto payload = message.payload();
-  auto tupleElements = rpc::readPayload(payload, message);
+  auto tupleElements = rpc::readWrappedPayload(payload, message);
   // Ensure that we have the expected number of elements
   auto profileEventsStartIdx = 3;
-  TORCH_INTERNAL_ASSERT(tupleElements.size() >= profileEventsStartIdx);
+  TORCH_INTERNAL_ASSERT(
+      tupleElements.size() >= profileEventsStartIdx,
+      c10::str(
+          "Expected payload size of at least ",
+          profileEventsStartIdx,
+          " but got size ",
+          tupleElements.size()));
   rpc::MessageType wrappedMsgType =
       static_cast<rpc::MessageType>(tupleElements[0].toInt());
   int fromWorkerId = tupleElements[1].toInt();
@@ -120,9 +125,11 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   for (int i = profileEventsStartIdx;
        i < profileEventsStartIdx + profiledEventsSize;
        ++i) {
+    TORCH_CHECK(i < tupleElements.size());
     // Reconstruct remote event from the ivalues.
     torch::autograd::profiler::Event fromIvalueEvent =
         torch::autograd::profiler::Event::fromIValue(tupleElements[i]);
+    fromIvalueEvent.setNodeId(fromWorkerId);
     remoteEvents.push_back(std::move(fromIvalueEvent));
   }
 
