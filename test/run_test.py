@@ -35,7 +35,6 @@ TESTS = [
     'distributed/test_data_parallel',
     'distributed/test_distributed',
     'test_distributions',
-    'test_docs_coverage',
     'test_expecttest',
     'test_indexing',
     'test_jit',
@@ -122,7 +121,6 @@ ROCM_BLACKLIST = [
 
 RUN_PARALLEL_BLACKLIST = [
     'test_cpp_extensions_jit',
-    'test_docs_coverage',
     'test_expecttest',
     'test_jit_disabled',
     'test_mobile_optimizer',
