@@ -7,8 +7,8 @@ import numpy as np
 import torch
 
 from utils import Timer
-from op_fuzzers.binary import BinaryFuzzer
-from op_fuzzers.unary import UnaryFuzzer
+from op_fuzzers.binary import BinaryOpFuzzer
+from op_fuzzers.unary import UnaryOpFuzzer
 
 
 _MEASURE_TIME = 1.0
@@ -89,9 +89,9 @@ def run(n, stmt, fuzzer_cls):
 
 
 def main():
-    run(n=100, stmt="torch.median(x, dim=0)", fuzzer_cls=UnaryFuzzer)
-    run(n=100, stmt="torch.square(x)", fuzzer_cls=UnaryFuzzer)
-    run(n=100, stmt="x + y", fuzzer_cls=BinaryFuzzer)
+    run(n=100, stmt="torch.median(x, dim=0)", fuzzer_cls=UnaryOpFuzzer)
+    run(n=100, stmt="torch.square(x)", fuzzer_cls=UnaryOpFuzzer)
+    run(n=100, stmt="x + y", fuzzer_cls=BinaryOpFuzzer)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ _POW_TWO_SIZES = tuple(2 ** i for i in range(
 ))
 
 
-class UnaryFuzzer(Fuzzer):
+class UnaryOpFuzzer(Fuzzer):
     def __init__(self, seed, dtype=torch.float32):
         super().__init__(
             parameters=[
