@@ -413,13 +413,23 @@ void RequestCallbackImpl::processRpc(
             });
       } else {
         IValue py_ivalue;
-        {
+        try {
+          {
+            py::gil_scoped_acquire acquire;
+            py_ivalue = jit::toIValue(
+                pythonRpcHandler.runPythonUdf(uprc.pythonUdf()),
+                PyObjectType::get());
+          }
+          ownerRRef->setValue(std::move(py_ivalue));
+        } catch (py::error_already_set& e) {
+          // py::error_already_set requires GIL to destruct, take special care.
+          ownerRRef->setError(e.what());
           py::gil_scoped_acquire acquire;
-          py_ivalue = jit::toIValue(
-              pythonRpcHandler.runPythonUdf(uprc.pythonUdf()),
-              PyObjectType::get());
+          e.restore();
+          PyErr_Clear();
+        } catch (std::exception& e) {
+          ownerRRef->setError(e.what());
         }
-        ownerRRef->setValue(std::move(py_ivalue));
         markComplete(RemoteRet(rrefId, forkId).toMessage());
       }
       return;
