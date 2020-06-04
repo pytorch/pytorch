@@ -10812,8 +10812,6 @@ class TestTorchDeviceType(TestCase):
         torch.bernoulli(torch.rand_like(p), out=p)
         self.assertTrue(isBinary(p))
 
-    # RngUniform not implemented for Integral type in XLA test
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
     @dtypesIfCPU(*(torch.testing.get_all_dtypes(include_half=False, include_bfloat16=False, include_complex=False)))
     @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False)))
     def test_bernoulli_self(self, device, dtype):
