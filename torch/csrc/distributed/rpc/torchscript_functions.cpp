@@ -16,9 +16,10 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
-    const float rpcTimeoutSeconds) {
-  auto scriptCall =
-      std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
+    const float rpcTimeoutSeconds,
+    const bool asyncFunction) {
+  auto scriptCall = std::make_unique<ScriptCall>(
+      qualifiedName, std::move(stack), asyncFunction);
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto futMessage = autograd::sendMessageWithAutograd(
       *rpcAgentPtr,
@@ -55,7 +56,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack) {
+    std::vector<c10::IValue>& stack,
+    const float rpcTimeoutSeconds) {
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto dstWorkerInfo = rpcAgentPtr->getWorkerInfo(dstWorkerName);
   auto& ctx = RRefContext::getInstance();
@@ -83,7 +85,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
-        true /*forceGradRecording*/);
+        true /*forceGradRecording*/,
+        rpcTimeoutSeconds /* timeout */);
 
     userRRefPtr->registerOwnerCreationFuture(fm);
 
@@ -108,12 +111,15 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
-        true /*forceGradRecording*/);
+        true /*forceGradRecording*/,
+        rpcTimeoutSeconds /* timeout */);
 
     ownerRRefPtr->registerOwnerCreationFuture(fm);
 
     fm->addCallback(
-        [](const FutureMessage& fm) { callback::finishCreatingOwnerRRef(fm); });
+        [ownerRRefId = ownerRRefPtr->rrefId()](const FutureMessage& fm) {
+          callback::finishCreatingOwnerRRef(fm, ownerRRefId);
+        });
     return ownerRRefPtr;
   }
 }
