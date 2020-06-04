@@ -3796,6 +3796,7 @@ class TestScript(JitTestCase):
     def test_bailout_loop_carried_deps_name_clash(self):
         with enable_profiling_mode_for_profiling_tests():
             NUM_ITERATIONS = 10
+
             @torch.jit.script
             def fct_loop(z, size):
                 # type: (int, int) -> Tuple[Tensor, List[int]]
@@ -3817,6 +3818,7 @@ class TestScript(JitTestCase):
     def test_bailout_loop_counter_transition(self):
         with enable_profiling_mode_for_profiling_tests():
             NUM_ITERATIONS = 10
+
             @torch.jit.script
             def fct_loop(z, size):
                 # type: (int, int) -> Tuple[Tensor, List[int]]
@@ -7001,9 +7003,10 @@ a")
         self.checkScript(test_cast_float, (-1.,))
 
         with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
+
             @torch.jit.script
             def test_bad_conditional(x):
-                if (1, 2):
+                if (1, 2):  # noqa F634
                     return
                 else:
                     return 0
@@ -7669,6 +7672,7 @@ a")
 
     def test_error_stacktrace_interface(self):
         global IFace
+
         @torch.jit.script
         def baz(c, b):
             return c + b
@@ -8318,6 +8322,7 @@ a")
                 return 4
         self.assertEqual(foo(4), 7)
         self.assertEqual(foo(None), 4)
+
         @torch.jit.script
         def foo2(a, b):
             # type: (Optional[int], Optional[int]) -> int
@@ -16082,7 +16087,7 @@ a")
         def identity(x1):  # noqa: F811
             # type: (str) -> str
             pass
-        #
+
         @torch.jit._overload  # noqa: F811
         def identity(x1):  # noqa: F811
             # type: (float) -> float
