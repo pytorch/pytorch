@@ -575,14 +575,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const float rpcTimeoutSeconds,
-         const bool isAsyncFunction) {
+         const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(
             pyRpcPythonUdf(
                 dst,
                 pickledPythonUDF,
                 tensors,
                 rpcTimeoutSeconds,
-                isAsyncFunction),
+                isAsyncExecution),
             /* unwrap_func */ [](const py::object& value) {
               py::gil_scoped_release release;
               auto& pythonRpcHandler = PythonRpcHandler::getInstance();
@@ -605,13 +605,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
          const std::string& qualifiedNameStr,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict,
-         const float rpcTimeoutSeconds) {
+         const float rpcTimeoutSeconds,
+         const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
             dstWorkerName,
             qualifiedNameStr,
             argsTuple,
             kwargsDict,
-            rpcTimeoutSeconds));
+            rpcTimeoutSeconds,
+            isAsyncExecution));
       },
       py::call_guard<py::gil_scoped_release>());
 

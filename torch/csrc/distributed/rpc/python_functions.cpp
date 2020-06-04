@@ -174,12 +174,12 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
     const float rpcTimeoutSeconds,
-    const bool isAsyncFunction) {
+    const bool isAsyncExecution) {
   DCHECK(!PyGILState_Check());
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
-  auto pythonCall =
-      std::make_unique<PythonCall>(std::move(serializedPyObj), isAsyncFunction);
+  auto pythonCall = std::make_unique<PythonCall>(
+      std::move(serializedPyObj), isAsyncExecution);
 
   auto agent = RpcAgent::getCurrentRpcAgent();
   return wrapFutureMessageInJitFuture(sendMessageWithAutograd(
@@ -195,7 +195,8 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
     const py::dict& kwargsDict,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const bool isAsyncExecution) {
   // No need to catch exception here, if function can not be found,
   // exception will be thrown in get_function() call; if args do not match
   // with function schema, exception will be thrown in
@@ -218,7 +219,12 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
   }
   DCHECK(!PyGILState_Check());
   c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
-      dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeoutSeconds);
+      dstWorkerName,
+      qualifiedName,
+      functionSchema,
+      stack,
+      rpcTimeoutSeconds,
+      isAsyncExecution);
   return fut;
 }
 
