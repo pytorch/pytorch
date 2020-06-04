@@ -2715,12 +2715,12 @@ class TestONNXRuntime(unittest.TestCase):
         class LinSpace(torch.nn.Module):
             def forward(self, x, y):
                 return torch.linspace(x, y, steps=11), \
-                       torch.linspace(-x, -y, steps=11), \
-                       torch.linspace(x, y * 100, steps=1991), \
-                       torch.linspace(0, x / 10, steps=1), \
-                       torch.linspace(0, x / 10, steps=0), \
-                       torch.linspace(0, x * 100 - 1, steps=1001), \
-                       torch.linspace(x * -100, x * 100, steps=4001)
+                    torch.linspace(-x, -y, steps=11), \
+                    torch.linspace(x, y * 100, steps=1991), \
+                    torch.linspace(0, x / 10, steps=1), \
+                    torch.linspace(0, x / 10, steps=0), \
+                    torch.linspace(0, x * 100 - 1, steps=1001), \
+                    torch.linspace(x * -100, x * 100, steps=4001)
 
         x = torch.tensor(10, dtype=torch.float)
         y = torch.tensor(20, dtype=torch.float)
