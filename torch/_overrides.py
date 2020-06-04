@@ -399,6 +399,7 @@ def get_testing_overrides():
         torch.narrow: lambda input, dim, start, length: -1,
         torch.native_batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps: -1,
         torch.native_layer_norm: lambda input, weight, bias, M, N, eps: -1,
+        torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
         torch.native_norm: lambda input, p=2: -1,
         torch.ne: lambda input, other, out=None: -1,
         torch.neg: lambda input, out=None: -1,
