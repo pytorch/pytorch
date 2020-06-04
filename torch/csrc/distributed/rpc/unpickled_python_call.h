@@ -17,15 +17,22 @@ namespace rpc {
 // PythonCall is a libtorch type which should not depend on Python types.
 class TORCH_API UnpickledPythonCall : public RpcCommandBase {
  public:
-  explicit UnpickledPythonCall(const SerializedPyObj& serializedPyObj);
+  UnpickledPythonCall(
+      const SerializedPyObj& serializedPyObj,
+      bool isAsyncFunction);
 
   // toMessage() method is not implemented, as objects of this class should
   // never be directly converted into a Message object.
   Message toMessageImpl() && override;
   py::object movePythonUdf() &&;
 
+  inline bool isAsyncFunction() {
+    return isAsyncFunction_;
+  }
+
  private:
   py::object pythonUdf_;
+  const bool isAsyncFunction_;
 };
 
 } // namespace rpc
