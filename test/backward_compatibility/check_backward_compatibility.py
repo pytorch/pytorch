@@ -21,7 +21,7 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
-    ('aten::append*', datetime.date(2020, 7, 1)),
+    ('profiler::_call_end_callbacks_on_jit_fut*', datetime.date(9999, 1, 1)),
     ('aten::_min', datetime.date(2020, 9, 9)),
     ('aten::_max', datetime.date(2020, 9, 9)),
     ('aten::real*', datetime.date(2020, 4, 15)),
@@ -86,7 +86,7 @@ white_list = [
     ('_prim::*', datetime.date(2020, 6, 1)),
 ]
 
-white_list.append(('profiler::_call_end_callbacks_on_jit_fut*', datetime.date(9999, 1, 1)))
+white_list.append(('aten::append*', datetime.date(2020, 7, 1)))
 
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
