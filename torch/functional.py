@@ -82,7 +82,7 @@ def split(tensor, split_size_or_sections, dim=0):
         split_size_or_sections (int) or (list(int)): size of a single chunk or
             list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
-        
+
     Example::
         >>> a = torch.arange(10).reshape(5,2)
         >>> a
