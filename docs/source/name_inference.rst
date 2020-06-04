@@ -72,6 +72,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.cumprod`, :func:`torch.cumprod`",:ref:`keeps_input_names-doc`
    ":meth:`Tensor.cumsum`, :func:`torch.cumsum`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.data_ptr`,None
+   ":meth:`Tensor.deg2rad`, :func:`torch.deg2rad`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.deg2rad_`,None
    ":meth:`Tensor.detach`, :func:`torch.detach`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.detach_`,None
    ":attr:`Tensor.device`, :func:`torch.device`",None
@@ -166,6 +168,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.pow`, :func:`torch.pow`",:ref:`unifies_names_from_inputs-doc`
    :meth:`Tensor.pow_`,None
    ":meth:`Tensor.prod`, :func:`torch.prod`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.rad2deg`, :func:`torch.rad2deg`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.rad2deg_`,None
    :func:`torch.rand`,:ref:`factory-doc`
    :func:`torch.rand`,:ref:`factory-doc`
    :func:`torch.randn`,:ref:`factory-doc`
