@@ -197,6 +197,7 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
   // First, wait for all pending UserRRefs to be confirmed,
   // one kind is pendingUsers_, which are shared from Owner,
   // the other kind pendingChildren_, which are shared from another User.
+  std::cout << "=== in delete users\n" << std::flush;
   std::unordered_map<ForkId, c10::weak_intrusive_ptr<RRef>, ForkId::Hash>
       tempConfirmedUsers;
   {
@@ -211,6 +212,8 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
     tempConfirmedUsers.swap(confirmedUsers_);
   }
 
+  std::cout << "=== after cv\n" << std::flush;
+
   // Start sending UserRRef delete messages, after all pendings are confirmed.
   // Note, there should be no new forkings in between, because it's assumed that
   // this utility is called during graceful shutdown, where no new user RPCs can
@@ -224,6 +227,8 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
     rref_ptr->tryDel();
   }
 
+  std::cout << "=== after for\n" << std::flush;
+
   // Wait for Owners to process all delete UserRRef messages.
   {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -233,6 +238,8 @@ void RRefContext::delAllUsers(std::chrono::milliseconds timeoutMillis) {
       LOG(ERROR) << "Timed out waiting for pending OwnerRRefs to be deleted.";
     }
   }
+
+  std::cout << "=== after all\n" << std::flush;
 }
 
 c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
