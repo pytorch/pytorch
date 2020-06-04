@@ -406,39 +406,37 @@ class TestScriptPy3(JitTestCase):
     def test_subexpression_List_Future(self):
 
         @torch.jit.script
-        def fn(x: List[torch.jit.Future[int]]):
+        def fn(x: List[torch.jit.Future[int]]) -> torch.jit.Future[int]:
             return x[0]
 
-        g = fn.graph
-        assert "Future" in repr(g)
+        FileCheck().check('Future[int]').check('Future[int]').run(fn.graph)
 
     def test_subexpression_Tuple_int_int_Future(self):
 
         @torch.jit.script
-        def fn(x: Tuple[int, int, torch.jit.Future[int]]):
+        def fn(x: Tuple[int, int, torch.jit.Future[int]]) -> Tuple[int, torch.jit.Future[int]]:
             return x[0], x[2]
 
-        g = fn.graph
-        assert "Future" in repr(g)
+        FileCheck().check('(int, int, Future[int])').check('(int, Future[int])').run(fn.graph)
 
     def test_subexpression_Dict_int_Future(self):
 
         @torch.jit.script
-        def fn(x: Dict[int, torch.jit.Future[int]], y: int):
+        def fn(x: Dict[int, torch.jit.Future[int]], y: int) -> torch.jit.Future[int]:
             return x[y]
 
-        g = fn.graph
-        assert "Future" in repr(g)
+        FileCheck().check('Dict(int, Future(int))').check('Future[int]').run(fn.graph)
 
     def test_subexpression_Optional(self):
 
         @torch.jit.script
-        def fn(x: Optional[Dict[int, torch.jit.Future[int]]]):
+        def fn(x: Optional[Dict[int, torch.jit.Future[int]]]) -> Optional[torch.jit.Future[int]]:
             if x is not None:
                 return x[0]
             else:
                 return None
 
+        FileCheck().check('Dict(int, Future(int))?').run(fn.graph)
 
     def test_unimported_type_resolution(self):
         # verify fallback from the python resolver to the c++ resolver
