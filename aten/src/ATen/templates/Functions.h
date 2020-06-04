@@ -15,6 +15,11 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/TypeDefault.h>
+#include <ATen/CPUType.h>
+#include <ATen/QuantizedCPUType.h>
+
 namespace at {
 
 using native::tensor;

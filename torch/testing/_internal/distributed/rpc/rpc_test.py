@@ -27,7 +27,7 @@ from torch.testing._internal.dist_utils import (
     get_timeout_error_regex,
     initialize_pg,
     wait_until_node_failure,
-    wait_until_pending_users_flushed,
+    wait_until_pending_futures_and_users_flushed,
     worker_name,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
@@ -312,8 +312,113 @@ def add_use_future_cb(to, x, y, z):
         out.set_result(fut.wait() + z)
 
     fut = rpc.rpc_async(to, torch.add, args=(x, y))
-    fut._then(callback)
+    fut.then(callback)
     return out.result()
+
+
+def get_events_from_profile(profile_rref):
+    return profile_rref.local_value().process_global_function_events
+
+
+def add_use_future_set_result(to, x, y, z):
+    out = torch.futures.Future()
+    fut = rpc.rpc_async(to, torch.add, args=(x, y))
+    fut.then(lambda fut : out.set_result(fut.wait() + z))
+    return out.wait()
+
+
+def add_use_future_nested_cb(to, x, y, z):
+    out = torch.futures.Future()
+
+    def callback(fut1):
+        fut2 = rpc.rpc_async(to, torch.add, args=(fut1.wait(), z))
+        fut2.then(lambda fut2 : out.set_result(fut2.wait()))
+
+    fut1 = rpc.rpc_async(to, torch.add, args=(x, y))
+    fut1.then(callback)
+    return out.wait()
+
+
+def fail_on_fut(fut):
+    pass
+
+
+@rpc.functions.async_execution
+def async_raise_func():
+    raise RuntimeError("Expected error")
+
+
+@rpc.functions.async_execution
+def async_wrong_type():
+    return torch.zeros(2, 2)
+
+
+@rpc.functions.async_execution
+def async_add(to, x, y):
+    return rpc.rpc_async(to, torch.add, args=(x, y))
+
+
+@rpc.functions.async_execution
+def async_add_with_future_ctor(to, x, y, z):
+    fut = torch.futures.Future()
+    rpc.rpc_async(to, torch.add, args=(x, y)).then(
+        lambda fut1: fut.set_result(fut1.wait() + z)
+    ).wait()
+    return fut
+
+
+@rpc.functions.async_execution
+def async_add_chained(to, x, y, z):
+    return rpc.rpc_async(to, torch.add, args=(x, y)).then(
+        lambda fut: fut.wait() + z
+    )
+
+
+@rpc.functions.async_execution
+def async_add_chained_multi(to, x, num, step):
+    fut = rpc.rpc_async(to, torch.add, args=(x, 0))
+    for _ in range(num):
+        fut = fut.then(lambda fut: fut.wait() + step)
+    return fut
+
+
+@rpc.functions.async_execution
+def async_add_nested(to, x, y, z):
+    return rpc.rpc_async(to, async_add, args=(to, x, y)).then(
+        lambda fut: fut.wait() + z
+    )
+
+
+@rpc.functions.async_execution
+def async_add_multi_fanout(to, x, num, step):
+    futs = []
+    for i in range(num):
+        if i == 0:
+            futs.append(rpc.rpc_async(to, torch.add, args=(x, step)))
+        else:
+            futs.append(rpc.rpc_async(to, torch.add, args=(0, step)))
+
+    # TODO: use torch.futures.collect_all
+    import threading
+    lock = threading.Lock()
+    state = {"cnt": 0, "ret": torch.zeros_like(x)}
+    ret_future = torch.futures.Future()
+
+    def inc_and_set(fut):
+        with lock:
+            state["cnt"] += 1
+            state["ret"] += fut.wait()
+            if state["cnt"] >= len(futs):
+                ret_future.set_result(state["ret"])
+
+    for fut in futs:
+        fut.then(inc_and_set)
+
+    return ret_future
+
+
+def return_future():
+    return torch.futures.Future()
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -543,7 +648,6 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    @_skip_if_tensorpipe_agent
     @dist_init(setup_rpc=False)
     def test_duplicate_name(self):
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
@@ -976,6 +1080,47 @@ class RpcTest(RpcAgentTestFixture):
             use_record_function=True,
         )
 
+    def _assert_top_level_events(self, process_global_events, expected_top_level_event_names):
+        top_level_event_names = []
+        for thread_local_events in process_global_events:
+            # Get top-level events from all events happened on a thread.
+            last_end_time = 0
+            for event in thread_local_events:
+                event_name = event.name
+                cpu_interval = event.cpu_interval
+                if cpu_interval.start > last_end_time:
+                    top_level_event_names.append(event_name)
+                    last_end_time = cpu_interval.end
+        self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
+
+    @dist_init
+    def test_server_process_global_profiler(self):
+        if self.rank != 0:
+            return
+
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker_name = worker_name(dst_rank)
+
+        x = torch.tensor(1)
+        y = torch.tensor(2)
+
+        outer_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        outer_profile_rref.rpc_sync().__enter__()
+        rpc.rpc_sync(dst_worker_name, torch.add, (x, y))
+        inner_profile_rref = rpc.remote(dst_worker_name, rpc._server_process_global_profile)
+        inner_profile_rref.rpc_sync().__enter__()
+        rpc.rpc_sync(dst_worker_name, torch.sub, (x, y))
+        inner_profile_rref.rpc_sync().__exit__(None, None, None)
+        outer_profile_rref.rpc_sync().__exit__(None, None, None)
+
+        inner_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (inner_profile_rref,))
+        self._assert_top_level_events(inner_events, ['sub'])
+        outer_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (outer_profile_rref,))
+        self._assert_top_level_events(outer_events, ['add', 'sub'])
+
+        inner_profile_rref.rpc_sync().key_averages()
+        outer_profile_rref.rpc_sync().key_averages()
+
     @dist_init
     def test_async_record_function_double_end_callbacks(self):
         num_sleep_seconds = 1
@@ -1083,7 +1228,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(ret, my_tensor_function(torch.ones(n, n), torch.ones(n, n)))
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_py_tensors_multi_async_call(self):
         futs = []
         n = self.rank + 1
@@ -1104,7 +1248,6 @@ class RpcTest(RpcAgentTestFixture):
             j += 1
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_py_tensors_in_container(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1147,7 +1290,6 @@ class RpcTest(RpcAgentTestFixture):
             fut.wait()
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_nested_rpc(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1177,7 +1319,6 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_stress_light_rpc(self):
         self._stress_test_rpc(light_rpc)
 
@@ -1256,7 +1397,6 @@ class RpcTest(RpcAgentTestFixture):
         self._test_multi_remote_call(my_function, kwargs_fn=kwargs_fn)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_py_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1272,7 +1412,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_py_rref_args_user_share(self):
         n = self.rank + 1
         owner_rank = n % self.world_size
@@ -1289,7 +1428,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_py_rpc_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1307,7 +1445,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(c, torch.ones(n, n) + 4)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_nested_remote(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -1321,7 +1458,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_nested_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -1342,7 +1478,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_nested_rref_stress(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -1365,7 +1500,6 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_multi_layer_nested_async_rpc(self):
         # This test will exit right away, but there will be a chain of async
         # RPCs. The termination algorithm should detect those messages properly.
@@ -1391,7 +1525,6 @@ class RpcTest(RpcAgentTestFixture):
             rref.to_here()
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_rpc_return_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -1404,7 +1537,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_rref_forward_chain(self):
         ttl = 8
         n = self.rank + 1
@@ -1429,7 +1561,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(local_rref.local_value(), 35)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_local_value_not_on_owner(self):
         # ensure that an error message is thrown if a user tries to call
         # local_value() on a non-owning node.
@@ -1443,7 +1574,6 @@ class RpcTest(RpcAgentTestFixture):
             rref.local_value()
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_return_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1518,7 +1648,6 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_remote_same_worker(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1726,17 +1855,14 @@ class RpcTest(RpcAgentTestFixture):
                 rpc.shutdown(graceful=True)
 
     @dist_init(setup_rpc=False)
-    @_skip_if_tensorpipe_agent
     def test_rref_leak(self):
         self._test_rref_leak(ignore_leak=False)
 
     @dist_init(setup_rpc=False)
-    @_skip_if_tensorpipe_agent
     def test_ignore_rref_leak(self):
         self._test_rref_leak(ignore_leak=True)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_rref_str(self):
         rref1 = RRef(self.rank)
         id_class = "GloballyUniqueId"
@@ -1756,7 +1882,6 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_rref_get_future(self):
         # Tests that we can obtain the future corresponding to the creation of
         # the RRef on remote end
@@ -1811,9 +1936,9 @@ class RpcTest(RpcAgentTestFixture):
         rpc.rpc_sync(worker_name(dst_rank), set_global_rref, args=(rref1,))
 
         # barrier before check 2
+        wait_until_pending_futures_and_users_flushed()
         dist.barrier()
 
-        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
@@ -1837,9 +1962,9 @@ class RpcTest(RpcAgentTestFixture):
         rref3.to_here()
 
         # barrier before check 3
+        wait_until_pending_futures_and_users_flushed()
         dist.barrier()
 
-        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
@@ -1984,7 +2109,6 @@ class RpcTest(RpcAgentTestFixture):
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
-    @_skip_if_tensorpipe_agent
     def test_handle_send_exceptions(self):
         # test that if a callee node has gone down, we raise an appropriate
         # exception instead of just crashing.
@@ -2119,7 +2243,6 @@ class RpcTest(RpcAgentTestFixture):
             )
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_default_timeout_used(self):
         """
         Tests that if no timeout is passed into rpc_async and rpc_sync, then the
@@ -2157,7 +2280,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc._set_rpc_timeout(rpc.constants.DEFAULT_RPC_TIMEOUT_SEC)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_rpc_timeouts(self):
         # TODO: enable timeouts for rpc.remote/RRef (https://github.com/pytorch/pytorch/issues/33803)
         dst_rank = (self.rank + 1) % self.world_size
@@ -2258,7 +2380,6 @@ class RpcTest(RpcAgentTestFixture):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_non_garbage_collected_user_rref_due_to_local_circular_dependency(self):
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
@@ -2277,7 +2398,6 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init(setup_rpc=False)
-    @_skip_if_tensorpipe_agent
     def test_use_rref_after_shutdown(self):
         rpc.init_rpc(
             name="worker%d" % self.rank,
@@ -2361,7 +2481,6 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_user_rrefs_confirmed(self):
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
@@ -2373,7 +2492,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(ret, True)
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_user_rrefs_confirmed_remote(self):
         dst_rank = (self.rank + 1) % self.world_size
         rref = self._create_rref()
@@ -2400,7 +2518,6 @@ class RpcTest(RpcAgentTestFixture):
             rref.to_here()
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_non_cont_tensors(self):
         if self.rank == 0:
             # Create a non-contiguous tensor.
@@ -2420,7 +2537,6 @@ class RpcTest(RpcAgentTestFixture):
             self.assertFalse(t_ret.is_contiguous())
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_callback_simple(self):
         set_by_cb = concurrent.futures.Future()
         n = self.rank + 1
@@ -2436,7 +2552,7 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n))
         )
 
-        fut._then(callback)
+        fut.then(callback)
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
         self.assertEqual(set_by_cb.result(), torch.ones(n, n) * 2 + 1)
@@ -2453,7 +2569,7 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n))
         )
 
-        cb_fut = fut._then(my_function)
+        cb_fut = fut.then(my_function)
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
@@ -2468,7 +2584,7 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
 
         fut0 = rpc.rpc_async(dst, torch.add, args=(torch.ones(2, 2), 1))
-        fut1 = fut0._then(lambda x: x + 1)
+        fut1 = fut0.then(lambda x: x + 1)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -2494,7 +2610,7 @@ class RpcTest(RpcAgentTestFixture):
 
         cb_futs = []
         for idx in range(num_cbs):
-            cb_futs.append(fut._then(partial(callback, idx)))
+            cb_futs.append(fut.then(partial(callback, idx)))
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
@@ -2522,7 +2638,7 @@ class RpcTest(RpcAgentTestFixture):
 
         num_cbs = 20
         for _ in range(num_cbs):
-            fut = fut._then(callback)
+            fut = fut.then(callback)
 
         self.assertEqual(fut.wait(), torch.ones(n, n) + 1 + num_cbs)
 
@@ -2547,7 +2663,7 @@ class RpcTest(RpcAgentTestFixture):
                 dst,
                 torch.add,
                 args=(fut0.wait(), 1)
-            )._then(lambda fut1: fut1.wait() + 1)
+            ).then(lambda fut1: fut1.wait() + 1)
 
             return fut2.wait()
 
@@ -2555,7 +2671,7 @@ class RpcTest(RpcAgentTestFixture):
             dst,
             torch.add,
             args=(torch.ones(2, 2), 1)
-        )._then(callback)
+        ).then(callback)
 
         self.assertEqual(fut3.wait(), torch.ones(2, 2) + 3)
 
@@ -2568,19 +2684,151 @@ class RpcTest(RpcAgentTestFixture):
                 fut0.wait()
             raise RuntimeError("Another expected error")
 
-        fut1 = rpc.rpc_async(dst, raise_func)._then(callback)
+        fut1 = rpc.rpc_async(dst, raise_func).then(callback)
         with self.assertRaisesRegex(RuntimeError, "Another expected error"):
             fut1.wait()
 
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_callback_none(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         with self.assertRaisesRegex(
             TypeError,
             "incompatible function arguments."
         ):
-            rpc.rpc_async(dst, raise_func)._then(None)
+            rpc.rpc_async(dst, raise_func).then(None)
+
+    @dist_init
+    def test_mark_future_twice(self):
+        fut = rpc.rpc_async(
+            worker_name((self.rank + 1) % self.world_size),
+            torch.add,
+            args=(torch.zeros(2, 2), 1)
+        )
+        self.assertEqual(fut.wait(), torch.zeros(2, 2) + 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Future can only be marked completed once"
+        ):
+            fut.set_result(1)
+
+    @dist_init
+    def test_pickle_future(self):
+        fut = torch.futures.Future()
+        errMsg = "Can not pickle torch.futures.Future"
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, errMsg):
+                rpc.rpc_sync(dst, fail_on_fut, args=(fut,))
+
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, errMsg):
+                rpc.rpc_async(dst, fail_on_fut, args=(fut,))
+
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(RuntimeError, errMsg):
+                rpc.remote(dst, fail_on_fut, args=(fut,))
+
+    def _test_future_cb(self, func):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(
+            dst1,
+            func,
+            args=(dst2, torch.ones(2, 2), 1, 2)
+        )
+        self.assertEqual(ret, torch.ones(2, 2) + 1 + 2)
+
+    @dist_init
+    def test_future_in_rpc(self):
+        self._test_future_cb(add_use_future_set_result)
+
+    @dist_init
+    def test_future_nested_callback(self):
+        self._test_future_cb(add_use_future_nested_cb)
+
+    @dist_init
+    def test_async_function_raise(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected error"):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                async_raise_func
+            )
+
+    @dist_init
+    def test_async_function_wrong_return_type(self):
+        errMsg = (
+            "Functions decorated with @rpc\\.async_function must return a "
+            "torch\\.futures\\.Future object,"
+        )
+        with self.assertRaisesRegex(RuntimeError, errMsg):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                async_wrong_type
+            )
+
+    @dist_init
+    def test_async_function_simple(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(dst1, async_add, args=(dst2, torch.ones(2, 2), 1))
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+    def _test_async_function(self, fn):
+        if self.rank == 0:
+            dst1 = worker_name((self.rank + 1) % self.world_size)
+            dst2 = worker_name((self.rank + 2) % self.world_size)
+
+            ret = rpc.rpc_sync(dst1, fn, args=(dst2, torch.ones(2, 2), 1, 2))
+
+            self.assertEqual(ret, torch.ones(2, 2) + 3)
+
+    @dist_init
+    def test_async_function_with_future_ctor(self):
+        self._test_async_function(async_add_with_future_ctor)
+
+    @dist_init
+    def test_async_function_chained(self):
+        self._test_async_function(async_add_chained)
+
+    @dist_init
+    def test_async_function_nested(self):
+        self._test_async_function(async_add_nested)
+
+    def _test_async_function_multi(self, fn):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        num = 20
+        step = 3
+        ret = rpc.rpc_sync(
+            dst1,
+            fn,
+            args=(dst2, torch.ones(2, 2), num, step)
+        )
+
+        self.assertEqual(ret, torch.ones(2, 2) + num * step)
+
+    @dist_init
+    def test_async_function_multi_chained(self):
+        self._test_async_function_multi(async_add_chained_multi)
+
+    @dist_init
+    def test_async_function_multi_fanout(self):
+        self._test_async_function_multi(async_add_multi_fanout)
+
+    @dist_init
+    def test_return_future(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Can not pickle torch.futures.Future"
+        ):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                return_future,
+            )
 
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
