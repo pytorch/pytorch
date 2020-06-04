@@ -12,6 +12,14 @@ void DispatchKeyExtractor::setOperatorHasKernelForBackend(DispatchKey k, bool ha
   }
 }
 
+void DispatchKeyExtractor::setOperatorHasFallthroughForBackend(DispatchKey k, bool has_fallthrough) {
+  if (has_fallthrough) {
+    operatorHasFallthroughForBackend_ = operatorHasFallthroughForBackend_.add(k);
+  } else {
+    operatorHasFallthroughForBackend_ = operatorHasFallthroughForBackend_.remove(k);
+  }
+}
+
 std::string DispatchKeyExtractor::dumpState() const {
   std::ostringstream oss;
   for (size_t i=0; i < c10::utils::bitset::NUM_BITS(); ++i) {

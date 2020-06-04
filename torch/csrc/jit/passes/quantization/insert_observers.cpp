@@ -740,6 +740,14 @@ void InsertObserversHelper::fillBoundaryValueMap(
 void InsertObserversHelper::preprocess(
     Module& module,
     const std::string& method_name) {
+  // run preprocess for child module before parent, since preprocess
+  // mutates the graph and it might affect passes like fillBoundaryValueMap
+  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_method);
+    const auto& invoked_method_name = std::get<1>(invoked_method);
+    preprocess(invoked_module, invoked_method_name);
+  }
+
   Method method = module.get_method(method_name);
   auto graph = method.graph();
   // TODO: remove constant prop, add separate graph
@@ -756,12 +764,6 @@ void InsertObserversHelper::preprocess(
   fillValueObserverMap(module, method_name);
   fillBoundaryValueMap(module, method_name);
   fillPassThroughValueMap(graph);
-
-  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
-    auto& invoked_module = std::get<0>(invoked_method);
-    const auto& invoked_method_name = std::get<1>(invoked_method);
-    preprocess(invoked_module, invoked_method_name);
-  }
 }
 
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {

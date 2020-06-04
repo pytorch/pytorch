@@ -353,21 +353,21 @@ TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
 if TEST_NUMPY:
-    import numpy
+    import numpy as np
 
     # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
     numpy_to_torch_dtype_dict = {
-        numpy.bool       : torch.bool,
-        numpy.uint8      : torch.uint8,
-        numpy.int8       : torch.int8,
-        numpy.int16      : torch.int16,
-        numpy.int32      : torch.int32,
-        numpy.int64      : torch.int64,
-        numpy.float16    : torch.float16,
-        numpy.float32    : torch.float32,
-        numpy.float64    : torch.float64,
-        numpy.complex64  : torch.complex64,
-        numpy.complex128 : torch.complex128
+        np.bool       : torch.bool,
+        np.uint8      : torch.uint8,
+        np.int8       : torch.int8,
+        np.int16      : torch.int16,
+        np.int32      : torch.int32,
+        np.int64      : torch.int64,
+        np.float16    : torch.float16,
+        np.float32    : torch.float32,
+        np.float64    : torch.float64,
+        np.complex64  : torch.complex64,
+        np.complex128 : torch.complex128
     }
 
     # Dict of torch dtype -> NumPy dtype
@@ -406,7 +406,7 @@ def skipIfCompiledWithoutNumpy(fn):
         try:
             # The numpy module is present, verify that PyTorch is compiled with
             # numpy support
-            torch.from_numpy(numpy.array([2, 2]))
+            torch.from_numpy(np.array([2, 2]))
         except RuntimeError:
             numpy_support = False
 
@@ -540,7 +540,7 @@ def set_rng_seed(seed):
     torch.manual_seed(seed)
     random.seed(seed)
     if TEST_NUMPY:
-        numpy.random.seed(seed)
+        np.random.seed(seed)
 
 
 @contextlib.contextmanager
@@ -883,6 +883,37 @@ class TestCase(expecttest.TestCase):
 
         return tg
 
+    # Compares the given Torch and NumPy functions on the given tensor-like object.
+    # NOTE: both torch_fn and np_fn should be functions that take a single
+    #   tensor (array). If the torch and/or NumPy function require additional
+    #   arguments then wrap the function in a lambda or pass a partial function.
+    # TODO: support bfloat16 comparisons
+    # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
+    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device, dtype):
+        assert TEST_NUMPY
+        assert dtype is not torch.bfloat16
+
+        if isinstance(tensor_like, torch.Tensor):
+            a = tensor_like.detach().cpu().numpy()
+            t = tensor_like
+        else:
+            a = np.array(tensor_like, dtype=torch_to_numpy_dtype_dict[dtype])
+            t = torch.tensor(tensor_like, device=device, dtype=dtype)
+
+        np_result = np_fn(a)
+        torch_result = torch_fn(t).cpu()
+
+        # Converts arrays to tensors
+        if isinstance(np_result, np.ndarray):
+            try:
+                np_result = torch.from_numpy(np_result)
+            except Exception:
+                # NOTE: copying an array before conversion is necessary when,
+                #   for example, the array has negative strides.
+                np_result = torch.from_numpy(np_result.copy())
+
+        self.assertEqual(np_result, torch_result)
+
     # Some analysis of tolerance by logging tests from test_torch.py can be found
     # in https://github.com/pytorch/pytorch/pull/32538.
     # dtype name : (rtol, atol)
@@ -995,10 +1026,10 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Tensor x np.bool
-        elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
+        elif isinstance(x, torch.Tensor) and isinstance(y, np.bool_):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
-        elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
+        elif isinstance(y, torch.Tensor) and isinstance(x, np.bool_):
             self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
                              exact_dtype=exact_dtype, exact_device=exact_device)
         # Tensor x Tensor
