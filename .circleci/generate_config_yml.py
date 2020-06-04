@@ -14,7 +14,6 @@ import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
-import cimodel.data.simple.setup_job
 import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.bazel_definitions
@@ -82,7 +81,6 @@ class Header(object):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        cimodel.data.simple.setup_job.get_workflow_jobs,
         windows_build_definitions.get_windows_workflows,
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
@@ -124,7 +122,6 @@ YAML_SOURCES = [
     File("job-specs/pytorch-job-specs.yml"),
     File("job-specs/caffe2-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
-    File("job-specs/job-specs-setup.yml"),
     File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),
     File("job-specs/binary_update_htmls.yml"),
