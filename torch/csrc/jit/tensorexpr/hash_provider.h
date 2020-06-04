@@ -62,6 +62,10 @@ class TORCH_API HashProvider : public IRVisitor {
     return exprToHash_.find(e) != exprToHash_.end();
   }
 
+  void clearCache() {
+    exprToHash_.clear();
+  }
+
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
   void visit(const Mul* v) override;
