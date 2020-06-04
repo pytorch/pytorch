@@ -107,6 +107,29 @@ Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
+static Tensor wrapped_scalar_tensor(Scalar scalar) {
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
+
+Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
+  constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
+  return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_180_PI)));
+}
+
+Tensor rad2deg(const Tensor& self) { return unary_op_impl(self, at::rad2deg_out); }
+Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
+
+Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
+  constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
+  return at::mul_out(result, self, wrapped_scalar_tensor(Scalar(M_PI_180)));
+}
+Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
+Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
+
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }

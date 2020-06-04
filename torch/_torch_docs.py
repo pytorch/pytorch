@@ -4689,6 +4689,52 @@ Example::
     True
 """)
 
+add_docstr(torch.rad2deg,
+           r"""
+rad2deg(input, out=None) -> Tensor
+
+Returns a new tensor with each of the elements of :attr:`input`
+converted from angles in radians to degrees.
+
+Args:
+    {input}
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([[3.142, -3.142], [6.283, -6.283], [1.570, -1.570]])
+    >>> torch.rad2deg(a)
+    tensor([[ 180.0233, -180.0233],
+            [ 359.9894, -359.9894],
+            [  89.9544,  -89.9544]])
+
+""".format(**common_args))
+
+add_docstr(torch.deg2rad,
+           r"""
+deg2rad(input, out=None) -> Tensor
+
+Returns a new tensor with each of the elements of :attr:`input`
+converted from angles in degrees to radians.
+
+Args:
+    {input}
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([[180.0, -180.0], [360.0, -360.0], [90.0, -90.0]])
+    >>> torch.deg2rad(a)
+    tensor([[ 3.1416, -3.1416],
+            [ 6.2832, -6.2832],
+            [ 1.5708, -1.5708]])
+
+""".format(**common_args))
+
 add_docstr(torch.rand,
            r"""
 rand(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor

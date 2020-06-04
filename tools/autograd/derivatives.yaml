@@ -297,6 +297,9 @@
 - name: _ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   log_probs: _ctc_loss_backward(grad, log_probs, targets, input_lengths, target_lengths, result0, result1, blank, zero_infinity)
 
+- name: deg2rad(Tensor self) -> Tensor
+  self: deg2rad_backward(grad)
+
 - name: det(Tensor self) -> Tensor
   self: det_backward(grad, self, result)
 
@@ -741,6 +744,9 @@
 
 - name: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
   self: qr_backward(grads, self, some, Q, R)
+
+- name: rad2deg(Tensor self) -> Tensor
+  self: rad2deg_backward(grad)
 
 - name: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad, at::MemoryFormat::Preserve)

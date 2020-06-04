@@ -2116,6 +2116,30 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: rad2deg(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  supports_named_tensor: True
+
+- func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  supports_named_tensor: True
+
+- func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: deg2rad(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  supports_named_tensor: True
+
+- func: deg2rad_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  supports_named_tensor: True
+
+- func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
