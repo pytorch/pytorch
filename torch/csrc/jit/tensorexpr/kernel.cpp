@@ -802,8 +802,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::tanh: {
       return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
-        // return
-        // (ExprHandle(-.67436811832e-5f)+(ExprHandle(.2468149110712040f)+(ExprHandle(.583691066395175e-1f)+ExprHandle(.3357335044280075e-1f)*a)*a)*a)/(ExprHandle(.2464845986383725f)+(ExprHandle(.609347197060491e-1f)+(ExprHandle(.1086202599228572f)+ExprHandle(.2874707922475963e-1f)*a)*a)*a);
         return tanh(a);
       });
     } break;
