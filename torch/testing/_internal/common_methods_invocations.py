@@ -117,6 +117,8 @@ def ident(x):
 def method_tests():
     set_rng_seed(0)
     return [
+        ('acosh', torch.rand(S, S, S).add(1), NO_ARGS, ''),
+        ('acosh', torch.rand(tuple()).add(1), NO_ARGS, 'scalar'),
         ('add', (S, S, S), ((S, S, S),), '', (True,)),
         ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
         ('add', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
@@ -126,6 +128,10 @@ def method_tests():
         ('add', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('add', (S, S, S), (3.14,), 'constant', (True,)),
         ('add', (), (3.14,), 'scalar_constant', (True,)),
+        ('asinh', (S, S, S), NO_ARGS, ''),
+        ('asinh', (), NO_ARGS, 'scalar'),
+        ('atanh', torch.rand(S, S, S), NO_ARGS, ''),
+        ('atanh', torch.rand(tuple()), NO_ARGS, 'scalar'),
         ('__radd__', (S, S, S), (3.14,), 'constant', (True, 'aten::add')),
         ('__radd__', (), (3.14,), 'scalar_constant', (True, 'aten::add')),
         ('sub', (S, S, S), ((S, S, S),), '', (True,)),

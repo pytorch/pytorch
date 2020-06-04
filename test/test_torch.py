@@ -6099,6 +6099,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.cosh(zero_d).shape)
         self.assertEqual((), torch.tan(zero_d).shape)
         self.assertEqual((), torch.atan(zero_d).shape)
+        self.assertEqual((), torch.acosh(zero_d).shape)
+        self.assertEqual((), torch.asinh(zero_d).shape)
+        self.assertEqual((), torch.atanh(zero_d).shape)
         self.assertEqual((), torch.tanh(zero_d).shape)
         self.assertEqual((), torch.erf(zero_d).shape)
         self.assertEqual((), torch.erfc(zero_d).shape)
@@ -6108,6 +6111,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.cosh(one_d).shape)
         self.assertEqual((1,), torch.tan(one_d).shape)
         self.assertEqual((1,), torch.atan(one_d).shape)
+        self.assertEqual((1,), torch.acosh(one_d).shape)
+        self.assertEqual((1,), torch.asinh(one_d).shape)
+        self.assertEqual((1,), torch.atanh(one_d).shape)
         self.assertEqual((1,), torch.tanh(one_d).shape)
         self.assertEqual((1,), torch.erf(one_d).shape)
         self.assertEqual((1,), torch.erfc(one_d).shape)
@@ -13015,6 +13021,36 @@ class TestTorchDeviceType(TestCase):
             else:
                 _helper()
 
+    # This function tests that a nan value is returned for input values not in domain
+    @dtypes(torch.float32, torch.float64)
+    def test_acosh_domain_float(self, device, dtype):
+        # Domain of acosh is [1, inf), for values outside the domain - output is mapped
+        # to NaN, except for input value `inf` - output is mapped to `inf`
+        sample = torch.tensor([float('-inf'), 1.00, -1.23, -0.06, 0.98, float('inf')],
+                              device=device, dtype=dtype)
+        nan_mask = torch.tensor([True, False, True, True, True, False], device=device)
+        inf_mask = torch.tensor([False, False, False, False, False, True], device=device)
+        self.assertEqual(torch.isnan(torch.acosh(sample)), nan_mask)
+        self.assertEqual(torch.isnan(sample.acosh()), nan_mask)
+        self.assertEqual(torch.isinf(torch.acosh(sample)), inf_mask)
+        self.assertEqual(torch.isinf(sample.acosh()), inf_mask)
+
+    # This function tests that a nan value is returned for input values not in domain
+    @dtypes(torch.float32, torch.float64)
+    def test_atanh_domain_float(self, device, dtype):
+        # Domain of atanh is (-1, 1), for edge values (-1 and 1) - output is mapped
+        # to inf and for other values outside this range - output is mapped to NaN
+        sample = torch.tensor([float('-inf'), -1.00, 1.00, -1.23, 1.06, float('inf')],
+                              device=device, dtype=dtype)
+        nan_mask = torch.tensor([True, False, False, True, True, True], device=device)
+        inf_mask = torch.tensor([False, True, True, False, False, False], device=device)
+        # For values not in domain (except -1.0 and 1.0), atanh should return nan
+        self.assertEqual(torch.isnan(torch.atanh(sample)), nan_mask)
+        self.assertEqual(torch.isnan(sample.atanh()), nan_mask)
+        # For values -1.0 and 1.0, atanh should return -inf and inf respectively
+        self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
+        self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
+
     # TODO: run on non-native device types
     @dtypes(torch.double)
     def test_unary_out_op_mem_overlap(self, device, dtype):
@@ -13031,6 +13067,12 @@ class TestTorchDeviceType(TestCase):
             ("asin", doubles, True, True, 'cuda'),
             ("atan", doubles, True, True, 'cpu'),
             ("atan", doubles, True, True, 'cuda'),
+            ("acosh", doubles, True, True, 'cpu'),
+            ("acosh", doubles, True, True, 'cuda'),
+            ("asinh", doubles, True, True, 'cpu'),
+            ("asinh", doubles, True, True, 'cuda'),
+            ("atanh", doubles, True, True, 'cpu'),
+            ("atanh", doubles, True, True, 'cuda'),
             ("bitwise_not", ints, True, True, 'cpu'),
             ("bitwise_not", ints, True, True, 'cuda'),
             ("ceil", doubles, True, True, 'cpu'),
@@ -14384,6 +14426,12 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.addcmul(y, y, value=2),
                 lambda x, y: x.addcmul_(y, y, value=2),
                 lambda x, y: y.addcmul(x, y, value=2),
+                lambda x, y: x.acosh(),
+                lambda x, y: x.acosh_(),
+                lambda x, y: x.asinh(),
+                lambda x, y: x.asinh_(),
+                lambda x, y: x.atanh(),
+                lambda x, y: x.atanh_(),
                 lambda x, y: x.asin(),
                 lambda x, y: x.asin_(),
                 lambda x, y: x.atan(),
@@ -17344,6 +17392,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         vec_cpu = vec.cpu()
         self.assertEqual(mat @ vec, mat_cpu @ vec_cpu)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.float32, torch.float64)
+    def test_unpack_double(self, device, dtype):
+        # Reference: https://github.com/pytorch/pytorch/issues/33111
+        vals = (2 ** 24 + 1, 2 ** 53 + 1,
+                np.iinfo(np.int64).max, np.iinfo(np.uint64).max, np.iinfo(np.uint64).max + 1,
+                -1e500, 1e500)
+        for val in vals:
+            t = torch.tensor(val, dtype=dtype, device=device)
+            a = np.array(val, dtype=torch_to_numpy_dtype_dict[dtype])
+            self.assertEqual(t, torch.from_numpy(a))
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
@@ -18083,6 +18142,8 @@ _complex_types = [torch.cfloat, torch.cdouble]
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
 
+_complex_and_float_types2 = _float_types2 + _complex_types
+
 _signed_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
@@ -18537,6 +18598,9 @@ tensor_op_tests = [
     ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('acosh', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
+    ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
+    ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('cos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('cosh', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _float_types),
     ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
@@ -18717,12 +18781,15 @@ class _TorchMathTestMeta(object):
 
 torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('asin', reffn='arcsin'),
+                  _TorchMathTestMeta('asinh', reffn='arcsinh'),
                   _TorchMathTestMeta('sinh'),
                   _TorchMathTestMeta('cos'),
                   _TorchMathTestMeta('acos', reffn='arccos'),
+                  _TorchMathTestMeta('acosh', reffn='arccosh'),
                   _TorchMathTestMeta('cosh'),
                   _TorchMathTestMeta('tan'),
                   _TorchMathTestMeta('atan', reffn='arctan'),
+                  _TorchMathTestMeta('atanh', reffn='arctanh'),
                   _TorchMathTestMeta('tanh'),
                   _TorchMathTestMeta('log'),
                   _TorchMathTestMeta('log10'),
