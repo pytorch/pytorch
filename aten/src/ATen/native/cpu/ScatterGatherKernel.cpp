@@ -120,8 +120,7 @@ struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
   void operator()(Tensor& self, int64_t dim,
     const Tensor& index, Scalar& value,
-    const std::string& method_name,
-    bool serial_exec, func_t& kernel_func) {
+    const std::string& method_name, func_t& kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
       return;
@@ -220,9 +219,7 @@ struct cpu_scatter_gather_base_kernel {
   template <typename func_t>  
   void operator()(Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
-    const std::string& method_name,
-    bool serial_exec,
-    func_t& kernel_func) {
+    const std::string& method_name, func_t& kernel_func) {
 
     // no-op if index is empty
     if (index.numel() == 0) {
@@ -323,23 +320,23 @@ struct cpu_scatter_gather_base_kernel {
 void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
     result, dim, index, self,
-    "gather_out_cpu", /*serial_exec=*/false, tensor_assign);
+    "gather_out_cpu", tensor_assign);
 }
 
 void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
-    self, dim, index, src, "scatter_cpu_", false, tensor_assign);
+    self, dim, index, src, "scatter_cpu_", tensor_assign);
 }
 
 void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar value) {
   cpu_scatter_gather_base_kernel<>()(
-    self, dim, index, value, "scatter_fill_cpu_", /*serial_exec=*/false, tensor_assign);
+    self, dim, index, value, "scatter_fill_cpu_", tensor_assign);
 }
 
 void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   cpu_scatter_gather_base_kernel<>()(
     self, dim, index, src,
-    "scatter_add_", /*serial_exec=*/false, reduce_add);
+    "scatter_add_", reduce_add);
 
 }
 
@@ -348,19 +345,19 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
-                                       "scatter_reduce_add_", true, reduce_add);
+                                       "scatter_reduce_add_", reduce_add);
     break;
   case SCATTER_GATHER_OP::REDUCE_SUBTRACT :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
-                                       "scatter_reduce_subtract_", true, reduce_subtract);
+                                       "scatter_reduce_subtract_", reduce_subtract);
     break;
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
-                                       "scatter_reduce_multiply_", true, reduce_multiply);
+                                       "scatter_reduce_multiply_", reduce_multiply);
     break;
   case SCATTER_GATHER_OP::REDUCE_DIVIDE :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
-                                       "scatter_reduce_divide_", true, reduce_divide);
+                                       "scatter_reduce_divide_", reduce_divide);
   }
 }
 
@@ -369,19 +366,19 @@ void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Ten
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
-                                       "scatter_scalar_reduce_add_", true, reduce_add);
+                                       "scatter_scalar_reduce_add_", reduce_add);
     break;
   case SCATTER_GATHER_OP::REDUCE_SUBTRACT :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
-                                       "scatter_scalar_reduce_subtract_", true, reduce_subtract);
+                                       "scatter_scalar_reduce_subtract_", reduce_subtract);
     break;
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
-                                       "scatter_scalar_reduce_multiply_", true, reduce_multiply);
+                                       "scatter_scalar_reduce_multiply_", reduce_multiply);
     break;
   case SCATTER_GATHER_OP::REDUCE_DIVIDE :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
-                                       "scatter_scalar_reduce_divide_", true, reduce_divide);
+                                       "scatter_scalar_reduce_divide_", reduce_divide);
   }
 }
 
