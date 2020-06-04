@@ -37,24 +37,23 @@ void LayerNormFakeFp16Op<CPUContext>::LayerNormForward(
   ConstEigenVectorArrayMap<T> bias_arr(bias, M);
   EigenArrayMap<T> Y_arr(Y, N, M);
   if (gamma != nullptr && beta != nullptr) {
-      ConstEigenVectorArrayMap<T> gamma_arr(gamma, N);
-      ConstEigenVectorArrayMap<T> beta_arr(beta, N);
-      Y_arr = (((X_arr.rowwise() * scale_arr.transpose()).rowwise() +
-                bias_arr.transpose())
-               .colwise() *
-               gamma_arr)
-          .colwise() +
-          beta_arr;
-    } else {
-      CAFFE_ENFORCE(gamma == nullptr);
-      CAFFE_ENFORCE(beta == nullptr);
-      Y_arr = (X_arr.rowwise() * scale_arr.transpose()).rowwise() +
-          bias_arr.transpose();
-    }
+    ConstEigenVectorArrayMap<T> gamma_arr(gamma, N);
+    ConstEigenVectorArrayMap<T> beta_arr(beta, N);
+    Y_arr = (((X_arr.rowwise() * scale_arr.transpose()).rowwise() +
+              bias_arr.transpose())
+                 .colwise() *
+             gamma_arr)
+                .colwise() +
+        beta_arr;
+  } else {
+    CAFFE_ENFORCE(gamma == nullptr);
+    CAFFE_ENFORCE(beta == nullptr);
+    Y_arr = (X_arr.rowwise() * scale_arr.transpose()).rowwise() +
+        bias_arr.transpose();
+  }
 }
 
-
 REGISTER_CPU_OPERATOR(LayerNormFakeFP16, LayerNormFakeFp16Op<CPUContext>);
-OPERATOR_SCHEMA(LayerNormFakeFP16).NumInputs({1,3}).NumOutputs(3);
+OPERATOR_SCHEMA(LayerNormFakeFP16).NumInputs({1, 3}).NumOutputs(3);
 
 } // namespace caffe2
