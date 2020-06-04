@@ -9,7 +9,7 @@ namespace fuser {
 namespace cuda {
 
 at::optional<CudaKernel*> CudaKernelCache::getKernelPtr(
-    const at::ArrayRef<IValue> inputs) {
+    const at::ArrayRef<c10::IValue> inputs) {
   for (auto& iter : kernels_) {
     if (iter.first->matchKernelSize(inputs)) {
       return &(iter.second);

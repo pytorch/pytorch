@@ -22,8 +22,8 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, \
+    slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1063,8 +1063,6 @@ class TestCuda(TestCase):
         self.assertTrue("torch.cuda.Event" in e.__repr__())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    # Note: fails sometimes on the CI, passes on dual gfx906
-    @skipIfRocm
     def test_stream_context(self):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream(device=1)
@@ -1723,7 +1721,6 @@ class TestCuda(TestCase):
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
@@ -2433,7 +2430,6 @@ t2.start()
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
-    @skipIfRocm
     def test_cublas_multiple_threads_same_device(self):
         # Note, these parameters should be very carefully tuned
         # Too small number makes it hard for the racing condition
@@ -2538,7 +2534,6 @@ t2.start()
                     self.assertEqual(results[t].sum().item(),
                                      (2048 - test_iters) * (2048 - test_iters))
 
-    @skipIfRocm
     def test_cusparse_multiple_threads_same_device(self):
         size = 1024
         num_threads = 2
@@ -2824,6 +2819,26 @@ t2.start()
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
         loss.backward()
+
+    def test_autocast_cat_jit(self):
+        # Reported at https://github.com/pytorch/pytorch/issues/38958
+
+        class Model(torch.nn.Module):
+            def forward(self):
+                a = torch.randn(1)
+                b = torch.randn(1)
+                c = torch.cat((a, b), 0)
+                d = torch.stack([c, c], 0)
+                return d
+
+        # The JIT here doesn't really matter, we just need to call
+        # cat via the boxed API
+        model = Model()
+        model_jit_script = torch.jit.script(model)
+
+        with torch.cuda.amp.autocast(True):
+            model()
+            model_jit_script()
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
