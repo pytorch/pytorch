@@ -42,13 +42,20 @@ if platform.system() == 'Windows':
     else:
         cuda_path = ''
 
-    if not is_conda and sys.version_info >= (3, 8):
+    if sys.version_info >= (3, 8):
         dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
 
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
-    else:
+
+    if is_conda or sys.version_info < (3, 8):
         dll_paths = [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]
         dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
 
         os.environ['PATH'] = ';'.join(dll_paths)
+
+    import ctypes
+    import glob
+    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    for dll in dlls:
+        ctypes.CDLL(dll)
