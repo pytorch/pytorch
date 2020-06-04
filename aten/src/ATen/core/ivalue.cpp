@@ -590,7 +590,21 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
-  for (auto i = 0; i < slots_.size(); ++i) {
+  for (size_t i = 0; i < slots_.size(); ++i) {
+    if (slots_[i].type() == c10::CapsuleType::get()) {
+      // If we've gotten here, it means that we have *not* copied this
+      // class via __getstate__ and __setstate__. That fact and the
+      // fact that we have a Capsule attribute mean that this is a
+      // custom C++ class without serialization methods defined.
+      std::stringstream err;
+      err << "Cannot serialize custom bound C++ class";
+      if (auto qualname = type()->name()) {
+        err << " " << qualname->qualifiedName();
+      }
+      err << ". Please define serialization methods via def_pickle() for "
+            "this class.";
+      AT_ERROR(err.str());
+    }
     object->setSlot(i, slots_[i].deepcopy(memo));
   }
   return object;
