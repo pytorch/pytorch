@@ -41,6 +41,7 @@ struct ExtractSizeStride {
       const at::Tensor& val,
       c10::optional<at::IntArrayRef> broadcasted_size = c10::nullopt) {
     if (broadcasted_size) {
+      // [Note - broadcast support in integration]
       // PyTorch follows numpy broadcasting rule.
       // (https://numpy.org/doc/stable/user/basics.broadcasting.html)
       //
@@ -171,16 +172,22 @@ bool validateKernelArgTensor(
     msg << "Argument is a tensor, but the parameter is not.";
     return false;
   }
+
   // Check the rank of the tensors.
   size_t arg_dim = arg.dim();
+  // Note: This requires current Fusion to be active.
   size_t param_dim = TensorDomain::noReductions(
                          static_cast<const TensorView*>(param)->getRootDomain())
                          .size();
-  if (arg_dim != param_dim) {
+  // see [Note - broadcast support in integration]
+  // Because of broadcasting support handled in integration, we relax the rank
+  // check as necessary.
+  if (arg_dim > param_dim) {
     msg << "Argument tensor's rank is " << arg_dim << ", but the parameter is "
         << param_dim;
     return false;
   }
+
   if (arg.device().index() != device_index) {
     msg << "Argument is on device that is not compiled for";
     return false;
@@ -256,12 +263,15 @@ void validateKernelArgs(
     const CudaKernel& entry,
     const at::ArrayRef<IValue>& inputs,
     const std::vector<at::Tensor>& outputs) {
+  // This is necessary as we were traversing the fusion graph later in the check
+  FusionGuard fg(&entry);
   // Check inputs
   TORCH_INTERNAL_ASSERT(
-      inputs.size() == entry.inputs.size(), "Wrong number of kernel inputs.");
+      inputs.size() == entry.fusion_->inputs().size(),
+      "Wrong number of kernel inputs.");
   for (size_t i = 0; i < inputs.size(); ++i) {
     const IValue& arg = inputs[i];
-    const Val* const param = entry.inputs[i];
+    const Val* const param = entry.fusion_->inputs()[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArg(arg, param, entry.device_, msg),
@@ -272,15 +282,15 @@ void validateKernelArgs(
   }
 
   TORCH_INTERNAL_ASSERT(
-      entry.outputs.size() != 0,
+      entry.fusion_->outputs().size() != 0,
       "Kernel should have at least one output tensor.");
 
   TORCH_INTERNAL_ASSERT(
-      outputs.size() == entry.outputs.size(),
+      outputs.size() == entry.fusion_->outputs().size(),
       "Wrong number of kernel outputs.");
   for (size_t i = 0; i < outputs.size(); ++i) {
     const at::Tensor& arg = outputs[i];
-    const Val* const param = entry.outputs[i];
+    const Val* const param = entry.fusion_->outputs()[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArgTensor(arg, param, entry.device_, msg),
@@ -546,7 +556,7 @@ void runTestKernel(
           input.toTensor().device().index() == entry->device_,
           "input to kernel on device that is not compiled for");
       TORCH_INTERNAL_ASSERT(
-          !entry->outputs.empty(),
+          !entry->fusion_->outputs().empty(),
           "No output found for this kernel, aborting.");
       if (has_reduction) {
         kernel_args.push(input.toTensor());
