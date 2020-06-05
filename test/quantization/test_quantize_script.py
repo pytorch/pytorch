@@ -2424,3 +2424,7 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         m2 = convert_dynamic_script(m2)
         out_ref = m2(data)
         self.assertEqual(out_graph, out_ref)
+
+        FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
+                   .check_not("aten::_choose_qparams_per_tensor") \
+                   .run(m1.graph)

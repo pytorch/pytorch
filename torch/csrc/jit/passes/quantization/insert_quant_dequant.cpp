@@ -611,15 +611,14 @@ void InsertQuantDeQuantHelper::findSubgraph(
   weight_subgraph.push_back(node);
   const auto& inputs = node->inputs().vec();
   for (auto v : inputs) {
-    auto n = v->node();
     if (!hitGraphInput(v)) {
       findSubgraph(self, v, weight_subgraph);
     } else {
       TORCH_CHECK(
-          n->output(0) == self,
+          v == self,
           "Unexpected value found when handling weight value "
           " in findSubgraph, traced back to:",
-          n->output(0)->debugName(),
+          v->debugName(),
           " which is not self:",
           self->debugName());
     }
