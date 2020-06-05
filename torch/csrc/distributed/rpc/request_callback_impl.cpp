@@ -195,8 +195,10 @@ void RequestCallbackImpl::processRpc(
         std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
         {
           py::gil_scoped_acquire acquire;
-          auto result =
-              pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf());
+          // TODO: Destruction of upc would acquire GIl again. This can be
+          // avoided by decrement the refcnt if upc is an unique/shared_ptr.
+          // Do this as part of https://github.com/pytorch/pytorch/issues/39351.
+          auto result = pythonRpcHandler.runPythonUdf(upc.pythonUdf());
 
           if (pythonRpcHandler.isRemoteException(result)) {
             // Hit exception when running the user function.
@@ -249,9 +251,9 @@ void RequestCallbackImpl::processRpc(
         std::shared_ptr<SerializedPyObj> serializedPyObj;
         {
           py::gil_scoped_acquire acquire;
-          serializedPyObj = std::make_shared<SerializedPyObj>(
-              pythonRpcHandler.serialize(pythonRpcHandler.runPythonUdf(
-                  std::move(upc).movePythonUdf())));
+          serializedPyObj =
+              std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
+                  pythonRpcHandler.runPythonUdf(upc.pythonUdf())));
         }
         markComplete(
             std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
@@ -363,7 +365,7 @@ void RequestCallbackImpl::processRpc(
         {
           py::gil_scoped_acquire acquire;
           py_ivalue = jit::toIValue(
-              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
+              pythonRpcHandler.runPythonUdf(uprc.pythonUdf()),
               PyObjectType::get());
         }
         ownerRRef->setValue(std::move(py_ivalue));
@@ -646,6 +648,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();
+    // Deserialize PythonUDF here to trigger RRef unpickling
     std::unique_ptr<RpcCommandBase> rpc = deserializePythonRpcCommand(
         deserializeRequest(request), request.type());
     auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();
