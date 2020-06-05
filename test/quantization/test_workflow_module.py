@@ -823,10 +823,14 @@ class TestDistributed(QuantizationTestCase):
 
             def __init__(self):
                 super(Model, self).__init__()
-                self.linear = nn.Linear(2, 2)
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.bn = nn.BatchNorm2d(1)
+                self.relu = nn.ReLU()
 
             def forward(self, x):
-                x = self.linear(x)
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
                 return x
 
         model = Model()
@@ -841,5 +845,5 @@ class TestDistributed(QuantizationTestCase):
         self.assertEqual(model_device, device)
 
         # ensure that running an input on CUDA works without any needed changes
-        input = torch.randn(2, device=device)
+        input = torch.randn(4, 1, 4, 4, device=device)
         model(input)

@@ -98,7 +98,7 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x4L;
 // 2. Removed op_version_set version numbers
 // 3. Added type tags to pickle serialization of container types
 // 4. Stopped integer division using torch.div
-//      (implemented a versioned symbol for versions 0-3)
+//      (a versioned symbol preserves the historic behavior of versions 1--3)
 constexpr uint64_t kProducedFileFormatVersion = 0x4L;
 
 // Writer-specific constants
