@@ -638,7 +638,6 @@ try:
     try:
         from typing import Final
     except ImportError:
-        import typing_extensions
         from typing_extensions import Final
 
     def is_final(ann):
