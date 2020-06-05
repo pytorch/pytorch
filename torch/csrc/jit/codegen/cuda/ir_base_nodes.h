@@ -182,7 +182,8 @@ struct TORCH_CUDA_API Val : public Statement {
   // to throw, fusion's destructor will get called, but the pointer to this Val
   // will be invalid. When fusion tries to delete this value it will cause a seg
   // fault, instead of showing the thrown error.
-  Val(ValType _vtype,
+  explicit Val(
+      ValType _vtype,
       DataType _dtype = DataType::Null,
       bool register_val = true);
 
