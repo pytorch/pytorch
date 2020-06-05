@@ -222,22 +222,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
-         [](Stack& stack) {
-           bool non_blocking;
-           bool copy;
-           pop(stack, non_blocking, copy);
-           c10::optional<at::ScalarType> scalarType =
-               pop(stack).toOptional<at::ScalarType>();
-           c10::optional<c10::Device> device = c10::nullopt;
-           at::Tensor self = pop(stack).toTensor();
-           push(
-               stack,
-               to_dispatch(self, device, scalarType, non_blocking, copy));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor self;
@@ -276,15 +260,6 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.grad());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::data(Tensor(a) a) -> Tensor(a)",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, autograd::Variable(a).variable_data());
            return 0;
          },
          aliasAnalysisFromSchema()),

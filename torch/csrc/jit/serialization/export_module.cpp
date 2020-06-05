@@ -211,9 +211,8 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
     for (const auto& td : data_pickle.tensorData()) {
-      WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-      writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+      writer_.writeRecord(fname, td.data(), td.sizeInBytes());
     }
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());

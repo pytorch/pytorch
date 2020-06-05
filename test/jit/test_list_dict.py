@@ -1,12 +1,13 @@
 import os
 import sys
 import inspect
-from typing import List, Dict
+from typing import Dict, List, Optional, Tuple
 from textwrap import dedent
 from collections import OrderedDict
 
 import torch
 from torch.testing import FileCheck
+from torch import Tensor
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -1237,6 +1238,7 @@ class TestDict(JitTestCase):
             a['b'] -= 12
             a['c'] *= 122
             a['c'] /= 2
+            a['c'] %= 2
             return a
 
         def aug_assign_dict_prim(a):
@@ -1245,6 +1247,7 @@ class TestDict(JitTestCase):
             a['b'] -= 2.4
             a['c'] *= 3.0
             a['c'] /= 2.0
+            a['c'] %= 2.0
             return a
 
         self.checkScript(aug_assign_dict_tensor, (self.dict(),))

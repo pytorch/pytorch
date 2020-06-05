@@ -142,7 +142,7 @@ class Pickler {
   void startTuple();
   void endTuple();
 
-  const std::vector<at::Tensor>& tensorData() {
+  const std::vector<WriteableTensorData>& tensorData() {
     return tensor_data_;
   }
 
@@ -254,7 +254,7 @@ class Pickler {
 
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
-  std::vector<at::Tensor> tensor_data_;
+  std::vector<WriteableTensorData> tensor_data_;
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
