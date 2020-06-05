@@ -75,6 +75,18 @@ def createResolutionCallbackFromEnv(lookup_base):
             subexp_mod = env(subexp, module)
             return try_build_type(base_mod, subexp_mod)
 
+    def lookupInModule(qualified_name, module):
+        if '.' in qualified_name:
+            parts = qualified_name.split('.')
+            base = parts[0]
+            remaining_pieces = '.'.join(parts[1:])
+            module_value = getattr(module, base)
+            return lookupInModule(remaining_pieces, module_value)
+        else:
+            return getattr(module, qualified_name)
+
+
+
     def env(qualified_name, module):
         # We may need to resolve a qualified name, something like `torch.device`
         # or `a.b.c.d`. We first look up `torch` or `a` in the function's closed
@@ -90,14 +102,8 @@ def createResolutionCallbackFromEnv(lookup_base):
             subexp = qualified_name[first + 1: last]
             return subexpression(subexp, base_mod, module)
 
-        elif '.' in qualified_name:
-            parts = qualified_name.split('.')
-            base = parts[0]
-            remaining_pieces = '.'.join(parts[1:])
-            module_value = getattr(module, base)
-            return env(remaining_pieces, module_value)
         else:
-            return getattr(module, qualified_name)
+            return lookupInModule(qualified_name, module)
 
     return lambda key: env(key, lookup_base)
 
