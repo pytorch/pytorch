@@ -17,7 +17,7 @@ DEFINE_DISPATCH(elu_stub);
 DEFINE_DISPATCH(elu_backward_stub);
 DEFINE_DISPATCH(softplus_stub);
 DEFINE_DISPATCH(softplus_backward_stub);
-DEFINE_DISPATCH(log_sigmoid_cpu_stub);
+DEFINE_DISPATCH(log_sigmoid_stub);
 DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
 DEFINE_DISPATCH(threshold_stub);
 DEFINE_DISPATCH(hardtanh_backward_stub);
@@ -729,7 +729,7 @@ std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
   // FIXME: do these actually need to be zeros_like or can they be empty_like?
   auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
   auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
-  log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
+  log_sigmoid_stub(kCPU, result, buffer, input.contiguous());
   return std::make_tuple(result, buffer);
 }
 
@@ -738,7 +738,7 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor&
   buffer.resize_as_(input, at::MemoryFormat::Contiguous);
   TORCH_CHECK(buffer.is_contiguous(), "Contiguous buffer required for log_sigmoid with out parameter");
   Tensor result_tmp = result.is_contiguous() ? result : at::empty_like(result, at::MemoryFormat::Contiguous);
-  log_sigmoid_cpu_stub(kCPU, result_tmp, buffer, input.contiguous());
+  log_sigmoid_stub(kCPU, result_tmp, buffer, input.contiguous());
   if (!result.is_contiguous()) {
     result.copy_(result_tmp);
   }
