@@ -202,7 +202,6 @@ struct TORCH_API RecordFunction {
   // Unique id for this RecordFunction, used in callbacks to track start
   // and end of ranges
   RecordFunctionHandle handle_ {0};
-
 };
 
 //

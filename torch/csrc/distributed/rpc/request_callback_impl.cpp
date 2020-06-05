@@ -680,15 +680,6 @@ void RequestCallbackImpl::processRpc(
                 double cpu_elapsed_us = profilerStart->cpu_elapsed_us(e);
                 e.setRelativeElapsedCpuUs(cpu_elapsed_us);
               }
-
-              // Remove below
-              // std::ostringstream ss;
-              // std::vector<torch::autograd::profiler::Event*> evts;
-              // for (auto& e : profiledEvents) {
-              //   evts.push_back(&e);
-              // }
-              // torch::autograd::profiler::writeProfilerEventsToStream(ss,
-              // evts); LOG(INFO) << ss.str();
             });
         TORCH_INTERNAL_ASSERT(
             torch::autograd::profiler::profilerEnabled(),
