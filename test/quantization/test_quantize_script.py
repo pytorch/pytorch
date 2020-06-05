@@ -1262,7 +1262,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     @override_qengines
     def test_quantized_convnd_relu(self):
         """tests for conv1d_relu/conv2d_relu/conv3d_relu"""
-        conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 :torch.nn.Conv3d}
+        conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         class ConvNdRelu(torch.nn.Module):
             def __init__(self, dim, inplace):
                 super(ConvNdRelu, self).__init__()
@@ -1295,7 +1296,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         data3d = [(torch.randn(1, 1, 5, 5, 5, dtype=torch.float),
                    torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
 
-        input_data = {1 : data1d, 2 : data2d, 3 :data3d}
+        input_data = {1 : data1d, 2 : data2d, 3 : data3d}
         for dim in [1, 2, 3]:
             if dim == 3 and not torch.backends.quantized.engine == 'fbgemm':
                 continue
