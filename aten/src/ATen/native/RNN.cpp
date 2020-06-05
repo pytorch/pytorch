@@ -286,7 +286,8 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
     c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed,
     c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed,
     at::Tensor bias_ih,
-    at::Tensor bias_hh);
+    at::Tensor bias_hh,
+    bool reduce_range);
 
 struct QuantizedCellParamsDynamic : public CellParamsBase {
   QuantizedCellParamsDynamic(
@@ -295,16 +296,19 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
       c10::intrusive_ptr<LinearPackedParamsBase>
           _packed_w_hh, /* Prepacked Weight Tensor */
       Tensor _b_ih, /* float Bias Tensor */
-      Tensor _b_hh /* float Bias Tensor */)
+      Tensor _b_hh, /* float Bias Tensor */
+      bool _reduce_range = false /* Use reduced range for activation tensors */)
       : packed_w_ih(std::move(_packed_w_ih)),
         packed_w_hh(std::move(_packed_w_hh)),
         b_ih_(std::move(_b_ih)),
-        b_hh_(std::move(_b_hh)) {}
+        b_hh_(std::move(_b_hh)),
+        reduce_range_(_reduce_range) {}
 
   c10::intrusive_ptr<LinearPackedParamsBase> packed_w_ih;
   c10::intrusive_ptr<LinearPackedParamsBase> packed_w_hh;
   const Tensor b_ih_;
   const Tensor b_hh_;
+  bool reduce_range_;
 
   Tensor matmul_ih(const Tensor& input) const override {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
@@ -340,8 +344,9 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     std::vector<c10::intrusive_ptr<LinearPackedParamsBase>>
         packed_params_to_serialize{packed_w_ih, packed_w_hh};
 
+    string op_name = reduce_range_ ? "quantized_dynamic_bc" : "quantized_dynamic";
     return CellParamsSerializationType(
-        "quantized_dynamic",
+        op_name,
         std::move(tensors_to_serialize),
         {},
         {},
@@ -360,7 +365,47 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
         /*w_ih_packed=*/std::move(packed_params[0]),
         /*w_hh_packed=*/std::move(packed_params[1]),
         /*bias_ih=*/std::move(tensors[0]),
-        /*bias_hh=*/std::move(tensors[1]));
+        /*bias_hh=*/std::move(tensors[1]),
+        /*reduce_range=*/false);
+  }
+};
+
+struct QuantizedCellParamsDynamicReduceRange : public QuantizedCellParamsDynamic {
+  QuantizedCellParamsDynamicReduceRange(
+      c10::intrusive_ptr<LinearPackedParamsBase>
+          _packed_w_ih, /* Prepacked Weight Tensor */
+      c10::intrusive_ptr<LinearPackedParamsBase>
+          _packed_w_hh, /* Prepacked Weight Tensor */
+      Tensor _b_ih, /* float Bias Tensor */
+      Tensor _b_hh /* float Bias Tensor */,
+      bool reduce_range)
+      : QuantizedCellParamsDynamic{_packed_w_ih,
+                                   _packed_w_hh,
+                                   _b_ih,
+                                   _b_hh,
+                                   true} {}
+
+  Tensor linear_ih(const Tensor& input_ih) const override {
+    return packed_w_ih->apply_dynamic(input_ih, /*reduce_range=*/true);
+  }
+  Tensor linear_hh(const Tensor& input_hh) const override {
+    return packed_w_hh->apply_dynamic(input_hh, /*reduce_range=*/true);
+  }
+
+  static c10::intrusive_ptr<CellParamsBase> __setstate__(
+      CellParamsSerializationType state) {
+    std::vector<at::Tensor> tensors;
+    std::vector<c10::intrusive_ptr<LinearPackedParamsBase>> packed_params;
+    std::tie(std::ignore, tensors, std::ignore, std::ignore, packed_params) =
+        std::move(state);
+    TORCH_INTERNAL_ASSERT(tensors.size() == 2);
+    TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
+    return make_quantized_cell_params_dynamic(
+        /*w_ih_packed=*/std::move(packed_params[0]),
+        /*w_hh_packed=*/std::move(packed_params[1]),
+        /*bias_ih=*/std::move(tensors[0]),
+        /*bias_hh=*/std::move(tensors[1]),
+        /*reduce_range=*/true);
   }
 };
 
@@ -368,7 +413,17 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
     c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed,
     c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed,
     at::Tensor bias_ih,
-    at::Tensor bias_hh) {
+    at::Tensor bias_hh,
+    bool reduce_range) {
+  if (reduce_range) {
+
+    return c10::make_intrusive<QuantizedCellParamsDynamicReduceRange>(
+        /*_packed_w_ih=*/std::move(w_ih_packed),
+        /*_packed_w_hh=*/std::move(w_hh_packed),
+        /*_b_ih=*/std::move(bias_ih),
+        /*_b_hh=*/std::move(bias_hh),
+        /*reduce_range=*/true);
+  }
   return c10::make_intrusive<QuantizedCellParamsDynamic>(
       /*_packed_w_ih=*/std::move(w_ih_packed),
       /*_packed_w_hh=*/std::move(w_hh_packed),
@@ -443,6 +498,7 @@ static std::unordered_map<
     cell_params_deserializers = {
         {"quantized", &QuantizedCellParams::__setstate__},
         {"quantized_dynamic", &QuantizedCellParamsDynamic::__setstate__},
+        {"quantized_dynamic_bc", &QuantizedCellParamsDynamicReduceRange::__setstate__},
         {"quantized_fp16", &QuantizedCellParamsFP16::__setstate__}};
 
 // Stupid wrapper to convert from -> to .
@@ -1833,7 +1889,7 @@ static auto registry =
                 .kernel<
                     decltype(quantized_lstm_data_legacy),
                     quantized_lstm_data_legacy>(DispatchKey::CPUTensorId))
-        .op("quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
+        .op("quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh, bool reduce_range=False) -> __torch__.torch.classes.rnn.CellParamsBase",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(make_quantized_cell_params_dynamic),
