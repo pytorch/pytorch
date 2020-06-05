@@ -26,6 +26,8 @@ const char* toString(DispatchKey t) {
       return "HIP";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
+    case DispatchKey::FPGA:
+      return "FPGA";
     case DispatchKey::MSNPU:
       return "MSNPU";
     case DispatchKey::XLA:
@@ -50,6 +52,8 @@ const char* toString(DispatchKey t) {
       return "TESTING_ONLY_GenericWrapper";
     case DispatchKey::Profiler:
       return "Profile";
+    case DispatchKey::Named:
+      return "Named";
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }

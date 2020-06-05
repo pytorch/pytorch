@@ -634,17 +634,6 @@ Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
-    auto sizes = self.sizes();
-    if (sizes[dim.value()] == 1) {
-      if (keepdim) {
-        result = at::zeros(sizes, self.options().dtype(at::kLong));
-      } else {
-        auto sizes_vec = sizes.vec();
-        sizes_vec.erase(sizes_vec.begin() + dim.value());
-        result = at::zeros(sizes_vec, self.options().dtype(at::kLong));
-      }
-      return result;
-    }
     in = self;
   } else {
     in = self.reshape({-1});
@@ -666,17 +655,6 @@ Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
-    auto sizes = self.sizes();
-    if (sizes[dim.value()] == 1) {
-      if (keepdim) {
-        result = at::zeros(sizes, self.options().dtype(at::kLong));
-      } else {
-        auto sizes_vec = sizes.vec();
-        sizes_vec.erase(sizes_vec.begin() + dim.value());
-        result = at::zeros(sizes_vec, self.options().dtype(at::kLong));
-      }
-      return result;
-    }
     in = self;
   } else {
     in = self.reshape({-1});
@@ -703,7 +681,7 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
 
   if (at::isComplexType(self.scalar_type())){
     ScalarType dtype = c10::toValueType(get_dtype(result, self, {}, true));
-    Tensor real_in = self.copy_real().to(dtype);
+    Tensor real_in = at::real(self);
     Tensor real_out = at::empty({0}, self.options().dtype(dtype));
     auto iter = make_reduction("std or var", real_out, real_in, dim, keepdim, dtype);
     if (iter.numel() == 0) {
@@ -711,7 +689,7 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
     } else {
       std_var_stub(iter.device_type(), iter, unbiased, false);
     }
-    Tensor imag_in = self.copy_imag().to(dtype);
+    Tensor imag_in = at::imag(self);
     Tensor imag_out = at::empty({0}, self.options().dtype(dtype));
     iter = make_reduction("std or var", imag_out, imag_in, dim, keepdim, dtype);
     if (iter.numel() == 0) {
@@ -749,7 +727,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
            ".");
   if (at::isComplexType(self.scalar_type())){
     ScalarType dtype = c10::toValueType(get_dtype(result1, self, {}, true));
-    Tensor real_in = self.copy_real().to(dtype);
+    Tensor real_in = at::real(self);
     Tensor real_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor real_out_mean = at::empty({0}, self.options().dtype(dtype));
     auto iter = make_reduction(fname, real_out_var, real_out_mean, real_in, dim, keepdim, dtype);
@@ -759,7 +737,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     } else {
       std_var_stub(iter.device_type(), iter, unbiased, false);
     }
-    Tensor imag_in = self.copy_imag().to(dtype);
+    Tensor imag_in = at::imag(self);
     Tensor imag_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor imag_out_mean = at::empty({0}, self.options().dtype(dtype));
     iter = make_reduction(fname, imag_out_var, imag_out_mean, imag_in, dim, keepdim, dtype);
