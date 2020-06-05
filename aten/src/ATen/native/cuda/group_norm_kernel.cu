@@ -62,10 +62,9 @@ __global__ void ComputeFusedParamsCUDAKernel(
   using T_ACC = acc_type<T, true>;
   const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
   if (index < N * C) {
-    const int64_t D = C / group;
-    const int64_t ng = index / D;
+    const int64_t ng = index / (C / group);
     const int64_t c = index % C;
-    const T_ACC x = gamma == nullptr
+    const T_ACC x = (gamma == nullptr)
         ? static_cast<T_ACC>(rstd[ng])
         : static_cast<T_ACC>(rstd[ng]) * static_cast<T_ACC>(gamma[c]);
     a[index] = x;
@@ -258,11 +257,11 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
     for (int64_t n = 0; n < N; ++n) {
       const int64_t nc = n * C + c;
       const int64_t ng = n * G + c / D;
-      sum1 += dgamma == nullptr
+      sum1 += (dgamma == nullptr)
           ? T_ACC(0)
           : ((ds[nc] - db[nc] * static_cast<T_ACC>(mean[ng])) *
              static_cast<T_ACC>(rstd[ng]));
-      sum2 += dbeta == nullptr ? T_ACC(0) : db[nc];
+      sum2 += (dbeta == nullptr) ? T_ACC(0) : db[nc];
     }
     if (dgamma != nullptr) {
       dgamma[c] = sum1;

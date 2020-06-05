@@ -1,37 +1,46 @@
 # See README.md in this directory for more guidance
 
-# Temporary type cast operators. These are needed to trace type-casts now since
-# Type's are not supported in the IR. Instead, we call down to these
-# specialized operators for each datatype.
-# TODO: remove when we have Type support in the IR
+# *********NB: _cast_* operators are DEPRECATED and will be removed
+# eventually. These were previously used before TorchScript IR supported
+# representing ScalarType's. They are now superseded by usage of
+# `aten::to()`. The ops remain here for backward compatibility purposes.
+
+# DEPRECATED. DO NOT USE
 - func: _cast_Byte(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Char(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Double(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Float(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Int(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Long(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Short(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
+# DEPRECATED. DO NOT USE
 - func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
   variants: function
@@ -242,24 +251,6 @@
   use_c10_dispatcher: full
   variants: function
 
-# Temporary methods for getting the real and imaginary values in complex tensors. These are needed
-# until we support real and imag as tensor attributes which is blocked by the untyped storage task
-# TODO: remove these methods when we add real and imag as tensor attributes
-
-- func: copy_real(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: copy_real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-
-- func: copy_imag(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: copy_imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-
 - func: conj(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -412,6 +403,42 @@
   dispatch:
     CPU: argmin
     CUDA: argmin
+
+- func: acosh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: acosh_(Tensor(a!) self) -> Tensor(a!)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: asinh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: asinh_(Tensor(a!) self) -> Tensor(a!)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: atanh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: atanh_(Tensor(a!) self) -> Tensor(a!)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   use_c10_dispatcher: full
@@ -2134,6 +2161,30 @@
 - func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
   use_c10_dispatcher: full
   variants: function
+
+- func: rad2deg(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  supports_named_tensor: True
+
+- func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  supports_named_tensor: True
+
+- func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: deg2rad(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  supports_named_tensor: True
+
+- func: deg2rad_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  supports_named_tensor: True
+
+- func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 

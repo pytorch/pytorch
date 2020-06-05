@@ -16,6 +16,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ScalarOps.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -89,6 +90,12 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
     size *= sizes[d];
   }
   return size;
+}
+
+static Tensor wrapped_scalar_tensor(Scalar scalar) {
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
 }
 
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
@@ -196,6 +203,16 @@ Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
     dims[at::maybe_wrap_dim(fwd_dims[i], ndims)] = i;
   }
   return grad.permute(dims);
+}
+
+Tensor rad2deg_backward(const Tensor& grad) {
+  constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
+  return at::mul(grad, wrapped_scalar_tensor(Scalar(M_180_PI)));
+}
+
+Tensor deg2rad_backward(const Tensor& grad) {
+  constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
+  return at::mul(grad, wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
 
 Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
