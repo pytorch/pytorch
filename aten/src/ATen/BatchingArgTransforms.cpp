@@ -82,5 +82,45 @@ int64_t PhysicalView::getPhysicalDim(int64_t logical_dim) {
   return maybe_wrap_dim(logical_dim, logical_ndim) + numBatchDims();
 }
 
+static BatchDims computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {
+  BatchDims bdims;
+  int64_t dim = 0;
+  for (int64_t level = 0; level < kVmapNumLevels; level++) {
+    if (!levels_bitset[level]) {
+      continue;
+    }
+    bdims.emplace_back(level, dim++);
+  }
+  return bdims;
+}
+
+static bool batchDimsAreSameSize(
+    const Tensor& physical,
+    const Tensor& reference,
+    int64_t num_batch_dims) {
+  auto physical_sizes = physical.sizes();
+  auto reference_sizes = reference.sizes();
+  if (physical_sizes.size() < num_batch_dims) {
+    return false;
+  }
+  if (reference_sizes.size() < num_batch_dims) {
+    return false;
+  }
+  for (int64_t dim = 0; dim < num_batch_dims; dim++) {
+    if (physical_sizes[dim] != reference_sizes[dim]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+Tensor PhysicalView::newLogicalFromPhysical(const Tensor& physical) {
+  TORCH_INTERNAL_ASSERT(
+      batchDimsAreSameSize(physical, tensor_, numBatchDims()),
+      "PhysicalView::newLogicalFromPhysical(physical): expected batch dims ",
+      "of `physical` to be the same size as the batch dims from this PhysicalView.");
+  return makeBatched(physical, computeFrontBatchDimsFromLevels(levels_));
+}
+
 
 } // namespace at

@@ -209,5 +209,57 @@ TEST(VmapTest, TestPhysicalViewGetPhysicalDims) {
   ASSERT_THROW(physical_view.getPhysicalDims({0, -3}), c10::Error);
 }
 
+static void checkBatchDimsEqual(BatchDimsRef bdims, BatchDimsRef expected_bdims) {
+  ASSERT_EQ(bdims.size(), expected_bdims.size());
+  for (int64_t idx = 0; idx < bdims.size(); idx++) {
+    ASSERT_EQ(bdims[idx].dim(), expected_bdims[idx].dim());
+    ASSERT_EQ(bdims[idx].level(), expected_bdims[idx].level());
+  }
+}
+
+TEST(VmapTest, TestPhysicalViewNewLogicalFromPhysical) {
+  {
+    // Simple case: single level
+    PhysicalView physical_view(ones({2, 3, 4}), /*levels = {2}*/4);
+    Tensor physical = ones({2, 6, 7});
+
+    auto result = physical_view.newLogicalFromPhysical(physical);
+    auto* batched = maybeGetBatched(result);
+    ASSERT_TRUE(batched != nullptr);
+    ASSERT_TRUE(batched->value().is_same(physical));
+    checkBatchDimsEqual(batched->bdims(), {{2, 0}});
+  }
+  {
+    // Multiple levels
+    PhysicalView physical_view(ones({2, 3, 4, 5, 6}), /*levels = {1, 3, 4}*/2 | 8 | 16);
+    Tensor physical = ones({2, 3, 4, 7});
+
+    auto result = physical_view.newLogicalFromPhysical(physical);
+    auto* batched = maybeGetBatched(result);
+    ASSERT_TRUE(batched != nullptr);
+    ASSERT_TRUE(batched->value().is_same(physical));
+    checkBatchDimsEqual(batched->bdims(), {{1, 0}, {3, 1}, {4, 2}});
+  }
+  {
+    // Logical dimensions is [].
+    PhysicalView physical_view(ones({2}), /*levels = {2}*/4);
+    Tensor physical = ones({2});
+
+    auto result = physical_view.newLogicalFromPhysical(physical);
+    auto* batched = maybeGetBatched(result);
+    ASSERT_TRUE(batched != nullptr);
+    ASSERT_TRUE(batched->value().is_same(physical));
+    checkBatchDimsEqual(batched->bdims(), {{2, 0}});
+  }
+  {
+    // Failure case: incompatible batch sizes
+    PhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2 | 8 | 16);
+    ASSERT_THROW(physical_view.newLogicalFromPhysical(ones({2, 2, 4, 7})), c10::Error);
+    ASSERT_THROW(physical_view.newLogicalFromPhysical(ones({2, 3})), c10::Error);
+    ASSERT_THROW(physical_view.newLogicalFromPhysical(ones({2, 1, 1})), c10::Error);
+  }
+}
+
+
 
 }

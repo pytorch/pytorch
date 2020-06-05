@@ -81,6 +81,10 @@ struct TORCH_API PhysicalView {
   std::vector<int64_t> getPhysicalDims(IntArrayRef logical_dims);
   int64_t getPhysicalDim(int64_t logical_dim);
 
+  // Maps a physical tensor to a new logical tensor (BatchedTensor),
+  // using the mapping info stored in this PhysicalView.
+  Tensor newLogicalFromPhysical(const Tensor& physical);
+
  private:
   int64_t numLogicalDims();
   int64_t numBatchDims();
