@@ -281,7 +281,7 @@
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 
-- name: _bmm(Tensor self, Tensor mat2, *, bool? deterministic=None) -> Tensor
+- name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
   self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
   mat2: at::_bmm(self.transpose(1, 2), grad, deterministic)
 
