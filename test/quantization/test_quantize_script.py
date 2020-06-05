@@ -2420,6 +2420,7 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         out_graph = m1(data)
 
         m2 = prepare_dynamic_script(model, qconfig_dict)
+        m2(data)
         m2 = convert_dynamic_script(m2)
         out_ref = m2(data)
         self.assertEqual(out_graph, out_ref)
