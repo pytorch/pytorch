@@ -47,7 +47,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype
+    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -351,6 +351,13 @@ class TestJit(JitTestCase):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
         self.checkTrace(f, (x, y))
+
+    def test_inferred_as_tensor(self):
+        with self.assertRaisesRegex(RuntimeError, "Inferred the value for argument 'dim' to be of type 'Tensor' "
+                                                  "because it was not annotated with an explicit type"):
+            @torch.jit.script
+            def dot(points, query, dim):
+                return (points * query).sum(dim)
 
     def test_trace_checking_with_global_name(self):
         class MyClass(torch.nn.Module):
@@ -3737,16 +3744,15 @@ class TestScript(JitTestCase):
                 return 2
 
         with enable_profiling_mode_for_profiling_tests():
-            old_num_runs = torch._C._jit_set_num_profiled_runs(2)
-            test_not_const(torch.rand([1, 2]))
-            test_not_const(torch.rand([2, 2]))
-            test_not_const(torch.rand([3, 2]))
+            with num_profiled_runs(2):
+                test_not_const(torch.rand([1, 2]))
+                test_not_const(torch.rand([2, 2]))
+                test_not_const(torch.rand([3, 2]))
 
-            graph_str = torch.jit.last_executed_optimized_graph()
-            FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
-            FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
+                graph_str = torch.jit.last_executed_optimized_graph()
+                FileCheck().check("Double(*:2, 2:1) = ").run(graph_str)
+                FileCheck().check_not("Double(1:2, 2:1) = ").run(graph_str)
 
-        torch._C._jit_set_num_profiled_runs(old_num_runs)
 
     def test_nested_bailouts(self):
         @torch.jit.script
@@ -3790,6 +3796,7 @@ class TestScript(JitTestCase):
     def test_bailout_loop_carried_deps_name_clash(self):
         with enable_profiling_mode_for_profiling_tests():
             NUM_ITERATIONS = 10
+
             @torch.jit.script
             def fct_loop(z, size):
                 # type: (int, int) -> Tuple[Tensor, List[int]]
@@ -3811,6 +3818,7 @@ class TestScript(JitTestCase):
     def test_bailout_loop_counter_transition(self):
         with enable_profiling_mode_for_profiling_tests():
             NUM_ITERATIONS = 10
+
             @torch.jit.script
             def fct_loop(z, size):
                 # type: (int, int) -> Tuple[Tensor, List[int]]
@@ -6995,9 +7003,10 @@ a")
         self.checkScript(test_cast_float, (-1.,))
 
         with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
+
             @torch.jit.script
             def test_bad_conditional(x):
-                if (1, 2):
+                if (1, 2):  # noqa F634
                     return
                 else:
                     return 0
@@ -7390,7 +7399,7 @@ a")
                             continue
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    self.assertEqual(res_python, res_script, message=msg, atol=(1e-4) * max(abs(res_python), res_script))
+                    self.assertEqual(res_python, res_script, msg=msg, atol=(1e-4) * max(abs(res_python), res_script), rtol=0)
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
@@ -7663,6 +7672,7 @@ a")
 
     def test_error_stacktrace_interface(self):
         global IFace
+
         @torch.jit.script
         def baz(c, b):
             return c + b
@@ -7939,8 +7949,8 @@ a")
             message = 'with code `{} {} {}` and t={}'.format(args[0], op, args[1], tensor)
             res1 = cu.func(tensor)
             res2 = scope['func'](tensor)
-            self.assertEqual(res1, res2, message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
-            self.assertEqual(res1.dtype, res2.dtype, message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
+            self.assertEqual(res1, res2, msg=message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
+            self.assertEqual(res1.dtype, res2.dtype, msg=message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
 
         var_int = [2, -2]
         var_float = [1.4321, -1.2]
@@ -8291,7 +8301,7 @@ a")
             self.assertEqual(
                 cu.func(),
                 scope['func'](),
-                "Failed with op: {}, lhs: {}, rhs: {}"
+                msg="Failed with op: {}, lhs: {}, rhs: {}"
                 .format(op, args[0], args[1])
             )
 
@@ -8312,6 +8322,7 @@ a")
                 return 4
         self.assertEqual(foo(4), 7)
         self.assertEqual(foo(None), 4)
+
         @torch.jit.script
         def foo2(a, b):
             # type: (Optional[int], Optional[int]) -> int
@@ -8343,17 +8354,6 @@ a")
         self.assertEqual(any_refinement2(3), torch.tensor(3))
         self.assertEqual(any_refinement2(torch.tensor(5)), torch.tensor(5))
 
-    def test_any_in_class_fails(self):
-        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
-            @torch.jit.script
-            class Foo(object):
-                def __init__(self, a):
-                    # type: (Tuple[int,Any]) -> None
-                    self.a = a
-
-                def hi(self):
-                    pass
-
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
@@ -8370,7 +8370,7 @@ a")
             self.assertEqual(
                 cu.func(inp),
                 scope['func'](inp),
-                "Failed with typ: {}"
+                msg="Failed with typ: {}"
                 .format(typ)
             )
 
@@ -10183,6 +10183,17 @@ a")
         self.checkScript(torch_unique, (None,))
         self.checkScript(torch_unique, (0,))
 
+        def torch_unique_consecutive(dim: Optional[int]):
+            ten = torch.unique(torch.tensor([[1, 3], [3, 2], [3, 2], [2, 3]], dtype=torch.long))
+            a = torch.unique_consecutive(ten, dim=dim)
+            b = torch.unique_consecutive(ten, return_counts=True, dim=dim)
+            c = torch.unique_consecutive(ten, return_inverse=True, dim=dim)
+            d = torch.unique_consecutive(ten, return_counts=True, return_inverse=True, dim=dim)
+            return a, b, c, d
+
+        self.checkScript(torch_unique_consecutive, (None,))
+        self.checkScript(torch_unique_consecutive, (0,))
+
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -11174,6 +11185,14 @@ a")
                     # type: (int, Tuple[int, int[2]]) -> List[int]
                     return x  # noqa: T484
             ''')
+
+        @torch.jit.script
+        def f(x: BroadcastingList2[int]):
+            return x
+
+        out = f(1)
+        self.assertTrue(isinstance(out[0], int))
+        self.assertEqual(out, [1, 1])
 
     def test_ntuple_builtins(self):
         from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
@@ -16068,7 +16087,7 @@ a")
         def identity(x1):  # noqa: F811
             # type: (str) -> str
             pass
-        #
+
         @torch.jit._overload  # noqa: F811
         def identity(x1):  # noqa: F811
             # type: (float) -> float

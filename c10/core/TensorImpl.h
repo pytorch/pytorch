@@ -460,6 +460,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::MkldnnCPU);
   }
 
+  bool is_vulkan() const {
+    return key_set_.has(DispatchKey::Vulkan);
+  }
+
   int64_t get_device() const {
     TORCH_CHECK(
         device_opt_.has_value(),
@@ -835,6 +839,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
 #endif
     named_tensor_meta_ = std::move(named_tensor_meta);
+    if (named_tensor_meta_ == nullptr) {
+      key_set_ = key_set_.remove(DispatchKey::Named);
+    } else {
+      key_set_ = key_set_.add(DispatchKey::Named);
+    }
   }
 
   /**
@@ -1645,6 +1654,8 @@ protected:
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
   // not anymore!)
+  //
+  // INVARIANT: named_tensor_meta_ != nullptr  <==>  key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
 
   // You get to have eight byte-size fields here, before you

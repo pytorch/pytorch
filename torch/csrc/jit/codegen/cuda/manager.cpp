@@ -72,7 +72,10 @@ class CudaFusionManager {
       graph_cache_[repr] = kernel_id;
 
       // create entry for cached kernel;
-      kernel_cache_.insert({kernel_id, CudaKernelCache()});
+      // Note: use make_pair instead of uniform initialization list here since
+      //       it doesn't work under some env that we still support.
+      //       eg. cuda9.2 + gcc5.4
+      kernel_cache_.insert(std::make_pair(kernel_id, CudaKernelCache()));
 
       // TODO: we should compile here using profiled information:
       //       size (range) / stride (contiguity)

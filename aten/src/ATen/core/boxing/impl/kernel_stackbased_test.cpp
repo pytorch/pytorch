@@ -6,6 +6,8 @@
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
+#include <ATen/core/LegacyTypeDispatch.h>
+
 using c10::RegisterOperators;
 using c10::DispatchKey;
 using c10::Stack;

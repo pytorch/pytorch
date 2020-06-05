@@ -14,7 +14,6 @@ import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
-import cimodel.data.simple.setup_job
 import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.bazel_definitions
@@ -82,8 +81,6 @@ class Header(object):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        cimodel.data.simple.setup_job.get_workflow_jobs,
-        windows_build_definitions.get_windows_workflows,
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
         cimodel.data.simple.android_gradle.get_workflow_jobs,
@@ -93,14 +90,24 @@ def gen_build_workflows_tree():
         cimodel.data.simple.bazel_definitions.get_workflow_jobs,
         caffe2_build_definitions.get_workflow_jobs,
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
-        binary_build_definitions.get_binary_smoke_test_jobs,
-        binary_build_definitions.get_binary_build_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
+        windows_build_definitions.get_windows_workflows,
+        binary_build_definitions.get_binary_smoke_test_jobs,
+    ]
+
+    binary_build_functions = [
+        binary_build_definitions.get_binary_build_jobs,
+        binary_build_definitions.get_nightly_tests,
+        binary_build_definitions.get_nightly_uploads,
     ]
 
     return {
         "workflows": {
+            "binary_builds": {
+                "when": r"<< pipeline.parameters.run_binary_tests >>",
+                "jobs": [f() for f in binary_build_functions]
+            },
             "build": {
                 "jobs": [f() for f in build_workflows_functions],
             },
@@ -124,7 +131,6 @@ YAML_SOURCES = [
     File("job-specs/pytorch-job-specs.yml"),
     File("job-specs/caffe2-job-specs.yml"),
     File("job-specs/binary-job-specs.yml"),
-    File("job-specs/job-specs-setup.yml"),
     File("job-specs/job-specs-custom.yml"),
     File("job-specs/job-specs-promote.yml"),
     File("job-specs/binary_update_htmls.yml"),
@@ -134,10 +140,6 @@ YAML_SOURCES = [
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
 
-    Header("Nightly tests"),
-    Listgen(binary_build_definitions.get_nightly_tests, 3),
-    File("workflows/workflows-nightly-uploads-header.yml"),
-    Listgen(binary_build_definitions.get_nightly_uploads, 3),
     File("workflows/workflows-s3-html.yml"),
     File("workflows/workflows-docker-builder.yml"),
     File("workflows/workflows-ecr-gc.yml"),

@@ -140,7 +140,7 @@ genrule(
         "aten/src/ATen/TypeDefault.h",
         "aten/src/ATen/TypeDefault.cpp",
         "aten/src/ATen/core/TensorBody.h",
-        "aten/src/ATen/core/TensorMethods.h",
+        "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
     cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)` aten/src/ATen/Declarations.cwrap aten/src/THCUNN/generic/THCUNN.h aten/src/ATen/nn.yaml aten/src/ATen/native/native_functions.yaml",
@@ -192,6 +192,12 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/ProfiledType_3.cpp",
         "torch/csrc/autograd/generated/ProfiledType_4.cpp",
         # "torch/csrc/autograd/generated/ProfiledTypeEverything.cpp",
+        "torch/csrc/autograd/generated/TraceType_0.cpp",
+        "torch/csrc/autograd/generated/TraceType_1.cpp",
+        "torch/csrc/autograd/generated/TraceType_2.cpp",
+        "torch/csrc/autograd/generated/TraceType_3.cpp",
+        "torch/csrc/autograd/generated/TraceType_4.cpp",
+        # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
         "torch/csrc/autograd/generated/RegistrationDeclarations.h",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
@@ -290,6 +296,11 @@ filegroup(
 filegroup(
     name = "aten_native_xnnpack",
     srcs = glob(["aten/src/ATen/native/xnnpack/*.cpp"]),
+)
+
+filegroup(
+    name = "aten_native_vulkan_stub",
+    srcs = glob(["aten/src/ATen/native/vulkan/stub/*.cpp"]),
 )
 
 filegroup(
@@ -641,6 +652,7 @@ cc_library(
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
+        ":aten_native_vulkan_stub",
         ":aten_src_ATen_config",
         ":generated_cpp",
     ],
@@ -1955,7 +1967,7 @@ cc_library(
 
 pybind_extension(
     name = "_C",
-    srcs = ["torch/csrc/stub.cpp"],
+    srcs = ["torch/csrc/stub.c"],
     deps = [
         ":torch_python"
     ],
