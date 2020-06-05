@@ -46,7 +46,10 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
       return std::make_unique<UnpickledPythonRemoteCall>(
-          prc.serializedPyObj(), prc.retRRefId(), prc.retForkId());
+          prc.serializedPyObj(),
+          prc.retRRefId(),
+          prc.retForkId(),
+          prc.isAsyncExecution());
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       // Deserialize the wrapped RPC if it contains Python UDF
@@ -93,9 +96,11 @@ void processAsyncExecution(
     const py::object& pyFn,
     const int64_t messageId,
     const std::shared_ptr<FutureMessage>& responseFuture,
-    std::function<
-        void(SerializedPyObj, int64_t, const std::shared_ptr<FutureMessage>&)>
-        postProcessing) {
+    std::function<void(
+        const py::object&,
+        int64_t,
+        PythonRpcHandler&,
+        const std::shared_ptr<FutureMessage>&)> postProcessing) {
   std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   {
@@ -106,9 +111,7 @@ void processAsyncExecution(
       // Hit exception when running the user function.
       // Not releasing GIL before serialize to avoid an additional
       // context switch.
-      auto serializedPyObj = pythonRpcHandler.serialize(result);
-      py::gil_scoped_release release;
-      postProcessing(std::move(serializedPyObj), messageId, responseFuture);
+      postProcessing(result, messageId, pythonRpcHandler, responseFuture);
       return;
     }
 
@@ -138,13 +141,12 @@ void processAsyncExecution(
                               postProcessing{std::move(postProcessing)},
                               jitFuture = pyFuture->fut,
                               &pythonRpcHandler]() {
-    std::shared_ptr<SerializedPyObj> serializedPyObj;
-    {
-      py::gil_scoped_acquire acquire;
-      serializedPyObj = std::make_shared<SerializedPyObj>(
-          pythonRpcHandler.serialize(jit::toPyObject(jitFuture->value())));
-    }
-    postProcessing(std::move(*serializedPyObj), messageId, responseFuture);
+    py::gil_scoped_acquire acquire;
+    postProcessing(
+        jit::toPyObject(jitFuture->value()),
+        messageId,
+        pythonRpcHandler,
+        responseFuture);
   });
 }
 
@@ -254,9 +256,12 @@ void RequestCallbackImpl::processRpc(
             upc.pythonUdf(),
             messageId,
             responseFuture,
-            [](SerializedPyObj serializedPyObj,
+            [](const py::object& result,
                const int64_t messageId,
+               PythonRpcHandler& pythonRpcHandler,
                const std::shared_ptr<FutureMessage>& responseFuture) {
+              auto serializedPyObj = pythonRpcHandler.serialize(result);
+              py::gil_scoped_release release;
               auto m =
                   std::move(PythonResp(std::move(serializedPyObj))).toMessage();
               m.setId(messageId);
@@ -374,27 +379,7 @@ void RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
-
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-
-      IValue py_ivalue;
-      try {
-        {
-          py::gil_scoped_acquire acquire;
-          py_ivalue = jit::toIValue(
-              pythonRpcHandler.runPythonUdf(uprc.pythonUdf()),
-              PyObjectType::get());
-        }
-        ownerRRef->setValue(std::move(py_ivalue));
-      } catch (py::error_already_set& e) {
-        // py::error_already_set requires GIL to destruct, take special care.
-        ownerRRef->setError(e.what());
-        py::gil_scoped_acquire acquire;
-        e.restore();
-        PyErr_Clear();
-      } catch (std::exception& e) {
-        ownerRRef->setError(e.what());
-      }
 
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
@@ -407,7 +392,46 @@ void RequestCallbackImpl::processRpc(
         // rrefId (OwnerRRef does not have a forkId anyway).
         ctx.addForkOfOwner(rrefId, forkId);
       }
-      markComplete(RemoteRet(rrefId, forkId).toMessage());
+
+      if (uprc.isAsyncExecution()) {
+        processAsyncExecution(
+            uprc.pythonUdf(),
+            messageId,
+            responseFuture,
+            [ownerRRef, rrefId, forkId](
+                const py::object& result,
+                const int64_t messageId,
+                PythonRpcHandler& pythonRpcHandler,
+                const std::shared_ptr<FutureMessage>& responseFuture) {
+              IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
+
+              py::gil_scoped_release release;
+              ownerRRef->setValue(std::move(py_ivalue));
+              auto m = RemoteRet(rrefId, forkId).toMessage();
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            });
+      } else {
+        IValue py_ivalue;
+        try {
+          {
+            py::gil_scoped_acquire acquire;
+            py_ivalue = jit::toIValue(
+                pythonRpcHandler.runPythonUdf(uprc.pythonUdf()),
+                PyObjectType::get());
+          }
+          ownerRRef->setValue(std::move(py_ivalue));
+        } catch (py::error_already_set& e) {
+          // py::error_already_set requires GIL to destruct, take special care.
+          ownerRRef->setError(e.what());
+          py::gil_scoped_acquire acquire;
+          e.restore();
+          PyErr_Clear();
+        } catch (std::exception& e) {
+          ownerRRef->setError(e.what());
+        }
+        markComplete(RemoteRet(rrefId, forkId).toMessage());
+      }
       return;
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {

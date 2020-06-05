@@ -633,11 +633,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   module.def(
       "_invoke_remote_python_udf",
       &pyRemotePythonUdf,
-      py::call_guard<py::gil_scoped_release>(),
-      py::arg("dst"),
-      py::arg("pickledPythonUDF"),
-      py::arg("tensors"),
-      py::arg("timeout"));
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_torchscript",
