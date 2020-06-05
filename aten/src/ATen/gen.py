@@ -161,6 +161,7 @@ TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
 TENSOR_METHODS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.cpp")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
+FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.cpp")
 
 LEGACY_TH_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctions.h")
 LEGACY_TH_FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctions.cpp")
@@ -406,7 +407,7 @@ def declare_outputs():
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
-             'Functions.h', 'NativeFunctions.h', 'BackendSelectRegister.cpp']
+             'Functions.h', 'Functions.cpp', 'NativeFunctions.h', 'BackendSelectRegister.cpp']
     for f in files:
         file_manager.will_write(f)
     for backend, density in iterate_types():
@@ -524,6 +525,7 @@ def generate_outputs():
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
 
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
+    file_manager.write('Functions.cpp', FUNCTIONS_CPP, top_env)
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
 

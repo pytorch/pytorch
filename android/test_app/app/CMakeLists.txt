@@ -29,8 +29,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${PYTORCH_INCLUDE_DIRS}
 )
 
-find_library(PYTORCH_LIBRARY pytorch_jni 
+find_library(PYTORCH_LIBRARY pytorch_jni
   PATHS ${PYTORCH_LINK_DIRS}
   NO_CMAKE_FIND_ROOT_PATH)
 
-target_link_libraries(${PROJECT_NAME} ${PYTORCH_LIBRARY})
+target_link_libraries(${PROJECT_NAME}
+  ${PYTORCH_LIBRARY}
+  log)

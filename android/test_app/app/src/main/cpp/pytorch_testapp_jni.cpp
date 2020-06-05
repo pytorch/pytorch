@@ -1,18 +1,34 @@
+#include <android/log.h>
+#include <pthread.h>
+#include <unistd.h>
 #include <cassert>
 #include <cmath>
 #include <vector>
+#define ALOGI(...) \
+  __android_log_print(ANDROID_LOG_INFO, "PyTorchTestAppJni", __VA_ARGS__)
+#define ALOGE(...) \
+  __android_log_print(ANDROID_LOG_ERROR, "PyTorchTestAppJni", __VA_ARGS__)
 
-#include <torch/script.h>
-#include <ATen/NativeFunctions.h>
 #include "jni.h"
+
+#include <ATen/NativeFunctions.h>
+#include <torch/script.h>
 
 namespace pytorch_testapp_jni {
 namespace {
-  struct JITCallGuard {
-    torch::autograd::AutoGradMode no_autograd_guard{false};
-    torch::AutoNonVariableTypeMode non_var_guard{true};
-    torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
-  };
+
+template <typename T>
+void log(const char* m, T t) {
+  std::ostringstream os;
+  os << t << std::endl;
+  ALOGI("%s %s", m, os.str().c_str());
+}
+
+struct JITCallGuard {
+  torch::autograd::AutoGradMode no_autograd_guard{false};
+  torch::AutoNonVariableTypeMode non_var_guard{true};
+  torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
+};
 } // namespace
 
 static void loadAndForwardModel(JNIEnv* env, jclass, jstring jModelPath) {
@@ -22,13 +38,10 @@ static void loadAndForwardModel(JNIEnv* env, jclass, jstring jModelPath) {
   JITCallGuard guard;
   torch::jit::Module module = torch::jit::load(modelPath);
   module.eval();
-  // XXX: Why TypeDefault.randn is not linked?
-  //torch::Tensor t = torch::randn({1, 3, 224, 224});
-  torch::Tensor t = at::native::randn({1, 3, 224, 224});
+  torch::Tensor t = torch::randn({1, 3, 224, 224});
+  log("input tensor:", t);
   c10::IValue t_out = module.forward({t});
-  std::cout << "XXX t:" << t << std::endl;
-  std::cout << "XXX t_out:" << t_out << std::endl;
-
+  log("output tensor:", t_out);
   env->ReleaseStringUTFChars(jModelPath, modelPath);
 }
 } // namespace pytorch_testapp_jni
