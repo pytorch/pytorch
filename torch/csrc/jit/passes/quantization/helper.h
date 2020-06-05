@@ -97,32 +97,34 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // ==================== filter functions for matches ==============
-auto aten_add_alpha_is_one = [](const Match& match,
-                                const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
-    return alpha && alpha->isInt() && alpha->toInt() == 1;
-};
+auto aten_add_alpha_is_one =
+    [](const Match& match,
+       const std::unordered_map<std::string, Value*>& vmap) {
+      const auto& match_vmap = match.values_map;
+      auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
+      return alpha && alpha->isInt() && alpha->toInt() == 1;
+    };
 
-auto is_functional_relu = [](const Match& match,
-                             const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    Value* relu = match_vmap.at(vmap.at("relu"));
-    return relu->type()->cast<FunctionType>() && getFuncName(relu) == "relu";
-};
+auto is_functional_relu =
+    [](const Match& match,
+       const std::unordered_map<std::string, Value*>& vmap) {
+      const auto& match_vmap = match.values_map;
+      Value* relu = match_vmap.at(vmap.at("relu"));
+      return relu->type()->cast<FunctionType>() && getFuncName(relu) == "relu";
+    };
 
 auto is_relu_module = [](const Match& match,
                          const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    Value* relu = match_vmap.at(vmap.at("relu"));
-    auto type = relu->type()->cast<ClassType>();
-    if (type && type->name()) {
-      static std::regex mangle_re("\\.___torch_mangle_\\d+");
-      auto qualified_name =
+  const auto& match_vmap = match.values_map;
+  Value* relu = match_vmap.at(vmap.at("relu"));
+  auto type = relu->type()->cast<ClassType>();
+  if (type && type->name()) {
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto qualified_name =
         std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
-      return qualified_name == "__torch__.torch.nn.modules.activation.ReLU";
-    }
-    return false;
+    return qualified_name == "__torch__.torch.nn.modules.activation.ReLU";
+  }
+  return false;
 };
 
 } // namespace jit

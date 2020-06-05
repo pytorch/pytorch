@@ -71,9 +71,13 @@ class Conf(object):
             ]
             job_def["filters"] = {"branches": {"only": "postnightly"}}
         else:
+            if phase in ["upload"]:
+                filter_branch = "nightly"
+            else:
+                filter_branch = r"/.*/"
             job_def["filters"] = {
                 "branches": {
-                    "only": "nightly"
+                    "only": filter_branch
                 },
                 # Will run on tags like v1.5.0-rc1, etc.
                 "tags": {
