@@ -49,4 +49,8 @@ bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {
          unboxed_kernel_func_ == other.unboxed_kernel_func_;
 }
 
+std::string KernelFunction::dumpOperatorHandle(const OperatorHandle& opHandle) {
+  return c10::str("opname: ", opHandle.operator_name());
+}
+
 } // namespace c10
