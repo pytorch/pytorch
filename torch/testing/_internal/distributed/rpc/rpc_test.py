@@ -964,6 +964,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(rpc_exec_mode.value in rpc_event.name)
         self.assertEqual(rpc_event.count, 1)
 
+
     @dist_init
     def test_profiler_remote_events_profiled(self):
         # Tests that we can successfully invoke the profiler on a remote node,
@@ -990,22 +991,32 @@ class RpcTest(RpcAgentTestFixture):
                 RPCExecMode.ASYNC,
             )
             expected_remote_events = [
-                "mul",
-                "add",
                 "ones",
+                "ones",
+                "add",
+                "mul",
                 "relu",
-                "sigmoid",
                 "threshold",
+                "sigmoid"
             ]
             remote_events = {
                 event.name: event
                 for event in events
                 if event.name in expected_remote_events
             }
+
             for expected_remote_event_name in expected_remote_events:
                 self.assertTrue(expected_remote_event_name in remote_events)
                 remote_event = remote_events[expected_remote_event_name]
+                # Remote event should have a node ID corresponding to the worker
+                # it ran on.
                 self.assertEqual(remote_event.node_id, dst)
+
+            # Validate order remote events show up in profiling output.
+            remote_events_list = [
+                event.name for event in events if event.name in expected_remote_events
+            ]
+            self.assertEqual(remote_events_list, expected_remote_events)
 
     def run_profiling_workload(self, dst):
         fut = rpc.rpc_async(
@@ -1029,6 +1040,7 @@ class RpcTest(RpcAgentTestFixture):
         remote_events = {
             event for event in events if event.name in ["mul"]
         } - {rpc_mul_event}
+
         for remote_event in remote_events:
             print(remote_event.name, remote_event.node_id)
             # self.assertEqual(dst, remote_event.node_id)
@@ -1065,7 +1077,7 @@ class RpcTest(RpcAgentTestFixture):
             self.validate_profiling_workload(dst, prof)
 
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False, dst=None):
-        dst = dst or (self.rank + 1) % self.world_size
+        dst = dst if dst is not None else (self.rank + 1) % self.world_size
 
         # only run profiler on rank 1.
         if self.rank == 1:
@@ -1099,6 +1111,9 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(rpc_event.node_id, self.rank)
             # Ensure recording of remote events.
             remote_events = {event for event in events if event.node_id == dst} - {rpc_event}
+            # print("-- prof table --")
+            # print(prof.key_averages().table())
+            # print("-- end prof table --")
             self.assertGreaterEqual(len(remote_events), 1)
             for remote_event in remote_events:
                 self.assertEqual(remote_event.node_id, dst)
@@ -1120,8 +1135,6 @@ class RpcTest(RpcAgentTestFixture):
                 foo_event_ix = next(i for i, event in enumerate(events) if "foo" in event.name)
                 rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
                 self.assertLess(foo_event_ix, rpc_event_idx)
-
-            print(prof.key_averages().table())
 
     @dist_init
     def test_profiler_with_sync_rpc_udf(self):

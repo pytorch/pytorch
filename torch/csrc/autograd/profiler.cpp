@@ -167,6 +167,8 @@ struct ProfilerThreadLocalState
   }
 
   void setOrAddRemoteProfiledEvents(std::vector<Event>&& remoteProfiledEvents) {
+    // Lock to serialize access from multiple callback threads.
+    std::lock_guard<std::mutex> guard(remoteProfiledEventsMutex_);
     if (remoteProfiledEvents_) {
       (*remoteProfiledEvents_).push_back(std::move(remoteProfiledEvents));
     } else {
@@ -306,6 +308,8 @@ struct ProfilerThreadLocalState
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false, false);
   at::CallbackHandle handle_ = 0;
   c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
+  // mutex to guard access to remoteProfiledEvents_
+  std::mutex remoteProfiledEventsMutex_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
