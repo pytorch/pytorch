@@ -736,6 +736,29 @@ void initJITBindings(PyObject* module) {
             std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
+      .def(
+          "get_storage_from_record",
+          [](PyTorchStreamReader& self,
+             const std::string& key,
+             size_t numel,
+             py::object data_type_obj) {
+            at::DataPtr data(std::get<0>(self.getRecord(key)));
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+
+            c10::Storage storage(
+                c10::Storage::use_byte_size_t(),
+                numel * elementSize(scalar_type),
+                std::move(data),
+                /*allocator=*/nullptr,
+                /*resizable=*/false);
+            auto ptr =
+                c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                    std::move(storage),
+                    at::DispatchKeySet(),
+                    at::CPU(scalar_type).typeMeta());
+            return at::Tensor(std::move(ptr));
+          })
       .def("get_all_records", [](PyTorchStreamReader& self) {
         return self.getAllRecords();
       });
