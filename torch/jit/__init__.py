@@ -731,6 +731,8 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance, strict,
 
         traced_outs = run_mod_and_filter_tensor_outputs(traced_func, inputs, 'trace')
         fn_outs = run_mod_and_filter_tensor_outputs(func, inputs, 'Python function')
+        print("traced_outs:" + str(traced_outs))
+        print("fn_outs:" + str(fn_outs))
         if compare_outputs(traced_outs, fn_outs, 'Python function'):
             check_outs = run_mod_and_filter_tensor_outputs(check_mod_func, inputs, 'repeated trace')
             compare_outputs(traced_outs, check_outs, 'repeated trace')

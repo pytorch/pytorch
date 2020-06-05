@@ -2993,6 +2993,37 @@ graph(%Ra, %Rb):
         traced_dict_tensor_mod = torch.jit.trace(TraceDictTensorTensor(), x, strict=False)
         self.assertEqual(traced_dict_tensor_mod(*x), {x[0]: x[1], x[1]: x[0]})
 
+    def test_trace_dict_mix_script(self):
+        class testB(torch.nn.Module):
+            def __init__(self):
+                super(testB, self).__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, feature_map: Dict[str, List[Tensor]]) -> Tensor:
+                output = []
+                for i, j in feature_map.items():
+                    output.append(self.linear(j[0]))
+
+                return torch.stack(output)
+
+        class testA(torch.nn.Module):
+            def __init__(self):
+                super(testA, self).__init__()
+                self.b = torch.jit.script(testB())
+
+            def forward(self, input_map: Dict[str, List[Tensor]]) -> Tensor:
+                feature_map = {}
+                for i, j in input_map.items():
+                    feature_map[i] = [j[0]]
+
+                return self.b(feature_map)
+
+        torch._C._jit_set_inline_everything_mode(True)
+
+        input_map = {"1" : [torch.rand(2, 2), torch.rand(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        model = torch.jit.trace(testA(), input_map)
+        print(model.code)
+
     def test_trace_with_tensor_list_output(self):
         def f():
             return [torch.zeros(1), torch.zeros(5)]

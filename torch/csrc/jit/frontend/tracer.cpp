@@ -106,6 +106,18 @@ Value* TracingState::getValue(const IValue& var) {
             var.toTuple()->elements(),
             [&](const IValue& val) { return getValue(val); })))
         ->output();
+  } else if (var.isGenericDict()) {
+    auto dict = var.toGenericDict();
+    TypePtr key_type = dict.keyType();
+    TypePtr value_type = dict.valueType();
+    std::vector<Value*> keys;
+    std::vector<Value*> values;
+    for (const auto& entry : dict) {
+      keys.emplace_back(getValue(entry.key()));
+      values.emplace_back(getValue(entry.value()));
+    }
+    auto dict_node = graph->createDict(key_type, value_type, keys, values);
+    return graph->insertNode(dict_node)->output();
   }
   if (var.isTensor()) {
     auto ten = var.toTensor();
