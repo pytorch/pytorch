@@ -181,6 +181,24 @@
 - name: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   self: not_implemented("all")
 
+- name: acosh(Tensor self) -> Tensor
+  self: grad * (self.pow(2) - 1).rsqrt()
+
+- name: acosh_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("inplace version of acosh")
+
+- name: asinh(Tensor self) -> Tensor
+  self: grad * (self.pow(2) + 1).rsqrt()
+
+- name: asinh_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("inplace version of asinh")
+
+- name: atanh(Tensor self) -> Tensor
+  self: grad * 1 / (1 - self.pow(2))
+
+- name: atanh_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("inplace version of atanh")
+
 - name: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 

@@ -24,6 +24,9 @@ _(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
+_(aten, _acosh) \
+_(aten, _asinh) \
+_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _asin) \
