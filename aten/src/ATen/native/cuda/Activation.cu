@@ -598,7 +598,7 @@ Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, Scalar th
 void glu_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), iter.dtype(), "glu_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "glu_cuda", [&] {
-        const scalar_t one(1);
+        const scalar_t one(1.0f);
         gpu_kernel(iter, [one]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
           return a * (one / (one + std::exp(-b)));
       });
@@ -609,7 +609,7 @@ void glu_kernel(TensorIterator& iter) {
 void glu_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), iter.dtype(), "glu_backward_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "glu_backward_cuda", [&] {
-      const scalar_t one(1);
+      const scalar_t one(1.0f);
       gpu_kernel(iter, [one]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
         return (one - a) * a * b * c;
       });
