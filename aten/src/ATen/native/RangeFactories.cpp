@@ -30,16 +30,6 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   return result;
 }
 
-// c10::complex fails on MacOS with SIGILL (illegal instruction)
-// for unknown reason. See: https://github.com/pytorch/pytorch/issues/39123
-// I don't know what is the reason, but looks like a compiler bug
-//  -- @zasdfgbnm
-#ifdef __APPLE__
-#define AT_DISPATCH_COMPLEX_TYPES_MAC_STD AT_DISPATCH_STD_COMPLEX_TYPES
-#else
-#define AT_DISPATCH_COMPLEX_TYPES_MAC_STD AT_DISPATCH_COMPLEX_TYPES
-#endif
-
 Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps, double base) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -53,7 +43,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   } else if (steps == 1) {
     r.fill_(std::pow(base, start.to<double>()));
   } else if (isComplexType(r.scalar_type())) {
-    AT_DISPATCH_COMPLEX_TYPES_MAC_STD(r.scalar_type(), "logspace_cpu", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();

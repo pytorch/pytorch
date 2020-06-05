@@ -66,16 +66,6 @@ void mul_kernel(TensorIterator& iter) {
   }
 }
 
-// c10::complex fails on MacOS with SIGILL (illegal instruction)
-// for unknown reason. See: https://github.com/pytorch/pytorch/issues/39123
-// I don't know what is the reason, but looks like a compiler bug
-//  -- @zasdfgbnm
-#ifdef __APPLE__
-#define AT_DISPATCH_COMPLEX_TYPES_MAC_STD AT_DISPATCH_STD_COMPLEX_TYPES
-#else
-#define AT_DISPATCH_COMPLEX_TYPES_MAC_STD AT_DISPATCH_COMPLEX_TYPES
-#endif
-
 void div_kernel(TensorIterator& iter) {
   if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
@@ -87,7 +77,7 @@ void div_kernel(TensorIterator& iter) {
       });
     });
   } else if (isComplexType(iter.dtype())) {
-      AT_DISPATCH_COMPLEX_TYPES_MAC_STD(iter.dtype(), "div_cpu", [&]() {
+      AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "div_cpu", [&]() {
         cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
              return a / b;
