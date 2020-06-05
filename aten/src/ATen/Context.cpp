@@ -78,6 +78,14 @@ void Context::alertNotDeterministic(c10::string_view const& caller) {
   }
 }
 
+bool Context::allowTF32CuDNN() const {
+  return allow_tf32_cudnn;
+}
+
+void Context::setAllowTF32CuDNN(bool b) {
+  allow_tf32_cudnn = b;
+}
+
 bool Context::benchmarkCuDNN() const {
   return benchmark_cudnn;
 }
