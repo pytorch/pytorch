@@ -308,7 +308,11 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
                       "bucket_view.sizes() = ", bucket_view.sizes(),
                       "bucket_view.strides() = ", bucket_view.strides());
     }
-    bucket_view.copy_(grad, /* non_blocking */ true);
+    // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
+    auto wrapped = c10::scalar_to_tensor(float(1.0/process_group_->getSize()));
+    wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
+    // Divides while copying into the bucket view.
+    at::native::mul_out(bucket_view, grad, wrapped);
   } else {
     bucket_view.zero_();
   }
@@ -451,8 +455,6 @@ void Reducer::mark_variable_ready(VariableIndex index) {
 
   // Check if this was the final gradient for this bucket.
   if (--replica.pending == 0) {
-    // Prescale bucket contents to turn the global sum into the global average.
-    replica.contents.div_(process_group_->getSize());
     // Kick off reduction if all replicas for this bucket are ready.
     if (--bucket.pending == 0) {
       mark_bucket_ready(bucket_index.bucket_index);
