@@ -5,9 +5,15 @@ repositories {
     maven {
         url "https://oss.sonatype.org/content/repositories/snapshots"
     }
+    flatDir {
+        dir 'aars'
+    }
 }
 
 android {
+    configurations {
+      extractForNativeBuild
+    }
     compileOptions {
         sourceCompatibility 1.8
         targetCompatibility 1.8
@@ -31,6 +37,11 @@ android {
     buildTypes {
         debug {
             minifyEnabled false
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
         }
     }
     flavorDimensions "model", "build", "activity"
@@ -89,9 +100,14 @@ android {
 
 dependencies {
     implementation 'com.android.support:appcompat-v7:28.0.0'
+    implementation 'com.facebook.soloader:nativeloader:0.8.0'
 
-    localImplementation project(':pytorch_android')
-    localImplementation project(':pytorch_android_torchvision')
+    //localImplementation project(':pytorch_android')
+    //localImplementation project(':pytorch_android_torchvision')
+    localImplementation(name: 'pytorch_android-1.6.0-SNAPSHOT', ext: 'aar')
+    extractForNativeBuild(name: 'pytorch_android-1.6.0-SNAPSHOT', ext: 'aar')
+    localImplementation(name: 'pytorch_android_torchvision-1.6.0-SNAPSHOT', ext: 'aar')
+
     nightlyImplementation 'org.pytorch:pytorch_android:1.6.0-SNAPSHOT'
     nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.6.0-SNAPSHOT'
 
@@ -99,4 +115,24 @@ dependencies {
     cameraImplementation "androidx.camera:camera-core:$camerax_version"
     cameraImplementation "androidx.camera:camera-camera2:$camerax_version"
     cameraImplementation 'com.google.android.material:material:1.0.0-beta01'
+}
+
+task extractAARForNativeBuild {
+    doLast {
+        configurations.extractForNativeBuild.files.each {
+            def file = it.absoluteFile
+            copy {
+                from zipTree(file)
+                into "$buildDir/$file.name"
+                include "headers/**"
+                include "jni/**"
+            }
+        }
+    }
+}
+
+tasks.whenTaskAdded { task ->
+  if (task.name.contains('externalNativeBuild')) {
+    task.dependsOn(extractAARForNativeBuild)
+  }
 }
