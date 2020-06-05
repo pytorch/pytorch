@@ -379,14 +379,14 @@ class TestCudaFuser(JitTestCase):
             o = o * torch.lerp(x, y, z)
             return o
         lerp_jit = torch.jit.script(lerp)
-        self._run_helper(lerp_jit, lerp, True, x, y, z)
+        self._run_helper(lerp_jit, lerp, x, y, z)
 
         def lerp_scale(x : torch.Tensor, y : torch.Tensor, z: float):
             o = torch.rand_like(x)
             o = o * torch.lerp(x, y, z)
             return o
         lerp_scale_jit = torch.jit.script(lerp_scale)
-        self._run_helper(lerp_scale_jit, lerp_scale, True, x, y, 0.5)
+        self._run_helper(lerp_scale_jit, lerp_scale, x, y, 0.5)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
@@ -401,24 +401,25 @@ class TestCudaFuser(JitTestCase):
             o = torch.addcmul(o, y, z, value=value)
             return o
         addcmul_jit = torch.jit.script(addcmul)
-        self._run_helper(addcmul_jit, addcmul, True, x, y, z, 2.0)
+        self._run_helper(addcmul_jit, addcmul, x, y, z, 2.0)
 
         def addcmul_no_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
             o = torch.add(x, 0.5)
             o = torch.addcmul(o, y, z)
             return o
         addcmul_no_alpha_jit = torch.jit.script(addcmul_no_alpha)
-        self._run_helper(addcmul_no_alpha_jit, addcmul_no_alpha, True, x, y, z)
+        self._run_helper(addcmul_no_alpha_jit, addcmul_no_alpha, x, y, z)
 
         def addcmul_const_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
             o = torch.add(x, 0.5)
             o = torch.addcmul(o, y, z, value=0.75)
             return o
         addcmul_const_alpha_jit = torch.jit.script(addcmul_const_alpha)
-        self._run_helper(addcmul_const_alpha_jit, addcmul_const_alpha, True, x, y, z)
+        self._run_helper(addcmul_const_alpha_jit, addcmul_const_alpha, x, y, z)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Requires profiling node to run cuda fuser")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
     @skipIfRocm
     def test_dynamic_size(self):
         def t(x: torch.Tensor, y: torch.Tensor, z: float):
