@@ -236,11 +236,12 @@ void Reducer::verify_replica0_across_processes() {
 
   auto metadata_dev = metadata.clone().to(replicas_[0][0].device());
   std::vector<at::Tensor> vec{metadata_dev};
-  process_group_->broadcast(vec);
+  process_group_->broadcast(vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.
-  auto control = metadata_dev.to(metadata.device());
+  auto control = at::empty({static_cast<long>(i)}, options);
+  control.copy_(metadata_dev, /*non_blocking=*/false);
   auto control_accessor = control.accessor<int64_t, 1>();
   i = 0;
   for (size_t p = 0; p < replicas_[0].size(); p++) {
@@ -922,10 +923,10 @@ void Reducer::sync_bucket_indices(
   // Copy CPU tensor to device tensor, as the process_group_ could be NCCL and
   // it can only broadcast device tensors.
   auto indices_tensor_device = at::empty({total_size + 1}, options);
-  indices_tensor_device.copy_(indices_tensor, true);
+  indices_tensor_device.copy_(indices_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> indices_tensor_list = {indices_tensor_device};
   process_group_->broadcast(indices_tensor_list)->wait();
-  indices_tensor.copy_(indices_tensor_list.front());
+  indices_tensor.copy_(indices_tensor_list.front(), /*non_blocking=*/false);
 
   // Update num_buckets after receiving it from rank 0
   num_buckets = indices_accessor[indices_accessor_Index];
@@ -940,11 +941,11 @@ void Reducer::sync_bucket_indices(
         bucket_sizes.at(std::min(i, (bucket_sizes.size() - 1)));
   }
   auto bucket_sizes_tensor_device = at::empty({(int64_t)num_buckets}, options);
-  bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, true);
+  bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
   process_group_->broadcast(bucket_sizes_tensor_list)->wait();
-  bucket_sizes_tensor.copy_(bucket_sizes_tensor_list.front());
+  bucket_sizes_tensor.copy_(bucket_sizes_tensor_list.front(), /*non_blocking=*/false);
 
   // Clear bucket_indices first, and then update bucket_indices using received
   // num_buckets, bucket_sizes_tensor and indices_tensor from rank 0

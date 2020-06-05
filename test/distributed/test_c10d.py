@@ -2866,17 +2866,17 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        dev0 = torch.device("cuda" + str(gpus_for_rank(self.world_size)[self.rank][:1]))
+        dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
         layer_devs = [dev0] * 4
-        if self.rank == 0:
-            layer_formats = [torch.contiguous_format] * 4
-        else:
-            layer_formats = [torch.channels_last] * 4
+        layer_formats = [torch.contiguous_format] * 4 if self.rank == 0 else [torch.channels_last] * 4
         layer_dtypes = [torch.float] * 4
 
         m = ConvNet(layer_devs, layer_formats, layer_dtypes)
-        with self.assertRaisesRegex(AssertionError, ".* appears not to match strides of the same param in process 0"):
+        if self.rank == 0:
             m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
+        else:
+            with self.assertRaisesRegex(RuntimeError, ".* appears not to match strides of the same param in process 0"):
+                m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
 
 
 class ReducerModule(nn.Module):
