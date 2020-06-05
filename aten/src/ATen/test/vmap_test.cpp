@@ -183,5 +183,31 @@ TEST(VmapTest, TestMultiBatchArgTransform) {
     ASSERT_TRUE(at::allclose(result.tensor(), tensor.permute({1, 2, 0})));
   }
 }
+TEST(VmapTest, TestPhysicalViewGetPhysicalDim) {
+  PhysicalView physical_view(ones({2, 3, 4, 5, 6}), 1 | 4);
+
+  // Positive dims
+  ASSERT_EQ(physical_view.getPhysicalDim(0), 2);
+  ASSERT_EQ(physical_view.getPhysicalDim(1), 3);
+  ASSERT_EQ(physical_view.getPhysicalDim(2), 4);
+  ASSERT_THROW(physical_view.getPhysicalDim(3), c10::Error);
+
+  // Negative dims (testing wrap dim behavior)
+  ASSERT_EQ(physical_view.getPhysicalDim(-1), 4);
+  ASSERT_EQ(physical_view.getPhysicalDim(-2), 3);
+  ASSERT_EQ(physical_view.getPhysicalDim(-3), 2);
+  ASSERT_THROW(physical_view.getPhysicalDim(-4), c10::Error);
+}
+TEST(VmapTest, TestPhysicalViewGetPhysicalDims) {
+  PhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2 | 8 | 16);
+
+  ASSERT_EQ(
+      physical_view.getPhysicalDims({0, 1, -1, -2}),
+      std::vector<int64_t>({3, 4, 4, 3}));
+
+  ASSERT_THROW(physical_view.getPhysicalDims({2, 0}), c10::Error);
+  ASSERT_THROW(physical_view.getPhysicalDims({0, -3}), c10::Error);
+}
+
 
 }

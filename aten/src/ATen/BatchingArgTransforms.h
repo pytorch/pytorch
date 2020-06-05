@@ -52,15 +52,40 @@ struct TORCH_API MultiBatchArgTransform {
 // One can use it to further convert logical dimension indices, logical shapes,
 // and more to their physical variants, or convert a new (physical) tensor into
 // a logical BatchedTensor. (TODO(rzou): these are not yet implemented).
+//
+// PhysicalView stores a physical tensor with all of its batch dimensions at
+// the front and some levels that correspond to said batch dimensions.
+//
+// The levels contain the information necessary to perform the logical<->physical
+// mapping. For example, given:
+//   physical_view = PhysicalView(tensor=ones(2, 3, 4, 5), levels={1, 3}),
+// the levels tell us that dim 0 corresponds to the vmap at level 1,
+// and dim 1 corresponds to the vmap at level 3.
 struct TORCH_API PhysicalView {
-  PhysicalView(Tensor&& tensor)
-      : tensor_(tensor) {
+  PhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
+      : levels_(levels), tensor_(tensor) {
     TORCH_INTERNAL_ASSERT(!isBatched(tensor));
   }
 
   Tensor& tensor() { return tensor_; }
 
+  // Maps logical dim indices to physical dim indices. Also does dim wrapping.
+  //
+  // For example, given:
+  //   physical_view = PhysicalView(tensor=ones(2, 3, 4, 5), levels={1, 3})
+  //
+  // Then physical_view.getPhysicalDims({0, 1}) returns {2, 3}.
+  // This is because the size of levels tell us that the first two dimensions
+  // of `tensor_` are batch dimensions, so a logical dim of `n` is actually
+  // a physical dim of `n + 2`.
+  std::vector<int64_t> getPhysicalDims(IntArrayRef logical_dims);
+  int64_t getPhysicalDim(int64_t logical_dim);
+
  private:
+  int64_t numLogicalDims();
+  int64_t numBatchDims();
+
+  std::bitset<kVmapNumLevels> levels_;
   Tensor tensor_;
 };
 
