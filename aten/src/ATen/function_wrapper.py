@@ -99,7 +99,9 @@ m.impl("${unqual_operator_name_with_overload}",
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       c10::impl::hacky_wrapper_for_legacy_signatures<decltype(TypeDefault::${type_wrapper_name}), &TypeDefault::${type_wrapper_name}>::func_ptr());
+       c10::impl::hacky_wrapper_for_legacy_signatures<
+            decltype(TypeDefault::${type_wrapper_name}),
+            &TypeDefault::${type_wrapper_name}>::func_ptr());
 """)
 
 # NB: In the ordinary, TypeDerived code generation work flow, specification
@@ -119,7 +121,9 @@ m.impl("${unqual_operator_name_with_overload}",
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${Type}::${type_wrapper_name}), &${Type}::${type_wrapper_name}>::func_ptr())
+                       c10::impl::hacky_wrapper_for_legacy_signatures<
+                            decltype(${Type}::${type_wrapper_name}),
+                            &${Type}::${type_wrapper_name}>::func_ptr())
 );
 """)
 
@@ -1081,7 +1085,9 @@ def create_generic(top_env, declarations):
         option['formals_types'] = [f['type'] for f in option['formals_list']]
 
         option['cpp_signature'] = "{} ({})".format(option['return_type'], ", ".join(option['formals_types']))
-        option['schema_order_cpp_signature'] = option['cpp_signature'].replace('const TensorOptions &', 'optional<ScalarType>, optional<Layout> layout, optional<Device> device, optional<bool> pin_memory')
+        option['schema_order_cpp_signature'] = option['cpp_signature']\
+            .replace('const TensorOptions &',
+                     'optional<ScalarType>, optional<Layout> layout, optional<Device> device, optional<bool> pin_memory')
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']

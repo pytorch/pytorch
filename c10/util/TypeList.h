@@ -250,7 +250,12 @@ static_assert(
     std::is_same<int, last_t<typelist<double, float, int>>>::value,
     "");
 
-// TODO Doc & Test take&drop
+/**
+ * Take/drop a number of arguments from a typelist.
+ * Example:
+ *   typelist<int, string> == take_t<typelist<int, string, bool>, 2>
+ *   typelist<string, bool> == drop_t<typelist<int, string, bool>, 2>
+ */
 namespace detail {
   template<class TypeList, size_t offset, class IndexSequence>
   struct take_elements final {};

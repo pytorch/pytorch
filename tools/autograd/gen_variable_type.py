@@ -195,7 +195,9 @@ m.impl_UNBOXED("${unqual_operator_name_with_overload}", ${class_type}::${type_wr
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${class_type}::${type_wrapper_name}), &${class_type}::${type_wrapper_name}>::func_ptr()
+       c10::impl::hacky_wrapper_for_legacy_signatures<
+            decltype(${class_type}::${type_wrapper_name}),
+            &${class_type}::${type_wrapper_name}>::func_ptr()
 );
 """)
 
@@ -636,7 +638,8 @@ def emit_profiled_body(declaration):
     arg_types = ', '.join([a['type'] for a in declaration['arguments']])
     ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
     schema_order_arg_types = ', '.join([a['type'] for a in declaration['schema_order_arguments']])
-    schema_order_ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['schema_order_arguments']])
+    schema_order_ret_and_arg_types = ', '.join(\
+        [declaration['return_type']] + [a['type'] for a in declaration['schema_order_arguments']])
 
     def check_record_function_input_type(simple_type):
         return simple_type in ['Tensor', 'Scalar']

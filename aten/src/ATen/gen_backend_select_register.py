@@ -34,8 +34,10 @@ UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<std::remove_pointer_t<decltype(c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${function_name}), &${function_name}>::func_ptr())>,
-                                         c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${function_name}), &${function_name}>::func_ptr()>(DispatchKey::BackendSelect)
+  .kernel<std::remove_pointer_t<decltype(
+      c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${function_name}), &${function_name}>::func_ptr())>,
+      c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${function_name}), &${function_name}>::func_ptr()>(
+        DispatchKey::BackendSelect)
   .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
 """)
 
