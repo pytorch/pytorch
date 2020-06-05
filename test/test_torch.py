@@ -6368,7 +6368,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
-    @unittest.skipIf(not, TEST_NUMPY, 'NumPy not found')
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.float)
     def test_nanprod(self, device, dtype):

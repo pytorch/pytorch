@@ -165,7 +165,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
 }
 
 static void nanprod_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(iter.dtype(), "nanprod_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "nanprod_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NanProdOps<scalar_t>{},
