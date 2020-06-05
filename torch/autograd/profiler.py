@@ -699,7 +699,7 @@ class FunctionEvent(FormattedTimesMixin):
         return (
             '<FunctionEvent id={} cpu_time={} cpu_start={} cpu_end={} '
             'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
-            'cpu_memory_usage={} cuda_memory_usage={}>'.format(
+            'cpu_memory_usage={} cuda_memory_usage={} is_async={}>'.format(
                 self.id,
                 self.cpu_time_str,
                 self.cpu_interval.start,
@@ -710,7 +710,8 @@ class FunctionEvent(FormattedTimesMixin):
                 self.thread,
                 str(self.input_shapes),
                 self.cpu_memory_usage,
-                self.cuda_memory_usage
+                self.cuda_memory_usage,
+                self.is_async,
             )
         )
 
