@@ -11,7 +11,7 @@ UnpickledPythonRemoteCall::UnpickledPythonRemoteCall(
     const SerializedPyObj& serializedPyObj,
     const at::IValue& rrefId,
     const at::IValue& forkId)
-    : UnpickledPythonCall(serializedPyObj),
+    : UnpickledPythonCall(serializedPyObj, false),
       rrefId_(RRefId::fromIValue(rrefId)),
       forkId_(ForkId::fromIValue(forkId)) {}
 

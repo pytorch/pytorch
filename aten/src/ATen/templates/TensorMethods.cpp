@@ -59,7 +59,6 @@ TensorOptions Tensor::options() const {
                         .layout(layout());
 }
 
-// all static to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
 
 caffe2::TypeMeta Tensor::dtype() const noexcept {
@@ -156,7 +155,7 @@ bool is_quantized(Tensor self) {
 
 #define DEFINE_CAST(T, name)                     \
   template <>                                    \
-  TORCH_API T* Tensor::data_ptr() const {        \
+  TORCH_API T* Tensor::data_ptr() const {           \
     TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
@@ -189,10 +188,10 @@ TORCH_API std::complex<double>* Tensor::data_ptr() const {
 }
 // end TODO
 
-#define DEFINE_ITEM(T, name)         \
-  template <>                        \
+#define DEFINE_ITEM(T, name)      \
+  template <>                     \
   TORCH_API T Tensor::item() const { \
-    return item().to##name();        \
+    return item().to##name();     \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)

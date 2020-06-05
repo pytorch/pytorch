@@ -5,7 +5,7 @@ try:
 except ImportError:
     # Uses of all the functions below should be guarded by torch.backends.cudnn.is_available(),
     # so it's safe to not emit any checks here.
-    _cudnn = None
+    _cudnn = None  # type: ignore
 
 
 def get_cudnn_mode(mode):
@@ -48,7 +48,7 @@ def init_dropout_state(dropout, train, dropout_seed, dropout_state):
         if dropout_p == 0:
             dropout_state[dropout_desc_name] = Unserializable(None)
         else:
-            dropout_state[dropout_desc_name] = Unserializable(torch._cudnn_init_dropout_state(
+            dropout_state[dropout_desc_name] = Unserializable(torch._cudnn_init_dropout_state(  # type: ignore
                 dropout_p,
                 train,
                 dropout_seed,
