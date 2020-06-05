@@ -2805,9 +2805,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                             bucket_cap_mb=bucketsize)
             has_half = any(p.dtype is torch.half for p in m.parameters())
             tol = 1.e-3 if has_half else 1.e-5
-            # Two rounds to test the bucket reconstruction.
-            for it in range(2):
-                # Print lots of debugging info to show which case went wrong.
+            # 3 iters:  First iter creates grads, second iter retests after rebucketing, third iter tries zeroed grads.
+            for it in range(3):
+                # Debugging info to show which case went wrong.
                 msg = "iter = {}, formats = {}, dtypes = {}, bucketsize = {}".format(it, formats, dtypes, bucketsize)
                 F.mse_loss(m(input).float(), target).backward()
                 F.mse_loss(m_ddp(input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]).float(),
@@ -2821,8 +2821,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                                                           m_ddp_child.named_parameters())):
                         named_msg = layer_name + "." + param_name + " " + msg
                         self.assertEqual(p.grad, p_ddp.grad, msg=named_msg, rtol=tol, atol=tol)
-                        p.grad = None
-                        p_ddp.grad = None
+                        if it == 0:
+                            p.grad = None
+                            p_ddp.grad = None
+                        else:
+                            m.zero_grad()
+                            m_ddp.zero_grad()
 
     @requires_nccl()
     @skip_if_not_multigpu
