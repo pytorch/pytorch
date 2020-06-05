@@ -1888,6 +1888,23 @@ class QuadraGpuNet(nn.Module):
         return F.softmax(x, dim=1).to(dev0)
 
 
+class ConvNet(nn.Module):
+    def __init__(self, gpus, layouts, dtypes):
+        super(ConvNet, self).__init__()
+         self.layer_gpus = layer_gpus
+         self.conv0 = torch.nn.Conv2d(2, 3, 2, 2).to(gpus[0]).to(layouts[0]).to(dtypes[0]),
+         self.conv1 = torch.nn.Conv2d(3, 4, 2, 2).to(gpus[1]).to(layouts[1]).to(dtypes[1]),
+         self.conv2 = torch.nn.Conv2d(4, 3, 2, 2).to(gpus[2]).to(layouts[2]).to(dtypes[2]),
+         self.conv3 = torch.nn.Conv2d(3, 2, 2, 2).to(gpus[3]).to(layouts[3]).to(dtypes[3]),
+
+    def forward(self, x):
+         x = x.to(self.dtypes[0])
+         x = self.conv0(x).to(self.gpus[1]).to(self.dtypes[1])
+         x = self.conv1(x).to(self.gpus[2]).to(self.dtypes[2])
+         x = self.conv2(x).to(self.gpus[3]).to(self.dtypes[3])
+         return self.conv3(x)
+
+
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
@@ -2761,6 +2778,84 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         vanilla_parameter = next(vanilla_model.parameters())
         ddp_parameter = next(ddp_model.parameters())
         self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
+
+    def _test_grad_layout(self, replica_devices, layer_devices, local_batch_size):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        global_batch_size = local_batch_size * self.world_size
+
+        # Carry out some trials with small buckets and some with big buckets.
+        bucketsizes = (0.000001, 25)
+        # Tuples of lists.  Each list describes per-layer characteristics for one trial.
+        layer_formats = ([torch.contiguous_format] * 4,
+                         [torch.channels_last] * 2 + [torch.contiguous_format] * 2,
+                         [torch.channels_last] * 4)
+        layer_dtypes = ([torch.float] * 4,
+                        [torch.float] * 2 + [torch.half] * 2,
+                        [torch.half] * 4)
+
+        input = torch.randn(global_batch_size, 2, 8, 8).to(layer_devices[0])
+        target = torch.randn(global_batch_size, 2, 4, 4).to(layer_devices[-1])
+
+        for formats, dtypes, bucketsize in itertools.product(layer_formats,
+                                                             layer_dtypes,
+                                                             bucketsizes):
+            m = ConvNet(devs, formats, dtype)
+            m_ddp = DistributedDataParallel(copy.deepcopy(m),
+                                            device_ids=replica_devices)
+            # Two rounds to test the bucket reconstruction.
+            for it in range(2):
+                # Large cross product of possibilities tested here, prepare lots of debugging info
+                msg = "{} vs {}, iter = {}, formats = {}, dtypes = {}, bucketsize = {}".format(
+                      it, name, name_ddp, formats, dtypes, bucketsize)
+                F.mse_loss(m(input), target).backward()
+                F.mse_loss(m_ddp(input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
+                                 target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])).backward()
+                for i, l in enumerate(m_ddp.children()):
+                    self.assertTrue(m.weight.grad.is_contiguous(memory_format=formats[i]), msg)
+                for (name, p), (name_ddp, p_ddp) in zip(m.named_parameters(), m_ddp.named_parameters()):
+                    self.assertEqual(p.grad, p_ddp.grad, msg=msg)
+                    p.grad = None
+                    p_ddp.grad = None
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_grad_layout_1devicemodule_1replicaperprocess(self):
+        dev0 = torch.device("cuda" + str(gpus_for_rank(self.world_size)[self.rank][:1]))
+        # Tells DDP to use just one device.
+        device_ids = [dev0]
+        # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
+        layer_devices = [dev0] * 4
+        local_batch_size = 1
+        self._test_grad_layout(replica_devices, layer_devices, local_batch_size)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_grad_layout_1devicemodule_2replicaperprocess(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        dev0 = torch.device("cuda:" + str(int_devices[0]))
+        dev1 = torch.device("cuda:" + str(int_devices[1]))
+        # Tells DDP to replicate the model to both of this process's devices.
+        replica_devices = [dev0, dev1]
+        # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
+        layer_devices = [dev0] * 4
+        local_batch_size = 2
+        self._test_grad_layout(replica_devices, layer_devices, local_batch_size)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_grad_layout_2devicemodule(self):
+          self.assertFalse(try_replicas, "DDP can only make per-GPU replicas for single-device CUDA modules.")
+          int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+          dev0 = torch.device("cuda:" + str(int_devices[0]))
+          dev1 = torch.device("cuda:" + str(int_devices[1]))
+          # DDP's default behavior for a multi-device module is "don't replicate."
+          replica_devices = None
+          # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
+          layer_devices = [dev0] * 2 + [dev1] * 2
+          local_batch_size = 1
+        self._test_grad_layout(replica_devices, layer_devices, local_batch_size)
 
 
 class ReducerModule(nn.Module):
