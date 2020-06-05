@@ -218,7 +218,7 @@ namespace detail {
 // operators to macros.
 //
 // Instead of doing this, we have a different mechanism centered around the
-// concept of a SelectiveName.  A selective name is like a const char* string,
+// concept of a SelectiveStr.  A selective name is like a const char* string,
 // except it also carries at compile time a boolean saying whether or not a
 // registration should actually happen or not.  We then have extra overloads which
 // bypass registration entirely if a selective name is disabled.  We do a
@@ -227,21 +227,23 @@ namespace detail {
 
 namespace detail {
 
-  // A SelectiveName is like a const char*, except that it also comes
+  // A SelectiveStr is like a const char*, except that it also comes
   // with a type brand that says whether or not the name is enabled or
-  // not.  If a name is disabled, then (at compile time) we DON'T generate
+  // not.  If the string is disabled, then (at compile time) we DON'T generate
   // a registration call for it.  This class is not intended to be called
-  // directly; use TORCH_SELECTIVE_NAME macro below to create it.
+  // directly; use TORCH_SELECTIVE_NAME or TORCH_SELECTIVE_SCHEMA macros below
+  // to create it.
   template <bool enabled>
-  class SelectiveName {
+  class SelectiveStr {
   public:
-    constexpr SelectiveName(const char* name) : name_(name) {}
+    constexpr SelectiveStr(const char* name) : name_(name) {}
     constexpr operator const char*() { return name_; }
   private:
     const char* name_;
   };
 
-#define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveName<c10::op_whitelist_check(n)>(n)
+#define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_whitelist_check(n)>(n)
+#define TORCH_SELECTIVE_SCHEMA(n) torch::detail::SelectiveStr<c10::impl::schema_whitelist_check(n)>(n)
 
 }
 
@@ -359,15 +361,19 @@ public:
     return impl(name, CppFunction::makeUnboxedOnly(raw_f));
   }
 
-  // These overloads cover cases when a SelectiveName (see Note [Selective build])
+  // These overloads cover cases when a SelectiveStr (see Note [Selective build])
   // has been disabled at compile time.  In that case, don't generate any code
   // referencing the passed in functions at all.
+  template <typename Schema>
+  Library& def(detail::SelectiveStr<false>) & { return *this; }
   template <typename Func>
-  Library& impl(detail::SelectiveName<false>, Func&& raw_f) & { return *this; }
+  Library& def(detail::SelectiveStr<false>, Func&& raw_f) & { return *this; }
+  template <typename Func>
+  Library& impl(detail::SelectiveStr<false>, Func&& raw_f) & { return *this; }
   template <typename Dispatch, typename Func>
-  Library& impl(detail::SelectiveName<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
+  Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
   template <typename Func>
-  Library& impl_UNBOXED(detail::SelectiveName<false> name, Func* raw_f) & { return *this; }
+  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & { return *this; }
 
   // Register a fallback implementation for all operators which will be used
   // if there is not a specific implementation for an operator available.
@@ -443,12 +449,18 @@ public:
   ); \
   void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library& m)
 
+// NB: if the dispatch key is not whitelisted, we simply omit the Library
+// call entirely
 #define TORCH_LIBRARY_IMPL(ns, k, m) \
   static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library&); \
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ( \
     torch::Library::IMPL, \
-    & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, \
-    #ns, c10::make_optional(c10::DispatchKey::k), __FILE__, __LINE__ \
+    c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
+      []() { return & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k; }, \
+      []() { return [](torch::Library&) -> void {}; } \
+    ), \
+    #ns, c10::make_optional(c10::DispatchKey::k), \
+    __FILE__, __LINE__ \
   ); \
   void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
 
