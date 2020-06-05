@@ -636,19 +636,13 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
 
 CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
     std::vector<intrusive_ptr<ivalue::Future>> srcs) {
-  auto consistentTypePtr =
-      [](const std::vector<intrusive_ptr<ivalue::Future>>& srcs) -> TypePtr {
-    if (srcs.empty()) {
-      return FutureType::create(AnyType::get());
-    }
-    TypePtr res = srcs[0]->elementType();
-    for (size_t i = 1, len = srcs.size(); i < len; ++i) {
-      if (*srcs[i]->elementType() != *res) {
-        return FutureType::create(AnyType::get());
-      }
-    }
-    return FutureType::create(res);
-  };  List<intrusive_ptr<ivalue::Future>> asList(consistentTypePtr(srcs));
+  auto typePtr = srcs.empty() ? AnyType::get() : srcs[0]->elementType();
+  // Lists are generally expected to have a consistent type, check
+  // for this unless we have a compelling target use case.
+  for (size_t i = 1, len = srcs.size(); i < len; ++i) {
+    TORCH_CHECK(*srcs[i]->elementType() == *typePtr);
+  }
+  List<intrusive_ptr<ivalue::Future>> asList(FutureType::create(typePtr));
   asList.reserve(srcs.size());
   for (auto&& s : srcs) {
     asList.push_back(std::move(s));
