@@ -194,7 +194,7 @@ struct TORCH_CUDA_API TensorView : public Val {
   TensorView(const std::shared_ptr<Value>& jit_value)
       : TensorView(jit_value->type()->cast<c10::TensorType>()) {}
 
-  TensorDomain* domain() const noexcept {
+  TensorDomain* domain() const {
     return domain_;
   }
 
@@ -207,7 +207,7 @@ struct TORCH_CUDA_API TensorView : public Val {
   }
 
   // Return the TensorView we're computing at
-  TensorView* getComputeAtView() const noexcept {
+  TensorView* getComputeAtView() const {
     return compute_at_view_;
   }
 
@@ -216,12 +216,12 @@ struct TORCH_CUDA_API TensorView : public Val {
   IterDomain* axis(int pos) const;
 
   // Return compute at axis relative to this domain
-  unsigned int getThisComputeAtAxis() const noexcept {
+  unsigned int getThisComputeAtAxis() const {
     return this_compute_at_axis_;
   }
 
   // Return compute at axis relative to compute at view
-  unsigned int getRelativeComputeAtAxis() const noexcept {
+  unsigned int getRelativeComputeAtAxis() const {
     return relative_compute_at_axis_;
   }
 
@@ -270,7 +270,7 @@ struct TORCH_CUDA_API TensorView : public Val {
    */
   TensorView* rFactor(const std::vector<int>& axes);
 
-  MemoryType getMemoryType() const noexcept {
+  MemoryType getMemoryType() const {
     return memory_type_;
   }
 
