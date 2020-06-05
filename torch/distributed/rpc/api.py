@@ -482,6 +482,9 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     with ctx_manager as rf:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+
+        is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
+
         if qualified_name is not None:
             rref = _invoke_remote_builtin(dst_worker_info, qualified_name, timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
@@ -496,7 +499,13 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
-            rref = _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, timeout)
+            rref = _invoke_remote_python_udf(
+                dst_worker_info,
+                pickled_python_udf,
+                tensors,
+                timeout,
+                is_async_exec
+            )
         # attach profiling information
         if should_profile:
             assert torch.autograd._profiler_enabled()
