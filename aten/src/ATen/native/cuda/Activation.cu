@@ -479,6 +479,36 @@ void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
   });
 }
 
+void log_sigmoid_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "log_sigmoid_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "log_sigmoid_cuda", [&] {
+      const scalar_t zero(0.0f);
+      gpu_kernel(iter, [zero]GPU_LAMBDA(scalar_t a) -> scalar_t {
+        auto max = std::max(zero, -a);
+        auto z = std::exp(-max) + std::exp(-a -max);
+        return max + std::log(z);
+      });
+    });
+  });
+}
+
+void log_sigmoid_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "log_sigmoid_backward_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "log_sigmoid_backward_cuda", [&] {
+      const scalar_t zero(0.0f);
+      const scalar_t one(1.0f);
+      const scalar_t neg_one(-1.0f);
+      gpu_kernel(iter, [zero, one, neg_one]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        auto max_deriv = a < zero ? neg_one : zero;
+        auto sign = a < zero? one : neg_one;
+        auto max = std::max(zero, -a);
+        auto z = std::exp(-max) + std::exp(-a -max);
+        return b * (-max_deriv - sign*((z - 1.f)/z));
+      });
+    });
+  });
+}
+
 void hardswish_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardswish_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "hardswish_cuda", [&] {
@@ -603,6 +633,8 @@ REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
+REGISTER_DISPATCH(log_signmoid_stub, &log_sigmoid_kernel);
+REGISTER_DISPATCH(log_signmoid_backward_stub, &log_sigmoid_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
 REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
 REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);

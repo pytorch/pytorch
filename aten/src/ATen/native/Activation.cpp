@@ -18,7 +18,7 @@ DEFINE_DISPATCH(elu_backward_stub);
 DEFINE_DISPATCH(softplus_stub);
 DEFINE_DISPATCH(softplus_backward_stub);
 DEFINE_DISPATCH(log_sigmoid_stub);
-DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
+DEFINE_DISPATCH(log_sigmoid_backward_stub);
 DEFINE_DISPATCH(threshold_stub);
 DEFINE_DISPATCH(hardtanh_backward_stub);
 DEFINE_DISPATCH(hardsigmoid_stub);
@@ -725,36 +725,20 @@ Tensor leaky_relu_backward(
   return iter.output();
 }
 
-std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
-  // FIXME: do these actually need to be zeros_like or can they be empty_like?
-  auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
-  auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
-  log_sigmoid_stub(kCPU, result, buffer, input.contiguous());
-  return std::make_tuple(result, buffer);
-}
-
-std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor& buffer, const Tensor& input) {
-  result.resize_as_(input);
-  buffer.resize_as_(input, at::MemoryFormat::Contiguous);
-  TORCH_CHECK(buffer.is_contiguous(), "Contiguous buffer required for log_sigmoid with out parameter");
-  Tensor result_tmp = result.is_contiguous() ? result : at::empty_like(result, at::MemoryFormat::Contiguous);
-  log_sigmoid_stub(kCPU, result_tmp, buffer, input.contiguous());
-  if (!result.is_contiguous()) {
-    result.copy_(result_tmp);
-  }
-  return std::forward_as_tuple(result, buffer);
+Tensor log_sigmoid(const Tensor& input) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, input);
+  log_sigmoid_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
-  Tensor buffer = at::empty({0}, self.options());
-  return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
+  auto iter = TensorIterator::unary_op(output, self);
+  log_sigmoid_stub(iter.device_type(), iter);
+  return output;
 }
 
-Tensor log_sigmoid(const Tensor & self) {
-  return std::get<0>(at::log_sigmoid_forward(self));
-}
-
-Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
+Tensor log_sigmoid_backward(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
   Tensor grad_input;
   auto iter = at::TensorIterator();
   iter.set_check_mem_overlap(true);
@@ -763,11 +747,11 @@ Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, 
   iter.add_input(buffer);
   iter.add_input(grad_output);
   iter.build();
-  log_sigmoid_backward_cpu_stub(kCPU, iter);
+  log_sigmoid_backward_stub(kCPU, iter);
   return iter.output();
 }
 
-Tensor& log_sigmoid_backward_out_cpu(
+Tensor& log_sigmoid_backward_out(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
@@ -779,7 +763,7 @@ Tensor& log_sigmoid_backward_out_cpu(
   iter.add_input(buffer);
   iter.add_input(grad_output);
   iter.build();
-  log_sigmoid_backward_cpu_stub(kCPU, iter);
+  log_sigmoid_backward_stub(kCPU, iter);
   return grad_input;
 }
 
