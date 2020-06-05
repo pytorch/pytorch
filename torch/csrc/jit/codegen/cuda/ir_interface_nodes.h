@@ -41,7 +41,7 @@ struct TORCH_CUDA_API Bool : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<bool> value() const noexcept {
+  c10::optional<bool> value() const {
     return maybe_value_;
   }
 
@@ -78,7 +78,7 @@ struct TORCH_CUDA_API Float : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<ScalarType> value() const noexcept {
+  c10::optional<ScalarType> value() const {
     return maybe_value_;
   }
 
@@ -113,7 +113,7 @@ struct TORCH_CUDA_API Half : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<float> value() const noexcept {
+  c10::optional<float> value() const {
     return maybe_value_;
   }
 
@@ -147,7 +147,7 @@ struct TORCH_CUDA_API Int : public Val {
   bool isConst() const {
     return maybe_value_.has_value();
   }
-  c10::optional<ScalarType> value() const noexcept {
+  c10::optional<ScalarType> value() const {
     return maybe_value_;
   }
 
@@ -321,7 +321,7 @@ struct TORCH_CUDA_API TensorView : public Val {
   int getComputeAtRelPos(int pos);
   void setThisComputeAtAxis();
 
-  TensorDomain* domain_;
+  TensorDomain* domain_ = nullptr;
   TensorView* compute_at_view_ = nullptr;
   // compute at axis in compute at view
   unsigned int relative_compute_at_axis_ = 0;
