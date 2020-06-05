@@ -193,7 +193,7 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       ptr(handler)->handle(static_cast<const ReductionOp*>(expr));
       return;
     case ExprType::BroadcastOp:
-      ptr(handler)->handle(static_cast<const BroadcastOp* const>(expr));
+      ptr(handler)->handle(static_cast<const BroadcastOp*>(expr));
       return;
     case ExprType::ForLoop:
       ptr(handler)->handle(static_cast<const ForLoop*>(expr));

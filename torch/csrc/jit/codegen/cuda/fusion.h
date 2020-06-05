@@ -192,7 +192,7 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   const std::unordered_set<Expr*>& unordered_exprs() const noexcept;
 
   // Return all Exprs that use val
-  std::unordered_set<Expr*> uses(Val* val) const;
+  std::unordered_set<Expr*> unordered_uses(Val* val) const;
 
   // Return the Expr that produces val
   Expr* origin(Val* val) const;

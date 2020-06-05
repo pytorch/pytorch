@@ -250,7 +250,7 @@ std::vector<Statement*> BackwardVisitor::next(Val* val) {
   // Going to sort based on relative topological position
   std::map<size_t, Statement*> exprs;
 
-  for (auto expr : FusionGuard::getCurFusion()->uses(val))
+  for (auto expr : FusionGuard::getCurFusion()->unordered_uses(val))
     // Make sure it's an expr we can traverse
     if (traversal_exprs_.find(expr) != traversal_exprs_.end())
       exprs[traversal_exprs_[expr]] = expr;
