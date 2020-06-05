@@ -61,7 +61,7 @@ inline int noop(Stack& n) {
 // using the rules from python_arg_parser FunctionParameter::check
 // tensor cannot have grad set, tensor must be 0 dim,
 // and if the dest is an int the source must be integral type
-void checkImplicitTensorToNum(at::Tensor t, bool toInt);
+void checkImplicitTensorToNum(const at::Tensor& t, bool toInt);
 
 // Convert the tensor pointed to by \p data to a nested list. \p dim is the
 // number of dimensions in the tensor and \p cur_dim is the dimension being

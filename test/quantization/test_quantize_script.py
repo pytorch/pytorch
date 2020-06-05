@@ -27,7 +27,10 @@ from torch.quantization.quantize_script import quantize_dynamic_script
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 from torch.testing._internal.common_quantized import override_qengines
 
-from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_quantization import (
+    QuantizationTestCase,
+    skipIfNoFBGEMM,
+)
 
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
@@ -667,6 +670,20 @@ graph(%input, %weight):
         assert len(attrs_with_prefix(m, '_observer_',)) == 3
 
     def test_insert_observers_for_if(self):
+        class QuantProp(torch.nn.Module):
+            def __init__(self, use_skip):
+                super(QuantProp, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.use_skip = use_skip
+
+            def forward(self, x):
+                if self.use_skip:
+                    x = self.conv(x)
+                    return torch.flatten(x)
+                else:
+                    x = self.conv(x)
+                    return torch.flatten(x)
+
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
                 super(Res, self).__init__()
@@ -682,6 +699,43 @@ graph(%input, %weight):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
+                self.quant_prop = QuantProp(True)
+                self.res2 = Res(False)
+
+            def forward(self, x):
+                x = self.quant_prop(x)
+                x = self.res2(x)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        m = torch.jit.script(M()).eval()
+        m = prepare_script(m, {'': default_qconfig})
+        # one observer for input and one observer for output
+        # no observer for output of quant_prop
+        assert len(attrs_with_prefix(m, '_observer_',)) == 2
+        # one observer for output of conv for each branch
+        assert len(attrs_with_prefix(m.quant_prop, '_observer_',)) == 2
+
+    def test_insert_observers_for_nested_if(self):
+        class Res(torch.nn.Module):
+            def __init__(self, use_skip):
+                super(Res, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.cond = use_skip
+                self.use_skip = use_skip
+
+            def forward(self, x):
+                if self.use_skip:
+                    if self.cond:
+                        return self.conv(x)
+                    else:
+                        return self.conv(x)
+                else:
+                    return self.conv(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
                 self.res1 = Res(True)
                 self.res2 = Res(False)
 
@@ -691,9 +745,13 @@ graph(%input, %weight):
                 return x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig})
-        assert len(attrs_with_prefix(m, '_observer_',)) == 3
+        for tracing in [True, False]:
+            if tracing:
+                m = torch.jit.trace(M(), data[0][0])
+            else:
+                m = torch.jit.script(M())
+            m = prepare_script(m.eval(), {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_',)) == 3
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
@@ -1266,9 +1324,35 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         checker.run(model.graph)
         checker.run(model_functional.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
+    def test_quantized_add_alpha(self):
+        """ Test quant fusion for multiple aten::add using same
+        constant alpha as the third argument
+        """
+        class QuantizedAdd(torch.nn.Module):
+            def __init__(self):
+                super(QuantizedAdd, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                z = x + y
+                w = y + z
+                return z + w
+
+        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        m = QuantizedAdd()
+        m = self._test_op_impl(m, data, "quantized::add")
+        FileCheck().check_count("quantized::add", 3, exactly=True)
+        FileCheck().check_not("aten::add") \
+                   .check_not("aten::add_") \
+                   .run(m.graph)
+
+    @skipIfNoFBGEMM
     def test_quantized_add(self):
         class QuantizedAdd(torch.nn.Module):
             def __init__(self):

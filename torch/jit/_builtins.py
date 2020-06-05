@@ -83,6 +83,7 @@ _builtin_ops = [
     (torch._VF.cdist, "aten::cdist"),
     (torch._VF.norm, "aten::norm"),
     (torch._VF.unique_dim, "aten::unique_dim"),
+    (torch._VF.unique_consecutive, "aten::unique_consecutive"),
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),
 ]
@@ -96,7 +97,7 @@ def _gen_torch_functional_registered_ops():
     # but we are currently only able to compile some of the functions. additionally,
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
-    ops = ["stft", "istft", "lu", "lu_unpack", "cdist", "norm", "unique"]
+    ops = ["stft", "istft", "lu", "lu_unpack", "cdist", "norm", "unique", "unique_consecutive"]
     return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
