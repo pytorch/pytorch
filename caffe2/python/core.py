@@ -58,6 +58,10 @@ _REGISTERED_OPERATORS = _GetRegisteredOperators()
 
 
 def RefreshRegisteredOperators():
+    _import_lazy()
+    _RefreshRegisteredOperators()
+
+def _RefreshRegisteredOperators():
     global _REGISTERED_OPERATORS
     _REGISTERED_OPERATORS = _GetRegisteredOperators()
 
@@ -66,6 +70,7 @@ _GLOBAL_INIT_ARGS = []
 
 
 def GlobalInit(args):
+    _import_lazy()
     _GLOBAL_INIT_ARGS.extend(args[1:])
     C.global_init(args)
 
@@ -79,6 +84,7 @@ def IsOperator(op_type):
 
 
 def IsOperatorWithEngine(op_type, engine):
+    _import_lazy()
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
@@ -278,6 +284,7 @@ class BlobReference(object):
             op_type, *args, **kwargs)
 
     def __dir__(self):
+        _import_lazy()
         additional_methods = [
             op
             for op in _REGISTERED_OPERATORS
@@ -2211,6 +2218,7 @@ class Net(object):
             op_type, *args, **kwargs)
 
     def __dir__(self):
+        _import_lazy()
         additional_methods = [
             op
             for op in _REGISTERED_OPERATORS
