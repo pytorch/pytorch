@@ -250,34 +250,6 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
-    Operator(
-        "aten::_infer_size(int[] a, int[] b) -> int[]",
-        [](Stack& stack) {
-          auto a = pop(stack);
-          auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
-        [](Stack& stack) {
-          at::Tensor weight;
-          at::Tensor input;
-          double max_norm;
-          double norm_type;
-          pop(stack, weight, input, max_norm, norm_type);
-
-          // TODO: remove when script supports setting grad mode
-          torch::NoGradGuard no_grad;
-
-          at::Tensor result =
-              at::embedding_renorm_(weight, input, max_norm, norm_type);
-          push(stack, std::move(result));
-
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)  \
   Operator(                                                                \
