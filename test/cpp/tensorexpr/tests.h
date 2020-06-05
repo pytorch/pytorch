@@ -64,6 +64,7 @@ namespace jit {
   _(Reduce3DRfactorRepeated)                \
   _(ReduceRfactorInsertionPoint)            \
   _(Reduce3DRfactorInsertionPoint)          \
+  _(ReduceRepeatedInternalRfactor)          \
   _(ReduceSplitTail)                        \
   _(ReduceSplitNoTail)                      \
   _(ReduceOverSplitTail)                    \
@@ -127,6 +128,7 @@ namespace jit {
   _(HashEquivalenceAfterFolding)            \
   _(HashDifferenceTypes)                    \
   _(HashLargeExpression)                    \
+  _(HashForLoopOptions)                     \
   _(SimplifyAdd)                            \
   _(SimplifySub)                            \
   _(SimplifyMultiLayer)                     \

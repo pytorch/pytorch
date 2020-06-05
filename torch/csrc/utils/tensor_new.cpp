@@ -18,6 +18,7 @@
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TracerMode.h>
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
@@ -288,7 +289,8 @@ Tensor internal_new_from_data(
   // here.
   Tensor tensor;
   {
-    at::AutoNonVariableTypeMode guard;
+    at::AutoNonVariableTypeMode guard;  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
         (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
