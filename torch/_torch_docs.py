@@ -1032,7 +1032,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.real,
-               r"""
+           r"""
 real(input) -> Tensor
 
 Returns a new tensor containing real values of the :attr:`self` tensor.
@@ -1051,7 +1051,7 @@ Example::
 """)
 
 add_docstr(torch.imag,
-               r"""
+           r"""
 imag(input) -> Tensor
 
 Returns a new tensor containing imaginary values of the :attr:`self` tensor.
@@ -1070,7 +1070,7 @@ Example::
 """)
 
 add_docstr(torch.view_as_real,
-               r"""
+           r"""
 view_as_real(input) -> Tensor
 
 Returns a view of :attr:`input` as a complex tensor. For an input complex tensor of
@@ -1093,7 +1093,7 @@ Example::
 """)
 
 add_docstr(torch.view_as_complex,
-               r"""
+           r"""
 view_as_complex(input) -> Tensor
 
 Returns a view of :attr:`input` as real tensor. For an input complex tensor of
