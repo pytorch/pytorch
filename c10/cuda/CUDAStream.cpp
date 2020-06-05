@@ -16,6 +16,8 @@ namespace cuda {
 
 namespace {
 
+
+typedef std::unique_ptr<std::function<cudaStream_t()>> CUDAStreamProvider;
 // Internal implementation that leaks the stream. It's not intended to be used
 // outside of this file.
 struct LeakyStreamInternals {
@@ -35,6 +37,7 @@ struct LeakyStreamInternals {
   DeviceIndex device_index = -1;
   int32_t stream_id = -1;
   cudaStream_t stream = nullptr;
+  CUDAStreamProvider stream_provider = nullptr;
 };
 
 // Global stream state and constants
@@ -68,10 +71,13 @@ static LeakyStreamInternals default_streams[C10_COMPILE_TIME_MAX_GPUS];
 static std::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> high_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
+static std::atomic<uint32_t> custom_counters[C10_COMPILE_TIME_MAX_GPUS];
 static std::array<LeakyStreamInternals, kStreamsPerPool>
     low_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
 static std::array<LeakyStreamInternals, kStreamsPerPool>
     high_priority_streams[C10_COMPILE_TIME_MAX_GPUS];
+static std::array<LeakyStreamInternals, kStreamsPerPool>
+    custom_streams[C10_COMPILE_TIME_MAX_GPUS];
 
 // Note [StreamId assignment]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -104,6 +110,7 @@ enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,
   LOW = 0x1,
   HIGH = 0x2,
+  CUSTOM = 0x3,
 };
 
 std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
@@ -293,6 +300,8 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
       return &low_priority_streams[device_index][si];
     case StreamIdType::HIGH:
       return &high_priority_streams[device_index][si];
+    case StreamIdType::CUSTOM:
+      return &custom_streams[device_index][si];
     default:
       AT_ASSERTM(
           0,
@@ -318,7 +327,7 @@ CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
 cudaStream_t CUDAStream::stream() const {
   auto ptr = CUDAStream_internals(*this);
   AT_ASSERT(ptr);
-  return ptr->stream;
+  return ptr->stream != nullptr ? ptr->stream : (*(ptr->stream_provider))();
 }
 
 // Returns a stream from the requested pool
