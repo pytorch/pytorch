@@ -6,10 +6,17 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Optional.h>
 
-#include <nccl.h>
-
 #include <cstddef>
 #include <vector>
+
+enum class ncclDataType_t;
+enum class ncclResult_t;
+enum class ncclRedOp_t;
+enum class ncclComm_t;
+
+int32_t ncclSum;
+
+class ncclUniqueId;
 
 namespace torch {
 namespace cuda {
@@ -21,11 +28,7 @@ namespace detail {
 
 TORCH_CUDA_API void throw_nccl_error(ncclResult_t status);
 
-static inline void NCCL_CHECK(ncclResult_t status) {
-  if (status != ncclSuccess) {
-    throw_nccl_error(status);
-  }
-}
+static inline void NCCL_CHECK(ncclResult_t status);
 
 struct AutoNcclGroup {
   AutoNcclGroup() {

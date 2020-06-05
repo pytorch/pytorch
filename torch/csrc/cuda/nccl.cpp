@@ -9,6 +9,8 @@
 
 #include <THC/THC.h>
 
+#include <nccl.h>
+
 #include <limits>
 #include <sstream>
 #include <type_traits>
@@ -26,6 +28,12 @@ void throw_nccl_error(ncclResult_t status) {
   std::ostringstream err;
   err << "NCCL Error " << status << ": " << ncclGetErrorString(status);
   throw std::runtime_error(err.str());
+}
+
+ void NCCL_CHECK(ncclResult_t status) {
+  if (status != ncclSuccess) {
+    throw_nccl_error(status);
+  }
 }
 
 struct NcclCommList {
