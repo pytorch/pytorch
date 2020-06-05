@@ -209,7 +209,7 @@ struct alignas(sizeof(T) * 2) complex {
   }
 
   template<typename U>
-  constexpr complex<T> &operator /=(const complex<U> &rhs) __ubsan_ignore_float_divide_by_zero__ {
+  constexpr __attribute__((always_inline)) complex<T> &operator /=(const complex<U> &rhs) __ubsan_ignore_float_divide_by_zero__ {
     // (a + bi) / (c + di) = (ac + bd)/(c^2 + d^2) + (bc - ad)/(c^2 + d^2) i
     T a = real_;
     T b = imag_;
