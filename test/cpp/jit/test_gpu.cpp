@@ -2718,6 +2718,58 @@ void testGPU_FusionReductionTFT() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
+void testGPU_FusionReduction4() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(3);
+
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+
+  fusion.addOutput(tv1);
+
+  int bidy = 2;
+  int bidx = 3;
+  int tidy = 4;
+  int tidx = 5;
+
+  tv1->split(-2, tidy);
+
+  TensorView* tv2 = tv1->rFactor({-3});
+
+  tv0->computeAt(tv1, 1);
+  tv2->computeAt(tv1, 1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+
+  for (auto* val : fusion.vals()) {
+    if (val->getValType().value() == ValType::TensorView)
+      val->as<TensorView>()->axis(-1)->parallelize(ParallelType::BIDx);
+  }
+
+  tv2->axis(-2)->parallelize(ParallelType::TIDy);
+  tv1->axis(-2)->parallelize(ParallelType::TIDy);
+
+  prog.device_ = 0;
+  prog.grid(bidx, bidy);
+  prog.block(1, tidy);
+  torch::jit::fuser::cuda::compileKernel(&prog);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({bidy, tidy, bidx}, options);
+
+  at::Tensor cg_output = at::empty({bidy, bidx}, options);
+
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({1});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
 void testGPU_FusionSimpleBCast() {
   {
     Fusion fusion;
