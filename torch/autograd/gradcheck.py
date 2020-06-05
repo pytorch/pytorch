@@ -359,7 +359,7 @@ def gradcheck(
                                                       grads_output,
                                                       allow_unused=True)
                 except RuntimeError:
-                    raise RuntimeError((
+                    return fail_test((
                         'Expected backward function to handle undefined output grads. '
                         'Please look at "Notes about undefined output gradients" in '
                         '"tools/autograd/derivatives.yaml"'))
