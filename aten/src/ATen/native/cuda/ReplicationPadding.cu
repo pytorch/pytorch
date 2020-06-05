@@ -218,8 +218,8 @@ void replication_pad1d_out_cuda_template(
 
   int numInputDims = input.ndimension();
   TORCH_CHECK(
-      (numInputDims == 4 && input.size(1) != 0) ||
-      (numInputDims == 5 && input.size(1) != 0 && input.size(2) != 0),
+      (numInputDims == 2 && input.size(1) != 0) ||
+      (numInputDims == 3 && input.size(1) != 0 && input.size(2) != 0),
       "2D or 3D (batch mode) tensor expected for input")
   
   if (numInputDims == 3) {
