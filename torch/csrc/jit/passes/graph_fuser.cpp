@@ -46,6 +46,7 @@ bool isSimpleMap(Node* node) {
       "aten::cosh(Tensor self) -> Tensor",
       "aten::div(Tensor self, Tensor other) -> Tensor",
       "aten::exp(Tensor self) -> Tensor",
+      "aten::exp2(Tensor self) -> Tensor",
       "aten::expm1(Tensor self) -> Tensor",
       "aten::erf(Tensor self) -> Tensor",
       "aten::erfc(Tensor self) -> Tensor",

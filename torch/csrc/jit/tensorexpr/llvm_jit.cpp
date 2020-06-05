@@ -38,6 +38,8 @@ class TORCH_API PytorchLLVMJITImpl {
     cantFail(LLJ->defineAbsolute(
         *Mangle("expf"), {llvm::pointerToJITTargetAddress(&expf), {}}));
     cantFail(LLJ->defineAbsolute(
+        *Mangle("exp2f"), {llvm::pointerToJITTargetAddress(&exp2f), {}}));
+    cantFail(LLJ->defineAbsolute(
         *Mangle("erff"), {llvm::pointerToJITTargetAddress(&erff), {}}));
     cantFail(LLJ->defineAbsolute(
         *Mangle("cosf"), {llvm::pointerToJITTargetAddress(&cosf), {}}));
@@ -114,6 +116,9 @@ class TORCH_API PytorchLLVMJITImpl {
     cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_expf4"),
         {llvm::pointerToJITTargetAddress(&Sleef_expf4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_exp2f4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_exp2f4_u10), {}}));
     cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_expm1f4"),
         {llvm::pointerToJITTargetAddress(&Sleef_expm1f4_u10), {}}));
@@ -200,6 +205,9 @@ class TORCH_API PytorchLLVMJITImpl {
         *Mangle("Sleef_expf8"),
         {llvm::pointerToJITTargetAddress(&Sleef_expf8_u10), {}}));
     cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_exp2f8"),
+        {llvm::pointerToJITTargetAddress(&Sleef_exp2f8_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_expm1f8"),
         {llvm::pointerToJITTargetAddress(&Sleef_expm1f8_u10), {}}));
     cantFail(LLJ->defineAbsolute(
@@ -285,6 +293,9 @@ class TORCH_API PytorchLLVMJITImpl {
         *Mangle("Sleef_expd2"),
         {llvm::pointerToJITTargetAddress(&Sleef_expd2_u10), {}}));
     cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_exp2d2"),
+        {llvm::pointerToJITTargetAddress(&Sleef_exp2d2_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_expm1d2"),
         {llvm::pointerToJITTargetAddress(&Sleef_expm1d2_u10), {}}));
     cantFail(LLJ->defineAbsolute(
@@ -369,6 +380,9 @@ class TORCH_API PytorchLLVMJITImpl {
     cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_expd4"),
         {llvm::pointerToJITTargetAddress(&Sleef_expd4_u10), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("Sleef_exp2d4"),
+        {llvm::pointerToJITTargetAddress(&Sleef_exp2d4_u10), {}}));
     cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_expm1d4"),
         {llvm::pointerToJITTargetAddress(&Sleef_expm1d4_u10), {}}));

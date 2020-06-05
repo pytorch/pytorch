@@ -1037,6 +1037,7 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
+    DEFINE_UNARY_OP(aten::exp2, std::exp2(a), float, float),
     DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
     DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
     DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),

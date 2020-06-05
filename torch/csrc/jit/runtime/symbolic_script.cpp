@@ -810,6 +810,13 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def exp2(self):
+            result = torch.exp2(self)
+            def backward(grad_output):
+                return grad_output * result * 0.6931471805599453
+
+            return result, backward
+
         def neg(self):
             def backward(grad_output):
                 return grad_output.neg()

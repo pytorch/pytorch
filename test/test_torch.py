@@ -6037,6 +6037,7 @@ class TestTorchDeviceType(TestCase):
 
         # exp, cos, cosh, tan, atan, tanh, erf, erfc, reciprocal
         self.assertEqual((), torch.exp(zero_d).shape)
+        self.assertEqual((), torch.exp2(zero_d).shape)
         self.assertEqual((), torch.cos(zero_d).shape)
         self.assertEqual((), torch.cosh(zero_d).shape)
         self.assertEqual((), torch.tan(zero_d).shape)
@@ -6049,6 +6050,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.erfc(zero_d).shape)
         self.assertEqual((), torch.reciprocal(zero_d).shape)
         self.assertEqual((1,), torch.exp(one_d).shape)
+        self.assertEqual((1,), torch.exp2(one_d).shape)
         self.assertEqual((1,), torch.cos(one_d).shape)
         self.assertEqual((1,), torch.cosh(one_d).shape)
         self.assertEqual((1,), torch.tan(one_d).shape)
@@ -13113,6 +13115,8 @@ class TestTorchDeviceType(TestCase):
             ("erfinv", doubles, True, True, 'cuda'),
             ("exp", doubles, True, True, 'cpu'),
             ("exp", doubles, True, True, 'cuda'),
+            ("exp2", doubles, True, True, 'cpu'),
+            ("exp2", doubles, True, True, 'cuda'),
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, True, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
@@ -14476,6 +14480,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.erfinv(),
                 lambda x, y: x.erfinv_(),
                 lambda x, y: x.exp(),
+                lambda x, y: x.exp2(),
                 lambda x, y: x.expm1(),
                 lambda x, y: x.expm1_(),
                 lambda x, y: x.floor(),
@@ -18633,6 +18638,8 @@ tensor_op_tests = [
     ('exp', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
     ('exp', 'samll', lambda t, d: _small_3d(t, d).clamp(-1, 1),
         lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('exp2', 'samll', lambda t, d: _small_3d(t, d).clamp(-1, 1),
+        lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('expm1', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
     ('expm1', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
         lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
@@ -18824,6 +18831,7 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                   _TorchMathTestMeta('erf', ref_backend='scipy'),
                   _TorchMathTestMeta('erfc', ref_backend='scipy'),
                   _TorchMathTestMeta('exp'),
+                  _TorchMathTestMeta('exp2'),
                   _TorchMathTestMeta('expm1'),
                   _TorchMathTestMeta('floor'),
                   _TorchMathTestMeta('ceil'),

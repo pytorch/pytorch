@@ -143,6 +143,9 @@ public:
   Vec256<double> exp() const {
     return Vec256<double>(Sleef_expd4_u10(values));
   }
+  Vec256<double> exp2() const {
+    return Vec256<double>(Sleef_exp2d4_u10(values));
+  }
   Vec256<double> expm1() const {
     return Vec256<double>(Sleef_expm1d4_u10(values));
   }

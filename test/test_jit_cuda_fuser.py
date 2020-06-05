@@ -239,6 +239,7 @@ class TestCudaFuser(JitTestCase):
                       torch.log2,
                       torch.lgamma,
                       torch.exp,
+                      torch.exp2,
                       torch.expm1,
                       torch.erf,
                       torch.erfc,

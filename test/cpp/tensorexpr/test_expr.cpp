@@ -317,6 +317,8 @@ void testExprUnaryMath01() {
        [](float v) { return std::tanh(v); }},
       {[](const ExprHandle& v) { return exp(v); },
        [](float v) { return std::exp(v); }},
+      {[](const ExprHandle& v) { return exp2(v); },
+       [](float v) { return std::exp2(v); }},
       {[](const ExprHandle& v) { return fabs(v); },
        [](float v) { return std::fabs(v); }},
       {[](const ExprHandle& v) { return log(v); },

@@ -12,6 +12,7 @@ inline c10::BFloat16 atan(c10::BFloat16 a) { return std::atan(float(a));}
 inline c10::BFloat16 erf(c10::BFloat16 a) { return std::erf(float(a));}
 inline c10::BFloat16 erfc(c10::BFloat16 a) { return std::erfc(float(a));}
 inline c10::BFloat16 exp(c10::BFloat16 a) { return std::exp(float(a));}
+inline c10::BFloat16 exp2(c10::BFloat16 a) { return std::exp2(float(a));}
 inline c10::BFloat16 expm1(c10::BFloat16 a) { return std::expm1(float(a));}
 inline c10::BFloat16 log(c10::BFloat16 a) { return std::log(float(a));}
 inline c10::BFloat16 log10(c10::BFloat16 a) { return std::log10(float(a));}

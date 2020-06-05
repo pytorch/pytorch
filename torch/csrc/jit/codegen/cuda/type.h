@@ -49,6 +49,7 @@ enum class UnaryOpType {
   Cos,
   Cosh,
   Exp,
+  Exp2,
   Expm1,
   Erf,
   Erfc,

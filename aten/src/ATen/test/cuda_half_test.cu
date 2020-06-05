@@ -35,6 +35,7 @@ __device__ void test(){
   float threshold = 0.00001;
   assert(::abs(::lgamma(Half(10.0)) - ::lgamma(10.0f)) <= threshold);
   assert(::abs(::exp(Half(1.0)) - ::exp(1.0f)) <= threshold);
+  assert(::abs(::exp2(Half(1.0)) - ::exp2(1.0f)) <= threshold);
   assert(::abs(::log(Half(1.0)) - ::log(1.0f)) <= threshold);
   assert(::abs(::log10(Half(1000.0)) - ::log10(1000.0f)) <= threshold);
   assert(::abs(::log1p(Half(0.0)) - ::log1p(0.0f)) <= threshold);

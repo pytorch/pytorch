@@ -192,6 +192,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::log2, {"log2f(${0})", "log2(${0})"}},
       {aten::lgamma, {"lgammaf(${0})", "lgamma(${0})"}},
       {aten::exp, {"expf(${0})", "exp(${0})"}},
+      {aten::exp2, {"exp2f(${0})", "exp2(${0})"}},
       {aten::expm1, {"expm1f(${0})", "expm1(${0})"}},
       {aten::erf, {"erff(${0})", "erf(${0})"}},
       {aten::erfc, {"erfcf(${0})", "erfc(${0})"}},

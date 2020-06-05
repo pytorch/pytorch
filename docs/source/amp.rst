@@ -135,6 +135,7 @@ Ops that can autocast to ``float32``
 ``dist``,
 ``erfinv``,
 ``exp``,
+``exp2``,
 ``expm1``,
 ``gelu``,
 ``group_norm``,

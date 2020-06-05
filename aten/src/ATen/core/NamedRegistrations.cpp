@@ -158,6 +158,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("exp", CppFunction::makeFallthrough());
   m.impl("exp.out", CppFunction::makeFallthrough());
   m.impl("exp_", CppFunction::makeFallthrough());
+  m.impl("exp2", CppFunction::makeFallthrough());
+  m.impl("exp2.out", CppFunction::makeFallthrough());
+  m.impl("exp2_", CppFunction::makeFallthrough());
   m.impl("expand", CppFunction::makeFallthrough());
   m.impl("expm1", CppFunction::makeFallthrough());
   m.impl("expm1.out", CppFunction::makeFallthrough());

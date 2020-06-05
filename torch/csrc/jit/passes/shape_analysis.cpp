@@ -820,6 +820,7 @@ class ShapePropagator {
             "aten::erfc(Tensor self) -> Tensor",
             "aten::erfinv(Tensor self) -> Tensor",
             "aten::exp(Tensor self) -> Tensor",
+            "aten::exp2(Tensor self) -> Tensor",
             "aten::expm1(Tensor self) -> Tensor",
             "aten::log(Tensor self) -> Tensor",
             "aten::log10(Tensor self) -> Tensor",

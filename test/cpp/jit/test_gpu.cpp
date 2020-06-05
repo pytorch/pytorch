@@ -1615,6 +1615,7 @@ void testGPU_FusionUnaryOps() {
       OpTuple{at::erf, UnaryOpType::Erf, "erf"},
       OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
       OpTuple{at::exp, UnaryOpType::Exp, "exp"},
+      OpTuple{at::exp2, UnaryOpType::Exp2, "exp2"},
       OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
       OpTuple{at::floor, UnaryOpType::Floor, "floor"},
       OpTuple{at::frac, UnaryOpType::Frac, "frac"},

@@ -881,6 +881,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('erfc'),
             fn_method_and_inplace('erfinv'),
             fn_method_and_inplace('exp'),
+            fn_method_and_inplace('exp2'),
             fn_method_and_inplace('expm1'),
             method('exponential_'),
             fn_method_and_inplace('floor'),

@@ -6608,7 +6608,7 @@ a")
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_fuser_double_float_codegen(self):
-        fns = ['log', 'log10', 'log1p', 'log2', 'lgamma', 'exp', 'expm1', 'erf',
+        fns = ['log', 'log10', 'log1p', 'log2', 'lgamma', 'exp', 'exp2', 'expm1', 'erf',
                'erfc', 'cos', 'acos', 'cosh', 'sin', 'asin', 'sinh', 'tan',
                'atan', 'tanh', 'sqrt', 'ceil', 'floor', 'round', 'trunc',
                'frac']

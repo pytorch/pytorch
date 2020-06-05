@@ -810,6 +810,10 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.exp(torch.add(x, y))
             return c
 
+        def test_exp2(x, y):
+            c = torch.exp2(torch.add(x, y))
+            return c
+
         def test_expm1(x, y):
             c = torch.expm1(torch.add(x, y))
             return c
@@ -868,6 +872,7 @@ class TestTensorExprFuser(BaseTestClass):
             test_log1p,
             test_rsqrt,
             test_exp,
+            test_exp2,
             test_expm1,
             test_erf,
             test_erfc,

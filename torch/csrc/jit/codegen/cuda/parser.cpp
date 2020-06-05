@@ -19,7 +19,7 @@ typedef Node JitOp;
 namespace fuser {
 namespace cuda {
 
-constexpr auto NUM_UNARY_OPS = 31;
+constexpr auto NUM_UNARY_OPS = 32;
 constexpr auto NUM_BINARY_OPS = 24;
 constexpr auto NUM_BINARY_OPS_WITH_ALPHA = 4;
 
@@ -280,6 +280,7 @@ class IrParser {
         "aten::log2(Tensor self) -> Tensor",
         "aten::lgamma(Tensor self) -> Tensor",
         "aten::exp(Tensor self) -> Tensor",
+        "aten::exp2(Tensor self) -> Tensor",
         "aten::expm1(Tensor self) -> Tensor",
         "aten::erf(Tensor self) -> Tensor",
         "aten::erfc(Tensor self) -> Tensor",
@@ -319,6 +320,7 @@ class IrParser {
                 {aten::log2, UnaryOpType::Log2},
                 {aten::lgamma, UnaryOpType::Lgamma},
                 {aten::exp, UnaryOpType::Exp},
+                {aten::exp2, UnaryOpType::Exp2},
                 {aten::expm1, UnaryOpType::Expm1},
                 {aten::erf, UnaryOpType::Erf},
                 {aten::erfc, UnaryOpType::Erfc},

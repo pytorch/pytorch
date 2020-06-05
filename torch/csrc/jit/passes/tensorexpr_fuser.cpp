@@ -36,6 +36,7 @@ bool isSupported(Node* node) {
     case aten::log:
     case aten::log2:
     case aten::exp:
+    case aten::exp2:
     case aten::erf:
     case aten::erfc:
     case aten::fmod:

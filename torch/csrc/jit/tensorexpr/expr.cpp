@@ -116,6 +116,10 @@ ExprHandle exp(const ExprHandle& v) {
   return Intrinsics::make(kExp, v);
 }
 
+ExprHandle exp2(const ExprHandle& v) {
+  return Intrinsics::make(kExp2, v);
+}
+
 ExprHandle expm1(const ExprHandle& v) {
   return Intrinsics::make(kExpm1, v);
 }

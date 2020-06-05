@@ -121,6 +121,7 @@ TEST(TestHalf, CommonMath) {
   float threshold = 0.00001;
   assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
   assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);
+  assert(std::abs(std::exp2(Half(1.0)) - std::exp2(1.0f)) <= threshold);
   assert(std::abs(std::log(Half(1.0)) - std::log(1.0f)) <= threshold);
   assert(std::abs(std::log10(Half(1000.0)) - std::log10(1000.0f)) <= threshold);
   assert(std::abs(std::log1p(Half(0.0)) - std::log1p(0.0f)) <= threshold);

@@ -98,6 +98,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.erfinv_`,None
    ":meth:`Tensor.exp`, :func:`torch.exp`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.exp_`,None
+   ":meth:`Tensor.exp2`, :func:`torch.exp2`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.exp2_`,None
    :meth:`Tensor.expand`,:ref:`keeps_input_names-doc`
    ":meth:`Tensor.expm1`, :func:`torch.expm1`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.expm1_`,None

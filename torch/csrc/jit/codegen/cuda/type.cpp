@@ -74,6 +74,7 @@ static _enum_unordered_map<UnaryOpType, std::string> unary_op_type_string_map{
     {UnaryOpType::Cos, "cosf"},
     {UnaryOpType::Cosh, "coshf"},
     {UnaryOpType::Exp, "expf"},
+    {UnaryOpType::Exp2, "exp2"},
     {UnaryOpType::Expm1, "expm1f"},
     {UnaryOpType::Erf, "erff"},
     {UnaryOpType::Erfc, "erfcf"},

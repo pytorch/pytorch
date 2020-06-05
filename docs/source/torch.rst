@@ -271,6 +271,7 @@ Pointwise Ops
     erfc
     erfinv
     exp
+    exp2
     expm1
     floor
     floor_divide

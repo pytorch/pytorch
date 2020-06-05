@@ -887,6 +887,33 @@ void testATenexpFloat() {
   }
 }
 
+void testATenexp2Float() {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128;
+  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Buffer b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  Stmt* store_b = Store::make(b_buf, {index}, exp2(load_a), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = i / 10.0f;
+  }
+
+  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  ir_eval(a_v, b_v);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    ASSERT_EQ(a_v(i), i / 10.0f, "index: ", i);
+    ASSERT_EQ(b_v(i), std::exp2(a_v(i)), "index: ", i);
+  }
+}
+
 void testATenerfFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;

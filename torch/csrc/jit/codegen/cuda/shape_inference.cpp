@@ -51,6 +51,7 @@ class NaiveShapeTypePropagator {
       case aten::log2:
       case aten::lgamma:
       case aten::exp:
+      case aten::exp2:
       case aten::expm1:
       case aten::erf:
       case aten::erfc:

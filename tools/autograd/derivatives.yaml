@@ -367,6 +367,9 @@
 - name: exp(Tensor self) -> Tensor
   self: grad * result
 
+- name: exp2(Tensor self) -> Tensor
+  self: grad * result * 0.6931471805599453
+
 - name: expm1(Tensor self) -> Tensor
   self: grad * (result + 1)
 

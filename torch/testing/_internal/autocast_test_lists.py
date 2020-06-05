@@ -98,6 +98,7 @@ class AutocastTestLists(object):
             ("cosh", pointwise0_fp16),
             ("erfinv", (pointwise0_fp16[0].clamp(-.9, .9),)),
             ("exp", pointwise0_fp16),
+            ("exp2", pointwise0_fp16),
             ("expm1", pointwise0_fp16),
             ("log", (pointwise0_fp16[0].clamp(0.1, 100.0),)),
             ("log10", (pointwise0_fp16[0].clamp(0.1, 100.0),)),
