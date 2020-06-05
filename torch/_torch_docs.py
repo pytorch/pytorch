@@ -182,7 +182,7 @@ Example::
 
 add_docstr(torch.add,
            r"""
-add(input, other, out=None)
+add(input, other, out=None) -> Tensor
 
 Adds the scalar :attr:`other` to each element of the input :attr:`input`
 and returns a new resulting tensor.
@@ -195,7 +195,7 @@ a real number, otherwise it should be an integer.
 
 Args:
     {input}
-    value (Number): the number to be added to each element of :attr:`input`
+    other (Number): the number to be added to each element of :attr:`input`
 
 Keyword arguments:
     {out}
@@ -208,7 +208,7 @@ Example::
     >>> torch.add(a, 20)
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
-.. function:: add(input, other, *, alpha=1, out=None)
+.. function:: add(input, other, *, alpha=1, out=None) -> Tensor
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
 :attr:`alpha` and added to each element of the tensor :attr:`input`.
