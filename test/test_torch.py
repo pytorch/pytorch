@@ -43,6 +43,10 @@ import torch.testing._internal.data
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+# TF32 are disabled globally, so that we have full FP32 precision for all testes. TF32 will be reenabled
+# when needed for some tests with relaxed threshold.
+torch.backends.cuda.matmul.allow_tf32 = False
+
 if TEST_NUMPY:
     import numpy as np
 
