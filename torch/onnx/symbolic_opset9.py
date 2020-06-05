@@ -261,8 +261,19 @@ def _slice(g, input, axes, starts, ends):
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
 
+def _maybe_cast_reduce_op_input(g, self):
+    dtype = self.type().scalarType()
+    # This check only covers traced modules where dtype is present
+    if dtype is not None:
+        # pytorch reduce-ops cast all other integral types to int64
+        if not sym_help._is_fp(self) and not (dtype == 'Long'):
+            self = _cast_Long(g, self, False)
+    return self
+
+
 def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
+        self = _maybe_cast_reduce_op_input(g, self)
         if dim is None:
             # all-reduce path
             return g.op(onnx_op_name, self, keepdims_i=0)
@@ -273,6 +284,7 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
             dim_list = dim if allow_multi_dim_support else [dim]
             return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
     return symbolic
+
 
 
 def overload_by_arg_count(fn):

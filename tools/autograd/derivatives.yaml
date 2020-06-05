@@ -181,6 +181,24 @@
 - name: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   self: not_implemented("all")
 
+- name: acosh(Tensor self) -> Tensor
+  self: grad * (self.pow(2) - 1).rsqrt()
+
+- name: acosh_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("inplace version of acosh")
+
+- name: asinh(Tensor self) -> Tensor
+  self: grad * (self.pow(2) + 1).rsqrt()
+
+- name: asinh_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("inplace version of asinh")
+
+- name: atanh(Tensor self) -> Tensor
+  self: grad * 1 / (1 - self.pow(2))
+
+- name: atanh_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("inplace version of atanh")
+
 - name: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
@@ -296,6 +314,9 @@
 
 - name: _ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   log_probs: _ctc_loss_backward(grad, log_probs, targets, input_lengths, target_lengths, result0, result1, blank, zero_infinity)
+
+- name: deg2rad(Tensor self) -> Tensor
+  self: deg2rad_backward(grad)
 
 - name: det(Tensor self) -> Tensor
   self: det_backward(grad, self, result)
@@ -647,6 +668,9 @@
 - name: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_layer_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, M, N, eps, grad_input_mask) : native_layer_norm_backward(grads[0].is_contiguous() ? grads[0] : grads[0].contiguous(), input, result1, result2, weight, M, N, grad_input_mask)"
 
+- name: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, int N, int C, int HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
+  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : native_group_norm_backward(grads[0].is_contiguous() ? grads[0] : grads[0].contiguous(), input.is_contiguous() ? input : input.contiguous(), result1, result2, weight, N, C, HxW, group, grad_input_mask)"
+
 - name: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
 
@@ -741,6 +765,9 @@
 
 - name: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
   self: qr_backward(grads, self, some, Q, R)
+
+- name: rad2deg(Tensor self) -> Tensor
+  self: rad2deg_backward(grad)
 
 - name: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
