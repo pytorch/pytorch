@@ -45,6 +45,25 @@ TEST(VmapTest, TestBatchedTensor) {
     Tensor tensor = addBatchDim(ones({3}), /*lvl*/1, /*dim*/0);
   }
 }
+TEST(VmapTest, TestBatchedTensorMaxLevel) {
+  {
+    // Should not throw
+    auto tensor = ones({2, 3, 4});
+    makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels - 1, /*bdim*/0}});
+  }
+  {
+    auto tensor = ones({2, 3, 4});
+    ASSERT_THROW(
+        makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels, /*bdim*/0}}),
+        c10::Error);
+  }
+  {
+    auto tensor = ones({2, 3, 4});
+    ASSERT_THROW(
+        makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels + 5, /*bdim*/0}}),
+        c10::Error);
+  }
+}
 TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // No batch dims
