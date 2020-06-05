@@ -93,7 +93,7 @@ bool BatchedTensorImpl::has_storage() const {
   TORCH_INTERNAL_ASSERT(false, "Can't query has_storage for BatchedTensorImpl");
 }
 
-inline Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
+Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
   TORCH_INTERNAL_ASSERT(!isBatched(tensor));
   auto tensor_dim = tensor.dim();
   TORCH_CHECK(
