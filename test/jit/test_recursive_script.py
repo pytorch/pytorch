@@ -168,8 +168,6 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, t):
                 return t + self.x
 
-        m = M1()
-
         self.checkModule(M1(), (torch.randn(2, 2),))
 
         if sys.version_info[:2] >= (3, 8):
@@ -182,8 +180,6 @@ class TestRecursiveScript(JitTestCase):
 
                 def forward(self, t):
                     return t + self.x
-
-            m = M1()
 
             self.checkModule(M2(), (torch.randn(2, 2),))
 
