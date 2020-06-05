@@ -1401,7 +1401,8 @@ class TestQuantizedOps(TestCase):
                         mode=mode, align_corners=align_corners)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+                                       msg="{} results are off: qX_hat={} X_ref={}"
+                                           .format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1455,7 +1456,8 @@ class TestQuantizedOps(TestCase):
                         mode=mode, align_corners=align_corners)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+                                       msg="{} results are off: qX_hat={}, X_ref={}"
+                                           .format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1952,13 +1954,14 @@ class TestDynamicQuantizedLinear(TestCase):
         use_bias=st.booleans(),
         use_relu=st.booleans(),
         use_multi_dim_input=st.booleans(),
-        use_channelwise=st.booleans())
+        use_channelwise=st.booleans(),
+        reduce_range=st.booleans())
     @override_qengines
     def test_qlinear(self, batch_size, input_channels, output_channels,
-                     use_bias, use_relu, use_multi_dim_input, use_channelwise):
-
+                     use_bias, use_relu, use_multi_dim_input, use_channelwise, reduce_range):
         if torch.backends.quantized.engine == 'qnnpack':
             use_relu = False
+            reduce_range = False
 
         qlinear_prepack = torch.ops.quantized.linear_prepack
         if use_relu:
@@ -1973,6 +1976,8 @@ class TestDynamicQuantizedLinear(TestCase):
         X_zp = 0
         X_value_min = 0
         X_value_max = 255
+        if reduce_range:
+            X_value_max = 127
         X_q0 = np.round(np.random.rand(batch_size, input_channels) *
                         (X_value_max - X_value_min)
                         + X_value_min
@@ -2042,13 +2047,13 @@ class TestDynamicQuantizedLinear(TestCase):
 
         # Observe X_fp32 and determine X_scale and X_zero_point, this should match
         # internals of dynamic linear.
-        X_scale, X_zp = _calculate_dynamic_qparams(X_fp32, torch.quint8)
+        X_scale, X_zp = _calculate_dynamic_qparams(X_fp32, torch.quint8, reduce_range)
         X_q = torch.quantize_per_tensor(X_fp32, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
 
         # Weight prepacking operator for dynamic quantized Linear
         W_prepack = qlinear_prepack(W_q, b_fp32)
         # Dynamic quantized Linear operator with prepacked weight
-        Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack)
+        Y_fp32 = qlinear_dynamic(X_q.dequantize(), W_prepack, reduce_range)
         # Y_fp32 = qlinear_dynamic(X_fp32, W_prepack, b_fp32)
 
         Y_fp32_ref = F.linear(X_q.dequantize(), W_q.dequantize(), b_fp32)
@@ -2058,9 +2063,8 @@ class TestDynamicQuantizedLinear(TestCase):
 
         if use_relu:
             Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
-
         self.assertEqual(Y_fp32, Y_fp32_ref,
-                         msg="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
+                         msg="torch.ops.quantized.linear_dynamic results are off")
 
     @skipIfNoFBGEMM
     @given(

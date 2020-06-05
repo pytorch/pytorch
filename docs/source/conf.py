@@ -78,6 +78,59 @@ templates_path = ['_templates']
 if RELEASE:
     templates_path = ['_templates-stable'] + templates_path
 
+# TODO: document these and remove them from here.
+
+coverage_ignore_modules = [
+    "torch.autograd",
+    "torch.cuda",
+    "torch.distributed",
+    "torch.distributions",
+    "torch.hub",
+    "torch.jit.unsupported_tensor_ops",
+    "torch.onnx",
+    "torch.nn.quantized.functional",
+    "torchvision",
+]
+
+coverage_ignore_functions = [
+    # torch.jit
+    "annotate",
+    "export_opnames",
+    "fuser",
+    "indent",
+    "interface",
+    "is_tracing",
+    "make_module",
+    "make_tuple",
+    "optimized_execution",
+    "script_method",
+    "validate_map_location",
+    "verify",
+    "whichmodule",
+    "wrap_check_inputs",
+]
+
+coverage_ignore_classes = [
+    # torch.jit
+    "Attribute",
+    "CompilationUnit",
+    "ConstMap",
+    "Error",
+    "Future",
+    "ONNXTracedModule",
+    "OrderedDictWrapper",
+    "OrderedModuleDict",
+    "RecursiveScriptModule",
+    "ScriptFunction",
+    "ScriptMeta",
+    "ScriptModule",
+    "ScriptWarning",
+    "TopLevelTracedModule",
+    "TracedModule",
+    "TracerWarning",
+    "TracingCheckError",
+]
+
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #

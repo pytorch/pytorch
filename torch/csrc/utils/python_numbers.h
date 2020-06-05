@@ -106,17 +106,6 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   if (PyFloat_Check(obj)) {
     return PyFloat_AS_DOUBLE(obj);
   }
-  if (PyLong_Check(obj)) {
-    int overflow;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (overflow != 0) {
-      throw std::runtime_error("Overflow when unpacking double");
-    }
-    if (value > DOUBLE_INT_MAX || value < -DOUBLE_INT_MAX) {
-      throw std::runtime_error("Precision loss when unpacking double");
-    }
-    return (double)value;
-  }
   double value = PyFloat_AsDouble(obj);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
@@ -131,4 +120,25 @@ inline std::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
   }
 
   return std::complex<double>(value.real, value.imag);
+}
+
+inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
+  if (PyFloat_Check(obj)) {
+    return (bool)PyFloat_AS_DOUBLE(obj);
+  }
+
+  if (PyComplex_Check(obj)) {
+    double real_val = PyComplex_RealAsDouble(obj);
+    double imag_val = PyComplex_ImagAsDouble(obj);
+    return !(real_val == 0 && imag_val == 0);
+  }
+
+  int overflow;
+  long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  // No need to check overflow, because when overflow occured, it should
+  // return true in order to keep the same behavior of numpy.
+  return (bool)value;
 }

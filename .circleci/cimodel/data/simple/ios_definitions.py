@@ -49,7 +49,6 @@ class IOSJob:
             "ios_arch": self.arch_variant.name,
             "ios_platform": platform_name,
             "name": self.gen_job_name(),
-            "requires": ["setup"],
         }
 
         if self.is_org_member_context:
