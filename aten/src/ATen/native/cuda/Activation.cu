@@ -595,6 +595,28 @@ Tensor threshold_backward_cuda(const Tensor& grad, const Tensor& self, Scalar th
   return threshold_out_cuda(nullopt, self, threshold, 0, grad);
 }
 
+void glu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), iter.dtype(), "glu_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "glu_cuda", [&] {
+        const scalar_t one(1);
+        gpu_kernel(iter, [one]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+          return a * (one / (one + std::exp(-b)));
+      });
+    });
+  });
+}
+
+void glu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), iter.dtype(), "glu_backward_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "glu_backward_cuda", [&] {
+      const scalar_t one(1);
+      gpu_kernel(iter, [one]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+        return (one - a) * a * b * c;
+      });
+    });
+  });
+}
+
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
@@ -609,5 +631,7 @@ REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
 REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
+REGISTER_DISPATCH(glu_stub, &glu_kernel);
+REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
 
 }}  // namespace at::native
