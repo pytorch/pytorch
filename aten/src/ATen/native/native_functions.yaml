@@ -5521,29 +5521,17 @@
 
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: glu_out
-    CUDA: legacy::cuda::_thnn_glu_forward_out
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: glu
-    CUDA: legacy::cuda::_thnn_glu_forward
 
 - func: glu_backward.grad_input(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: glu_backward_out
-    CUDA: legacy::cuda::_thnn_glu_backward_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: glu_backward
-    CUDA: legacy::cuda::_thnn_glu_backward
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
