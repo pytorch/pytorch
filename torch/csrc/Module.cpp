@@ -207,26 +207,6 @@ PyObject * THPModule_setDefaultDtype(PyObject *_unused, PyObject *dtype)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs)
-{
-  PyObject *result = nullptr;
-  PyObject *args_slice = nullptr;
-  PyThreadState *thread_state = PyThreadState_Get();
-  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
-  THPUtils_assert(num_args > 0, "expected at least one argument");
-  try {
-    args_slice = PyTuple_GetSlice(args, 1, num_args);
-    result = PyObject_Call(PyTuple_GET_ITEM(args, 0), args_slice, kwargs);
-  } catch (std::exception &e) {
-    PyEval_RestoreThread(thread_state);
-    Py_DECREF(args_slice);
-    PyErr_SetString(THPException_FatalError, e.what());
-    Py_LeaveRecursiveCall();
-  }
-  Py_DECREF(args_slice);
-  return result;
-}
-
 PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
@@ -533,7 +513,6 @@ static PyMethodDef TorchMethods[] = {
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, nullptr},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       nullptr},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  nullptr},
-  {"_safe_call",      (PyCFunction)(void(*)())THPModule_safeCall, METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, nullptr},
   {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, nullptr},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, nullptr},
