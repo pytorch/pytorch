@@ -635,12 +635,16 @@ def is_rref(ann):
     return getattr(ann, "__origin__", None) is RRef
 
 try:
-    import typing_extensions
-    from typing_extensions import Final
+    try:
+        import typing
+        from typing import Final
+    except ImportError:
+        import typing_extensions 
+        from typing_extensions import Final
 
     def is_final(ann):
-        return ann.__module__ == 'typing_extensions' and \
-            (getattr(ann, '__origin__', None) is typing_extensions.Final)
+        return ann.__module__ in {'typing', 'typing_extensions'} and \
+            (getattr(ann, '__origin__', None) is Final)
 except ImportError:
     # Same as above, this polyfill is only for `typing_extensions`
     class FinalInstance(object):
