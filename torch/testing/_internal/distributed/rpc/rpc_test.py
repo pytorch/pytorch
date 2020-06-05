@@ -2751,6 +2751,14 @@ class RpcTest(RpcAgentTestFixture):
     def test_future_nested_callback(self):
         self._test_future_cb(add_use_future_nested_cb)
 
+    def _run_func_in_mode(self, to, fn, mode, args=None, kwargs=None):
+        if mode == RPCExecMode.SYNC:
+            return rpc.rpc_sync(to, fn, args=args, kwargs=kwargs)
+        elif mode == RPCExecMode.ASYNC:
+            return rpc.rpc_async(to, fn, args=args, kwargs=kwargs).wait()
+        elif mode == RPCExecMode.REMOTE:
+            return rpc.remote(to, fn, args=args, kwargs=kwargs).to_here()
+
     @dist_init
     def test_async_function_raise(self):
         with self.assertRaisesRegex(RuntimeError, "Expected error"):
@@ -2779,39 +2787,49 @@ class RpcTest(RpcAgentTestFixture):
         ret = rpc.rpc_sync(dst1, async_add, args=(dst2, torch.ones(2, 2), 1))
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
-    def _test_async_function(self, fn):
-        if self.rank == 0:
-            dst1 = worker_name((self.rank + 1) % self.world_size)
-            dst2 = worker_name((self.rank + 2) % self.world_size)
+    def _test_async_function(self, fn, mode=RPCExecMode.SYNC):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
 
-            ret = rpc.rpc_sync(dst1, fn, args=(dst2, torch.ones(2, 2), 1, 2))
-
-            self.assertEqual(ret, torch.ones(2, 2) + 3)
+        args = (dst2, torch.ones(2, 2), 1, 2)
+        ret = self._run_func_in_mode(dst1, fn, mode, args=args)
+        self.assertEqual(ret, torch.ones(2, 2) + 3)
 
     @dist_init
     def test_async_function_with_future_ctor(self):
         self._test_async_function(async_add_with_future_ctor)
 
     @dist_init
+    def test_async_function_with_future_ctor_remote(self):
+        self._test_async_function(
+            async_add_with_future_ctor,
+            RPCExecMode.REMOTE
+        )
+
+    @dist_init
     def test_async_function_chained(self):
         self._test_async_function(async_add_chained)
+
+    @dist_init
+    def test_async_function_chained_remote(self):
+        self._test_async_function(async_add_chained, RPCExecMode.REMOTE)
 
     @dist_init
     def test_async_function_nested(self):
         self._test_async_function(async_add_nested)
 
-    def _test_async_function_multi(self, fn):
+    @dist_init
+    def test_async_function_nested_remote(self):
+        self._test_async_function(async_add_nested, RPCExecMode.REMOTE)
+
+    def _test_async_function_multi(self, fn, mode=RPCExecMode.SYNC):
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
 
         num = 20
         step = 3
-        ret = rpc.rpc_sync(
-            dst1,
-            fn,
-            args=(dst2, torch.ones(2, 2), num, step)
-        )
-
+        args = (dst2, torch.ones(2, 2), num, step)
+        ret = self._run_func_in_mode(dst1, fn, mode, args=args)
         self.assertEqual(ret, torch.ones(2, 2) + num * step)
 
     @dist_init
@@ -2819,8 +2837,36 @@ class RpcTest(RpcAgentTestFixture):
         self._test_async_function_multi(async_add_chained_multi)
 
     @dist_init
+    def test_async_function_multi_chained_async(self):
+        self._test_async_function_multi(
+            async_add_chained_multi,
+            RPCExecMode.ASYNC
+        )
+
+    @dist_init
+    def test_async_function_multi_chained_remote(self):
+        self._test_async_function_multi(
+            async_add_chained_multi,
+            RPCExecMode.REMOTE
+        )
+
+    @dist_init
     def test_async_function_multi_fanout(self):
         self._test_async_function_multi(async_add_multi_fanout)
+
+    @dist_init
+    def test_async_function_multi_fanout_async(self):
+        self._test_async_function_multi(
+            async_add_multi_fanout,
+            RPCExecMode.ASYNC
+        )
+
+    @dist_init
+    def test_async_function_multi_fanout_remote(self):
+        self._test_async_function_multi(
+            async_add_multi_fanout,
+            RPCExecMode.REMOTE
+        )
 
     @dist_init
     def test_return_future(self):

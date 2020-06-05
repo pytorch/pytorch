@@ -33,9 +33,10 @@ import json
 from urllib.request import urlopen
 import __main__
 import errno
+from typing import cast, Any, Iterable, Optional
 
 from torch.testing._internal import expecttest
-from torch.testing import _compare_tensors_internal, _compare_scalars_internal
+from torch.testing import _compare_tensors_internal, _compare_scalars_internal, _compare_return_type
 
 import torch
 import torch.cuda
@@ -633,55 +634,35 @@ class CudaMemoryLeakCheck():
 #  3.56.0 and removed in hypothesis 4.x
 try:
     import hypothesis
-    if hypothesis.version.__version_info__ >= (3, 56, 0):
-        hypothesis.settings.register_profile(
-            "pytorch_ci",
-            hypothesis.settings(
-                derandomize=True,
-                suppress_health_check=[hypothesis.HealthCheck.too_slow],
-                database=None,
-                max_examples=100,
-                verbosity=hypothesis.Verbosity.normal))
-        hypothesis.settings.register_profile(
-            "dev",
-            hypothesis.settings(
-                suppress_health_check=[hypothesis.HealthCheck.too_slow],
-                database=None,
-                max_examples=10,
-                verbosity=hypothesis.Verbosity.normal))
-        hypothesis.settings.register_profile(
-            "debug",
-            hypothesis.settings(
-                suppress_health_check=[hypothesis.HealthCheck.too_slow],
-                database=None,
-                max_examples=1000,
-                verbosity=hypothesis.Verbosity.verbose))
-    else:
-        hypothesis.settings.register_profile(
-            "pytorch_ci",
-            hypothesis.settings(
-                derandomize=True,
-                suppress_health_check=[hypothesis.HealthCheck.too_slow],
-                database=None,
-                max_examples=100,
-                min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.normal))
-        hypothesis.settings.register_profile(
-            "dev",
-            hypothesis.settings(
-                suppress_health_check=[hypothesis.HealthCheck.too_slow],
-                database=None,
-                max_examples=10,
-                min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.normal))
-        hypothesis.settings.register_profile(
-            "debug",
-            hypothesis.settings(
-                suppress_health_check=[hypothesis.HealthCheck.too_slow],
-                database=None,
-                max_examples=1000,
-                min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.verbose))
+
+    def settings(*args, **kwargs):
+        if 'min_satisfying_examples' in kwargs and hypothesis.version.__version_info__ >= (3, 56, 0):
+            kwargs.pop('min_satisfying_examples')
+        return hypothesis.settings(*args, **kwargs)
+
+
+    hypothesis.settings.register_profile(
+        "pytorch_ci",
+        settings(
+            derandomize=True,
+            suppress_health_check=[hypothesis.HealthCheck.too_slow],
+            database=None,
+            max_examples=100,
+            verbosity=hypothesis.Verbosity.normal))
+    hypothesis.settings.register_profile(
+        "dev",
+        settings(
+            suppress_health_check=[hypothesis.HealthCheck.too_slow],
+            database=None,
+            max_examples=10,
+            verbosity=hypothesis.Verbosity.normal))
+    hypothesis.settings.register_profile(
+        "debug",
+        settings(
+            suppress_health_check=[hypothesis.HealthCheck.too_slow],
+            database=None,
+            max_examples=1000,
+            verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
         "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
@@ -947,8 +928,8 @@ class TestCase(expecttest.TestCase):
     # NOTE: this function checks the tensors' devices, sizes, and dtypes
     #  and acquires the appropriate device, dtype, rtol and atol to compare
     #  them with. It then calls _compare_tensors_internal.
-    def _compareTensors(self, a, b, *, rtol=None, atol=None, equal_nan=True,
-                        exact_dtype=True, exact_device=False):
+    def _compareTensors(self, a, b, *, rtol: Optional[float] = None, atol=None, equal_nan=True,
+                        exact_dtype=True, exact_device=False) -> _compare_return_type:
         assert (atol is None) == (rtol is None)
         if not isinstance(a, torch.Tensor):
             return (False, "argument a, {0}, to _compareTensors is not a tensor!".format(a))
@@ -993,7 +974,8 @@ class TestCase(expecttest.TestCase):
     #   when they are and (False, debug_msg) when they are not.
     # NOTE: this function just acquires rtol and atol
     #   before calling _compare_scalars_internal.
-    def _compareScalars(self, a, b, *, rtol=None, atol=None, equal_nan=True):
+    def _compareScalars(self, a, b, *,
+                        rtol: Optional[float] = None, atol: Optional[float] = None, equal_nan=True) -> _compare_return_type:
         # Acquires rtol and atol
         assert (atol is None) == (rtol is None)
         if rtol is None:
@@ -1005,17 +987,18 @@ class TestCase(expecttest.TestCase):
                 rtol, atol = 0, 0
         atol = max(atol, self.precision)
 
-        return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
+        return _compare_scalars_internal(a, b, rtol=cast(float, rtol), atol=cast(float, atol), equal_nan=equal_nan)
 
-    def assertEqualIgnoreType(self, *args, **kwargs):
+    def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
     # Compares x and y
     # TODO: default exact_device to True
-    def assertEqual(self, x, y, *, atol=None, rtol=None, equal_nan=True,
-                    exact_dtype=True, exact_device=False, msg=None):
+    def assertEqual(self, x, y, msg: Optional[str] = None, *,
+                    atol: Optional[float] = None, rtol: Optional[float] = None,
+                    equal_nan=True, exact_dtype=True, exact_device=False) -> None:
         assert (atol is None) == (rtol is None), "If one of atol or rtol is specified the other must be, too"
 
         # Tensor x Number and Number x Tensor comparisons
@@ -1045,6 +1028,7 @@ class TestCase(expecttest.TestCase):
                                                                  exact_device=exact_device)
 
                 if not indices_result and msg is None:
+                    assert debug_msg is not None
                     msg = "Sparse tensor indices failed to compare as equal! " + debug_msg
                 self.assertTrue(indices_result, msg=msg)
 
@@ -1054,6 +1038,7 @@ class TestCase(expecttest.TestCase):
                                                                 exact_device=exact_device)
 
                 if not values_result and msg is None:
+                    assert debug_msg is not None
                     msg = "Sparse tensor values failed to compare as equal! " + debug_msg
                 self.assertTrue(values_result, msg=msg)
             elif x.is_quantized and y.is_quantized:
@@ -1086,6 +1071,7 @@ class TestCase(expecttest.TestCase):
                                                          exact_device=exact_device)
 
                 if not result and msg is None:
+                    assert debug_msg is not None
                     msg = "Quantized representations failed to compare as equal! " + debug_msg
                 self.assertTrue(result, msg=msg)
             else:
@@ -1094,6 +1080,7 @@ class TestCase(expecttest.TestCase):
                                                          exact_device=exact_device)
 
                 if not result and msg is None:
+                    assert debug_msg is not None
                     msg = "Tensors failed to compare as equal! " + debug_msg
                 self.assertTrue(result, msg=msg)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
@@ -1127,6 +1114,7 @@ class TestCase(expecttest.TestCase):
             result, debug_msg = self._compareScalars(x, y, rtol=rtol, atol=atol,
                                                      equal_nan=equal_nan)
             if not result and msg is None:
+                assert debug_msg is not None
                 msg = "Scalars failed to compare as equal! " + debug_msg
             self.assertTrue(result, msg=msg)
         else:
@@ -1139,17 +1127,18 @@ class TestCase(expecttest.TestCase):
         rtol = None if prec is None else 0
         self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
 
-    def assertNotEqual(self, x, y, *, msg=None, atol=None, rtol=None):
+    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
+                       atol: Optional[float] = None, rtol: Optional[float] = None) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, atol=atol, rtol=rtol)
 
-    def assertEqualTypeString(self, x, y):
+    def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() == y.type()
         self.assertEqual(x.device, y.device)
         self.assertEqual(x.dtype, y.dtype)
         self.assertEqual(x.is_sparse, y.is_sparse)
 
-    def assertObjectIn(self, obj, iterable):
+    def assertObjectIn(self, obj: Any, iterable: Iterable[Any]) -> None:
         for elem in iterable:
             if id(obj) == id(elem):
                 return
