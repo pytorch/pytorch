@@ -640,7 +640,9 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
   // Lists are generally expected to have a consistent type, check
   // for this unless we have a compelling target use case.
   for (size_t i = 1, len = srcs.size(); i < len; ++i) {
-    TORCH_CHECK(*srcs[i]->elementType() == *typePtr);
+    TORCH_CHECK(*srcs[i]->elementType() == *typePtr,
+                "Expected ", typePtr->str(), " type in list but saw ",
+                srcs[i]->elementType()->str());
   }
   List<intrusive_ptr<ivalue::Future>> asList(FutureType::create(typePtr));
   asList.reserve(srcs.size());
