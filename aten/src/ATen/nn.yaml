@@ -29,9 +29,6 @@
 
 # Activation functions
 
-- name: _thnn_glu(Tensor self, int64_t dim)
-  cname: GatedLinear
-
 - name: _thnn_log_sigmoid(Tensor self)
   cname: LogSigmoid
   buffers: [buffer]
