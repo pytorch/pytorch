@@ -2,8 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <string>
 #include <unordered_map>
 
@@ -723,9 +723,18 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
       {"quantized::conv3d_relu", conv3d_relu, quantized_conv3d_relu},
       {"quantized::conv3d_relu", conv3d_inplace_relu, quantized_conv3d_relu},
       {"quantized::linear", linear, quantized_linear},
-      {"quantized::add_relu", add_relu, quantized_add_relu, aten_add_alpha_is_one},
-      {"quantized::add_relu", add_inplace_relu, quantized_add_relu, aten_add_alpha_is_one},
-      {"quantized::add_relu", inplace_add_relu, quantized_add_relu, aten_add_alpha_is_one},
+      {"quantized::add_relu",
+       add_relu,
+       quantized_add_relu,
+       aten_add_alpha_is_one},
+      {"quantized::add_relu",
+       add_inplace_relu,
+       quantized_add_relu,
+       aten_add_alpha_is_one},
+      {"quantized::add_relu",
+       inplace_add_relu,
+       quantized_add_relu,
+       aten_add_alpha_is_one},
       {"quantized::add_relu",
        inplace_add_inplace_relu,
        quantized_add_relu,

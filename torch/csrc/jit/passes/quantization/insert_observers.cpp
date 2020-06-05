@@ -8,8 +8,8 @@
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
-#include <stack>
 #include <regex>
+#include <stack>
 
 namespace torch {
 namespace jit {
@@ -410,19 +410,23 @@ class InsertObserversHelper {
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
-  const PatternInfo nn_conv1d_f_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv1d_f_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %inplace, %relu):
     %first_module = match::module[name=".Conv1d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )", {is_functional_relu});
+    return (%second_output) )",
+      {is_functional_relu});
 
-  const PatternInfo nn_conv1d_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv1d_nn_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %relu):
     %first_module = match::module[name=".Conv1d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
-    return (%second_output) )", {is_relu_module});
+    return (%second_output) )",
+      {is_relu_module});
 
   const PatternInfo nn_conv1d_aten_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
@@ -438,19 +442,23 @@ graph(%self, %input):
     %second_output = aten::relu_(%first_output)
     return (%second_output) )");
 
-  const PatternInfo nn_conv2d_f_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv2d_f_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %inplace, %relu):
     %first_module = match::module[name=".Conv2d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )", {is_functional_relu});
+    return (%second_output) )",
+      {is_functional_relu});
 
-  const PatternInfo nn_conv2d_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv2d_nn_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %relu):
     %first_module = match::module[name="Conv2d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
-    return (%second_output) )", {is_relu_module});
+    return (%second_output) )",
+      {is_relu_module});
 
   const PatternInfo nn_conv2d_aten_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
@@ -466,19 +474,23 @@ graph(%self, %input):
     %second_output = aten::relu_(%first_output)
     return (%second_output) )");
 
-  const PatternInfo nn_conv3d_f_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv3d_f_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %inplace, %relu):
     %first_module = match::module[name=".Conv3d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )", {is_functional_relu});
+    return (%second_output) )",
+      {is_functional_relu});
 
-  const PatternInfo nn_conv3d_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv3d_nn_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %relu):
     %first_module = match::module[name=".Conv3d"](%self)
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
-    return (%second_output) )", {is_relu_module});
+    return (%second_output) )",
+      {is_relu_module});
 
   const PatternInfo nn_conv3d_aten_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
@@ -494,29 +506,37 @@ graph(%self, %input):
     %second_output = aten::relu_(%first_output)
     return (%second_output) )");
 
-  const PatternInfo add_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo add_nn_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %a, %b, %alpha, %relu):
      %first_output = aten::add(%a, %b, %alpha)
      %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
-     return (%second_output) )", {aten_add_alpha_is_one, is_relu_module});
+     return (%second_output) )",
+      {aten_add_alpha_is_one, is_relu_module});
 
-  const PatternInfo add_f_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo add_f_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %a, %b, %alpha, %relu, %inplace):
      %first_output = aten::add(%a, %b, %alpha)
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-     return (%second_output) )", {aten_add_alpha_is_one, is_functional_relu});
+     return (%second_output) )",
+      {aten_add_alpha_is_one, is_functional_relu});
 
-  const PatternInfo inplace_add_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo inplace_add_nn_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %a, %b, %alpha, %relu):
      %first_output = aten::add_(%a, %b, %alpha)
      %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
-     return (%second_output) )", {aten_add_alpha_is_one, is_relu_module});
+     return (%second_output) )",
+      {aten_add_alpha_is_one, is_relu_module});
 
-  const PatternInfo inplace_add_f_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo inplace_add_f_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %a, %b, %alpha, %relu, %inplace):
      %first_output = aten::add_(%a, %b, %alpha)
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-     return (%second_output) )", {aten_add_alpha_is_one, is_functional_relu});
+     return (%second_output) )",
+      {aten_add_alpha_is_one, is_functional_relu});
 
   const PatternInfo add_aten_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b, %alpha):
@@ -589,32 +609,19 @@ graph(%self, %a, %b, %inplace):
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
-          nn_conv1d_f_relu,
-          nn_conv1d_nn_relu,
-          nn_conv1d_aten_relu,
-          nn_conv1d_aten_relu_,
-          nn_conv2d_f_relu,
-          nn_conv2d_nn_relu,
-          nn_conv2d_aten_relu,
-          nn_conv2d_aten_relu_,
-          nn_conv3d_f_relu,
-          nn_conv3d_nn_relu,
-          nn_conv3d_aten_relu,
-          nn_conv3d_aten_relu_,
-          add_nn_relu,
-          add_f_relu,
-          inplace_add_nn_relu,
-          inplace_add_f_relu,
-          add_aten_relu,
-          add_aten_relu_,
-          inplace_add_aten_relu,
-          inplace_add_aten_relu_,
-          nn_bn_nn_relu,
-          nn_bn_f_relu,
-          mul_nn_relu,
-          mul_f_relu,
-          inplace_mul_nn_relu,
-          inplace_mul_f_relu,
+          nn_conv1d_f_relu,      nn_conv1d_nn_relu,
+          nn_conv1d_aten_relu,   nn_conv1d_aten_relu_,
+          nn_conv2d_f_relu,      nn_conv2d_nn_relu,
+          nn_conv2d_aten_relu,   nn_conv2d_aten_relu_,
+          nn_conv3d_f_relu,      nn_conv3d_nn_relu,
+          nn_conv3d_aten_relu,   nn_conv3d_aten_relu_,
+          add_nn_relu,           add_f_relu,
+          inplace_add_nn_relu,   inplace_add_f_relu,
+          add_aten_relu,         add_aten_relu_,
+          inplace_add_aten_relu, inplace_add_aten_relu_,
+          nn_bn_nn_relu,         nn_bn_f_relu,
+          mul_nn_relu,           mul_f_relu,
+          inplace_mul_nn_relu,   inplace_mul_f_relu,
   };
 };
 
@@ -701,7 +708,10 @@ void InsertObserversHelper::delayObservingValuesInPattern(
 
   const auto& matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
-    if (!std::all_of(pattern.filters.begin(), pattern.filters.end(), [&](const MatchFilter& f) { return f(match, vmap); })) {
+    if (!std::all_of(
+            pattern.filters.begin(),
+            pattern.filters.end(),
+            [&](const MatchFilter& f) { return f(match, vmap); })) {
       continue;
     }
     auto first_output = match.values_map.at(vmap.at("first_output"));

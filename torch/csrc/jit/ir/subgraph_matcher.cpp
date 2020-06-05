@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <stack>
 #include <regex>
+#include <stack>
 
 namespace torch {
 namespace jit {
