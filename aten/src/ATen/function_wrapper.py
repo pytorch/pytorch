@@ -144,19 +144,19 @@ ${return_type} Tensor::${api_name}(${method_formals}) const {
 
 # add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals_with_defaults});
+CAFFE2_API ${return_type} ${api_name}(${formals_with_defaults});
 """)
 
 # add a method declaration in Functions.h
 DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
-C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults});
+C10_DEPRECATED CAFFE2_API ${return_type} ${api_name}(${formals_with_defaults});
 """)
 
 # add method definition in Functions.h
 C10_FUNCTION_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
-static inline ${return_type} ${api_name}(${formals}) {
+${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
 #else
