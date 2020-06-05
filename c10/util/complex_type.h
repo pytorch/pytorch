@@ -208,8 +208,13 @@ struct alignas(sizeof(T) * 2) complex {
     return *this;
   }
 
+#ifdef __APPLE__
+#define FORCE_INLINE_APPLE __attribute__((always_inline))
+#else
+#define FORCE_INLINE_APPLE
+#endif
   template<typename U>
-  constexpr __attribute__((always_inline)) complex<T> &operator /=(const complex<U> &rhs) __ubsan_ignore_float_divide_by_zero__ {
+  constexpr FORCE_INLINE_APPLE complex<T> &operator /=(const complex<U> &rhs) __ubsan_ignore_float_divide_by_zero__ {
     // (a + bi) / (c + di) = (ac + bd)/(c^2 + d^2) + (bc - ad)/(c^2 + d^2) i
     T a = real_;
     T b = imag_;
@@ -220,6 +225,7 @@ struct alignas(sizeof(T) * 2) complex {
     imag_ = (b * c - a * d) / denominator;
     return *this;
   }
+#undef FORCE_INLINE_APPLE
 
   template<typename U>
   constexpr complex<T> &operator =(const std::complex<U> &rhs) {
