@@ -115,12 +115,23 @@
 #
 #  Notes about undefined output gradients:
 #     All backward functions must support all combinations of undefined output
-#     gradient Tensors, where `grad[i].defined() == false`. Code generation
-#     automatically adds this support to all derivative formulas that only
-#     calculate one input gradient, so in that case, you shouldn't have to think
-#     about undefined gradients (unless there is a bug in the code generation).
-#     However, if your derivative formula calculates multiple input gradients,
-#     you will need to add support explicitly.
+#     gradient Tensors, where `grad[i].defined() == false`. Depending on the
+#     number of input and output grads your derivative formula uses, code
+#     generation may automatically add some level of undefined grad support,
+#     according to these three cases:
+#
+#       * 1 input grad and 1 output grad:
+#           Complete undefined grad support is automatically added, so you
+#           shouldn't have to think about it, unless there is a bug in the code
+#           generation.
+#
+#       * 1 input grad and multiple output grads:
+#           Undefined grad support is automatically added ONLY in the case where
+#           all output grads are undefined. You will have to add explicit support
+#           for cases where a subset of output grads is undefined.
+#
+#       * multiple input grads:
+#           No automatic support, so you will need to add it.
 #
 #     If your derivative formula uses more than one output grad, it is usually
 #     preferable to add undefined grad support in the backward function itself
