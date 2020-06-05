@@ -2739,11 +2739,12 @@ void testGPU_FusionReduction4() {
 
   tv1->split(-2, tidy);
 
+  tv1->split(-2, tidy);
+  
   TensorView* tv2 = tv1->rFactor({-3});
 
   tv0->computeAt(tv1, 1);
-  tv2->computeAt(tv1, 1);
-
+    
   tv1->axis(0)->parallelize(ParallelType::BIDy);
 
   for (auto* val : fusion.vals()) {
@@ -2760,7 +2761,7 @@ void testGPU_FusionReduction4() {
   torch::jit::fuser::cuda::compileKernel(&prog);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::randn({bidy, tidy, bidx}, options);
+  at::Tensor input = at::randn({bidy, dim1, bidx}, options);
 
   at::Tensor cg_output = at::empty({bidy, bidx}, options);
 
