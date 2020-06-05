@@ -38,7 +38,10 @@ class Size(Tuple[_int, ...]):
 
 # Defined in torch/csrc/Dtype.cpp
 class dtype:
-    # TODO: is_floating_point, is_complex, is_Signed, __reduce__
+    # TODO: __reduce__
+    is_floating_point: _bool
+    is_complex: _bool
+    is_signed: _bool
     ...
 
 # Defined in torch/csrc/TypeInfo.cpp
@@ -206,4 +209,5 @@ class _TensorBase(object):
     layout: _layout
     real: Tensor
     imag: Tensor
+    _version: _bool
     ${tensor_method_hints}

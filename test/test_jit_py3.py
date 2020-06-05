@@ -16,7 +16,7 @@ class TestScriptPy3(JitTestCase):
         def func(x):
             hello, test = "Hello", "test"
             print(f"{hello + ' ' + test}, I'm a {test}") # noqa E999
-            print(f"format blank")
+            print(f"format blank") # noqa F541
             hi = 'hi'
             print(f"stuff before {hi}")
             print(f"{hi} stuff after")
@@ -39,6 +39,7 @@ class TestScriptPy3(JitTestCase):
     @unittest.skipIf(sys.version_info[:2] < (3, 7), "`dataclasses` module not present on < 3.7")
     def test_dataclass_error(self):
         from dataclasses import dataclass
+
         @dataclass
         class NormalizationInfo(object):
             mean: float = 0.0
@@ -256,6 +257,7 @@ class TestScriptPy3(JitTestCase):
                 return str(type(args[0]))
 
         the_class = MyPythonClass()
+
         @torch.jit.script
         def fn(x):
             return the_class(x)
@@ -424,6 +426,7 @@ class TestScriptPy3(JitTestCase):
 
     def test_export_opnames_interface(self):
         global OneTwoModule
+
         @torch.jit.interface
         class OneTwoModule(nn.Module):
             def one(self, x, y):
