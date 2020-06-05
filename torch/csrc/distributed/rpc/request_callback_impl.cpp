@@ -89,6 +89,65 @@ struct DistAutogradContextGuard {
   int64_t prevCtxId_;
 };
 
+void processAsyncExecution(
+    const py::object& pyFn,
+    const int64_t messageId,
+    const std::shared_ptr<FutureMessage>& responseFuture,
+    std::function<
+        void(SerializedPyObj, int64_t, const std::shared_ptr<FutureMessage>&)>
+        postProcessing) {
+  std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  {
+    py::gil_scoped_acquire acquire;
+    auto result = pythonRpcHandler.runPythonUdf(pyFn);
+
+    if (pythonRpcHandler.isRemoteException(result)) {
+      // Hit exception when running the user function.
+      // Not releasing GIL before serialize to avoid an additional
+      // context switch.
+      auto serializedPyObj = pythonRpcHandler.serialize(result);
+      py::gil_scoped_release release;
+      postProcessing(std::move(serializedPyObj), messageId, responseFuture);
+      return;
+    }
+
+    try {
+      pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
+    } catch (const py::cast_error& e) {
+      auto type = result.get_type();
+      auto errMsg = c10::str(
+          e.what(),
+          ". Functions decorated with @rpc.async_function must return a "
+          "torch.futures.Future object, but got ",
+          type.attr("__module__").cast<std::string>(),
+          ".",
+          type.attr("__qualname__").cast<std::string>());
+
+      {
+        py::gil_scoped_release release;
+        responseFuture->markCompleted(
+            createExceptionResponse(errMsg, messageId));
+      }
+      return;
+    }
+  }
+
+  pyFuture->fut->addCallback([messageId,
+                              responseFuture,
+                              postProcessing{std::move(postProcessing)},
+                              jitFuture = pyFuture->fut,
+                              &pythonRpcHandler]() {
+    std::shared_ptr<SerializedPyObj> serializedPyObj;
+    {
+      py::gil_scoped_acquire acquire;
+      serializedPyObj = std::make_shared<SerializedPyObj>(
+          pythonRpcHandler.serialize(jit::toPyObject(jitFuture->value())));
+    }
+    postProcessing(std::move(*serializedPyObj), messageId, responseFuture);
+  });
+}
+
 } // anonymous namespace
 
 Message RequestCallbackImpl::handleError(
@@ -190,64 +249,21 @@ void RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_CALL: {
       auto& upc = static_cast<UnpickledPythonCall&>(rpc);
-      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       if (upc.isAsyncExecution()) {
-        std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
-        {
-          py::gil_scoped_acquire acquire;
-          // TODO: Destruction of upc would acquire GIl again. This can be
-          // avoided by decrement the refcnt if upc is an unique/shared_ptr.
-          // Do this as part of https://github.com/pytorch/pytorch/issues/39351.
-          auto result = pythonRpcHandler.runPythonUdf(upc.pythonUdf());
-
-          if (pythonRpcHandler.isRemoteException(result)) {
-            // Hit exception when running the user function.
-            // Not releasing GIL before serialize to avoid an additional
-            // context switch.
-            auto serializedPyObj = pythonRpcHandler.serialize(result);
-            py::gil_scoped_release release;
-            markComplete(
-                std::move(PythonResp(std::move(serializedPyObj))).toMessage());
-            return;
-          }
-
-          try {
-            pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
-          } catch (const py::cast_error& e) {
-            auto type = result.get_type();
-            auto errMsg = c10::str(
-                e.what(),
-                ". Functions decorated with @rpc.async_function must return a "
-                "torch.futures.Future object, but got ",
-                type.attr("__module__").cast<std::string>(),
-                ".",
-                type.attr("__qualname__").cast<std::string>());
-
-            {
-              py::gil_scoped_release release;
-              responseFuture->markCompleted(
-                  createExceptionResponse(errMsg, messageId));
-            }
-            return;
-          }
-        }
-        pyFuture->fut->addCallback([msgId = messageId,
-                                    responseFuture = responseFuture,
-                                    jitFuture = pyFuture->fut,
-                                    &pythonRpcHandler]() {
-          std::shared_ptr<SerializedPyObj> serializedPyObj;
-          {
-            py::gil_scoped_acquire acquire;
-            serializedPyObj =
-                std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
-                    jit::toPyObject(jitFuture->value())));
-          }
-          auto m =
-              std::move(PythonResp(std::move(*serializedPyObj))).toMessage();
-          m.setId(msgId);
-          responseFuture->markCompleted(std::move(m));
-        });
+        processAsyncExecution(
+            upc.pythonUdf(),
+            messageId,
+            responseFuture,
+            [](SerializedPyObj serializedPyObj,
+               const int64_t messageId,
+               const std::shared_ptr<FutureMessage>& responseFuture) {
+              auto m =
+                  std::move(PythonResp(std::move(serializedPyObj))).toMessage();
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            });
       } else {
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
         std::shared_ptr<SerializedPyObj> serializedPyObj;
         {
           py::gil_scoped_acquire acquire;
@@ -360,6 +376,7 @@ void RequestCallbackImpl::processRpc(
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
 
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+
       IValue py_ivalue;
       try {
         {
