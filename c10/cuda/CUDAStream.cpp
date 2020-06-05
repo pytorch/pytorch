@@ -17,7 +17,7 @@ namespace cuda {
 namespace {
 
 
-typedef std::unique_ptr<std::function<cudaStream_t()>> CUDAStreamProvider;
+typedef std::function<cudaStream_t()> CUDAStreamProvider;
 // Internal implementation that leaks the stream. It's not intended to be used
 // outside of this file.
 struct LeakyStreamInternals {
@@ -37,7 +37,7 @@ struct LeakyStreamInternals {
   DeviceIndex device_index = -1;
   int32_t stream_id = -1;
   cudaStream_t stream = nullptr;
-  CUDAStreamProvider stream_provider = nullptr;
+  CUDAStreamProvider stream_provider = std::function<cudaStream_t()>();
 };
 
 // Global stream state and constants
@@ -327,7 +327,7 @@ CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
 cudaStream_t CUDAStream::stream() const {
   auto ptr = CUDAStream_internals(*this);
   AT_ASSERT(ptr);
-  return ptr->stream != nullptr ? ptr->stream : (*(ptr->stream_provider))();
+  return ptr->stream_provider ? ptr->stream_provider() : ptr->stream;
 }
 
 // Returns a stream from the requested pool
@@ -376,6 +376,18 @@ void setCurrentCUDAStream(CUDAStream stream) {
   auto ptr = CUDAStream_internals(stream);
   AT_ASSERT(ptr);
   current_streams[ptr->device_index] = ptr;
+}
+
+CUDAStream registerCustomCUDAStream(DeviceIndex device_index, CUDAStreamProvider stream_provider) {
+  initCUDAStreamsOnce();
+  // counter++
+  uint32_t stream_id = custom_counter++;
+  // add type bits ....
+  LeakyStreamInternals* newStream = &custom_stream[device_index][custom_counter++]
+  return CUDAStream(
+    CUDAStream::UNCHECKED,
+    Stream(Stream::UNSAFE, Device(kCUDA, device_index), stream_id)
+  );
 }
 
 std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {
