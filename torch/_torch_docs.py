@@ -4028,7 +4028,7 @@ Example::
 
 add_docstr(torch.mul,
            r"""
-mul(input, other, out=None)
+mul(input, other, out=None) -> Tensor
 
 Multiplies each element of the input :attr:`input` with the scalar
 :attr:`other` and returns a new resulting tensor.
@@ -4041,7 +4041,7 @@ should be a real number, otherwise it should be an integer
 
 Args:
     {input}
-    value (Number): the number to be multiplied to each element of :attr:`input`
+    other (Number): the number to be multiplied to each element of :attr:`input`
     {out}
 
 Example::
@@ -4052,7 +4052,7 @@ Example::
     >>> torch.mul(a, 100)
     tensor([  20.1494,  -42.5491,  260.8663])
 
-.. function:: mul(input, other, out=None)
+.. function:: mul(input, other, out=None) -> Tensor
 
 Each element of the tensor :attr:`input` is multiplied by the corresponding
 element of the Tensor :attr:`other`. The resulting tensor is returned.
