@@ -1,6 +1,5 @@
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
 ${CMAKE_CURRENT_SOURCE_DIR}/ClassNLLCriterion.cu
-${CMAKE_CURRENT_SOURCE_DIR}/GatedLinearUnit.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/LogSigmoid.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/MultiLabelMarginCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/MultiMarginCriterion.cu
