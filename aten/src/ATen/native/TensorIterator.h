@@ -390,7 +390,9 @@ protected:
   void compute_names();
   void propagate_names_to_outputs();
   void coalesce_dimensions();
-  void analyze_memory_format();
+  bool requires_channels_last_2d_output();
+  bool requires_channels_last_3d_output();
+  template <int D, at::MemoryFormat mf> bool requires_channels_last_nd_output();
 
 protected:
   DimVector shape_;
@@ -411,8 +413,6 @@ protected:
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
   bool all_ops_same_shape_ = false;
-  bool requires_channels_last_output_ = false;
-  bool requires_channels_last_3d_output_ = false;
   bool static_shape_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
