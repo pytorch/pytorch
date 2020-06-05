@@ -26,19 +26,6 @@ THC_API void THNN_(ClassNLLCriterion_updateGradInput)(
                   THCTensor *total_weight,
                   int64_t ignore_index);
 
-THC_API void THNN_(GatedLinear_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int dim);
-
-THC_API void THNN_(GatedLinear_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int dim);
-
 THC_API void THNN_(LogSigmoid_updateOutput)(
                   THCState *state,
                   THCTensor *input,
