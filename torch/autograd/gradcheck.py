@@ -243,6 +243,8 @@ def gradcheck(
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
+        check_undefined_grad (bool, options): if True, check if undefined output grads
+            are supported and treated as zeros
 
     Returns:
         True if all differences satisfy allclose condition
@@ -351,6 +353,13 @@ def gradcheck(
                 return fail_test('grad is incorrect size')
 
         if check_undefined_grad:
+            def warn_bc_breaking():
+                warnings.warn((
+                    'Backwards compatibility: New undefined gradient support checking '
+                    'feature is enabled by default, but it may break existing callers '
+                    'of this function. If this is true for you, you can call this '
+                    'function with "check_undefined_grad=False" to disable the feature'))
+
             def check_undefined_grad_support(output_to_check):
                 grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_to_check]
                 try:
@@ -359,6 +368,7 @@ def gradcheck(
                                                       grads_output,
                                                       allow_unused=True)
                 except RuntimeError:
+                    warn_bc_breaking()
                     return fail_test((
                         'Expected backward function to handle undefined output grads. '
                         'Please look at "Notes about undefined output gradients" in '
@@ -366,6 +376,7 @@ def gradcheck(
 
                 for gi, i in zip(grads_input, diff_input_list):
                     if (gi is not None) and (not gi.eq(0).all()):
+                        warn_bc_breaking()
                         return fail_test((
                             'Expected all input grads to be undefined or zero when all output grads are undefined '
                             'or zero. Please look at "Notes about undefined output gradients" in '
