@@ -4040,9 +4040,11 @@ If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`other`
 should be a real number, otherwise it should be an integer
 
 Args:
-    input (Tensor): the input tensor
+    {input}
     other (Number): the number to be multiplied to each element of :attr:`input`
-    out (Tensor, optional): the output tensor
+
+Keyword arguments:
+    {out}
 
 Example::
 
