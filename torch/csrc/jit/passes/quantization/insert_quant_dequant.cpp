@@ -551,27 +551,20 @@ void InsertQuantDeQuantHelper::cleanup(Module& module, Graph* g) {
   GRAPH_DUMP("After remove observers :", g);
 }
 
-Value* updateInputValueInGraph(
-    Value* v,
-    std::shared_ptr<Graph>& g,
-    std::unordered_map<Value*, Value*>& remap_old_to_new) {
-  if (remap_old_to_new.count(v) == 0) {
-    auto new_value = g->block()->addInput();
-    remap_old_to_new[v] = new_value;
-    new_value->copyMetadata(v);
-    return new_value;
-  } else {
-    return remap_old_to_new[v];
-  }
-}
-
 void SubGraphCloneHelper::cloneNodeInGraph(
     Node* node,
     std::shared_ptr<Graph>& g,
     std::unordered_map<Value*, Value*>& remap_old_to_new) {
   auto* block = g->block();
   auto value_fn = [&](Value* v) {
-    return updateInputValueInGraph(v, g, remap_old_to_new);
+    if (remap_old_to_new.count(v) == 0) {
+      auto new_value = g->block()->addInput();
+      remap_old_to_new[v] = new_value;
+      new_value->copyMetadata(v);
+      return new_value;
+    } else {
+      return remap_old_to_new[v];
+    }
   };
 
   auto new_node = block->appendNode(g->createClone(node, value_fn));
