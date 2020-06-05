@@ -437,18 +437,6 @@ public:
   ); \
   void TORCH_LIBRARY_init_ ## ns (torch::Library& m)
 
-// This macro is a version of TORCH_LIBRARY that doesn't enforce that there
-// is only one library (it is a "fragment").  This should ONLY be used
-// with PerOpRegistration (as its name suggests).
-#define TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(ns, m) \
-  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## k ( \
-    torch::Library::FRAGMENT, \
-    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k, \
-    #ns, c10::nullopt, __FILE__, __LINE__ \
-  ); \
-  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library& m)
-
 // NB: if the dispatch key is not whitelisted, we simply omit the Library
 // call entirely
 #define TORCH_LIBRARY_IMPL(ns, k, m) \

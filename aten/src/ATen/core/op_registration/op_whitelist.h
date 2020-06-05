@@ -52,6 +52,7 @@ constexpr bool op_whitelist_contains(string_view whitelist, string_view item) {
 // Returns true iff the given op name is on the whitelist
 // and should be registered
 constexpr bool op_whitelist_check(c10::string_view op_name) {
+  assert(op_name.find("::") != string_view::npos);
 #if !defined(TORCH_OPERATOR_WHITELIST)
   // If the TORCH_OPERATOR_WHITELIST parameter is not defined,
   // all ops are to be registered
