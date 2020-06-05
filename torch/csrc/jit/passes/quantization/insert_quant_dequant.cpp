@@ -685,9 +685,7 @@ void propagateQParams(
   insertDeQuantForAllUse(graph, quantized_output, quantized_output);
 }
 
-void propagateDequantize(Value* output, const std::vector<Value*> inputs) {
-  Node* n = output->node();
-  Graph* graph = n->owningGraph();
+void removeDequantizeFromInputs(const std::vector<Value*> inputs) {
   // Delete dequantize node, we have one dequantize
   // for each use of the value
   for (auto* dequantized_val : inputs) {
@@ -701,7 +699,26 @@ void propagateDequantize(Value* output, const std::vector<Value*> inputs) {
     dequantize_node->removeAllInputs();
     dequantize_node->destroy();
   }
-  insertDeQuantForAllUse(graph, output, output);
+}
+
+// Check if we need to propagate the quantization ops from input to
+// output
+c10::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
+  auto inputs = getPassThroughInputs(output);
+  if (inputs.size() > 0) {
+    // note that we don't need to recursively check for prim::If
+    // here because if all inputs of a prim::If is dequantized
+    // the dequantize will be factored out before we get to this
+    // point
+    bool is_dequantized = true;
+    for (auto* input : inputs) {
+      is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
+    }
+    if (is_dequantized) {
+      return inputs;
+    }
+  }
+  return c10::nullopt;
 }
 
 void propagateQuantizationOps(Block* block) {
@@ -718,27 +735,23 @@ void propagateQuantizationOps(Block* block) {
         // is not supported right now
         continue;
       }
-    }
-    for (auto* output : n->outputs()) {
-      auto inputs = getPassThroughInputs(output);
-      if (inputs.size() > 0) {
-        // note that we don't need to recursively check for prim::If
-        // here because if all inputs of a prim::If is dequantized
-        // the dequantize will be factored out before we get to this
-        // point
-        bool is_dequantized = true;
-        for (auto* input : inputs) {
-          is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
+    } else if (isSingleInputGeneralValueAtenFunction(n)) {
+      for (auto* output : n->outputs()) {
+        if (auto inputs = getDequantizedInputs(output)) {
+          propagateQParams(output, *inputs);
         }
-        if (!is_dequantized) {
-          continue;
+      }
+    } else if (auto qparams_opt = getFixedQParams(n)) {
+      for (auto* output : n->outputs()) {
+        if (auto inputs = getDequantizedInputs(output)) {
+          propagateQParams(output, *inputs, qparams_opt);
         }
-        if (isSingleInputGeneralValueAtenFunction(n)) {
-          propagateQParams(output, inputs);
-        } else if (auto qparams_opt = getFixedQParams(n)) {
-          propagateQParams(output, inputs, qparams_opt);
-        } else {
-          propagateDequantize(output, inputs);
+      }
+    } else {
+      for (auto* output : n->outputs()) {
+        if (auto inputs = getDequantizedInputs(output)) {
+          removeDequantizeFromInputs(*inputs);
+          insertDeQuantForAllUse(output->owningGraph(), output, output);
         }
       }
     }
