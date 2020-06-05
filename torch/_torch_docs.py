@@ -4648,6 +4648,45 @@ Example::
     tensor([  2.,   4.,   8.,  16.])
 """.format(**common_args))
 
+add_docstr(torch.nanprod,
+           r"""
+nanprod(input, dtype=None) -> Tensor
+
+Returns the product of all elements excluding ``NaN`` values in the
+:attr:`input` tensor.
+
+Args:
+    {input}
+    {dtype}
+
+Example::
+
+    >>> a = torch.tensor([float('nan'), 2, 3, 6, float('nan')])
+    >>> out = torch.nanprod(a)
+    >>> out
+    tensor(36.)
+
+.. function:: nanprod(input, dim, keepdim=False, dtype=None) -> Tensor
+
+Returns the product of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim` excluding `NaN` values.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+    {dtype}
+
+Example::
+
+    >>> a = torch.tensor([[float('nan'), 23], [6, float('nan')]])
+    >>> out = torch.nanprod(a, 0)
+    >>> out
+    tensor([ 6., 23.])
+""".format(**single_dim_common))
+
 add_docstr(torch.prod,
            r"""
 prod(input, dtype=None) -> Tensor
