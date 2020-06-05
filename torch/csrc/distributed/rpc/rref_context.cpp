@@ -84,6 +84,7 @@ void RRefContext::handleException(const FutureMessage& fm) {
   if (fm.hasError()) {
     // TODO: allow users to register an error handler and call it here.
     VLOG(1) << "Got exception: " << fm.error()->what();
+    std::cout << "=== exception is " << fm.error() -> what();
     throw std::runtime_error(fm.error()->what());
   }
 }

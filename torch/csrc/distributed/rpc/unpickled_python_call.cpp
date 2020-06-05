@@ -22,7 +22,11 @@ UnpickledPythonCall::~UnpickledPythonCall() {
   // See Note [Destructing py::object] in python_ivalue.h
   std::cout << "==== destructing UnpickledPythonCall\n" << std::flush;
   py::gil_scoped_acquire acquire;
+  std::cout << "==== destructing UnpickledPythonCall acquired GIL\n" << std::flush;
+
   pythonUdf_.dec_ref();
+  std::cout << "==== destructing UnpickledPythonCall derefed\n" << std::flush;
+
   pythonUdf_.ptr() = nullptr;
   std::cout << "==== done destructing UnpickledPythonCall\n" << std::flush;
 }
