@@ -443,10 +443,10 @@ class TestScriptPy3(JitTestCase):
 
         @ torch.jit.script
         def fn(x):
-            # type (number) -> number
+            # type: (number) -> number
             return x + 1
 
-        FileCheck().check('number').run(fn.graph)
+        FileCheck().check('Scalar').run(fn.graph)
 
     def test_parser_bug(self):
         def parser_bug(o: Optional[torch.Tensor]):
