@@ -131,6 +131,7 @@ void sinh_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+// We manually overload cosh because std::cosh does not work with thrust::complex types.
 template<typename scalar_t>
 __host__ __device__ static inline scalar_t cosh_wrapper(scalar_t v) {
   return ::cosh(v);
@@ -171,6 +172,36 @@ void tanh_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void acosh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "acosh_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "acosh_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+              return ::acosh(a);
+      });
+    });
+  });
+}
+
+void asinh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "asinh_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "asinh_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+              return ::asinh(a);
+      });
+    });
+  });
+}
+
+void atanh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "atanh_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "atanh_cuda", [&] {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+              return ::atanh(a);
+      });
+    });
+  });
+}
+
 template<typename scalar_t>
 __host__ __device__ static inline scalar_t tan_wrapper(scalar_t v) {
   return ::tan(v);
@@ -191,6 +222,9 @@ void tan_kernel_cuda(TensorIterator& iter) {
 }
 
 REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
+REGISTER_DISPATCH(acosh_stub, &acosh_kernel_cuda);
+REGISTER_DISPATCH(asinh_stub, &asinh_kernel_cuda);
+REGISTER_DISPATCH(atanh_stub, &atanh_kernel_cuda);
 REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
 REGISTER_DISPATCH(atan_stub, &atan_kernel_cuda);
 REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);
