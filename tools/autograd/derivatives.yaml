@@ -981,7 +981,7 @@
   self: grad.reshape(self.sizes())
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_complex(grad)
+  self: at::view_as_complex(grad.contiguous()).conj()
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
   self: at::view_as_real(grad)

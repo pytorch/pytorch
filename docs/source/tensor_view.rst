@@ -62,6 +62,8 @@ For reference, here’s a full list of view ops in PyTorch:
 - :attr:`~torch.Tensor.T`
 - :attr:`~torch.Tensor.real`
 - :attr:`~torch.Tensor.imag`
+- :func:`~torch.Tensor.view_as_real`
+- :func:`~torch.Tensor.view_as_imag`
 - :meth:`~torch.Tensor.unfold`
 - :meth:`~torch.Tensor.unsqueeze`
 - :meth:`~torch.Tensor.view`

@@ -31,11 +31,11 @@ inline std::vector<int64_t> computeStrideForViewAsComplex(IntArrayRef oldstride)
   auto res = oldstride.vec();
   int dim = res.size();
 
-  TORCH_INTERNAL_ASSERT(res[dim-1] == 1 || res[dim-1] == 0);
+  TORCH_CHECK(res[dim-1] == 1, "Tensor must have a last dimension with stride 1");
   res.pop_back();
 
   for(size_t i = 0; i < res.size(); i++) {
-    TORCH_INTERNAL_ASSERT(res[i] % 2 == 0);
+    TORCH_CHECK(res[i] % 2 == 0, "Tensor must a stride divisible by 2 for all but last dimension");
     res[i] = res[i] / 2;
   }
   return res;
@@ -49,7 +49,7 @@ Tensor view_as_complex(const Tensor& self) {
     "view_as_complex is only supported for float and double tensors");
 
   auto new_sizes = self.sizes().vec();
-  TORCH_INTERNAL_ASSERT(new_sizes[self.dim()-1] == 2);
+  TORCH_CHECK(new_sizes[self.dim()-1] == 2, "Tensor must have a last dimension of size 2");
   new_sizes.pop_back();
 
   auto new_strides = computeStrideForViewAsComplex(self.strides());

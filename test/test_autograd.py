@@ -1503,7 +1503,7 @@ class TestAutograd(TestCase):
         gradgradcheck(func, [x])
 
     def test_real_imag(self):
-        x = torch.randn(10, dtype=torch.cfloat, requires_grad=True)
+        x = torch.randn(10, dtype=torch.cdouble, requires_grad=True)
 
         def real(x):
             return x.real.sum()
