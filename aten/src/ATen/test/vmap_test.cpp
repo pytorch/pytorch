@@ -260,6 +260,51 @@ TEST(VmapTest, TestPhysicalViewNewLogicalFromPhysical) {
   }
 }
 
+// Basic test for BatchedTensor::sum.
+// NB: We don't need to write tests in C++ for batching rules if we can test them
+// in Python via the vmap API. These are here to bootstrap that process.
+TEST(VmapTest, TestBatchedTensorSum) {
+  {
+    // Simple: single batch dim, single reduce dim
+    Tensor x = at::randn({2, 3, 5, 7});
+
+    Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/0}});
+    Tensor batched_out = batched_x.sum(0);
+    const auto& out = maybeGetBatched(batched_out)->value();
+
+    ASSERT_TRUE(at::allclose(out, x.sum(1)));
+  }
+  {
+    // single batch dim, -1 reduce dim handling
+    Tensor x = at::randn({2, 3});
+
+    Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/1}});
+    Tensor batched_out = batched_x.sum(-1);
+    const auto& out = maybeGetBatched(batched_out)->value();
+
+    ASSERT_TRUE(at::allclose(out, x.sum(0)));
+  }
+  {
+    // single batch dim, multiple reduce dim
+    Tensor x = at::randn({2, 3, 5, 7});
+
+    Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/1}});
+    Tensor batched_out = batched_x.sum(std::vector<int64_t>{0, 1});
+    const auto& out = maybeGetBatched(batched_out)->value();
+
+    ASSERT_TRUE(at::allclose(out, x.sum(std::vector<int64_t>{0, 2})));
+  }
+  {
+    // multiple batch dim, multiple reduce dim
+    Tensor x = at::randn({2, 3, 5, 7});
+
+    Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/1}});
+    Tensor batched_out = batched_x.sum(std::vector<int64_t>{0, 1});
+    const auto& out = maybeGetBatched(batched_out)->value();
+
+    ASSERT_TRUE(at::allclose(out, x.sum(std::vector<int64_t>{2, 3})));
+  }
+}
 
 
 }
