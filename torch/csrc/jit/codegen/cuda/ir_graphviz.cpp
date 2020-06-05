@@ -90,13 +90,11 @@ class IrNodeLabel : private OptInConstDispatch {
   }
 
   void handle(const Split* split) override {
-    label_ << "Split(IterDomain=" << split->in()
-           << ", factor=" << IrNodeLabel::gen(split->factor()) << ")";
+    label_ << "Split( factor=" << IrNodeLabel::gen(split->factor()) << ")";
   }
 
   void handle(const Merge* merge) override {
-    label_ << "Merge(IterDomainOuter=" << merge->outer()
-           << ", IterDomainInner=" << merge->inner() << ")";
+    label_ << "Merge";
   }
 
  private:
