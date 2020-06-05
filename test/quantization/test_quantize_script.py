@@ -932,16 +932,19 @@ graph(%input, %weight):
                 self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
             def forward(self, x):
-                x = torch.dequantize(x)
+                # type: (List[Tensor]) -> Tensor
+                x, y = torch.dequantize(x)
                 x = self.maxpool(x)
-                x = self.avgpool(x)
-                return x
+                y = self.avgpool(y)
+                return x + y
         x = torch.randn([1, 3, 10, 10], dtype=torch.float)
         x = torch.quantize_per_tensor(x, 0.5, 1, torch.quint8)
+        input = [x, x]
         m = torch.jit.script(M())
-        ref_res = m(x)
+        ref_res = m(input)
         torch._C._jit_pass_inline(m.graph)
         FileCheck().check("aten::dequantize") \
+                   .check("prim::ListUnpack") \
                    .check("aten::max_pool2d") \
                    .check("aten::adaptive_avg_pool2d") \
                    .run(m.graph)
@@ -950,7 +953,7 @@ graph(%input, %weight):
                    .check("aten::adaptive_avg_pool2d") \
                    .check("dequantize") \
                    .run(m.graph)
-        res = get_forward(m._c)(x)
+        res = m(input)
         self.assertEqual(res, ref_res)
 
     def test_swap_functional_linear(self):
