@@ -252,13 +252,13 @@ void RequestCallbackImpl::processRpc(
               messageId,
               responseFuture,
               [](const py::object& result,
-                const int64_t messageId,
-                PythonRpcHandler& pythonRpcHandler,
-                const std::shared_ptr<FutureMessage>& responseFuture) {
+                 const int64_t messageId,
+                 PythonRpcHandler& pythonRpcHandler,
+                 const std::shared_ptr<FutureMessage>& responseFuture) {
                 auto serializedPyObj = pythonRpcHandler.serialize(result);
                 py::gil_scoped_release release;
-                auto m =
-                    std::move(PythonResp(std::move(serializedPyObj))).toMessage();
+                auto m = std::move(PythonResp(std::move(serializedPyObj)))
+                             .toMessage();
                 m.setId(messageId);
                 responseFuture->markCompleted(std::move(m));
               });
@@ -481,39 +481,38 @@ void RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       // Making this lambda mutable to allow move-capture it in callbacks
-      auto postProcessing =
-          [responseFuture](c10::intrusive_ptr<OwnerRRef> rref,
-                           int64_t messageId) mutable {
-            auto whenValueSet = rref->getFuture();
-            if (whenValueSet->hasError()) {
-              responseFuture->setError(whenValueSet->error()->what());
-              return;
-            }
-            try {
-              auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-              std::shared_ptr<SerializedPyObj> result;
-              {
-                // Need this GIL to guard jit::toPyObj and destruct its returned
-                // py::object
-                py::gil_scoped_acquire acquire;
-                result = std::make_shared<SerializedPyObj>(
-                    pythonRpcHandler.serialize(
-                        jit::toPyObject(rref->getValue())));
-              }
-              Message m = PythonRRefFetchRet(
-                  std::move(*result).toIValues()).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } catch (py::error_already_set& e) {
-              // py::error_already_set requires GIL to destruct, take special care.
-              responseFuture->setError(e.what());
-              py::gil_scoped_acquire acquire;
-              e.restore();
-              PyErr_Clear();
-            } catch (const std::exception& e) {
-              responseFuture->setError(e.what());
-            }
-          };
+      auto postProcessing = [responseFuture](
+                                c10::intrusive_ptr<OwnerRRef> rref,
+                                int64_t messageId) mutable {
+        auto whenValueSet = rref->getFuture();
+        if (whenValueSet->hasError()) {
+          responseFuture->setError(whenValueSet->error()->what());
+          return;
+        }
+        try {
+          auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+          std::shared_ptr<SerializedPyObj> result;
+          {
+            // Need this GIL to guard jit::toPyObj and destruct its returned
+            // py::object
+            py::gil_scoped_acquire acquire;
+            result = std::make_shared<SerializedPyObj>(
+                pythonRpcHandler.serialize(jit::toPyObject(rref->getValue())));
+          }
+          Message m =
+              PythonRRefFetchRet(std::move(*result).toIValues()).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(std::move(m));
+        } catch (py::error_already_set& e) {
+          // py::error_already_set requires GIL to destruct, take special care.
+          responseFuture->setError(e.what());
+          py::gil_scoped_acquire acquire;
+          e.restore();
+          PyErr_Clear();
+        } catch (const std::exception& e) {
+          responseFuture->setError(e.what());
+        }
+      };
 
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
