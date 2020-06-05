@@ -13,7 +13,7 @@ inline c10::optional<MemoryFormat> process_memory_format(const TensorOptions& op
         "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
         "the redundant setter.");
     if (memory_format.has_value()) {
-        return *memory_format;
+        return memory_format;
     } else {
         return options.memory_format_opt();
     }
@@ -60,7 +60,6 @@ struct scatter_tensor_options<FuncType, base_func_ptr, std::enable_if_t<!has_ten
     static constexpr auto* func_ptr() {
         // FuncType does not have TensorOptions arguments.
         // Don't wrap anything but just return the base pointer.
-        // TODO Merge this case with the other one and use if_constexpr
         return base_func_ptr;
     }
 };
