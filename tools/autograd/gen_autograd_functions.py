@@ -191,14 +191,20 @@ def process_function(func):
     if uses_single_grad(func):
         body.append('auto& grad = grads[0];')
 
-    def emit_derivative(derivative, forward_func_name):
+    def emit_derivative(derivative, args_with_derivatives):
         formula = derivative['formula']
         var_names = derivative['var_names']
         if len(var_names) == 1:
             checks_any_grad_defined = False
-            if forward_func_name not in ['cat', 'stack'] and 'not_implemented' not in formula:
-                formula = 'any_grad_defined ? (' + formula + ') : Tensor()'
-                checks_any_grad_defined = True
+            if 'not_implemented' not in formula:
+                matching_args = [
+                    arg for arg in args_with_derivatives
+                    if ('name' in arg) and (arg['name'] == var_names[0])]
+                if len(matching_args) == 1:
+                    # We can add undefined grad support if the input variable is a Tensor
+                    if ('simple_type' in matching_args[0].keys()) and (matching_args[0]['simple_type'] == 'Tensor'):
+                        formula = 'any_grad_defined ? (' + formula + ') : Tensor()'
+                        checks_any_grad_defined = True
             return (checks_any_grad_defined,
                     DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula))
         else:
@@ -219,7 +225,7 @@ def process_function(func):
     body.extend(unpack)
     need_any_grad_defined_var = False
     for derivative in func['derivatives']:
-        checks_any_grad_defined, derivative_text = emit_derivative(derivative, func['name'])
+        checks_any_grad_defined, derivative_text = emit_derivative(derivative, func['args_with_derivatives'])
         body.append(derivative_text)
         need_any_grad_defined_var |= checks_any_grad_defined
     # Since single-output derivative formulas need to check if grads are
