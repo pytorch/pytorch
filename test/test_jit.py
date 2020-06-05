@@ -17649,6 +17649,17 @@ a")
         input = torch.ones(2, 2)
         self.assertEqual(input, sm(input))
 
+    # Tests the case where a torch.Tensor subclass (like Parameter) is used as
+    # input.
+    def test_script_module_tensor_subclass_argument(self):
+        @torch.jit.script
+        def parameter_script(x: torch.nn.Parameter):
+            return x
+
+        input = torch.ones(2, 2)
+        self.assertEqual(input, parameter_script(input))
+
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
