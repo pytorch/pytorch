@@ -3103,8 +3103,6 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         behaviour in its backward pass that is not easily switched off.
         Please see the notes on :doc:`/notes/randomness` for background.
     """
-    torch.experimental.alert_not_deterministic("interpolate")
-
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
