@@ -90,6 +90,12 @@ def get_simple_type(arg):
         simple_type = '{}?'.format(opt_match.group(1))
     return simple_type
 
+def has_tensoroptions_argument(declaration):
+    for argument in declaration['arguments']:
+        if 'TensorOptions' == argument['dynamic_type']:
+            return True
+    return False
+
 def process_schema_order_arg(schema_order_arg):
     if schema_order_arg == 'dtype':
         return 'optTypeMetaToScalarType(options.dtype_opt())'
@@ -99,6 +105,8 @@ def process_schema_order_arg(schema_order_arg):
         return 'options.device_opt()'
     elif schema_order_arg == 'pin_memory':
         return 'options.pinned_memory_opt()'
+    elif schema_order_arg == 'memory_format':
+        return 'c10::impl::process_memory_format(options, memory_format)'
     else:
         return schema_order_arg
 
@@ -122,7 +130,8 @@ def load_aten_declarations(path):
                                   for arg in declaration['arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['schema_order_args'] = [arg['name'] for arg in declaration['schema_order_arguments']]
-        declaration['schema_order_args'] = [process_schema_order_arg(arg) for arg in declaration['schema_order_args']]
+        if has_tensoroptions_argument(declaration):
+            declaration['schema_order_args'] = [process_schema_order_arg(arg) for arg in declaration['schema_order_args']]
         declaration['api_name'] = declaration['name']
         # NB: keep this in sync with common_with_cwrap.py
         if declaration.get('overload_name'):

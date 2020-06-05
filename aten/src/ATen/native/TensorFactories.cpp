@@ -284,11 +284,11 @@ Tensor empty_like(
       result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
     } else {
       // See Note [Explicit nullopt MemoryFormat argument]
-      result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), self.suggest_memory_format());
+      result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
     }
   } else {
     // See Note [Explicit nullopt MemoryFormat argument]
-    result = at::empty(self.sizes(), options.memory_format(memory_format), memory_format);
+    result = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
   }
 
   if (self.opt_names()) {

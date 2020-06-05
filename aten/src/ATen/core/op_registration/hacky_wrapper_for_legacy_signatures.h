@@ -7,6 +7,18 @@
 namespace c10 {
 namespace impl {
 
+inline c10::optional<MemoryFormat> process_memory_format(const TensorOptions& options, c10::optional<MemoryFormat> memory_format) {
+    TORCH_CHECK(
+        !(options.has_memory_format() && memory_format.has_value()),
+        "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+        "the redundant setter.");
+    if (memory_format.has_value()) {
+        return *memory_format;
+    } else {
+        return options.memory_format_opt();
+    }
+}
+
 namespace detail {
 
 // scatter_tensor_options takes a function pointer that potentially takes a TensorOptions argument.

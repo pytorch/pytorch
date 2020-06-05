@@ -910,6 +910,8 @@ def create_generic(top_env, declarations):
             return 'options.device_opt()'
         elif schema_order_actual == 'pin_memory':
             return 'options.pinned_memory_opt()'
+        elif schema_order_actual == 'memory_format':
+            return 'c10::impl::process_memory_format(options, memory_format)'
         else:
             return schema_order_actual
 
