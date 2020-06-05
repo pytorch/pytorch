@@ -92,6 +92,8 @@ white_list = [
     ('aten::le', datetime.date(2020, 6, 30)),
     ('aten::ge', datetime.date(2020, 6, 30)),
     ('aten::pow', datetime.date(2020, 6, 30)),
+    ('aten::min', datetime.date(2020, 6, 30)),
+    ('aten::max', datetime.date(2020, 6, 30)),
 
 
 # The nightly will fail to parse newly added syntax to schema declarations
