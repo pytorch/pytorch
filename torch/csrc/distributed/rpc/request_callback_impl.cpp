@@ -481,19 +481,9 @@ void RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       // Making this lambda mutable to allow move-capture it in callbacks
-      /*
-      auto serialize = [](IValue value) mutable -> SerializedPyObj {
-        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-        // Need this GIL to guard jit::toPyObj and destruct its returned
-        // py::object
-        py::gil_scoped_acquire acquire;
-        return pythonRpcHandler.serialize(jit::toPyObject(std::move(value)));
-      };
-      */
-
       auto postProcessing =
           [responseFuture](c10::intrusive_ptr<OwnerRRef> rref,
-                           int64_t messageId) {
+                           int64_t messageId) mutable {
             auto whenValueSet = rref->getFuture();
             if (whenValueSet->hasError()) {
               responseFuture->setError(whenValueSet->error()->what());
