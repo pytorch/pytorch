@@ -2382,7 +2382,7 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
 
-class TestGraphModePostTrainingStatic(QuantizationTestCase):
+class TestQuantizeScript(QuantizationTestCase):
     def test_single_linear(self):
         r"""Compare the result of quantizing single linear layer in
         eager mode and graph mode

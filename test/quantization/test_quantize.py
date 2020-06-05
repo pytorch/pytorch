@@ -1,4 +1,3 @@
-import unittest
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
@@ -7,42 +6,25 @@ import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
 from torch.nn.utils.rnn import PackedSequence
 from torch.quantization import (
-    quantize, # remove?
+    quantize,
     prepare,
     convert,
     prepare_qat,
     quantize_qat,
     fuse_modules,
-    quantize_dynamic, # remove?
+    quantize_dynamic,
     QuantWrapper,
     QConfig,
     default_qconfig,
-    default_per_channel_qconfig, # remove?
     default_qat_qconfig,
     default_dynamic_qconfig,
     per_channel_dynamic_qconfig,
-    default_eval_fn,
     float16_dynamic_qconfig,
-    default_observer,
-    default_weight_observer, # remove?
-    default_per_channel_weight_observer,
-    default_histogram_observer,
-)
-
-from torch.quantization.quantize_script import (
-    quantize_script,
-    quantize_dynamic_script
 )
 
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
-    AnnotatedSingleLayerLinearModel, # remove?
-    SingleLayerLinearModel, # remove?
-    AnnotatedConvModel, # remove?
-    ConvModel, # remove?
-    AnnotatedConvBnModel,
-    ConvBnModel,
-    SkipQuantModel, # remove?
+    AnnotatedSingleLayerLinearModel,
     QuantStubModel,
     ModelForFusion,
     ModelWithSequentialFusion,
@@ -53,14 +35,14 @@ from torch.testing._internal.common_quantization import (
     ModelMultipleOpsNoAvgPool,
     SingleLayerLinearDynamicModel,
     TwoLayerLinearModel,
-    NestedModel, #remove?
+    NestedModel,
     ResNetBase,
     LSTMDynamicModel,
     ModelForFusionWithBias,
     ActivationsTestModel,
     ActivationsQATTestModel,
     NormalizationTestModel,
-    test_only_eval_fn, # remove?
+    test_only_eval_fn,
     test_only_train_fn,
     prepare_dynamic,
     convert_dynamic,
