@@ -27,7 +27,8 @@ class DistributedSampler(Sampler):
         shuffle (bool, optional): If ``True`` (default), sampler will shuffle the
             indices.
         seed (int, optional): random seed used to shuffle the sampler if
-            :attr:`shuffle=True`. Default: ``0``.
+            :attr:`shuffle=True`. This number should be identical across all
+            processes in the distributed group. Default: ``0``.
 
     .. warning::
         In distributed mode, calling the :meth`set_epoch` method at the beginning of each
