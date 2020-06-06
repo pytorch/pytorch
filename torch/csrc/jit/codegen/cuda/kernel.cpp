@@ -542,11 +542,6 @@ void runTestKernel(
 
   KernelArgumentHolder kernel_args;
 
-  auto exprs = entry->fusion_->exprs(true);
-  bool has_reduction = std::any_of(exprs.begin(), exprs.end(), [](Expr* expr) {
-    return expr->getExprType() == ExprType::ReductionOp;
-  });
-
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
@@ -558,11 +553,7 @@ void runTestKernel(
       TORCH_INTERNAL_ASSERT(
           !entry->fusion_->outputs().empty(),
           "No output found for this kernel, aborting.");
-      if (has_reduction) {
-        kernel_args.push(input.toTensor());
-      } else {
-        kernel_args.push(input.toTensor(), outputs[0].sizes());
-      }
+      kernel_args.push(input.toTensor());
     } else {
       kernel_args.push(input);
     }
