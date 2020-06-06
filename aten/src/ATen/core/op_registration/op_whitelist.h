@@ -35,12 +35,12 @@ constexpr bool op_whitelist_contains(string_view whitelist, string_view item) {
     for (size_t cur = 0; cur <= whitelist.size(); cur = next) {
       next = whitelist.find(';', cur);
       if (next != string_view::npos) {
-        if (whitelist.substr(cur, next - cur) == item) {
+        if (whitelist.substr(cur, next - cur).compare(item) == 0) {
           return true;
         }
         next++;
       } else {
-        if (whitelist.substr(cur) == item) {
+        if (whitelist.substr(cur).compare(item) == 0) {
           return true;
         }
         break;
@@ -52,7 +52,7 @@ constexpr bool op_whitelist_contains(string_view whitelist, string_view item) {
 // Returns true iff the given op name is on the whitelist
 // and should be registered
 constexpr bool op_whitelist_check(c10::string_view op_name) {
-  assert(op_name.find("::") != string_view::npos);
+  assert(op_name.find("::").compare(string_view::npos) != 0);
 #if !defined(TORCH_OPERATOR_WHITELIST)
   // If the TORCH_OPERATOR_WHITELIST parameter is not defined,
   // all ops are to be registered
