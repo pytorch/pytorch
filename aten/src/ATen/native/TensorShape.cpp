@@ -214,7 +214,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       iter.dont_resize_outputs();
       iter.add_output(result_slice);
       iter.add_input(tensor);
-      iter.promote_common_dtype();
+      iter.allow_promotion();
       iter.build();
       copy_stub(iter.device_type(), iter, false);
       offset += slice_dim_size;

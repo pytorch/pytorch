@@ -18,7 +18,7 @@ Tensor make_per_tensor_quantized_tensor_cuda(
         auto iter = TensorIterator();
         iter.add_output(dst);
         iter.add_input(self);
-        iter.dont_compute_common_dtype();
+        iter.validate_common_dtype(false);
         iter.build();
         gpu_kernel(iter, [] GPU_LAMBDA(underlying_t value) -> scalar_t {
           return scalar_t(value);

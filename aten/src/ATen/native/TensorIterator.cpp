@@ -73,143 +73,173 @@ void TensorIterator::reorder_dimensions() {
   permute_dimensions(perm_);
 }
 
-// Returns the first non-CPU device, if present, or the CPU
-// if all operands are on the CPU.
-Device compute_device(at::ArrayRef<OperandInfo> operands) {
-  for (auto& op : operands) {
-    if (op.tensor.defined() && !op.tensor.device().is_cpu()) {
-      return op.tensor.device();
-    }
-  }
-
-  return kCPU;
-}
-
-static std::tuple<Device, ScalarType, bool> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
-  // See [Result type computation] in TensorIterator.h
-  auto device = compute_device(operands);
-  auto common_type = ScalarType::Undefined;
-  bool all_same_type = true;
-  for (const auto& op: operands){
-    if (!op.tensor.defined()) continue;
-    //don't handle scalars
-    if (op.tensor.dim() > 0){
-      ScalarType current = op.current_dtype;
-      if (current == ScalarType::Undefined){
-        all_same_type = false;
-        break;
-      }
-      if (common_type == ScalarType::Undefined) common_type = current;
-      if (common_type != current) {
-        all_same_type = false;
-        break;
-      }
-    } else {
-      all_same_type = false;
-      break;
-    }
-  }
-  if (all_same_type) {
-    return std::make_tuple(device, common_type, true);
+// See [Result type computation] in TensorIterator.h
+ScalarType TensorIterator::compute_common_dtype() {
+  if (operands_.size() - num_outputs_ == 0) {
+    return ScalarType::Undefined;
   }
 
   at::native::ResultTypeState state = {};
-  for (const auto& op : operands) {
+  for (const auto& op : operands_) {
+    if (op.is_output) {
+      continue;
+    }
+    // std::cout << "Computing common type from operand i, which has type: " << op.tensor.scalar_type() << std::endl;
     state = at::native::update_result_type_state(op.tensor, state);
   }
-  auto dtype = at::native::result_type(state);
 
-  auto result = std::make_tuple(device, dtype, false);
-  TORCH_INTERNAL_ASSERT(dtype != ScalarType::Undefined);
-  return result;
+  const auto dtype = at::native::result_type(state);
+
+  // TODO: need to determine why result_type can return Undefined for the ScalarType
+  if (dtype == ScalarType::Undefined) {
+    TORCH_INTERNAL_ASSERT(common_dtype_ != ScalarType::Undefined);
+  } else {
+    common_dtype_ = dtype;
+  }
+
+  return common_dtype_;
 }
 
-std::tuple<Device, ScalarType, bool> TensorIterator::compute_common_type() {
-  return compute_common_type_(operands_);
-}
+// compute_types() does the following:
+//   1) determines if the operation will run on the CPU or a CUDA/HIP device
+//   2) determines the dtype of undefined outputs (see below)
+//   3) sets the target dtype of each operand (see below)
+//   4) copies CPU tensors, if requested, to match their target dtypes (see below)
 
+// [Determining a common dtype (AKA computation type) and promoting on CPU vs CUDA]
+// A common dtype (computation type) is computed if any of the following
+// are true:
+//   - an output is undefined
+//   - any of promote_inputs_, validate_common_dtype_ or allow_copy_to_outputs_
+//       are true
+// This common dtype is used as follows:
+//   - if an output is undefined its dtype becomes the common dtype
+//   - if promote_inputs_ is true and the operation runs on the CPU,
+//       the actual inputs will be copied into temporaries with the
+//       common dtype, if necessary
+//   - if allow_copy_to_outputs_ is true and the operation runs on the CPU, the
+//       a temporary copy will be made to hold the result of the computation and
+//       copied to the actual output later
+//   - if validate_common_dtype_ is true then all inputs must be of the same
+//       type or promote_inputs_ must be true, and all outputs must be of the
+//       common dtype or allow_copy_to_outputs_ must be true.
+//       (Has no effect if both promote_inputs_ and allow_copy_to_outputs_
+//       are true.)
+
+// NOTE: a more complete set of flags might be preserve_inputs_, promote_inputs_,
+//   preserve_outputs_, allow_copying_to_output_on_cpu_ and
+//   check_all_same_dtype_, check_all_inputs_same_dtype_.
 void TensorIterator::compute_types() {
-  bool missing_dtypes = false;
-  bool missing_output_dtypes = false;
+  // Reviews operands
+  //   - sets original tensor
+  //   - validates that all input tensors are defined
+  //   - computes common device
+  Device common_device = kCPU;
   common_dtype_ = dtype();
+  bool has_undefined_outputs = false;
   for (auto& op : operands_) {
-    if (!op.tensor.defined() && !op.is_type_defined()) {
-      missing_dtypes = true;
-      if (op.is_output) {
-        missing_output_dtypes = true;
-      }
+    op.original_tensor = op.tensor;
+    if (!op.tensor.defined()) {
+      TORCH_CHECK(op.is_output, "Found undefined input tensor!");
+      has_undefined_outputs = true;
+    } else if (!op.tensor.device().is_cpu() && common_device == kCPU) {
+      common_device = op.tensor.device();
     }
+    // if (op.tensor.defined()) {
+    //   // std::cout << "Op type: " << op.tensor.scalar_type() << std::endl;
+    // }
   }
 
-  if (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE_INPUTS) {
-    TORCH_CHECK(!missing_output_dtypes, "unable to compute and promote common dtype based only on inputs if there are missing dtypes for outputs");
+  // std::cout << "has_undefined_outputs: " << has_undefined_outputs << std::endl;
+
+  // Computes common dtype, if requested or necessary
+  if (promote_inputs_ || allow_copy_to_outputs_ ||
+      validate_common_dtype_ || has_undefined_outputs) {
+    compute_common_dtype();
+  } else {
+    // Short-circuits if not computing a common dtype
+    return;
   }
 
-  bool compute_common_dtype = (common_dtype_strategy_ != CommonDTypeStrategy::NONE);
-  bool compute_common_dtype_only_for_inputs = (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE_INPUTS);
+  // std::cout << "Updating target dtypes and validating" << std::endl;
+  // std::cout << "common_dtype: " << common_dtype_ << std::endl;
+  // std::cout << "promote_inputs_: " << promote_inputs_ << std::endl;
+  // std::cout << "allow_copy_to_outputs_: " << allow_copy_to_outputs_ << std::endl;
+  // std::cout << "validate_common_dtype_: " << validate_common_dtype_ << std::endl;
 
-  bool may_have_differing_types = true;
-  bool common_device_is_cuda = false;
-
-  // TODO: set target_dtype and devices of the ops (devices never change now)
-  // TODO: is this the right place to set original tensor, too? - check other places where it might be defined
-  if (missing_dtypes || compute_common_dtype) {
-    auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
-    auto common_type = compute_common_type_(operands);
-    auto common_device = std::get<0>(common_type);
-    common_device_is_cuda = common_device.is_cuda();
-    common_dtype_ = std::get<1>(common_type);
-    may_have_differing_types = !std::get<2>(common_type);
-    bool has_cpu_scalar = false;
-    for (auto& op : operands_) {
-      if (!op.is_type_defined()) {
-        op.device = common_device;
+  // Reviews operands (again)
+  //   - sets current and target dtypes
+  //   - sets device on undefined outputs (used in allocate_outputs)
+  //   - creates CPU copies if requested and necessary
+  //   - validates dtypes if validate_common_dtype_ is true
+  // TODO: clarify cases, because they're a little wonky
+  int max_cpu_scalars_on_cuda = allow_cpu_scalars_ ? 1 : 0;
+  int current_cpu_scalars_on_cuda = 0;
+  for (auto& op : operands_) {
+    op.device = common_device;
+    op.target_dtype = op.current_dtype;
+    if (op.is_output) {
+      if (!op.tensor.defined()) {
         op.target_dtype = common_dtype_;
-      } else if (compute_common_dtype &&
-                 (op.device != common_device || op.target_dtype != common_dtype_)) {
-        if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
-            common_device_is_cuda && op.tensor.device().is_cpu() &&
-            !has_cpu_scalar) {
-          // don't cast CPU scalars in CUDA ops that directly support them.
-          op.device = op.tensor.device();
-          op.target_dtype = op.current_dtype;
-          has_cpu_scalar = true;
-        } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
-            !op.is_output &&
-            op.current_dtype == kHalf && common_dtype_ == kFloat &&
-            op.tensor.device().is_cuda() && common_device_is_cuda) {
-          // allow input tensor type upcasting for fp16 to fp32 in fused kernel
-          // on GPU
-          op.device = op.tensor.device();
-          op.target_dtype = op.current_dtype;
-        } else {
-          op.device = common_device;
-          if (compute_common_dtype_only_for_inputs && op.is_output) {
-            op.target_dtype = op.current_dtype;
+        // std::cout << "Assigning common dtype to output" << std::endl;
+      } else if (common_device == kCPU &&
+                 op.current_dtype != common_dtype_ &&
+                 allow_copy_to_outputs_) {
+          // Creates new tensor to temporarily write to if there's a dtype
+          // mismatch on the CPU
+          if (op.is_read_write && promote_inputs_) {
+            // does nothing (reuses the cast input below)
           } else {
+            // std::cout << "Creating temporary output tensor" << std::endl;
+            op.tensor = at::empty_like(op.tensor,
+                                       op.tensor.options().dtype(common_dtype_),
+                                       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+            op.current_dtype = common_dtype_;
             op.target_dtype = common_dtype_;
           }
+      } else if (validate_common_dtype_) {
+        TORCH_CHECK(op.current_dtype == common_dtype_,
+                    "Output has dtype ", op.current_dtype, " but "
+                    "expected ", common_dtype_, "!");
+      }
+    } else {  // operand is input
+      // Handles CPU scalars on CUDA
+      if (common_device.is_cuda() && op.tensor.dim() == 0 &&
+          op.tensor.device().is_cpu() &&
+          current_cpu_scalars_on_cuda < max_cpu_scalars_on_cuda) {
+        ++current_cpu_scalars_on_cuda;
+        op.device = op.tensor.device();
+      } else if (promote_inputs_) {
+        op.target_dtype = common_dtype_;
+        // Copies, if necessary, on CPU
+        if ((op.current_dtype != op.target_dtype) && common_device == kCPU) {
+          // std::cout << "Copying input tensor" << std::endl;
+          // std::cout << "Current dtype is: " << op.current_dtype << std::endl;
+          // std::cout << "Copying to: " << common_dtype_ << std::endl;
+          op.original_tensor = op.tensor;
+          op.tensor = op.tensor.to(common_dtype_);
+          op.current_dtype = common_dtype_;
+
+          // Updates corresponding output op, if any
+          if (common_device == kCPU && allow_copy_to_outputs_ && (op.corresponding_output != nullptr)) {
+            // std::cout << "Updating corresponding output tensor" << std::endl;
+            auto& other = *op.corresponding_output;
+            other.original_tensor = other.tensor;
+            other.tensor = op.tensor;
+            other.current_dtype = op.current_dtype;
+            other.target_dtype = op.target_dtype;
+          }
         }
-      }
-    }
-  }
-
-  // TODO: validate that the types are correct and, on CPU, create copies as appropriate, also validate that all tensors
-  //   have op.device == op.tensor.device() (not that all tensors are on the same device) - although that could be an additional check
-  // NOTE: maybe_copy_casting_to_common_dtype would set target_dtype, current_dtype, original_tensor and tensor
-  // TODO: it seems like this would never copy inputs to CUDA loops -- is that true? Need to check with Natalia/Xiang
-
-  for (auto &op : operands_) {
-    bool skip_output = compute_common_dtype_only_for_inputs && op.is_output;
-
-    if (may_have_differing_types) {
-      validate_dtype(op, common_dtype_, common_dtype_strategy_);
-      bool cast_by_copy = compute_common_dtype && !common_device_is_cuda && !skip_output;
-      if (cast_by_copy) {
-        maybe_copy_casting_to_common_dtype(op, common_dtype_);
+      } else if (validate_common_dtype_) {
+        TORCH_CHECK(op.current_dtype == common_dtype_,
+                    "Input has dtype ", op.current_dtype, " but "
+                    "expected ", common_dtype_, "!");
       }
     }
 
+    // TODO: simplify - do cross-device kernels not go through tensor iterator?
+    // if that's the case, why not just assert that all tensors are on the
+    // same device? copying from one gpu device to another should use TI
     // Checks for tensors on the wrong device
     if (op.tensor.defined() && op.device != op.tensor.device()) {
       if (op.is_output) {
@@ -586,12 +616,12 @@ bool TensorIterator::is_cpu_scalar(int arg) const {
 }
 
 void TensorIterator::cast_outputs() {
-  if (allow_copy_to_output_) {
-    for(int i=0; i < noutputs(); i++) {
-      if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
-        operands_[i].original_tensor.copy_(operands_[i].tensor);
-        operands_[i].tensor = operands_[i].original_tensor;
-      }
+  // std::cout << "cast_outputs" << std::endl;
+  for (auto& op : operands_) {
+    if (op.is_output && op.original_tensor.defined() &&
+        op.original_tensor.scalar_type() != op.tensor.scalar_type()) {
+      op.original_tensor.copy_(op.tensor);
+      op.tensor = op.original_tensor;
     }
   }
 }
@@ -647,7 +677,7 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
   iter.promote_inputs(true);
-  iter.allow_copy_to_output(true);
+  iter.allow_copy_to_outputs(true);
   iter.build();
   return iter;
 }
@@ -661,6 +691,9 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
   iter.promote_inputs(true);
+  // NOTE: Doesn't validate that the output matches the common dtype because the
+  //   output dtype is bool.
+  iter.validate_common_dtype(false);
   iter.build();
   return iter;
 }
@@ -672,7 +705,7 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
   iter.add_output(out);
   iter.add_input(a);
   iter.num_outputs_ = 1;
-  iter.allow_copy_to_output(true);
+  iter.allow_copy_to_outputs(true);
   iter.build();
   return iter;
 }
@@ -691,17 +724,16 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   auto iter = TensorIterator();
   iter.add_output(out);
   iter.add_input(a);
-  iter.promote_gpu_output_dtypes_ = true;
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
   // TODO: This is only really necessary for arg{min,max}
   iter.promote_inputs(true);
-  iter.allow_copy_to_output(true);
+  iter.allow_copy_to_outputs(true);
   iter.build();
   return iter;
 }
 
-TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a, bool promote) {
+TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out1.defined());
   TORCH_INTERNAL_ASSERT(out2.defined());
   TORCH_CHECK((!a.is_cuda() && !out1.is_cuda() && !out2.is_cuda()) || (a.device() == out1.device() && out1.device() == out2.device()),
@@ -712,16 +744,11 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   TORCH_CHECK(out1.sizes() == out2.sizes(), "reduce_op(): expected both outputs to have same sizes, but output1 has ", out1.sizes(),
       " and output2 has ", out2.sizes());
   TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
-           " and output2 has ", out2.strides());
+      " and output2 has ", out2.strides());
   auto iter = TensorIterator();
   iter.add_output(out1);
   iter.add_output(out2);
   iter.add_input(a);
-  if (promote) {
-    iter.promote_gpu_output_dtypes_ = true;
-  } else {
-    iter.preserve_dtypes(true);
-  }
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
   iter.build();
@@ -739,6 +766,7 @@ void TensorIterator::mark_outputs() {
       const auto& input = operands_[arg].tensor;
       if (output.is_same(input)) {
         operands_[i].is_read_write = true;
+        operands_[arg].corresponding_output = &operands_[i];
       }
     }
   }

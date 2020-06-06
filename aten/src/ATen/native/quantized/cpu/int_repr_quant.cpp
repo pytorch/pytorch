@@ -18,7 +18,7 @@ Tensor int_repr_quant_cpu(const Tensor& self) {
     auto iter = TensorIterator();
     iter.add_output(dst);
     iter.add_input(self);
-    iter.dont_compute_common_dtype();
+    iter.validate_common_dtype(false);
     iter.build();
     cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
   });

@@ -37,7 +37,7 @@
 // Note [Result type computation]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // TensorIterator handles limited mixed-type operations. The result type is
-// computed using promoteTypes on the scalar types of the operands with the
+// computed using promoteTypes on the scalar types of the input operands with the
 // following precedence:
 //
 // 1) Tensors with dim 1 or higher
@@ -95,6 +95,8 @@ struct CAFFE2_API OperandInfo {
   // Save the original tensor operand in cases when an output is modified
   // (e.g. if dtype is changed)
   Tensor original_tensor;
+
+  OperandInfo* corresponding_output = nullptr;
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
@@ -170,7 +172,7 @@ struct CAFFE2_API TensorIterator {
     bool check_mem_overlap = false);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
-  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a, bool promote=true);
+  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }
@@ -323,20 +325,25 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input, device, dtype);
   }
 
+  void validate_common_dtype(const bool should_validate) {
+    validate_common_dtype_ = should_validate;
+  }
+
+  void allow_promotion() {
+    promote_inputs(true);
+    allow_copy_to_outputs(true);
+  }
+
   void promote_inputs(const bool should_promote) {
     promote_inputs_ = should_promote;
-    preserve_dtypes_ = should_promote ? false : preserve_dtypes_;
   }
 
-  void allow_copy_to_output(const bool allow_copy) {
-    allow_copy_to_output_ = allow_copy;
-    preserve_dtypes_ = allow_copy ? false : preserve_dtypes_;
+  void allow_copy_to_outputs(const bool allow_copy_to_outputs) {
+    allow_copy_to_outputs_ = allow_copy_to_outputs;
   }
 
-  void preserve_dtypes(const bool should_preserve) {
-    preserve_dtypes_ = should_preserve;
-    TORCH_CHECK(!promote_inputs_ && !allow_copy_to_output,
-                "Can't both preserve dtypes and allow promoting inputs or copying to outputs!");
+  void allow_tensors_on_multiple_devices(const bool allow_tensors_on_multiple_devices) {
+    allow_tensors_on_multiple_devices_ = allow_tensors_on_multiple_devices;
   }
 
   void dont_resize_outputs() {
@@ -370,7 +377,7 @@ protected:
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
   void compute_types();
-  std::tuple<Device, ScalarType, bool> compute_common_type();
+  ScalarType compute_common_dtype();
   void allocate_outputs();
   bool fast_set_up();
   FastSetupType compute_fast_setup_type();
@@ -393,16 +400,16 @@ protected:
   bool resize_outputs_ = true;
   bool is_reduction_ = false;
   bool allow_cpu_scalars_ = false;
-  bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
   bool requires_channels_last_3d_output_ = false;
   bool static_shape_ = false;
-  bool preserve_dtypes_ = true;
+  bool validate_common_dtype_ = true;
   bool promote_inputs_ = false;
-  bool allow_copy_to_output_ = false;
+  bool allow_copy_to_outputs_ = false;
+  bool allow_tensors_on_multiple_devices_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
