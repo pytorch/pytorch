@@ -59,9 +59,18 @@ INCLUDE_DIR=$PYTORCH_ANDROID_DIR/pytorch_android/src/main/cpp/libtorch_include
 mkdir -p $LIB_DIR
 mkdir -p $INCLUDE_DIR
 
-for abi in $(echo $ABIS_LIST | tr ',' '\n')
+IFS=', ' read -r -a abis_array <<< "$ABIS_LIST"
+for abi in arm64-v8a armeabi-v7a x86_64 x86
 do
-echo "abi:$abi"
+  if [[ ! ${abis_array[*]} =~ $abi ]]
+  then
+    rm -f $LIB_DIR/$abi
+    rm -f $INCLUDE_DIR/$abi
+  fi
+done
+
+for abi in "${abis_array[@]}"
+do
 
 OUT_DIR=$WORK_DIR/build_android_$abi
 
@@ -71,7 +80,7 @@ mkdir -p $OUT_DIR
 pushd $PYTORCH_DIR
 python $PYTORCH_DIR/setup.py clean
 
-ANDROID_ABI=$abi $PYTORCH_DIR/scripts/build_android.sh -DANDROID_CCACHE=$(which ccache)
+ANDROID_ABI=$abi ANDROID_STL_SHARED=1 $PYTORCH_DIR/scripts/build_android.sh -DANDROID_CCACHE=$(which ccache)
 
 cp -R $PYTORCH_DIR/build_android/install/lib $OUT_DIR/
 cp -R $PYTORCH_DIR/build_android/install/include $OUT_DIR/
