@@ -1172,7 +1172,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     for individual ops end to end.
     """
     def _test_op_impl(self, module, data, quantized_op, tracing=False, debug=False):
-        print('Testing:', str(module))
+        if debug:
+            print('Testing:', str(module))
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         *inputs, target = data[0]
         if tracing:
@@ -1456,7 +1457,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                        AddFunctionalRelu(), InplaceAddFunctionalRelu(),
                        AddInplaceFunctionalRelu(), InplaceAddInplaceFunctionalRelu()]:
             for tracing in [True, False]:
-                m = self._test_op_impl(m_orig, data, "quantized::add_relu(", tracing=tracing, debug=True)
+                m = self._test_op_impl(m_orig, data, "quantized::add_relu(", tracing=tracing)
                 FileCheck().check_count("quantized::add_relu(", 2, exactly=True) \
                            .run(m.graph)
                 FileCheck().check_not("aten::add(") \
