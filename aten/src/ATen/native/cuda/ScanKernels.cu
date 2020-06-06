@@ -352,8 +352,7 @@ template <
     int num_threads_x,
     int num_threads_y,
     class BinaryFunction>
-__global__ typename std::enable_if<!c10::is_complex_t<T>::value, void>::type
-tensor_kernel_scan_innermost_dim(
+__global__ void tensor_kernel_scan_innermost_dim(
     T* tgt_,
     T* src_,
     unsigned num_rows,
@@ -362,33 +361,6 @@ tensor_kernel_scan_innermost_dim(
     BinaryFunction binary_op) {
   __shared__ T sbuf[num_threads_y][2 * num_threads_x];
   T* row_buf = sbuf[threadIdx.y];
-
-  tensor_kernel_scan_innermost_dim_impl<T, num_threads_x, num_threads_y>(
-      row_buf, tgt_, src_, num_rows, row_size, init, binary_op);
-}
-
-template <
-    typename T,
-    int num_threads_x,
-    int num_threads_y,
-    class BinaryFunction>
-__global__ typename std::enable_if<c10::is_complex_t<T>::value, void>::type
-tensor_kernel_scan_innermost_dim(
-    T* tgt_,
-    T* src_,
-    unsigned num_rows,
-    unsigned row_size,
-    T init,
-    BinaryFunction binary_op) {
-  // As we cannot directly initialize shared array for complex types
-  // Reference:
-  //  `error: initializer not allowed for __shared__ variable`
-  // We instead get the base scalar type and allocate twice number of
-  // elements required of base type and reinterpret them as complex.
-  using base_t = typename scalar_value_type<T>::type;
-  __shared__ base_t sbuf[num_threads_y][4 * num_threads_x];
-
-  T* row_buf = reinterpret_cast<T*>(sbuf[threadIdx.y]);
 
   tensor_kernel_scan_innermost_dim_impl<T, num_threads_x, num_threads_y>(
       row_buf, tgt_, src_, num_rows, row_size, init, binary_op);
