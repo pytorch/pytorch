@@ -463,7 +463,7 @@ graph(%input, %weight, %bias, %4):
       R"(
 graph(%self, %a, %b, %alpha, %relu):
      %first_output = aten::add(%a, %b, %alpha)
-     %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
+     %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
      return (%second_output) )",
       {aten_add_alpha_is_one, is_relu_module});
 
@@ -479,7 +479,7 @@ graph(%self, %a, %b, %alpha, %relu, %inplace):
       R"(
 graph(%self, %a, %b, %alpha, %relu):
      %first_output = aten::add_(%a, %b, %alpha)
-     %second_output = prim::CallMethod[name="forward.*"](%relu, %first_output)
+     %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
      return (%second_output) )",
       {aten_add_alpha_is_one, is_relu_module});
 
