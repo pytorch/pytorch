@@ -57,7 +57,7 @@ void KernelFunction::checkBoxedKernel(const OperatorHandle& opHandle) const {
               "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction.",
               " opname: ",
               opHandle.operator_name(),
-              " For mobile selective build please make sure to include all ops exported from `torch.jit.export_opnames(model)`.");
+              " If you're using mobile selective build please make sure to include all ops exported from `torch.jit.export_opnames(model)`.");
       } else {
           // TODO We want to introduce the invariant that all kernels must be callable in a boxed way, then this case should be impossible.
           TORCH_INTERNAL_ASSERT(
@@ -65,7 +65,7 @@ void KernelFunction::checkBoxedKernel(const OperatorHandle& opHandle) const {
               "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call().",
               " opname: ",
               opHandle.operator_name(),
-              " For mobile selective build please make sure to include all ops exported from `torch.jit.export_opnames(model)`.");
+              " If you're using mobile selective build please make sure to include all ops exported from `torch.jit.export_opnames(model)`.");
       }
   }
 }
