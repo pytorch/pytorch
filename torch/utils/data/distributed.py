@@ -31,9 +31,9 @@ class DistributedSampler(Sampler):
             processes in the distributed group. Default: ``0``.
 
     .. warning::
-        In distributed mode, calling the :meth`set_epoch` method at the beginning of each
-        epoch is necessary to make shuffling work properly across multiple epochs. 
-        Otherwise, the same ordering will be always used.
+        In distributed mode, calling the :meth`set_epoch(epoch) <set_epoch>` method at
+        the beginning of each epoch is necessary to make shuffling work properly across
+        multiple epochs. Otherwise, the same ordering will be always used.
 
     Example::
 
@@ -92,7 +92,7 @@ class DistributedSampler(Sampler):
         Sets the epoch for this sampler. When :attr:`shuffle=True`, this ensures all replicas
         use a different random ordering for each epoch. Otherwise, the next iteration of this
         sampler will yield the same ordering.
-        
+
         Arguments:
             epoch (int): Epoch number.
         """
