@@ -147,61 +147,55 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
 
 void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
-    gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t v) -> thrust_t {
-      return (v < lower) ? lower : (v > upper ? upper : v);
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      return std::min(std::max(v, lower), upper);
     });
   });
 }
 
 void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_max_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     auto upper = max_value.to<scalar_t>();
-    gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t v) -> thrust_t {
-      return v > upper ? upper : v;
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      return std::min(v, upper);
     });
   });
 }
 
 void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_min_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     auto lower = min_value.to<scalar_t>();
-    gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t v) -> thrust_t {
-      return v < lower ? lower : v;
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
+      return std::max(v, lower);
     });
   });
 }
 
 void clamp_with_tensors_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "clamp_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     gpu_kernel(iter,
-      [=]GPU_LAMBDA(thrust_t a, thrust_t min, thrust_t max) -> thrust_t {
-       return a < min ? min : (a > max ? max : a);
+      [=]GPU_LAMBDA(scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
+       return std::min(std::max(a, min), max);
     });
   });
 }
 
 void clamp_max_with_tensor_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "clamp_max_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     gpu_kernel(iter,
-      [=]GPU_LAMBDA(thrust_t a, thrust_t max) -> thrust_t {
-       return a > max ? max : a;
+      [=]GPU_LAMBDA(scalar_t a, scalar_t max) -> scalar_t {
+       return std::min(a, max);
     });
   });
 }
 
 void clamp_min_with_tensor_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "clamp_min_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
     gpu_kernel(iter,
-      [=]GPU_LAMBDA(thrust_t a, thrust_t min) -> thrust_t {
-       return a < min ? min : a;
+      [=]GPU_LAMBDA(scalar_t a, scalar_t min) -> scalar_t {
+       return std::max(a, min);
     });
   });
 }

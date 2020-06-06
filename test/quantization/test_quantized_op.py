@@ -564,7 +564,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qY_hat = op(qX, q_min_tensor, q_max_tensor)
-            self.assertEqual(qY, qY_hat, message="{} qclamp_with_tensors failed".format(name))
+            self.assertEqual(qY, qY_hat, msg="{} qclamp_with_tensors failed".format(name))
 
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM

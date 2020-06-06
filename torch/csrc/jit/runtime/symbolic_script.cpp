@@ -1354,11 +1354,13 @@ const std::vector<std::string> functions = {
                   max: Optional[Tensor]):
             def backward(grad_output):
                 if min is not None and max is not None:
-                    ge_min = self >= min
+                    self_geq_min = self >= min
+                    self_leq_max = self <= max
+                    min_leq_max = min <= max
 
-                    self_mask = torch.bitwise_and(ge_min, self <= max).type_as(self)
-                    min_mask = torch.bitwise_or(ge_min.bitwise_not(), min > max).type_as(self)
-                    max_mask = torch.bitwise_and(ge_min, torch.bitwise_and(self > max, max >= min)).type_as(self)
+                    self_mask = torch.bitwise_and(self_geq_min, self_leq_max).type_as(self)
+                    min_mask = torch.bitwise_and(self_geq_min.bitwise_not(), min_leq_max).type_as(self)
+                    max_mask = torch.bitwise_or(self_leq_max.bitwise_not(), min_leq_max.bitwise_not()).type_as(self)
                     return grad_output * self_mask, grad_output * min_mask, grad_output * max_mask
                 elif min is not None:
                     self_mask = (self >= min).type_as(self)
@@ -1376,10 +1378,12 @@ const std::vector<std::string> functions = {
                   min: Tensor,
                   max: number):
             def backward(grad_output):
-                ge_min = self >= min
+                self_geq_min = self >= min
+                self_leq_max = self <= max
+                min_leq_max = min <= max
 
-                self_mask = torch.bitwise_and(ge_min, self <= float(max)).type_as(self)
-                min_mask = torch.bitwise_or(ge_min.bitwise_not(), min > max).type_as(self)
+                self_mask = torch.bitwise_and(self_geq_min, self_leq_max).type_as(self)
+                min_mask = torch.bitwise_and(self_geq_min.bitwise_not(), min_leq_max).type_as(self)
                 return grad_output * self_mask, grad_output * min_mask, None
             return torch.clamp_with_tensors(self, min=min, max=max), backward
 
@@ -1387,10 +1391,12 @@ const std::vector<std::string> functions = {
                   min: number,
                   max: Tensor):
             def backward(grad_output):
-                ge_min = self >= float(min)
+                self_geq_min = self >= min
+                self_leq_max = self <= max
+                max_lt_min = max < min
 
-                self_mask = torch.bitwise_and(ge_min, self <= max).type_as(self)
-                max_mask = torch.bitwise_and(ge_min, torch.bitwise_and(self > max, max >= min)).type_as(self)
+                self_mask = torch.bitwise_and(self_geq_min, self_leq_max).type_as(self)
+                max_mask = torch.bitwise_or(self_leq_max.bitwise_not(), max_lt_min).type_as(self)
                 return grad_output * self_mask, None, grad_output * max_mask
             return torch.clamp_with_tensors(self, min=min, max=max), backward
     )"};

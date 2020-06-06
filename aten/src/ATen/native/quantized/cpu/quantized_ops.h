@@ -34,6 +34,7 @@ using qthreshold_fn = void (*)(
     const at::Tensor& /*qx*/,
     Scalar threshold,
     Scalar value,
+    at::Tensor& /*qy*/);
 using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qelu_fn = void(*)(
     const at::Tensor& /*qx*/,

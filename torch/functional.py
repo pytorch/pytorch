@@ -1496,24 +1496,26 @@ def clamp(input, min=None, max=None, out=None):
         >>> torch.clamp(a, max=max_tensor)
         tensor([ 0.7753, -0.4702, -0.4599, -0.1000])
     """
-    if type(input) is not Tensor and has_torch_function((input,)):
-        return handle_torch_function(clamp, (input,), input, min=min, max=max, out=out)
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(clamp, (input,), input, min=min, max=max, out=out)
     # Overwriting reason:
     # This dispatches to different ATen functions depending on the type of
     # min and max.
-    if (isinstance(min, torch.Tensor) and min.numel() > 1) or (isinstance(max, torch.Tensor) and max.numel() > 1):
+    if isinstance(min, torch.Tensor) or isinstance(max, torch.Tensor):
         return torch._C._VariableFunctions.clamp_with_tensors(input, min, max, out=out)
     else:
         return torch._C._VariableFunctions.clamp(input, min, max, out=out)
 
 
 def clamp_(input, min=None, max=None):
-    if type(input) is not Tensor and has_torch_function((input,)):
-        return handle_torch_function(clamp_, (input,), input, min=min, max=max)
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(clamp_, (input,), input, min=min, max=max)
     # Overwriting reason:
     # This dispatches to different ATen functions depending on the type of
     # min and max.
-    if (isinstance(min, torch.Tensor) and min.numel() > 1) or (isinstance(max, torch.Tensor) and max.numel() > 1):
+    if isinstance(min, torch.Tensor) or isinstance(max, torch.Tensor):
         return torch._C._VariableFunctions.clamp_with_tensors_(input, min, max)
     else:
         return torch._C._VariableFunctions.clamp_(input, min, max)

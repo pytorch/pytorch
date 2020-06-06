@@ -636,20 +636,29 @@ void qclamp_with_tensors_kernel(
     const Tensor& min_tensor,
     const Tensor& max_tensor,
     Tensor& qy) {
+  TORCH_CHECK(qx.q_scale() == min_tensor.q_scale() && qx.q_scale() == max_tensor.q_scale(),
+              "Quantized input scale should match min_tensor and max_tensor, got ",
+              qx.q_scale(), ", ", min_tensor.q_scale(), " and ", max_tensor.q_scale());
+  TORCH_CHECK(qx.q_zero_point() == min_tensor.q_zero_point() && qx.q_zero_point() == max_tensor.q_zero_point(),
+              "Quantized input zero-point should match min_tensor and max_tensor, got ", 
+              qx.q_zero_point(), ", ", min_tensor.q_zero_point(), " and ", max_tensor.q_zero_point());
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
-        qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
-        qx.q_scale(),
-        qx.q_zero_point(),
-        qx.suggest_memory_format());
-    auto iter = TensorIterator();
-    iter.set_check_mem_overlap(false);
-    iter.add_output(qy);
-    iter.add_input(qx);
-    iter.add_input(min_tensor);
-    iter.add_input(max_tensor);
-    iter.build();
+      qx.sizes(),
+      at::device(kCPU).dtype(SCALAR_TYPE),
+      qx.q_scale(),
+      qx.q_zero_point(),
+      qx.suggest_memory_format());
+    TensorIterator iter = TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(qy)
+      .add_input(qx)
+      .add_input(min_tensor)
+      .add_input(max_tensor)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .build();
 
     using Vec = Vec256<scalar_t>;
     cpu_kernel_vec(
@@ -671,19 +680,28 @@ void qclamp_with_min_tensor_kernel(
     const Tensor& min_tensor,
     Scalar max_scalar,
     Tensor& qy) {
+  TORCH_CHECK(qx.q_scale() == min_tensor.q_scale(),
+              "Quantized input scale should match min_tensor, got ",
+              qx.q_scale(), " and ", min_tensor.q_scale());
+  TORCH_CHECK(qx.q_zero_point() == min_tensor.q_zero_point(),
+              "Quantized input zero-point should match min_tensor, got ", 
+              qx.q_zero_point(), " and ", min_tensor.q_zero_point());
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
-        qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
-        qx.q_scale(),
-        qx.q_zero_point(),
-        qx.suggest_memory_format());
-    auto iter = TensorIterator();
-    iter.set_check_mem_overlap(false);
-    iter.add_output(qy);
-    iter.add_input(qx);
-    iter.add_input(min_tensor);
-    iter.build();
+      qx.sizes(),
+      at::device(kCPU).dtype(SCALAR_TYPE),
+      qx.q_scale(),
+      qx.q_zero_point(),
+      qx.suggest_memory_format());
+    TensorIterator iter = TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(qy)
+      .add_input(qx)
+      .add_input(min_tensor)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .build();
     
     using Vec = Vec256<scalar_t>;
     auto max = max_scalar.to<float>();
@@ -710,19 +728,28 @@ void qclamp_with_max_tensor_kernel(
     Scalar min_scalar,
     const Tensor& max_tensor,
     Tensor& qy) {
+  TORCH_CHECK(qx.q_scale() == max_tensor.q_scale(),
+              "Quantized input scale should match max_tensor, got ",
+              qx.q_scale(), " and ", max_tensor.q_scale());
+  TORCH_CHECK(qx.q_zero_point() == max_tensor.q_zero_point(),
+              "Quantized input zero-point should match max_tensor, got ", 
+              qx.q_zero_point(), " and ", max_tensor.q_zero_point());
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
-        qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
-        qx.q_scale(),
-        qx.q_zero_point(),
-        qx.suggest_memory_format());
-    auto iter = TensorIterator();
-    iter.set_check_mem_overlap(false);
-    iter.add_output(qy);
-    iter.add_input(qx);
-    iter.add_input(max_tensor);
-    iter.build();
+      qx.sizes(),
+      at::device(kCPU).dtype(SCALAR_TYPE),
+      qx.q_scale(),
+      qx.q_zero_point(),
+      qx.suggest_memory_format());
+    TensorIterator iter = TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(qy)
+      .add_input(qx)
+      .add_input(max_tensor)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .build();
     
     using Vec = Vec256<scalar_t>;
     auto min = min_scalar.to<float>();

@@ -98,12 +98,6 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
-static Tensor wrapped_scalar_tensor(Scalar scalar) {
-  auto tensor = scalar_to_tensor(scalar);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
@@ -624,11 +618,8 @@ Tensor clamp_with_tensors_backward_for_min(const Tensor & grad, const Tensor &se
   if (!max.defined()) {
     return grad * (self < min).type_as(grad);
   } else {
-    // We clamp max tensor to make sure that it is not smaller than min in forward.
-    // This is necessary to fix the divergent behaviour in AVX and base CPU kernels.
-    // So we must adjust the gradient computation too.
-    // https://github.com/pytorch/pytorch/pull/32587#issuecomment-591389582
-    return grad * (at::bitwise_or(self < min, min > max)).type_as(grad);
+    // In case some elements in min are greater than max, then max is returned so no gradient to min
+    return grad * at::bitwise_and(self < min, min <= max).type_as(grad);
   }
 }
 
@@ -637,11 +628,8 @@ Tensor clamp_with_tensors_backward_for_max(const Tensor & grad, const Tensor &se
   if (!min.defined()) {
     return grad * (self > max).type_as(grad);
   } else {
-    // We clamp max tensor to make sure that it is not smaller than min in forward.
-    // This is necessary to fix the divergent behaviour in AVX and base CPU kernels.
-    // So we must adjust the gradient computation too.
-    // https://github.com/pytorch/pytorch/pull/32587#issuecomment-591389582
-    return grad * at::bitwise_and(self >= min, at::bitwise_and(self > max, max >= min)).type_as(grad);
+    // In case some elements in max are less than min, then max is returned so need to compute gradient wrt these elements
+    return grad * at::bitwise_or(max < min, self > max).type_as(grad);
   }
 }
 

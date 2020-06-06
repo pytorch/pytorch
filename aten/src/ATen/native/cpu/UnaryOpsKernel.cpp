@@ -359,63 +359,57 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
 }
 
 static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
-    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
     auto min = min_scalar.to<scalar_t>();
     auto max = max_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : (zabs_(a) > zabs_(max) ? max : a); },
+     [=](scalar_t a) -> scalar_t { return std::min(std::max(a, min), max); },
      [=](Vec256<scalar_t> a) { return vec256::clamp(a, min_vec, max_vec); });
   });
 }
 
 static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
-    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
     auto max = max_scalar.to<scalar_t>();
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return zabs_(a) > zabs_(max) ? max : a; },
+     [=](scalar_t a) -> scalar_t { return std::min(a, max); },
      [=](Vec256<scalar_t> a) { return vec256::clamp_max(a, max_vec); });
   });
 }
 
 static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
-    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
     auto min = min_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : a; },
+     [=](scalar_t a) -> scalar_t { return std::max(a, min); },
      [=](Vec256<scalar_t> a) { return vec256::clamp_min(a, min_vec); });
   });
 }
 
 static void clamp_with_tensors_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
-    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
     cpu_kernel_vec(iter,
-     [=](scalar_t a, scalar_t min, scalar_t max) -> scalar_t { return zabs_(a) < zabs_(min) ? min : (zabs_(a) > zabs_(max) ? max : a); },
+     [=](scalar_t a, scalar_t min, scalar_t max) -> scalar_t { return std::min(std::max(a, min), max); },
      [=](Vec256<scalar_t> a, Vec256<scalar_t> min_vec, Vec256<scalar_t> max_vec) { return vec256::clamp(a, min_vec, max_vec); });
   });
 }
 
 static void clamp_min_with_tensor_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
-    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
     cpu_kernel_vec(iter,
-     [=](scalar_t a, scalar_t min) -> scalar_t { return zabs_(a) < zabs_(min) ? min : a; },
+     [=](scalar_t a, scalar_t min) -> scalar_t { return std::max(a, min); },
      [=](Vec256<scalar_t> a, Vec256<scalar_t> min_vec) { return vec256::clamp_min(a, min_vec); });
   });
 }
 
 static void clamp_max_with_tensor_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
-    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
     cpu_kernel_vec(iter,
-     [=](scalar_t a, scalar_t max) -> scalar_t { return zabs_(a) > zabs_(max) ? max : a; },
+     [=](scalar_t a, scalar_t max) -> scalar_t { return std::min(a, max); },
      [=](Vec256<scalar_t> a, Vec256<scalar_t> max_vec) { return vec256::clamp_max(a, max_vec); });
   });
 }
