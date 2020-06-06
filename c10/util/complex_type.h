@@ -127,8 +127,12 @@ template<typename T>
 struct alignas(sizeof(T) * 2) complex {
   using value_type = T;
 
-  T real_ = T(0);
-  T imag_ = T(0);
+  T real_;
+  T imag_;
+
+  // Constructor below leads to 
+  // `error: initializer not allowed for __shared__ variable`
+  // constexpr complex() : real_(T{0}), imag_(T{0}) {}
 
   constexpr complex() = default;
   constexpr complex(const T& re, const T& im = T()): real_(re), imag_(im) {}

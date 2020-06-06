@@ -96,6 +96,14 @@ TEST(TestMemory, ThrustReinterpretCast) {
 
 namespace constructors {
 
+C10_HOST_DEVICE void test_default_construct() {
+  static_assert(c10::complex<float>{}.real() == float{0}, "");
+  static_assert(c10::complex<float>{}.imag() == float{0}, "");
+
+  static_assert(c10::complex<double>{}.real() == double{0}, "");
+  static_assert(c10::complex<double>{}.imag() == double{0}, "");
+}
+
 template<typename scalar_t>
 C10_HOST_DEVICE void test_construct_from_scalar() {
   constexpr scalar_t num1 = scalar_t(1.23);
@@ -188,8 +196,8 @@ MAYBE_GLOBAL void test_assign_real() {
 
 constexpr std::tuple<c10::complex<double>, c10::complex<float>> one_two() {
   constexpr c10::complex<float> src(1, 2);
-  c10::complex<double> ret0;
-  c10::complex<float> ret1;
+  c10::complex<double> ret0{};
+  c10::complex<float> ret1{};
   ret0 = ret1 = src;
   return std::make_tuple(ret0, ret1);
 }
@@ -204,8 +212,8 @@ MAYBE_GLOBAL void test_assign_other() {
 
 constexpr std::tuple<c10::complex<double>, c10::complex<float>> one_two_std() {
   constexpr std::complex<float> src(1, 1);
-  c10::complex<double> ret0;
-  c10::complex<float> ret1;
+  c10::complex<double> ret0{};
+  c10::complex<float> ret1{};
   ret0 = ret1 = src;
   return std::make_tuple(ret0, ret1);
 }
@@ -263,14 +271,14 @@ namespace real_imag {
 
 template<typename scalar_t>
 constexpr c10::complex<scalar_t> zero_one() {
-  c10::complex<scalar_t> result;
+  c10::complex<scalar_t> result{};
   result.imag(scalar_t(1));
   return result;
 }
 
 template<typename scalar_t>
 constexpr c10::complex<scalar_t> one_zero() {
-  c10::complex<scalar_t> result;
+  c10::complex<scalar_t> result{};
   result.real(scalar_t(1));
   return result;
 }
