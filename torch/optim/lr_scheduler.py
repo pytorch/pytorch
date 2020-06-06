@@ -1,3 +1,4 @@
+import enum
 import types
 import math
 from torch._six import inf
@@ -20,6 +21,13 @@ EPOCH_DEPRECATION_WARNING = (
 )
 
 SAVE_STATE_WARNING = "Please also save or load the state of the optimzer when saving or loading the scheduler."
+
+
+class StepsOnFlag(enum.Flag):
+    """A flag which indicates when a _LRScheduler should be stepped and supports standard bitwise logic."""
+    BATCH = enum.auto()  # steps at the end of a batch
+    EPOCH = enum.auto()  # steps at the end of an epoch
+
 
 class _LRScheduler(object):
 
@@ -153,11 +161,8 @@ class _LRScheduler(object):
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
     @property
-    def steps_on_batch(self):
-        raise NotImplementedError
-
-    @property
-    def steps_on_epoch(self):
+    def steps_on(self):
+        """Returns a `StepsOnFlag` indicating when the _LRScheduler should be stepped."""
         raise NotImplementedError
 
 
@@ -243,12 +248,8 @@ class LambdaLR(_LRScheduler):
                 for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
 
     @property
-    def steps_on_batch(self):
-        return False
-
-    @property
-    def steps_on_epoch(self):
-        return True
+    def steps_on(self):
+        return StepsOnFlag.EPOCH
 
 
 class MultiplicativeLR(_LRScheduler):
@@ -330,12 +331,8 @@ class MultiplicativeLR(_LRScheduler):
             return list(self.base_lrs)
 
     @property
-    def steps_on_batch(self):
-        return False
-
-    @property
-    def steps_on_epoch(self):
-        return True
+    def steps_on(self):
+        return StepsOnFlag.EPOCH
 
 
 class StepLR(_LRScheduler):
@@ -384,12 +381,8 @@ class StepLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
     @property
-    def steps_on_batch(self):
-        return False
-
-    @property
-    def steps_on_epoch(self):
-        return True
+    def steps_on(self):
+        return StepsOnFlag.EPOCH
 
 
 class MultiStepLR(_LRScheduler):
@@ -438,12 +431,8 @@ class MultiStepLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
     @property
-    def steps_on_batch(self):
-        return False
-
-    @property
-    def steps_on_epoch(self):
-        return True
+    def steps_on(self):
+        return StepsOnFlag.EPOCH
 
 
 class ExponentialLR(_LRScheduler):
@@ -475,12 +464,8 @@ class ExponentialLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
     @property
-    def steps_on_batch(self):
-        return False
-
-    @property
-    def steps_on_epoch(self):
-        return True
+    def steps_on(self):
+        return StepsOnFlag.EPOCH
 
 
 class CosineAnnealingLR(_LRScheduler):
@@ -549,12 +534,8 @@ class CosineAnnealingLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
     @property
-    def steps_on_batch(self):
-        return False
-
-    @property
-    def steps_on_epoch(self):
-        return True
+    def steps_on(self):
+        return StepsOnFlag.EPOCH
 
 
 class ReduceLROnPlateau(object):
@@ -728,12 +709,8 @@ class ReduceLROnPlateau(object):
         self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)
 
     @property
-    def steps_on_batch(self):
-        return False
-
-    @property
-    def steps_on_epoch(self):
-        return True
+    def steps_on(self):
+        return StepsOnFlag.EPOCH
 
 
 class CyclicLR(_LRScheduler):
@@ -959,12 +936,8 @@ class CyclicLR(_LRScheduler):
         return lrs
 
     @property
-    def steps_on_batch(self):
-        return True
-
-    @property
-    def steps_on_epoch(self):
-        return False
+    def steps_on(self):
+        return StepsOnFlag.BATCH
 
 
 class CosineAnnealingWarmRestarts(_LRScheduler):
@@ -1086,12 +1059,8 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
     @property
-    def steps_on_batch(self):
-        return True
-
-    @property
-    def steps_on_epoch(self):
-        return False
+    def steps_on(self):
+        return StepsOnFlag.BATCH
 
 
 class OneCycleLR(_LRScheduler):
@@ -1316,9 +1285,5 @@ class OneCycleLR(_LRScheduler):
         return lrs
 
     @property
-    def steps_on_batch(self):
-        return True
-
-    @property
-    def steps_on_epoch(self):
-        return False
+    def steps_on(self):
+        return StepsOnFlag.BATCH
