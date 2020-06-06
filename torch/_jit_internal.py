@@ -85,6 +85,41 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return getattr(module, qualified_name)
 
+    """
+    Issues:
+    - first while loop missing ']' case to stop? or should be this way?
+    - return returns length of just the validly constructed expr, not the ',' or '[' after it?
+        - bottom while needs +1 to skip over the delimiter, does this also kill the ']'?
+            - maybe ']' is never a delimiter and that solves both while questions...
+
+    """
+    def parseNestedExpr(expr, module) -> Tuple[Any, int]:
+        i = 0
+        while i < len(expr) and expr[i] not in (',', '[', ']'):
+            i += 1
+
+        base = lookupInModule(expr[:i], module)
+        if i == len(expr) or expr[i] != '[':
+            return base, i
+
+        assert expr[i] == '['
+        i += 1
+        parts = []
+        while expr[i] != ']':
+            part, part_len = parseNestedExpr(expr[i:].strip(), module)
+            parts.append(part)
+            i += part_len
+            i += 1
+
+        return base[tuple(parts)], i
+
+    def parseExpr(expr, module):
+        # import pdb; pdb.set_trace()
+        try:
+            value, _ = parseNestedExpr(expr, module)
+            return value
+        except:
+            return None
 
 
     def env(qualified_name, module):
@@ -105,7 +140,7 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return lookupInModule(qualified_name, module)
 
-    return lambda key: env(key, lookup_base)
+    return lambda expr: parseExpr(expr, lookup_base)
 
 
 def createResolutionCallbackFromFrame(frames_up=0):
