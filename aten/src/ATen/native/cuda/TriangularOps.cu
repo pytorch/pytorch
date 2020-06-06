@@ -156,6 +156,14 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
   checkAllSameGPU("diag", {result_arg, self_arg});
   checkSameType("diag", result_arg, self_arg);
 
+  auto check_zero_strided = [](const IntArrayRef& strides) {
+    auto result = std::find(strides.begin(), strides.end(), 0);
+    if (result != strides.end()) {
+      return true;
+    }
+    return false;
+  };
+
   int nDimension = self.dim();
   if (nDimension == 2) {
     auto self_stride_0 = self.stride(0);
@@ -170,6 +178,9 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 
     result.resize_({sz});
     if (sz > 0) {
+      if (check_zero_strided(result.strides())) {
+        result = result.contiguous();
+      }
       auto result_stride = result.stride(0);
       const dim3 threads(std::min(
           int(sz),
@@ -197,6 +208,9 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     result.resize_({sz, sz});
     result.zero_();
     if (sz > 0) {
+      if (check_zero_strided(result.strides())) {
+        result = result.contiguous();
+      }
       auto result_stride_0 = result.stride(0);
       auto result_stride_1 = result.stride(1);
       const dim3 threads(std::min(
