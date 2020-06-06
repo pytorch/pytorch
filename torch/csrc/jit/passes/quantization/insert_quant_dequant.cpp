@@ -685,7 +685,7 @@ void propagateQParams(
   insertDeQuantForAllUse(graph, quantized_output, quantized_output);
 }
 
-void removeDequantizeFromInputs(const std::unordered_set<Value*> inputs) {
+void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
   // Delete dequantize node, we have one dequantize
   // for each use of the value
   for (auto* dequantized_val : inputs) {

@@ -446,6 +446,35 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY, qY_hat,
                          msg="TanH failed: {} vs. {}".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::threshold op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()),
+           threshold=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+           value=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False))
+    def test_qthreshold(self, X, threshold, value):
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # calculate threshold(dqX) and quantize
+        dqX = qX.dequantize()
+        dqY_hat = dqX.clone()
+        dqY_hat = torch.nn.functional.threshold(dqY_hat, threshold, value)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+        ops_under_test = {
+            'native': torch.threshold,
+            'nn.functional': torch.nn.functional.threshold,
+            'nn.quantized.functional': torch.nn.quantized.functional.threshold
+        }
+
+        for name, op in ops_under_test.items():
+            qY = op(qX, threshold, value)
+            self.assertEqual(qY, qY_hat, msg="{} qthreshold failed".format(name))
+
     """Tests the correctness of the quantized::clamp op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),

@@ -940,21 +940,26 @@ graph(%input, %weight):
         x = torch.randn([1, 3, 10, 10], dtype=torch.float)
         x = torch.quantize_per_tensor(x, 0.5, 1, torch.quint8)
         input = [x, x]
-        m = torch.jit.script(M())
-        ref_res = m(input)
-        torch._C._jit_pass_inline(m.graph)
-        FileCheck().check("aten::dequantize") \
-                   .check("prim::ListUnpack") \
-                   .check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .run(m.graph)
-        torch._C._jit_pass_swap_dequantize(m.graph)
-        FileCheck().check("aten::max_pool2d") \
-                   .check("aten::adaptive_avg_pool2d") \
-                   .check("dequantize") \
-                   .run(m.graph)
-        res = m(input)
-        self.assertEqual(res, ref_res)
+        for tracing in [True, False]:
+            if tracing:
+                m = torch.jit.trace(M(), [input])
+            else:
+                m = torch.jit.script(M())
+            ref_res = m(input)
+            torch._C._jit_pass_inline(m.graph)
+            FileCheck().check("aten::dequantize") \
+                       .check("prim::ListUnpack") \
+                       .check("aten::max_pool2d") \
+                       .check("aten::adaptive_avg_pool2d") \
+                       .run(m.graph)
+            torch._C._jit_pass_swap_dequantize(m.graph)
+            FileCheck().check("prim::ListUnpack") \
+                       .check("aten::max_pool2d") \
+                       .check("aten::adaptive_avg_pool2d") \
+                       .check("dequantize") \
+                       .run(m.graph)
+            res = m(input)
+            self.assertEqual(res, ref_res)
 
     def test_swap_functional_linear(self):
         class M(torch.nn.Module):
@@ -1175,7 +1180,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     for individual ops end to end.
     """
     def _test_op_impl(self, module, data, quantized_op, tracing=False, debug=False):
-        print('Testing:', str(module))
+        if debug:
+            print('Testing:', str(module))
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         *inputs, target = data[0]
         if tracing:
@@ -1441,7 +1447,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                        AddFunctionalRelu(), InplaceAddFunctionalRelu(),
                        AddInplaceFunctionalRelu(), InplaceAddInplaceFunctionalRelu()]:
             for tracing in [True, False]:
-                m = self._test_op_impl(m_orig, data, "quantized::add_relu(", tracing=tracing, debug=True)
+                m = self._test_op_impl(m_orig, data, "quantized::add_relu(", tracing=tracing)
                 FileCheck().check_count("quantized::add_relu(", 2, exactly=True) \
                            .run(m.graph)
                 FileCheck().check_not("aten::add(") \
