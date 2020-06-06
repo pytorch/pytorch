@@ -67,7 +67,7 @@ if sys.platform == 'win32':
         cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
     else:
         cuda_path = ''
-    
+
     dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path]))
 
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
@@ -89,7 +89,6 @@ if sys.platform == 'win32':
                 err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
                 raise err
 
-    import glob
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
     path_patched = False
     for dll in dlls:
