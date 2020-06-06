@@ -670,6 +670,20 @@ graph(%input, %weight):
         assert len(attrs_with_prefix(m, '_observer_',)) == 3
 
     def test_insert_observers_for_if(self):
+        class QuantProp(torch.nn.Module):
+            def __init__(self, use_skip):
+                super(QuantProp, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.use_skip = use_skip
+
+            def forward(self, x):
+                if self.use_skip:
+                    x = self.conv(x)
+                    return torch.flatten(x)
+                else:
+                    x = self.conv(x)
+                    return torch.flatten(x)
+
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
                 super(Res, self).__init__()
@@ -685,18 +699,22 @@ graph(%input, %weight):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.res1 = Res(True)
+                self.quant_prop = QuantProp(True)
                 self.res2 = Res(False)
 
             def forward(self, x):
-                x = self.res1(x)
+                x = self.quant_prop(x)
                 x = self.res2(x)
                 return x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         m = torch.jit.script(M()).eval()
         m = prepare_script(m, {'': default_qconfig})
-        assert len(attrs_with_prefix(m, '_observer_',)) == 3
+        # one observer for input and one observer for output
+        # no observer for output of quant_prop
+        assert len(attrs_with_prefix(m, '_observer_',)) == 2
+        # one observer for output of conv for each branch
+        assert len(attrs_with_prefix(m.quant_prop, '_observer_',)) == 2
 
     def test_insert_observers_for_nested_if(self):
         class Res(torch.nn.Module):
