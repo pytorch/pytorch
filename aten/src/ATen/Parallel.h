@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <ATen/Config.h>
 #include <ATen/core/ivalue.h>
 #include <c10/macros/Macros.h>
 
