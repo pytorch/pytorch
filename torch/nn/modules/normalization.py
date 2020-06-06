@@ -142,8 +142,6 @@ class LayerNorm(Module):
     normalized_shape: _shape_t
     eps: float
     elementwise_affine: bool
-    weight: Optional[Tensor]
-    bias: Optional[Tensor]
 
     def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True):
         super(LayerNorm, self).__init__()
@@ -219,8 +217,6 @@ class GroupNorm(Module):
     num_channels: int
     eps: float
     affine: bool
-    weight: Optional[Tensor]
-    bias: Optional[Tensor]
 
     def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True):
         super(GroupNorm, self).__init__()

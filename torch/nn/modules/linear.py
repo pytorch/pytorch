@@ -70,7 +70,6 @@ class Linear(Module):
     in_features: int
     out_features: int
     weight: Tensor
-    bias: Optional[Tensor]
 
     def __init__(self, in_features: int, out_features: int, bias: bool = True):
         super(Linear, self).__init__()
@@ -151,7 +150,6 @@ class Bilinear(Module):
     in2_features: int
     out_features: int
     weight: Tensor
-    bias: Optional[Tensor]
 
     def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True):
         super(Bilinear, self).__init__()
