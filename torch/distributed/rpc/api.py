@@ -28,6 +28,11 @@ from . import (
     backend_registry,
 )
 
+from . import (
+    _enable_jit_rref_pickle,
+    _disable_jit_rref_pickle,
+)
+
 from .internal import (
     PythonUDF,
     RPCExecMode,

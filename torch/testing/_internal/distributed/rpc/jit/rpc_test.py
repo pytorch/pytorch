@@ -1,3 +1,4 @@
+import io
 from typing import Dict, Tuple
 
 import torch
@@ -221,12 +222,14 @@ class RRefTypingTest:
 
     @dist_init
     def test_my_script_module_with_rrefs(self):
+
         n = self.rank + 1
         dst_rank = n % self.world_size
 
         module_with_rrefs = MyScriptModuleWithRRefs(worker_name(dst_rank))
         res = module_with_rrefs()
         self.assertEqual(res, torch.ones(2, 2) * 9)
+
 
     @dist_init
     def test_rref_python_annotation(self):
@@ -832,6 +835,12 @@ def async_wrong_type():
     return torch.zeros(2)
 
 
+def run_pickled_script_module(pickled_script_module):
+    f = io.BytesIO(pickled_script_module)
+    m = torch.jit.load(f)
+    return m()
+
+
 class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, FutureTypingTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
@@ -919,6 +928,29 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
                 run_ref_script_module,
                 args=(remote_ref, torch.ones(self.rank)),
             )
+
+    @dist_init
+    def test_pickle_script_module_with_rref(self):
+        dst_name = worker_name((self.rank + 1) % self.world_size)
+        m1 = MyScriptModuleWithRRefs(dst_name)
+        m2 = MyScriptModuleWithRRefs(dst_name)
+
+        import pickle
+
+        f = io.BytesIO()
+        p = pickle.Pickler(f)
+
+        rpc._enable_jit_rref_pickle()
+        torch.jit.save(m1, f)
+        rpc._disable_jit_rref_pickle()
+
+        out1 = rpc.rpc_sync(
+            dst_name,
+            run_pickled_script_module,
+            args=(f.getvalue(),)
+        )
+        out2 = m2()
+        self.assertEqual(out1, out2)
 
     @dist_init
     def test_rref_jit_pickle_not_supported(self):

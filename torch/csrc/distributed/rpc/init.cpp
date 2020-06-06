@@ -693,6 +693,25 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "_disable_server_process_global_profiler",
       &profiler::processglobal::disableServer);
 
+  module.def(
+      "_enable_jit_rref_pickle",
+      &enableJitRRefPickle,
+      R"(
+        Allows ``torch.jit.save`` to pickle a ``torch.jit.ScriptModule`` out of
+        RPC contexts.
+
+        .. warning::
+            This is a dangerous. If the module contains RRefs, the pickled
+            result must be sent over RPC and get unpickled on the receiving side
+            to restore the module. Otherwise, there will be RRef leaks, which
+            can potentially lead to program hang. When using this API, it is
+            applications responsibility to make sure that above assumption
+            always holds.
+      )");
+  module.def(
+      "_disable_jit_rref_pickle",
+      &disableJitRRefPickle);
+
   Py_RETURN_TRUE;
 }
 
