@@ -562,7 +562,7 @@ struct TORCH_CUDA_API ForLoop : public Expr {
   Val* const index_ = nullptr;
   IterDomain* const iter_domain_;
   Scope body_;
-  Expr* parent_scope_  = nullptr;
+  Expr* parent_scope_ = nullptr;
 };
 
 /*
@@ -622,7 +622,7 @@ struct TORCH_CUDA_API IfThenElse : public Expr {
   Bool* const cond_ = nullptr;
   Scope body_;
   Scope else_body_;
-  Expr* parent_scope_  = nullptr;
+  Expr* parent_scope_ = nullptr;
 };
 
 /*

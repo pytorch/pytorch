@@ -1195,7 +1195,7 @@ void testGPU_FusionAdvancedComputeAt() {
     TORCH_CHECK(tv0->getComputeAtView() == tv3);
     TORCH_CHECK(tv1->getComputeAtView() == tv4);
     TORCH_CHECK(tv2->getComputeAtView() == tv4);
-    TORCH_CHECK(tv3->getComputeAtView() == tv6);
+    TORCH_CHECK(tv3->getComputeAtView() == tv5);
     TORCH_CHECK(tv4->getComputeAtView() == tv5);
     TORCH_CHECK(tv5->getComputeAtView() == tv6);
     TORCH_CHECK(!tv6->hasComputeAt());
@@ -1209,7 +1209,7 @@ void testGPU_FusionAdvancedComputeAt() {
 
     tv0->computeAt(tv6, 1);
 
-    TORCH_CHECK(tv0->getComputeAtView() == tv3 && tv0->nDims() == 3);
+    TORCH_CHECK(tv0->getComputeAtView() == tv6 && tv0->nDims() == 3);
     TORCH_CHECK(tv1->getComputeAtView() == tv4 && tv1->nDims() == 3);
     TORCH_CHECK(tv2->getComputeAtView() == tv4 && tv2->nDims() == 3);
     TORCH_CHECK(tv3->getComputeAtView() == tv6 && tv3->nDims() == 3);
@@ -1283,6 +1283,7 @@ void testGPU_FusionAdvancedComputeAt() {
     fusion.addOutput(tv6);
 
     tv2->computeAt(tv4, 1);
+
     TORCH_CHECK(!tv0->hasComputeAt());
     TORCH_CHECK(!tv1->hasComputeAt());
     TORCH_CHECK(tv2->getComputeAtView() == tv4);
@@ -1629,9 +1630,6 @@ void testGPU_FusionLoopUnroll() {
   tv3->axis(0)->parallelize(ParallelType::BIDx);
 
   int inp_size = 129 * 13 * 3;
-
-  // GPULower lower(&fusion);
-  // lower.printKernel(std::cout);
 
   prog.device_ = 0;
   prog.grid((inp_size + 63) / 64);
@@ -2298,11 +2296,6 @@ void testGPU_FusionReduction() {
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-  // for(auto expr : fusion.exprs(true))
-  //   std::cout<<expr<<std::endl;
-  // GPULower lower(&fusion);
-  // lower.printKernel(std::cout);
-
   int numel_x = 65000;
   int numel_y = 1025;
 
@@ -2805,17 +2798,17 @@ void testGPU_FusionSimpleBCast() {
     fusion.addInput(tv0);
     fusion.addInput(tv1);
 
-    TensorView* tv2 = broadcast(tv0, {true, false, false});
-    TensorView* tv3 = broadcast(tv1, {false, false, true});
+    TensorView* tv2 = broadcast(tv0, {false, false, true});
+    TensorView* tv3 = broadcast(tv1, {true, false, false});
 
-    TensorView* tv4 = mul(tv3, tv2);
+    TensorView* tv4 = mul(tv2, tv3);
     fusion.addOutput(tv4);
 
     tv0->computeAt(tv4, -1);
     tv1->computeAt(tv4, -1);
 
-    // GPULower lower(&fusion);
-    // lower.printKernel(std::cout);
+    GPULower lower(&fusion);
+    lower.printKernel(std::cout);
   }
 }
 

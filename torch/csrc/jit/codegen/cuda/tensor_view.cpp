@@ -175,7 +175,8 @@ void TensorView::computeAt_impl(
 void TensorView::forwardComputeAt_impl(
     TensorView* producer,
     int producer_compute_at_axis) {
-  // Reset view otherwise will conflict with replay.
+  // Reset view otherwise will conflict with replay. Don't think this is true
+  // anymore.
   producer->clearComputeAt();
   TransformReplay::replayCasP(this, producer, producer_compute_at_axis);
   producer->setComputeAt(this, producer_compute_at_axis);
@@ -213,7 +214,33 @@ T1 tv_iterable(const T2& val_iterable) {
 }
 } // namespace
 
+/*
+ * Takes this tensor and tries to set up the schedule so that it's computed
+ * relative to consumer within axis. Simple example is if both this and consumer
+ * are 2D and this->computeAt(consumer, 1) is called, then only 1D of this will
+ * ever be materialized at the same time.
+ *
+ * Roughly what this function will do is:
+ *
+ * (1) Find if there's a consumer which contains all uses of this (aka
+ * producer). This "common_consumer" must be at consumer or after in the graph.
+ *
+ * (2) We will forward the computeAt from consumer to common_consumer.
+ *
+ * (3) We will find all paths from common_consumer back to this (aka producer).
+ * We will propagate the computeAt down this dependency chain to this (aka
+ * producer).
+ *
+ * (4) If there is not a common_consumer we will still have propagated down from
+ * consumer through all paths to this (aka producer). We will then make sure
+ * there isn't any broadcast axes within the computeAt axis (if so for now it's
+ * an error). We then propagate the compute at from this (aka producer) to all
+ * terminating Vals (registered outputs or leaves).
+ *
+ * (5) Set computeAt relative to outputs/leaves found in (4)
+ */
 TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
+  // Make sure the correct fusion is setup between this and consumer.
   TORCH_CHECK(
       this->fusion() == consumer->fusion(),
       this,
@@ -221,103 +248,60 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
       consumer,
       " are not in the same fusion.");
 
+  // Make sure Fusion Guard is set appropriately
   FusionGuard fg(this->fusion());
 
+  // Make sure this and consumer are not the same tensor, that's illegal
   TORCH_CHECK(
       !this->sameAs(consumer), "Cannot call this->computeAt(this, ...)");
 
+  // We support negative axes, so increment it by consumer->nDims() + 1 and make
+  // sure the result is within consumer->nDims() + 1. being at consumer->nDims()
+  // means this will be computed inline with consumer, hence the +1.
   if (axis < 0)
-    // Compute at is a bit strange where size is the maximum acceptable value
-    // instead of size-1
     axis += int(consumer->nDims()) + 1;
-
   TORCH_CHECK(
       axis >= 0 && (unsigned int)axis < consumer->nDims() + 1,
       "Compute at called on an axis outside valid range.");
 
-  // If not direct relationship follow dependency chain from consumer to
-  // producer.
-  auto dep_chains = DependencyCheck::getAllDependencyChains(this, consumer);
-
-  std::deque<Val*> dep_chain;
-  if (!dep_chains.empty())
-    dep_chain = dep_chains.front();
-
-  // Make sure there is a dependency chain, if not it's an invalid computeAt.
-  // We could do indirect computeAts, but it's not supported at this time.
+  // Right now we only support compute at if at some point in the graph consumer
+  // is dependent on this.
   TORCH_CHECK(
-      !dep_chain.empty(),
+      DependencyCheck::isDependencyOf(this, consumer),
       "Compute At expects ",
       this,
       " is a dependency of ",
       consumer,
       ", however it is not.");
 
-  // Validate dependency chain returned as expected
-  TORCH_INTERNAL_ASSERT(
-      dep_chain.back() == consumer && dep_chain[0] == this,
-      "Error computing dependency chain.");
+  // Start (1): Look through all the use chains of producer. Check if there's a
+  // single consumer for all chains at or after the consumer specified in the
+  // computeAt call.
 
-  // Start the replay going from consumer, through the dependency chain to
-  // producer. After this section, producer should look like consumer, and there
-  // should be a computeAt chain going from producer to consumer. Proper
-  // computeAts are setup, though they will be over-written in a later stage.
-  while (dep_chain.size() > 1) {
-    Val* consumer_val = dep_chain.back();
-    dep_chain.pop_back();
-    Val* producer_val = dep_chain.back();
+  // Grab all paths from this to  of producer in fusion.
+  auto val_all_dep_chains = DependencyCheck::getAllDependencyChainsTo(this);
 
-    TORCH_INTERNAL_ASSERT(
-        consumer_val->getValType().value() == ValType::TensorView &&
-            producer_val->getValType().value() == ValType::TensorView,
-        "When following the computeAt dependency chain, a non TensorView value was found.");
-
-    TensorView* running_consumer = static_cast<TensorView*>(consumer_val);
-    TensorView* running_producer = static_cast<TensorView*>(producer_val);
-    // Axis is relative to consumer, however as we propagate computeAt, it may
-    // move. This is why we have TensorView->getThisComputeAtAxis() which
-    // returns where in a TensorView does the computeAt (relative to consumer)
-    // line up. Mismatch is due to broadcast.
-    int compute_at_axis = axis;
-    if (running_consumer != consumer)
-      compute_at_axis = (int)running_consumer->getThisComputeAtAxis();
-    running_producer->computeAt_impl(running_consumer, compute_at_axis);
-  }
-
-  /*
-   * Compute At has now worked from consumer to producer, transforming producer
-   * to match computeAt selected in consumer We now need to work from producer
-   * up to its consumers (including indirect consumption) so their use also
-   * matches. If we can find a TV that contains all uses of producer (common
-   * consumer), we can terminate this propagation there. If not, we need to
-   * propagate all the way to outputs.
-   */
-
-  // Start looking for a common consumer of producer
-
-  // Grab all uses of producer in fusion
-  auto val_all_consumer_chains =
-      DependencyCheck::getAllDependencyChainsTo(this);
-
-  // Convert dep chains to tensor view chains
-  std::deque<std::deque<TensorView*>> all_consumer_chains;
-  for (const auto& val_dep_chain : val_all_consumer_chains)
-    all_consumer_chains.push_back(
+  // Convert dep chains to tensor view chains.
+  std::deque<std::deque<TensorView*>> tv_all_dep_chains;
+  for (const auto& val_dep_chain : val_all_dep_chains)
+    tv_all_dep_chains.push_back(
         tv_iterable<std::deque<TensorView*>>(val_dep_chain));
 
-  // Set arith to find a common consumer, start with first use chain of producer
+  // Convert the first chain to a set.
   std::set<TensorView*> common_consumers(
-      all_consumer_chains.front().begin(), all_consumer_chains.front().end());
+      tv_all_dep_chains.front().begin(), tv_all_dep_chains.front().end());
 
-  // Run through all use chains of producer, and intersect them
-  for (auto dep_chain : all_consumer_chains)
+  // Run through all use chains of producer, and intersect them to find common
+  // TVs
+  for (auto dep_chain : tv_all_dep_chains)
     common_consumers = set_intersection(
         common_consumers,
         std::set<TensorView*>(dep_chain.begin(), dep_chain.end()));
 
-  // Remove all TVs between producer and consumer as we don't want a common
-  // consumer placed logically before consumer provided in computeAt
-  for (const auto& dep_chain : dep_chains) {
+  // Remove all TVs from producer to consumer as common consumer must be at or
+  // after consumer
+  for (const auto& dep_chain :
+       DependencyCheck::getAllDependencyChains(this, consumer)) {
     auto tv_chain = tv_iterable<std::deque<TensorView*>>(dep_chain);
     for (auto tv : tv_chain) {
       if (tv != consumer)
@@ -325,23 +309,152 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
     }
   }
 
-  // If there is a common consumer, grab the first one (topologically)
+  // If there is a common consumer, grab the first one at or after consumer
   TensorView* common_consumer = nullptr;
   if (!common_consumers.empty()) {
-    for (TensorView* tv : all_consumer_chains.front())
+    for (TensorView* tv : tv_all_dep_chains.front())
       if (common_consumers.find(tv) != common_consumers.end()) {
         common_consumer = tv;
         break;
       }
+    TORCH_INTERNAL_ASSERT(
+        common_consumer != nullptr,
+        "Hit a logical inconsistency in the computeAt pass.");
   }
 
-  // Forward propagate the transformationthrough all use chains until
-  // common_consumer if there is one otherwise until we hit all output TVs
-  std::set<TensorView*> output_set;
+  // Record what axis we computeAt into, this is a map from "consumer" to
+  // computeAt point in "consumer", consumer in this context changes as we
+  // traverse the graph
+  std::unordered_map<TensorView*, int> compute_at_axis_lookup;
+  compute_at_axis_lookup[consumer] = axis;
+
+  // Track if we set computeAt on a TV
+  std::unordered_set<TensorView*> computeAted;
+  // Track if a TV was transformed by this pass
+  std::unordered_set<TensorView*> transformed;
+
+  // Start (2): Prop forward the computeAt from consumer to common_consumer if
+  // it exists
+  if (common_consumer != nullptr && common_consumer != consumer) {
+    int running_producer_compute_at = axis;
+    std::deque<Val*> dep_chain =
+        DependencyCheck::getSingleDependencyChain(consumer, common_consumer);
+    TORCH_INTERNAL_ASSERT(
+        !dep_chain.empty(), "Computed an invalid common_consumer.");
+    std::deque<TensorView*> tv_dep_chain =
+        tv_iterable<std::deque<TensorView*>>(dep_chain);
+
+    TensorView* running_consumer = tv_dep_chain.front();
+    tv_dep_chain.pop_front();
+
+    TensorView* running_producer;
+
+    while (!tv_dep_chain.empty()) {
+      running_producer = running_consumer;
+      running_consumer = tv_dep_chain.front();
+      tv_dep_chain.pop_front();
+
+      if (transformed.find(running_consumer) != transformed.end())
+        continue;
+
+      running_consumer->forwardComputeAt_impl(
+          running_producer, running_producer_compute_at);
+
+      // Update computeAted, transformed, and compute_at_axis_lookup
+      computeAted.emplace(running_producer);
+      transformed.emplace(running_consumer);
+
+      auto it = compute_at_axis_lookup.find(running_consumer);
+      if (it != compute_at_axis_lookup.end()) {
+        TORCH_INTERNAL_ASSERT(
+            it->second == running_producer->getRelativeComputeAtAxis(),
+            "Hit a logical inconsistency in the computeAt pass.");
+      } else {
+        compute_at_axis_lookup[running_consumer] =
+            running_producer->getRelativeComputeAtAxis();
+      }
+    }
+  }
+
+  // Start (3): Propagate back from common_consumer if it exists, or consumer
+  // through all paths to producer
+  TensorView* running_consumer =
+      common_consumer == nullptr ? consumer : common_consumer;
+
+  // Grab all chains from common_consumer to this
+  auto val_all_consumer_chains =
+      DependencyCheck::getAllDependencyChains(this, running_consumer);
+
+  // Convert dep chains to tensor view chains
+  std::deque<std::deque<TensorView*>> tv_all_consumer_chains;
+  for (const auto& val_dep_chain : val_all_consumer_chains)
+    tv_all_consumer_chains.push_back(
+        tv_iterable<std::deque<TensorView*>>(val_dep_chain));
+
+  for (auto tv_chain : tv_all_consumer_chains) {
+    TensorView* running_producer = tv_chain.back();
+    tv_chain.pop_back();
+    TensorView* running_consumer;
+
+    while (!tv_chain.empty()) {
+      running_consumer = running_producer;
+      running_producer = tv_chain.back();
+      tv_chain.pop_back();
+
+      auto it = compute_at_axis_lookup.find(running_consumer);
+      TORCH_INTERNAL_ASSERT(
+          it != compute_at_axis_lookup.end(),
+          "Should have already visisted a consumer, but encountered one that wasn't.");
+
+      if (transformed.find(running_producer) != transformed.end()) {
+        if (computeAted.find(running_producer) == computeAted.end())
+          running_producer->setComputeAt(running_consumer, it->second);
+        continue;
+      }
+
+      running_producer->computeAt_impl(running_consumer, it->second);
+
+      // Update both compute_at_ed and compute_at_axis_lookup
+      computeAted.emplace(running_producer);
+      transformed.emplace(running_producer);
+
+      it = compute_at_axis_lookup.find(running_producer);
+      if (it != compute_at_axis_lookup.end()) {
+        TORCH_INTERNAL_ASSERT(
+            it->second == running_producer->getThisComputeAtAxis(),
+            "Hit a logical inconsistency in the computeAt pass.");
+      } else {
+        compute_at_axis_lookup[running_producer] =
+            running_producer->getThisComputeAtAxis();
+      }
+    } // while (!tv_chain.empty())
+  } // for (auto tv_chain : tv_all_consumer_chains)
+
+  TORCH_INTERNAL_ASSERT(
+      this->hasComputeAt(),
+      "Hit a logical inconsistency in the computeAt pass.");
+  bool has_bcast = this->getThisComputeAtAxis() != axis;
+  TORCH_INTERNAL_ASSERT(
+      !has_bcast || common_consumer != nullptr,
+      "A broadcast dim was detected at somepoint to be within computeAt.",
+      " However, there isn't a TV that contains all uses of this.",
+      " This is not supported at this time.");
+
+  // Forward propagate the transformations through all use chains if we don't
+  // have a common_consumer
+  if (common_consumer != nullptr)
+    return this;
+
+  // Start (4): Propagate computeAt from producer through all uses to
+  // terminating values (registered outputs or leaf vals) Hold on to terminating
+  // outputs. Keep the order they were added so we can sort them later.
+  std::unordered_map<TensorView*, size_t> output_set;
+  size_t output_count = 0;
+
   // computeAt axis in outputs don't necessarily match up, make sure to keep the
   // relative computeAt position in each output
   std::vector<std::pair<TensorView*, int>> ordered_outputs;
-  for (auto dep_chain : all_consumer_chains) {
+  for (auto dep_chain : tv_all_dep_chains) {
     // All dep chains start with this.
     TORCH_INTERNAL_ASSERT(
         dep_chain.front() == this,
@@ -365,8 +478,19 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
       // Axis is relative to consumer, and may not necessarily apply to all
       // intermediate steps. Fortunately producer is guarenteed to have a valid
       // computeAt set, so we can use the compute at axis relative to producer.
-      running_consumer->forwardComputeAt_impl(
-          running_producer, running_producer_compute_at);
+
+      if (transformed.find(running_consumer) == transformed.end()) {
+        TransformReplay::replayCasP(
+            running_consumer, running_producer, running_producer_compute_at);
+      }
+      if (computeAted.find(running_producer) == computeAted.end()) {
+        running_producer->setComputeAt(
+            running_consumer, running_producer_compute_at);
+      }
+
+      transformed.emplace(running_consumer);
+      computeAted.emplace(running_producer);
+
       running_producer_compute_at =
           (int)running_producer->getThisComputeAtAxis();
       int consumer_compute_at =
@@ -374,7 +498,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 
       if (dep_chain.size() == 1) { // last one
         if (output_set.find(running_consumer) == output_set.end()) {
-          output_set.emplace(running_consumer);
+          output_set.emplace(std::make_pair(running_consumer, output_count++));
           ordered_outputs.emplace_back(std::pair<TensorView*, int>(
               running_consumer, consumer_compute_at));
         }
@@ -385,9 +509,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   if (!ordered_outputs.empty())
     for (auto it = ordered_outputs.begin(); it + 1 != ordered_outputs.end();
          it++)
-      (*it).first->computeAt_impl(
-          (*(it + 1)).first,
-          (*(it + 1)).second); // use recorded position, not axis.
+      it->first->setComputeAt((it + 1)->first, (it + 1)->second);
 
   return this;
 }
