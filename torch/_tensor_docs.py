@@ -202,6 +202,20 @@ acos_() -> Tensor
 In-place version of :meth:`~Tensor.acos`
 """)
 
+add_docstr_all('acosh',
+               r"""
+acosh() -> Tensor
+
+See :func:`torch.acosh`
+""")
+
+add_docstr_all('acosh_',
+               r"""
+acosh_() -> Tensor
+
+In-place version of :meth:`~Tensor.acosh`
+""")
+
 add_docstr_all('add',
                r"""
 add(other, *, alpha=1) -> Tensor
@@ -481,6 +495,19 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('asinh', r"""
+asinh() -> Tensor
+
+See :func:`torch.asinh`
+""")
+
+add_docstr_all('asinh_',
+               r"""
+asinh_() -> Tensor
+
+In-place version of :meth:`~Tensor.asinh`
+""")
+
 add_docstr_all('as_strided', r"""
 as_strided(size, stride, storage_offset=0) -> Tensor
 
@@ -513,6 +540,18 @@ add_docstr_all('atan_',
 atan_() -> Tensor
 
 In-place version of :meth:`~Tensor.atan`
+""")
+
+add_docstr_all('atanh',
+               r"""
+atanh() -> Tensor
+
+See :func:`torch.atanh`
+""")
+
+add_docstr_all('atanh_',
+               r"""
+In-place version of :meth:`~Tensor.atanh`
 """)
 
 add_docstr_all('baddbmm',
@@ -2236,6 +2275,34 @@ value is representable. For example, `torch.tensor(1, dtype=torch.double).random
 will be uniform in ``[0, 2^53]``.
 """)
 
+add_docstr_all('rad2deg',
+               r"""
+rad2deg() -> Tensor
+
+See :func:`torch.rad2deg`
+""")
+
+add_docstr_all('rad2deg_',
+               r"""
+rad2deg_() -> Tensor
+
+In-place version of :meth:`~Tensor.rad2deg`
+""")
+
+add_docstr_all('deg2rad',
+               r"""
+deg2rad() -> Tensor
+
+See :func:`torch.deg2rad`
+""")
+
+add_docstr_all('deg2rad_',
+               r"""
+deg2rad_() -> Tensor
+
+In-place version of :meth:`~Tensor.deg2rad`
+""")
+
 add_docstr_all('reciprocal',
                r"""
 reciprocal() -> Tensor
@@ -3367,7 +3434,7 @@ contiguity-like condition that :math:`\forall i = d, \dots, d+k-1`,
 Otherwise, it will not be possible to view :attr:`self` tensor as :attr:`shape`
 without copying it (e.g., via :meth:`contiguous`). When it is unclear whether a
 :meth:`view` can be performed, it is advisable to use :meth:`reshape`, which
-returns a view if the shapes are compatible, and copies (equivalent to calling 
+returns a view if the shapes are compatible, and copies (equivalent to calling
 :meth:`contiguous`) otherwise.
 
 Args:
@@ -3745,6 +3812,40 @@ Is this Tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+""")
+
+add_docstr_all('real',
+               r"""
+Returns a new tensor containing real values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`real` is only supported for tensors with complex dtypes.
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.real
+    tensor([ 0.3100, -0.5445, -1.6492, -0.0638])
+
+""")
+
+add_docstr_all('imag',
+               r"""
+Returns a new tensor containing imaginary values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`imag` is only supported for tensors with complex dtypes.
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.imag
+    tensor([ 0.3553, -0.7896, -0.0633, -0.8119])
+
 """)
 
 add_docstr_all('as_subclass',

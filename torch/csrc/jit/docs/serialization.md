@@ -8,8 +8,9 @@ of a call to `torch::jit::save()` or `torch::jit::load()`.
   - [`code/`: How code is serialized](#code-how-code-is-serialized)
     - [Printing code objects as Python source](#printing-code-objects-as-python-source)
     - [Placing the source code in the archive](#placing-the-source-code-in-the-archive)
-  - [`data.pkl`: How data is serialized](#datapkl-how-data-is-serialized)
-  - [`tensors/`: How tensors are serialized](#tensors-how-tensors-are-serialized)
+  - [How data is serialized](#how-data-is-serialized)
+    - [`data.pkl`: How module object state is serialized](#datapkl-how-module-object-state-is-serialized)
+    - [`data/`: How tensors are serialized](#tensors-how-tensors-are-serialized)
   - [`constants.pkl`: Constants in code](#constantspkl-constants-in-code)
   - [`torch:jit::load()`](#torchjitload)
   - [`__getstate__` and `__setstate__`](#getstate-and-setstate)
@@ -37,7 +38,7 @@ $ tree model/
 │   │   ├── bar.py.debug_pkl
 ├── data.pkl
 ├── constants.pkl
-└── tensors/
+└── data/
     ├── 0
     └── 1
 ```
@@ -211,7 +212,7 @@ That's about it; there's some additional logic to make sure that within a
 file, we place the classes in reverse-dependency order so that we compile the
 "leaf" dependencies before things that depend on them.
 
-## `data.pkl`: How data is serialized
+## How data is serialized
 
 A model is really a top-level `ScriptModule` with any number of submodules,
 parameters, attributes, and so on. We implement a subset of the Pickle format
@@ -234,6 +235,8 @@ necessary for pickling a module object.
 * **eager mode save** - `torch.save()` already produces a `pickle` archive, so
  doing the same with attributes avoids introducing yet another format
 
+### `data.pkl`: How module object state is serialized
+
 All data is written into the `data.pkl` file with the exception of tensors
 (see [the tensor section](#tensors-How-tensors-are-serialized) below).
 "Data" means all parts of the module object state, like attributes,
@@ -243,7 +246,7 @@ PyTorch functions defined in [torch/jit/_pickle.py](../../../jit/_pickle.py)
 are used to mark special data types, such as this tensor table index or
 specialized lists.
 
-## `tensors/`: How tensors are serialized
+### `data/`: How tensors are serialized
 
 During export a list of all the tensors in a model is created. Tensors can
 come from either module parameters or attributes of Tensor type.
