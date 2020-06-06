@@ -32,8 +32,9 @@ class DistributedSampler(Sampler):
 
     .. warning::
         In distributed mode, calling the :meth`set_epoch(epoch) <set_epoch>` method at
-        the beginning of each epoch is necessary to make shuffling work properly across
-        multiple epochs. Otherwise, the same ordering will be always used.
+        the beginning of each epoch **before** creating the :class:`DataLoader` iterator
+        is necessary to make shuffling work properly across multiple epochs. Otherwise,
+        the same ordering will be always used.
 
     Example::
 
