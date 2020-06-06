@@ -469,7 +469,8 @@ class InsertQuantDeQuantHelper {
 
   // Map from original weight value to GraphFunction corresponding to the
   // subgraph that includes the weight observer and dependent nodes.
-  std::unordered_map<Value*, std::unique_ptr<GraphFunction>> weight_to_graph_fn;
+  std::unordered_map<Value*, std::unique_ptr<GraphFunction>>
+      weight_to_graph_fn_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -633,7 +634,7 @@ void InsertQuantDeQuantHelper::extractAndRunWeightObserver(
   // If the graph was already visited, return the GraphFunction directly.
   // Multiple module instances can share the same graph code, so we don't need
   // to re-run the extraction process.
-  if (weight_to_graph_fn.count(weight_value) == 0) {
+  if (weight_to_graph_fn_.count(weight_value) == 0) {
     // Extract the subgraph nodes.
     findSubgraph(self, weight_value, weight_subgraph);
 
@@ -644,11 +645,11 @@ void InsertQuantDeQuantHelper::extractAndRunWeightObserver(
     SubGraphCloneHelper o;
     std::unique_ptr<GraphFunction> func =
         o.buildGraphFromNodes(weight_subgraph, "observer_subgraph");
-    weight_to_graph_fn[weight_value] = std::move(func);
+    weight_to_graph_fn_[weight_value] = std::move(func);
   }
   Stack module_inp = {module._ivalue()};
   // Run the graph with the module input.
-  weight_to_graph_fn[weight_value]->run(module_inp);
+  weight_to_graph_fn_[weight_value]->run(module_inp);
 }
 
 void InsertQuantDeQuantHelper::quantizeTensors(
