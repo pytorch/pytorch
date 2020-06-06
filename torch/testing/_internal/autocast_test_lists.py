@@ -31,6 +31,8 @@ class AutocastTestLists(object):
         # The lists below organize ops that autocast needs to test.
         # self.list_name corresponds to test_autocast_list_name in test/test_cuda.py.
         # Each op is associated with a tuple of valid arguments.
+        # In addition, cudnn conv ops are not supported on ROCm and hence will
+        # be skipped by passing TEST_WITH_ROCM flag to those ops in self.torch_fp16 list.
 
         # Some ops implement built-in type promotion.  These don't need autocasting,
         # but autocasting relies on their promotion, so we include tests to double-check.
