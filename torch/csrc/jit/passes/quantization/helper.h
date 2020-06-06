@@ -11,7 +11,6 @@ namespace torch {
 namespace jit {
 
 using graph_rewrite_helper::getFuncName;
-using graph_rewrite_helper::MatchFilter;
 
 // Vector of a module and the name of its method
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
