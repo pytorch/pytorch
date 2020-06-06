@@ -338,6 +338,10 @@ class TestSparse(TestCase):
         self.assertEqual(self.value_tensor(0), a.to_dense())
         self.assertEqual(a, a.to_dense().to_sparse())
 
+    def test_csr_layout(self):
+        self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
+        self.assertEqual(type(torch.sparse_csr), torch.layout)
+
     def test_shared(self):
         i = self.index_tensor([[2]])
         v = self.value_tensor([5])
