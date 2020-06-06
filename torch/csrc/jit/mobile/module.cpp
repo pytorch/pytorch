@@ -40,8 +40,7 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   auto debug_info = std::make_shared<MobileDebugInfo>();
   debug_info->setModelName(name());
   debug_info->setMethodName(method_name);
-  at::DebugInfoGuard guard(
-      at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
+  at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
   auto m = find_method(method_name);
   if (m == nullptr) {
