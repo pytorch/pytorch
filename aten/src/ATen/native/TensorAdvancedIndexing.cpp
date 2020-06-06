@@ -567,7 +567,10 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
 
 Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
                                    Scalar value, const std::string reduce) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add_(): Expected dtype int64 for index");  
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              "scatter_(): Expected floating or complex type for self.");
   SCATTER_GATHER_OP op = get_operator_enum(reduce);
   scatter_scalar_reduce_stub(self.device().type(), self, dim, index, value, op);
   return self;
@@ -575,7 +578,10 @@ Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor
 
 Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
                       const Tensor & src, const std::string reduce) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add_(): Expected dtype int64 for index");
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              "scatter_(): Expected floating or complex type for self.");
   SCATTER_GATHER_OP op = get_operator_enum(reduce);
   scatter_reduce_stub(self.device().type(), self, dim, index, src, op);
   return self;
