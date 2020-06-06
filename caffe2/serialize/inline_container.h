@@ -91,12 +91,16 @@ namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x3L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x4L;
 
 // Versions (i.e. why was the version number bumped?)
 // 1. Initial version
 // 2. Removed op_version_set version numbers
 // 3. Added type tags to pickle serialization of container types
+// 4. (Currently read-only) Will change torch.div to throw a runtime error
+//      when it would have performed floor division. Bumping the version counter
+//      will let us presever torch.div's historic behavior for programs
+//      serialized with file formats 1--3.
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 
 // Writer-specific constants
