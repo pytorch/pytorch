@@ -8080,7 +8080,7 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(x)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
-            torch.fliplr(torch.tensor(42))
+            torch.fliplr(torch.tensor(42, dtype=dtype))
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -8091,7 +8091,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_flipud_invalid(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 1-d."):
-            torch.flipud(torch.tensor(42))
+            torch.flipud(torch.tensor(42, dtype=dtype))
 
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
