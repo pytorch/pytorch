@@ -2707,6 +2707,7 @@
   dispatch:
     CPU: threshold
     CUDA: threshold_cuda
+    QuantizedCPU: quantized_threshold
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   variants: function

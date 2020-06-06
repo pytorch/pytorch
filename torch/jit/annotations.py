@@ -244,7 +244,7 @@ def try_real_annotations(fn, loc):
 def try_ann_to_type(ann, loc):
     if ann is None:
         return TensorType.get()
-    if ann is torch.Tensor:
+    if inspect.isclass(ann) and issubclass(ann, torch.Tensor):
         return TensorType.get()
     if is_tuple(ann):
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
