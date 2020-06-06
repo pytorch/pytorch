@@ -991,7 +991,14 @@ InsertObserversHelper::insertObserversFor(
     }
 
     for (auto* v : block->outputs()) {
-      block_output_observers.push_back(getObserverFor(v));
+      // we need explictly skip the values that are already observed
+      // this might happen in subblocks for `if` since
+      // these subblock has access to all values before the `if` node
+      if (!isObserved(v, block_observed_values)) {
+        block_output_observers.push_back(getObserverFor(v));
+      } else {
+        block_output_observers.push_back(c10::nullopt);
+      }
     }
   }
 
