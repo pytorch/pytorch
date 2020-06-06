@@ -222,14 +222,12 @@ class RRefTypingTest:
 
     @dist_init
     def test_my_script_module_with_rrefs(self):
-
         n = self.rank + 1
         dst_rank = n % self.world_size
 
         module_with_rrefs = MyScriptModuleWithRRefs(worker_name(dst_rank))
         res = module_with_rrefs()
         self.assertEqual(res, torch.ones(2, 2) * 9)
-
 
     @dist_init
     def test_rref_python_annotation(self):
