@@ -5451,6 +5451,39 @@ class TestTorchDeviceType(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
+    def test_complex(self, device):
+        input1 = torch.tensor([1, 2], dtype=torch.int32, device=device)
+        input2 = torch.tensor([3, 4], dtype=torch.int32, device=device)
+        self.assertEqual(torch.tensor([1+3j, 2+4j]), torch.complex(input1, input2).cpu())
+
+        input1 = torch.tensor([1, 2], device=device)
+        input2 = torch.tensor([np.pi/3, np.pi], device=device)
+        self.assertEqual(torch.tensor([0.5+0.86602540378j, -2]),
+                         torch.complex(input1, input2, polar=True).cpu(),
+                         atol=1e-5, rtol=1e-5)
+
+    def test_complex_out(self, device):
+        pass
+
+    def test_complex_unsupported(self, device):
+        pass
+        # input1 = torch.tensor([1.0, 0.1], device=device)
+        # input2 = torch.tensor([False, True], device=device)
+        # error = r'complex: input2 has the following unsupported type: torch(.*)BoolTensor'
+        # with self.assertRaisesRegex(RuntimeError, error):
+        #     z = torch.complex(input1, input2)
+
+        # input1 = torch.tensor([1, 0], dtype=torch.uint8, device=device)
+        # error = r'complex: input1 has the following unsupported type: torch(.*)ByteTensor'
+        # with self.assertRaisesRegex(RuntimeError, error_format):
+        #     z = torch.complex(input1, input2, polar=True)
+
+        # input1 = torch.tensor([-1, 1], dtype=torch.int8, device=device)
+        # error = r'complex: input1 has the following unsupported type: torch(.*)CharTensor'
+        # with self.assertRaisesRegex(RuntimeError, error_format):
+        #     z = torch.complex(input1, input2, polar=False)
+
+
     # Verifies that the inplace dunders (like idiv) actually are in place
     @onlyOnCPUAndCUDA
     def test_inplace_dunders(self, device):

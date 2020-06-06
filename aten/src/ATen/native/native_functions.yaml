@@ -706,6 +706,12 @@
   use_c10_dispatcher: full
   device_guard: False
 
+- func: complex(Tensor input1, Tensor input2, bool polar=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: complex.out(Tensor input1, Tensor input2, bool polar=False, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   use_c10_dispatcher: full
   variants: function
