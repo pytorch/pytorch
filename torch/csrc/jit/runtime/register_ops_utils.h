@@ -481,15 +481,15 @@ int listSetItem(Stack& stack);
       },                                                    \
       aliasAnalysisFromSchema())
 
-#define DEFINE_STR_CMP_OP(aten_op, op)     \
-  Operator(                                \
-      #aten_op "(str a, str b) -> bool",   \
-      [](Stack& stack) {                   \
-        auto b = pop(stack).toStringRef(); \
-        auto a = pop(stack).toStringRef(); \
-        push(stack, op);                   \
-        return 0;                          \
-      },                                   \
+#define DEFINE_STR_CMP_OP(aten_op, op)       \
+  Operator(                                  \
+      #aten_op ".str(str a, str b) -> bool", \
+      [](Stack& stack) {                     \
+        auto b = pop(stack).toStringRef();   \
+        auto a = pop(stack).toStringRef();   \
+        push(stack, op);                     \
+        return 0;                            \
+      },                                     \
       aliasAnalysisFromSchema())
 
 // define a primitive op over Scalar operands.
