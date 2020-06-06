@@ -12382,6 +12382,16 @@ class TestTorchDeviceType(TestCase):
                                               [1, 0, 0, 0],
                                               [0, 0, 0, 0]], device=device, dtype=torch.float32))
 
+    def test_scatter_different_types(self, device):
+        dtypes = [torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double]
+        for inp_type, src_type in combinations(dtypes, 2):
+            input = torch.zeros(4, 4, device=device, dtype=inp_type)
+            src = torch.ones(2, 2, device=device, dtype=src_type)
+            index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+            with self.assertRaisesRegex(RuntimeError,
+                                        'dtype of self and src should be the same'):
+                input.scatter_(0, index, src)
+
     def test_scatter_add_to_large_input(self, device):
         input = torch.zeros(4, 4, device=device)
         src = torch.ones(2, 2, device=device)
