@@ -552,5 +552,34 @@ bool is_relu_module(
                    "__torch__.torch.nn.modules.activation.ReLU");
 }
 
+bool is_conv1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv1d");
+}
+
+bool is_conv2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv2d");
+}
+
+bool is_conv3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv3d");
+}
+
+
+
 } // namespace jit
 } // namespace torch

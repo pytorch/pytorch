@@ -113,5 +113,18 @@ bool is_relu_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
+// TODO: add a macro to declare the filters
+bool is_conv1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
 } // namespace jit
 } // namespace torch
