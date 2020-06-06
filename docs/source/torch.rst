@@ -245,12 +245,15 @@ Pointwise Ops
     abs
     absolute
     acos
+    acosh
     add
     addcdiv
     addcmul
     angle
     asin
+    asinh
     atan
+    atanh
     atan2
     bitwise_not
     bitwise_and
