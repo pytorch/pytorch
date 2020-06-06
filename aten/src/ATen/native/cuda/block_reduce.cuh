@@ -22,6 +22,7 @@ __inline__ __device__ T BlockReduceSum(T val, T* shared) {
   const int lid = threadIdx.x % C10_WARP_SIZE;
   const int wid = threadIdx.x / C10_WARP_SIZE;
   val = WarpReduceSum(val);
+  __syncthreads();
   if (lid == 0) {
     shared[wid] = val;
   }
