@@ -1,9 +1,16 @@
 #pragma once
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+
+#include <functional>
+#include <regex>
 
 namespace torch {
 namespace jit {
+
+using graph_rewrite_helper::getFuncName;
 
 // Vector of a module and the name of its method
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
@@ -77,7 +84,7 @@ TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 // checks if a block will always raise an Exception
 TORCH_API bool alwaysRaisesException(Block* block);
 
-// =========== helper functions for Graph ==========
+// =========== helper functions for Module  ==========
 // TODO: remove
 TORCH_API std::vector<std::string> getModuleAccessPath(
     Value* instance,
@@ -89,7 +96,22 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
-// =========== helper functions for Module  ==========
+
+// ==================== filter functions for matches ==============
+// filter to check if the alpha argument of aten::add is constant 1
+bool aten_add_alpha_is_one(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+// filter to check if the functional in CallFunction is relu
+bool is_functional_relu(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+// filter to check if the module is torch.nn.ReLU
+bool is_relu_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
 
 } // namespace jit
 } // namespace torch
