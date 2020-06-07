@@ -85,8 +85,13 @@ white_list = [
     ('quantized::linear', datetime.date(2020, 6, 1)),
     ('_aten::*', datetime.date(2020, 6, 1)),
     ('_prim::*', datetime.date(2020, 6, 1)),
+    ('aten::eq', datetime.date(2020, 6, 30)),
+    ('aten::nq', datetime.date(2020, 6, 30)),
+    ('aten::lt', datetime.date(2020, 6, 30)),
+    ('aten::gt', datetime.date(2020, 6, 30)),
+    ('aten::le', datetime.date(2020, 6, 30)),
+    ('aten::ge', datetime.date(2020, 6, 30)),
 ]
-
 
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
