@@ -923,6 +923,15 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         self.assertEqual(type(model.fc1), torch.nn.qat.modules.Linear)
         self.assertEqual(
             type(model.group_norm), torch.nn.qat.modules.GroupNorm)
+        self.assertEqual(
+            type(model.instance_norm1d),
+            torch.nn.qat.modules.InstanceNorm1d)
+        self.assertEqual(
+            type(model.instance_norm2d),
+            torch.nn.qat.modules.InstanceNorm2d)
+        self.assertEqual(
+            type(model.instance_norm3d),
+            torch.nn.qat.modules.InstanceNorm3d)
 
         self.checkObservers(model)
         test_only_train_fn(model, self.train_data)
@@ -931,6 +940,14 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         def checkQuantized(model):
             self.assertEqual(type(model.fc1), nnq.Linear)
             self.assertEqual(type(model.group_norm), nnq.GroupNorm)
+            self.assertEqual(type(model.fc1), nnq.Linear)
+            self.assertEqual(type(model.group_norm), nnq.GroupNorm)
+            self.assertEqual(
+                type(model.instance_norm1d), nnq.InstanceNorm1d)
+            self.assertEqual(
+                type(model.instance_norm2d), nnq.InstanceNorm2d)
+            self.assertEqual(
+                type(model.instance_norm3d), nnq.InstanceNorm3d)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
 
