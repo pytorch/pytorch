@@ -377,7 +377,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::as_tensor(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
+        "aten::as_tensor.list(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
         createTensorFromList<false>,
         aliasAnalysisFromSchema()),
     Operator(
