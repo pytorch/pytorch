@@ -567,8 +567,8 @@ inline IValue toIValue(
           if (!N || !py::isinstance<py::int_>(obj)) {
             return IValue(py::cast<std::vector<int64_t>>(obj));
           } else {
-            double value = py::cast<int64_t>(obj);
-            c10::List<double> repeated;
+            int64_t value = py::cast<int64_t>(obj);
+            c10::List<int64_t> repeated;
             repeated.reserve(*N);
             for (int i = 0; i < *N; ++i) {
               repeated.push_back(value);
