@@ -248,7 +248,10 @@ void recurseThroughNestedModules(
     std::shared_ptr<ModuleValue> self,
     const std::string& prefix,
     const std::string& field,
-    std::function<void(std::shared_ptr<ModuleValue> module, SugaredValuePtr value, SugaredValuePtr key)> const& onModuleCallback) {
+    std::function<void(
+        std::shared_ptr<ModuleValue> module,
+        SugaredValuePtr value,
+        SugaredValuePtr key)> const& onModuleCallback) {
   auto prefix_value =
       std::make_shared<SimpleValue>(insertConstant(*m.graph(), prefix));
 
@@ -268,14 +271,9 @@ void recurseThroughNestedModules(
 
     auto keys_value = keys_iter->tup_.at(i);
     auto key_string = toIValue(keys_value->asValue(loc, m))->toStringRef();
-    
+
     recurseThroughNestedModules(
-        loc,
-        m,
-        module_value,
-        prefix,
-        field,
-        onModuleCallback);
+        loc, m, module_value, prefix, field, onModuleCallback);
   };
 }
 
@@ -389,7 +387,9 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   } else if (field == "named_modules" || field == "modules") {
     std::vector<SugaredValuePtr> keys;
     std::vector<SugaredValuePtr> values;
-    auto lambda = [&](std::shared_ptr<ModuleValue> module, SugaredValuePtr value, SugaredValuePtr key) -> void {
+    auto lambda = [&](std::shared_ptr<ModuleValue> module,
+                      SugaredValuePtr value,
+                      SugaredValuePtr key) -> void {
       keys.push_back(key);
       values.push_back(value);
     };
