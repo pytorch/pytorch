@@ -17184,8 +17184,6 @@ a")
         x = torch.jit.script(MyMod())
         z = self.getExportImportCopy(x)
         self.assertEqual(z.method(), x.method())
-        self.assertEqual(z.method(), model.method())
-        self.assertEqual(x.method(), model.method())
         names = x.method()
         print(names)
         for name in names:

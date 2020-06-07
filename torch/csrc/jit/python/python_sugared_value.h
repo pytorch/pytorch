@@ -216,12 +216,10 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc);
 void recurseThroughNestedModules(
     const SourceRange& loc,
     Function& m,
-    std::vector<SugaredValuePtr>& keys,
-    std::vector<SugaredValuePtr>& values,
     std::shared_ptr<ModuleValue> self,
     const std::string& prefix,
     const std::string& field,
-    std::function<void(std::shared_ptr<ModuleValue>)> const& onModuleCallback =
+    std::function<void(std::shared_ptr<ModuleValue> module, SugaredValuePtr value, SugaredValuePtr key)> const& onModuleCallback =
         {});
 
 // Used to support named_modules()
@@ -336,10 +334,16 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
       auto prefixInputValue =
           inputMap.find("prefix")->second.value(*f.graph());
       if (prefixInputValue->type()->kind() == TypeKind::StringType) {
-        prefix = constant_as<std::string>(prefixInputValue).value();
+        auto prefixInputValueAsConstString = constant_as<std::string>(prefixInputValue);
+        if (prefixInputValueAsConstString.has_value()) {
+          prefix = prefixInputValueAsConstString.value();
+        } else {
+          throw ErrorReport(loc)
+              << "Prefix string must be constant, not dynamically evaluted.";
+        }
       } else {
         throw ErrorReport(loc)
-            << "prefix must be a string";
+            << "Prefix must be a string";
       }
     }
 
@@ -347,18 +351,23 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
       auto recurseInputValue =
           inputMap.find("recurse")->second.value(*f.graph());
       if (recurseInputValue->type()->kind() == TypeKind::BoolType) {
-        bool shouldRecurse = constant_as<bool>(recurseInputValue).value();
+        auto shouldRecurseAsConstBool = constant_as<bool>(recurseInputValue);
+        if (!shouldRecurseAsConstBool.has_value()) {
+          throw ErrorReport(loc)
+              << "Recurse boolean must be constant, not dynamically evaluted.";
+        }
+        bool shouldRecurse = shouldRecurseAsConstBool.value();
         if (shouldRecurse) {
-          std::vector<SugaredValuePtr> moduleKeys;
-          std::vector<SugaredValuePtr> moduleValues;
+          // std::vector<SugaredValuePtr> moduleKeys;
+          // std::vector<SugaredValuePtr> moduleValues;
 
           std::vector<SugaredValuePtr> iterValues;
           std::vector<SugaredValuePtr> iterKeys;
 
-          auto lambda = [&](std::shared_ptr<ModuleValue> m) -> void {
+          auto lambda = [&](std::shared_ptr<ModuleValue> module, SugaredValuePtr value, SugaredValuePtr key) -> void {
             std::vector<std::string> names;
             const auto& selfType =
-                m->getConcreteType()->getJitType()->expect<ClassType>();
+                module->getConcreteType()->getJitType()->expect<ClassType>();
             for (size_t i = 0; i < selfType->numAttributes(); ++i) {
               if (name_ == "named_parameters") {
                 if (selfType->is_parameter(i)) {
@@ -383,13 +392,13 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
               auto name_v = std::make_shared<SimpleValue>(
                   insertConstant(*f.graph(),  name));
               Value* tensor_v =
-                  f.graph()->insertGetAttr(m->getSelf(), item_name);
-              iterValues.push_back(m->tryGetAttr(loc, f, item_name));
+                  f.graph()->insertGetAttr(module->getSelf(), item_name);
+              iterValues.push_back(module->tryGetAttr(loc, f, item_name));
               iterKeys.push_back(name_v);
             }
           };
           recurseThroughNestedModules(
-              loc, f, moduleKeys, moduleValues, module_, prefix, name_, lambda);
+              loc, f, module_, prefix, name_, lambda);
           auto iterator = std::make_shared<IterableTree>();
           iterator->addChild(
               loc, f, std::make_shared<SugaredTupleValue>(iterKeys));
