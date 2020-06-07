@@ -835,10 +835,33 @@ def _prepare_onnx_paddings(dim, pad):
     paddings = paddings[-2::-2] + paddings[-1::-2]
     return paddings
 
+def _convert_padding_node(padding):
+    if sym_help._is_value(padding):
+        if padding.node().kind() == 'onnx::Constant':
+            tval = padding.node()['value']
+            padding = [int(v) for v in tval]
+        elif padding.node().kind() == 'prim::ListConstruct':
+            all_constant = True
+            for v in padding.node().inputs():
+                if v.node().kind() != 'onnx::Constant':
+                    all_constant = False
+                    break
+            if all_constant:
+                padding = [int(v.node()['value']) for v in padding.node().inputs()]
+            else:
+                return sym_help._onnx_opset_unsupported('Pad', 9, 11)
+    return padding
 
-@parse_args('v', 'is', 'f')
 def constant_pad_nd(g, input, padding, value):
     mode = "constant"
+    if sym_help._is_value(value):
+        if value.node().kind() == 'onnx::Constant':
+            tval = value.node()['value']
+            value = float(tval)
+        else:
+            return sym_help._onnx_opset_unsupported('Pad', 9, 11)
+
+    padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
 
@@ -846,6 +869,7 @@ def constant_pad_nd(g, input, padding, value):
 @parse_args('v', 'is')
 def reflection_pad(g, input, padding):
     mode = "reflect"
+    padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
@@ -853,6 +877,7 @@ def reflection_pad(g, input, padding):
 @parse_args('v', 'is')
 def replication_pad(g, input, padding):
     mode = "edge"
+    padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
