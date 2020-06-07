@@ -438,52 +438,6 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                 numDist, numCategories,
                 prefixSum.data_ptr<scalar_t>(),
                 normDist.data_ptr<scalar_t>());
-      } else {
-        // Sample without replacement
-
-        // Binary search is warp divergent (so effectively we're running
-        // with just a single thread), but for better utilization,
-        // we need each block to have at least 4 warps.
-        dim3 block(32, 4);
-
-        // Each warp in a block will generate a sample from a different
-        // distribution concurrently.
-        ptrdiff_t numBlocks = (numDist + 4 - 1) / 4;
-        dim3 grid(numBlocks < MAX_NUM_BLOCKS ? numBlocks : MAX_NUM_BLOCKS);
-
-        for (int sample = 0; sample < n_sample; ++sample) {
-          if (sample > 0) {
-            // Update probabilities
-            // Renorm along rows
-            normDist.copy_(origDist);
-            renormRows(normDist);
-
-            // Prefix sum along rows
-            at::_cumsum_out(prefixSum, normDist, 1);
-          }
-          {
-            // See Note [Acquire lock when using random generators]
-            std::lock_guard<std::mutex> lock(gen->mutex_);
-
-            // each thread will utilize distributions/(gridDim.x*blockDim.y) randoms, however, since we have to use
-            // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
-            // offset is 4 times that.
-            auto offset = ((numDist-1)/(grid.x*block.y)+1)*4;
-            rng_engine_inputs = gen->philox_engine_inputs(offset);
-          }
-
-          // The kernel can only draw one sample before we have to
-          // recalculate our distribution
-          sampleMultinomialWithoutReplacement
-              <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-              rng_engine_inputs,
-                  n_sample,
-                  sample,
-                  result.data_ptr<int64_t>(),
-                  numDist, numCategories,
-                  origDist.data_ptr<scalar_t>(),
-                  prefixSum.data_ptr<scalar_t>());
-        }
       }
     }
   });
