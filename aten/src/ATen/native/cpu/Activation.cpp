@@ -56,8 +56,8 @@ static void log_sigmoid_kernel(Tensor& output, Tensor& buffer, const Tensor& inp
   });
 }
 
-static void log_sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_sigmoid_backward", [&]() {
+static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_sigmoid_backward_cpu", [&]() {
     using Vec = Vec256<scalar_t>;
     auto zero_val = scalar_t(0);
     auto zero_vec = Vec(zero_val);
