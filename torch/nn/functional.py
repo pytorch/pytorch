@@ -3872,13 +3872,13 @@ def _pad_circular(input, padding):
 
     # Only supports wrapping around once
     for a, size in enumerate(shape[2:]):
-        assert padding[-(a*2+1)] <= size
-        assert padding[-(a*2+2)] <= size
+        assert padding[-(a * 2 + 1)] <= size
+        assert padding[-(a * 2 + 2)] <= size
 
     # Get shape of padded array
     padded_shape = shape[:2]
     for a, size in enumerate(shape[2:]):
-        padded_shape += (size + padding[-(a*2+1)] + padding[-(a*2+2)],)
+        padded_shape += (size + padding[-(a * 2 + 1)] + padding[-(a * 2 + 2)],)
 
     out = torch.empty(padded_shape, dtype=input.dtype, layout=input.layout,
                       device=input.device)
@@ -3909,21 +3909,21 @@ def _pad_circular(input, padding):
     # Pad first conv dim (depth-wise)
     out[:, :, :padding[-2]] = \
         out[:, :, -(padding[-2] + padding[-1]):-padding[-1]]
-    out[:, :, (padded_shape[2]-padding[-1]):] = \
+    out[:, :, (padded_shape[2] - padding[-1]):] = \
         out[:, :, padding[-2]:(padding[-2] + padding[-1])]
 
     if len(padding) > 2:
         # Pad second conv dim (height-wise)
         out[:, :, :, :padding[-4]] = \
             out[:, :, :, -(padding[-4] + padding[-3]):-padding[-3]]
-        out[:, :, :, (padded_shape[3]-padding[-3]):] = \
+        out[:, :, :, (padded_shape[3] - padding[-3]):] = \
             out[:, :, :, padding[-4]:(padding[-4] + padding[-3])]
 
     if len(padding) > 4:
         # Pad third conv dim (width-wise)
         out[:, :, :, :, :padding[-6]] = \
             out[:, :, :, :, -(padding[-6] + padding[-5]):-padding[-5]]
-        out[:, :, :, :, (padded_shape[4]-padding[-5]):] = \
+        out[:, :, :, :, (padded_shape[4] - padding[-5]):] = \
             out[:, :, :, :, padding[-6]:(padding[-6] + padding[-5])]
 
     return out
