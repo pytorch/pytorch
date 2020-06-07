@@ -490,8 +490,8 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
 
   // Fast-path based on RobertoLat example.
   // Reference:
-  // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503 Half
-  // is not supported on CPU.
+  // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
+  // Half is not supported on CPU.
   if (!with_replacement &&
       !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half)) {
     auto rand = at::empty_like(self).uniform_();
