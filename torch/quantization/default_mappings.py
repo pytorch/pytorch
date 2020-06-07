@@ -49,6 +49,7 @@ DEFAULT_MODULE_MAPPING = {
     nnqat.InstanceNorm1d: nnq.InstanceNorm1d,
     nnqat.InstanceNorm2d: nnq.InstanceNorm2d,
     nnqat.InstanceNorm3d: nnq.InstanceNorm3d,
+    nnqat.LayerNorm: nnq.LayerNorm,
 }
 
 # Map for swapping float module to qat modules
@@ -60,6 +61,7 @@ DEFAULT_QAT_MODULE_MAPPING = {
     nn.InstanceNorm1d: nnqat.InstanceNorm1d,
     nn.InstanceNorm2d: nnqat.InstanceNorm2d,
     nn.InstanceNorm3d: nnqat.InstanceNorm3d,
+    nn.LayerNorm: nnqat.LayerNorm,
     # Intrinsic modules:
     nni.ConvBn2d: nniqat.ConvBn2d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,

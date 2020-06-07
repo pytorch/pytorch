@@ -932,6 +932,8 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         self.assertEqual(
             type(model.instance_norm3d),
             torch.nn.qat.modules.InstanceNorm3d)
+        self.assertEqual(
+            type(model.layer_norm), torch.nn.qat.modules.LayerNorm)
 
         self.checkObservers(model)
         test_only_train_fn(model, self.train_data)
@@ -948,6 +950,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 type(model.instance_norm2d), nnq.InstanceNorm2d)
             self.assertEqual(
                 type(model.instance_norm3d), nnq.InstanceNorm3d)
+            self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
 
