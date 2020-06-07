@@ -63,7 +63,14 @@ class TestSparse(TestCase):
             kwargs['dtype'] = kwargs.get('dtype', self.value_dtype)
             kwargs['device'] = kwargs.get('device', self.device)
             return torch.sparse_coo_tensor(*args, **kwargs)
+
+        def csr_sparse_tensor_factory(*args, **kwargs):
+            kwargs['dtype'] = kwargs.get('dtype', self.value_dtype)
+            kwargs['device'] = kwargs.get('device', self.device)
+            return torch.sparse_csr_tensor(*args, **kwargs)
+            
         self.sparse_tensor = sparse_tensor_factory
+        self.csr_sparse_tensor = csr_sparse_tensor_factory
         self.legacy_sparse_tensor = torch.sparse.DoubleTensor
         super(TestSparse, self).setUp()
 
@@ -337,11 +344,7 @@ class TestSparse(TestCase):
         self.assertTrue(a_coalesced.is_coalesced())
         self.assertEqual(self.value_tensor(0), a.to_dense())
         self.assertEqual(a, a.to_dense().to_sparse())
-
-    def test_csr_layout(self):
-        self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
-        self.assertEqual(type(torch.sparse_csr), torch.layout)
-
+        
     def test_shared(self):
         i = self.index_tensor([[2]])
         v = self.value_tensor([5])
