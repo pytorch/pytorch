@@ -337,6 +337,7 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
   // struct are empty, and there is no pre-existing accumulation tensor.
   // Directly assign the sparse tensor to the `contents` field.
   replica.contents = grad;
+  replica.contents.div_(process_group_->getSize());
 }
 
 // The function `autograd_hook` is called after the gradient for a
