@@ -546,7 +546,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
       [](std::chrono::milliseconds timeoutMillis) {
         RRefContext::getInstance().delAllUsersAndUnforkedOwners(timeoutMillis);
       },
-      py::arg("timeout") = kDeleteAllUsersTimeout);
+      py::arg("timeout") = kDeleteAllUsersTimeout,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
     // NB: do not release GIL in the function. The destroyInstance() method
