@@ -23,6 +23,9 @@ DEFAULT_MODULE_MAPPING = {
     nn.BatchNorm3d: nnq.BatchNorm3d,
     nn.LayerNorm: nnq.LayerNorm,
     nn.GroupNorm: nnq.GroupNorm,
+    nn.InstanceNorm1d: nnq.InstanceNorm1d,
+    nn.InstanceNorm2d: nnq.InstanceNorm2d,
+    nn.InstanceNorm3d: nnq.InstanceNorm3d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:

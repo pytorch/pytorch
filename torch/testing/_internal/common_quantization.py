@@ -408,12 +408,19 @@ class NormalizationTestModel(torch.nn.Module):
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.layer_norm = torch.nn.LayerNorm((8))
         self.group_norm = torch.nn.GroupNorm(2, 8)
+        # TODO: add handling for affine=False (future PR)
+        self.instance_norm1d = torch.nn.InstanceNorm1d(8, affine=True)
+        self.instance_norm2d = torch.nn.InstanceNorm2d(8, affine=True)
+        self.instance_norm3d = torch.nn.InstanceNorm3d(8, affine=True)
 
     def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.layer_norm(x)
         x = self.group_norm(x.unsqueeze(-1))
+        x = self.instance_norm1d(x)
+        x = self.instance_norm2d(x.unsqueeze(-1))
+        x = self.instance_norm3d(x.unsqueeze(-1))
         return x
 
 class NestedModel(torch.nn.Module):
