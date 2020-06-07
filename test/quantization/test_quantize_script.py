@@ -2484,16 +2484,22 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
 
         model = torch.jit.script(DynamicModel()).eval()
         data = torch.randn(5, 5, dtype=torch.float)
-        for op in ['mod1', '']:
+        quant_ops = ['mod1', '']
+        counts = [1, 2]
+        for op, count in zip(quant_ops, counts):
             qconfig_dict = {op: default_dynamic_qconfig}
-            model_graph = quantize_dynamic_script(model, qconfig_dict)
-            out_graph = model_graph(data)
+            m1 = quantize_dynamic_script(model, qconfig_dict)
+            out_graph = m1(data)
+
+            FileCheck().check_count("quantized::linear_dynamic(", count, exactly=True) \
+                       .check_not("aten::_choose_qparams_per_tensor") \
+                       .run(m1.graph)
 
             # Explicitly call forward on model before convert
-            m = prepare_dynamic_script(model, qconfig_dict)
-            m(data)
-            m = convert_dynamic_script(m, debug=False)
-            out_ref = model_graph(data)
+            m2 = prepare_dynamic_script(model, qconfig_dict)
+            m2(data)
+            m2 = convert_dynamic_script(m2, debug=False)
+            out_ref = m2(data)
             self.assertEqual(out_graph, out_ref)
 
     @override_qengines
