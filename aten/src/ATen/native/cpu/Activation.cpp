@@ -595,7 +595,7 @@ void glu_backward_kernel(TensorIterator& iter) {
 } // namespace
 
 REGISTER_DISPATCH(log_sigmoid_stub, &log_sigmoid_kernel);
-REGISTER_DISPATCH(log_sigmoid_backward_cpu_stub, &log_sigmoid_backward_kernel);
+REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_kernel);
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
 REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
