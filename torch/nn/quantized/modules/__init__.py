@@ -4,7 +4,7 @@ from torch.nn.modules.pooling import MaxPool2d
 
 from .activation import ReLU, ReLU6, Hardswish
 from .batchnorm import BatchNorm2d, BatchNorm3d
-from .normalization import LayerNorm
+from .normalization import LayerNorm, GroupNorm
 from .conv import Conv1d, Conv2d, Conv3d
 from .linear import Linear
 
@@ -91,6 +91,7 @@ __all__ = [
     'ReLU6',
     'Hardswish',
     'LayerNorm',
+    'GroupNorm',
     # Wrapper modules
     'FloatFunctional',
     'QFunctional',

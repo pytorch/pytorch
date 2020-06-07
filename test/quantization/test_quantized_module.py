@@ -627,6 +627,37 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                          msg="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
 
+    def test_group_norm(self):
+        """Tests the correctness of the groupnorm module.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+
+        dims = (1, 4, 8)
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = torch.nn.GroupNorm(2, 4).float()
+        float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
+        float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
+
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = nnq.GroupNorm(
+            2, 2, float_mod.weight, float_mod.bias, y_scale, y_zero_point)
+        qY = quant_mod(qX)
+
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         msg="GroupNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
+
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
     @skipIfNoFBGEMM
