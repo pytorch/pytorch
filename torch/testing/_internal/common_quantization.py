@@ -407,11 +407,13 @@ class NormalizationTestModel(torch.nn.Module):
         self.quant = torch.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.layer_norm = torch.nn.LayerNorm((8))
+        self.group_norm = torch.nn.GroupNorm(2, 8)
 
     def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.layer_norm(x)
+        x = self.group_norm(x.unsqueeze(-1))
         return x
 
 class NestedModel(torch.nn.Module):
