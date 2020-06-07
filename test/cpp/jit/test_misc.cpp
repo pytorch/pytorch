@@ -17,6 +17,7 @@
 #include "torch/csrc/jit/ir/attributes.h"
 #include "torch/csrc/jit/ir/irparser.h"
 #include "torch/csrc/jit/ir/scope.h"
+#include "torch/csrc/jit/jit_log.h"
 #include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -1457,15 +1458,15 @@ void testProfiler() {
   auto begin = pr->profiled_graph_->block()->nodes().begin();
   auto end = pr->profiled_graph_->block()->nodes().end();
   auto mm =
-      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mm; });
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::add; });
   ASSERT_NE(mm, end);
-  std::vector<int64_t> mm_expected{4, 256};
+  std::vector<int64_t> mm_expected{4, 2048};
   std::vector<int64_t> eltwise{4, 512};
   checkShape(*mm, mm_expected);
-  auto sigmoid_n = std::find_if(
-      begin, end, [](Node* n) { return n->kind() == aten::sigmoid; });
-  ASSERT_NE(sigmoid_n, end);
-  checkShape(*sigmoid_n, eltwise);
+  auto mul_n =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mul; });
+  ASSERT_NE(mul_n, end);
+  checkShape(*mul_n, eltwise);
   auto tanh_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
   checkShape(*tanh_n, eltwise);
