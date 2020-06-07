@@ -124,8 +124,8 @@ struct TORCH_CUDA_API TransformReplay {
  public:
   // Replay producer as consumer.
   static TensorDomain* replayPasC(
-      TensorDomain* producer,
-      TensorDomain* consumer,
+      const TensorDomain* producer,
+      const TensorDomain* consumer,
       int consumer_compute_at_axis);
 
   // Replay producer as consumer.
@@ -136,8 +136,8 @@ struct TORCH_CUDA_API TransformReplay {
 
   // Replay producer as consumer.
   static TensorDomain* replayCasP(
-      TensorDomain* consumer,
-      TensorDomain* producer,
+      const TensorDomain* consumer,
+      const TensorDomain* producer,
       int producer_compute_at_axis);
 
   // Replay producer as consumer.
@@ -148,8 +148,8 @@ struct TORCH_CUDA_API TransformReplay {
 
   // Self replay.
   static TensorDomain* fullSelfReplay(
-      TensorDomain* new_self_root,
-      TensorDomain* self);
+      const TensorDomain* new_self_root,
+      const TensorDomain* self);
 };
 
 } // namespace fuser

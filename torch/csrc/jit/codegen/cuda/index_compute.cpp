@@ -110,8 +110,8 @@ std::vector<Val*> IndexCompute::get(
 }
 
 TensorIndex* Index::getGlobalProducerIndex(
-    TensorView* producer,
-    TensorView* consumer,
+    const TensorView* producer,
+    const TensorView* consumer,
     const std::vector<ForLoop*>& loops) {
   // This replay will ignore reduction dimensions on the producer
   auto pind =
@@ -174,8 +174,8 @@ TensorIndex* Index::getGlobalProducerIndex(
 
 // Producer index for either shared or local memory
 TensorIndex* Index::getProducerIndex_impl(
-    TensorView* producer,
-    TensorView* consumer,
+    const TensorView* producer,
+    const TensorView* consumer,
     const std::vector<ForLoop*>& loops) {
   TORCH_INTERNAL_ASSERT(
       loops.size() == consumer->nDims(),
@@ -251,7 +251,7 @@ TensorIndex* Index::getProducerIndex_impl(
 }
 
 TensorIndex* Index::getGlobalConsumerIndex(
-    TensorView* consumer,
+    const TensorView* consumer,
     const std::vector<ForLoop*>& loops) {
   // If we're initializing a reduction buffer, we won't have the reduction
   // loops. If we're actually performing the reduction, we will.
@@ -295,7 +295,7 @@ TensorIndex* Index::getGlobalConsumerIndex(
 
 // Consumer index for either shared or local memory
 TensorIndex* Index::getConsumerIndex_impl(
-    TensorView* consumer,
+    const TensorView* consumer,
     const std::vector<ForLoop*>& loops) {
   // If we're initializing a reduction buffer, we won't have the reduction
   // loops. If we're actually performing the reduction, we will.
@@ -368,8 +368,8 @@ TensorIndex* Index::getConsumerIndex_impl(
 
 // Producer is the inputs of an expression
 TensorIndex* Index::getProducerIndex(
-    TensorView* producer,
-    TensorView* consumer,
+    const TensorView* producer,
+    const TensorView* consumer,
     const std::vector<ForLoop*>& loops) {
   TORCH_INTERNAL_ASSERT(
       loops.size() == consumer->nDims() ||
@@ -382,7 +382,7 @@ TensorIndex* Index::getProducerIndex(
 
 // Consumer is the output of an expression
 TensorIndex* Index::getConsumerIndex(
-    TensorView* consumer,
+    const TensorView* consumer,
     const std::vector<ForLoop*>& loops) {
   TORCH_INTERNAL_ASSERT(
       loops.size() == consumer->nDims() ||

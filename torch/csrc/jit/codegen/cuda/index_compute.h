@@ -80,25 +80,25 @@ struct Index {
  private:
   // Producer indexing if it's in shared or local memory
   static TensorIndex* getProducerIndex_impl(
-      TensorView* producer,
-      TensorView* consumer,
+      const TensorView* producer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
   // Consumer indexing if it's in shared or local memory
   static TensorIndex* getConsumerIndex_impl(
-      TensorView* consumer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
  public:
   // Producer if it's in global memory
   static TensorIndex* getGlobalProducerIndex(
-      TensorView* producer,
-      TensorView* consumer,
+      const TensorView* producer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
   // Consumer indexing if it's in global memory
   static TensorIndex* getGlobalConsumerIndex(
-      TensorView* consumer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
   // Indexing functions
@@ -106,13 +106,13 @@ struct Index {
   // i.e. T0 = T1... -> T0 is the consumer, T1 is the producer
   // Producer indexing dispatch
   static TensorIndex* getProducerIndex(
-      TensorView* producer,
-      TensorView* consumer,
+      const TensorView* producer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
   // Consumer index dispatch
   static TensorIndex* getConsumerIndex(
-      TensorView* consumer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
   // Will run inds through back prop index computation for tv

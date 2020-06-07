@@ -129,8 +129,8 @@ struct ReplaySelf : public ReplayTransformations {
 
 // Self replay.
 TensorDomain* TransformReplay::fullSelfReplay(
-    TensorDomain* new_self_root,
-    TensorDomain* self) {
+    const TensorDomain* new_self_root,
+    const TensorDomain* self) {
   TORCH_INTERNAL_ASSERT(
       new_self_root->nDims() == self->rootDomain().size(),
       "Invalid number of IterDomains provided.");
@@ -181,8 +181,8 @@ TensorDomain* TransformReplay::fullSelfReplay(
 // mapped to in the consumer the operations would all be the same. then we want
 // to start the replay of the producer from the rfactor root axes, not the root.
 TensorDomain* TransformReplay::replayPasC(
-    TensorDomain* producer,
-    TensorDomain* consumer,
+    const TensorDomain* producer,
+    const TensorDomain* consumer,
     int consumer_compute_at_axis) {
   if (consumer_compute_at_axis < 0)
     consumer_compute_at_axis += (int)consumer->nDims() + 1;
@@ -374,8 +374,8 @@ TensorDomain* TransformReplay::replayPasC(
 
 // Replay consumer as producer.
 TensorDomain* TransformReplay::replayCasP(
-    TensorDomain* consumer,
-    TensorDomain* producer,
+    const TensorDomain* consumer,
+    const TensorDomain* producer,
     int producer_compute_at_axis) {
   if (producer_compute_at_axis < 0)
     producer_compute_at_axis += (int)producer->nDims() + 1;
