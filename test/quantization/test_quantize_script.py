@@ -2148,6 +2148,26 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         FileCheck().check_not("aten::group_norm") \
                    .run(m.graph)
 
+    def test_instance_norm(self):
+        data = [(torch.rand((1, 4, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        # TODO: handle affine == False (separate PR)
+        instance_norm1d = torch.nn.InstanceNorm1d(4, affine=True)
+        m = self._test_op_impl(instance_norm1d, data, "quantized::instance_norm")
+        FileCheck().check_not("aten::instance_norm") \
+                   .run(m.graph)
+
+        data = [(torch.rand((1, 4, 10, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        instance_norm2d = torch.nn.InstanceNorm2d(4, affine=True)
+        m = self._test_op_impl(instance_norm2d, data, "quantized::instance_norm")
+        FileCheck().check_not("aten::instance_norm") \
+                   .run(m.graph)
+
+        data = [(torch.rand((1, 4, 10, 1, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        instance_norm3d = torch.nn.InstanceNorm3d(4, affine=True)
+        m = self._test_op_impl(instance_norm3d, data, "quantized::instance_norm")
+        FileCheck().check_not("aten::instance_norm") \
+                   .run(m.graph)
+
     def test_quantize_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general shape ops like aten::flatten
