@@ -129,7 +129,7 @@ TEST(DistributionsTest, TestPhiloxIncrementBigUniformTensor) {
 TEST(DistributionsTest, TestPhiloxIncrementSmallMultinomialTensor) {
   // Test Description:
   //   Same concept as TestPhiloxIncrementSmallUniformTensor.
-  //   Multinomial increments offset by 10. Tests if uniform starts from the correct offset.
+  //   Multinomial increments offset by 4. Tests if uniform starts from the correct offset.
 
   // if cuda not available, return
   if (!at::cuda::is_available()) return;
