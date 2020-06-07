@@ -142,7 +142,7 @@ class ModuleList(Module):
                 return x
     """
 
-    def __init__(self, modules: Optional[Iterable[ModuleT]] = None) -> None:
+    def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
         super(ModuleList, self).__init__()
         if modules is not None:
             self += modules
@@ -157,13 +157,13 @@ class ModuleList(Module):
         return str(idx)
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: int) -> ModuleT:
+    def __getitem__(self, idx: int) -> Module:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
             return self._modules[self._get_abs_string_index(idx)]
 
-    def __setitem__(self, idx: int, module: ModuleT) -> None:
+    def __setitem__(self, idx: int, module: Module) -> None:
         idx = self._get_abs_string_index(idx)
         return setattr(self, str(idx), module)
 
@@ -182,10 +182,10 @@ class ModuleList(Module):
         return len(self._modules)
 
     @_copy_to_script_wrapper
-    def __iter__(self) -> Iterator[ModuleT]:
+    def __iter__(self) -> Iterator[Module]:
         return iter(self._modules.values())
 
-    def __iadd__(self: T, modules: Iterable[ModuleT]) -> T:
+    def __iadd__(self: T, modules: Iterable[Module]) -> T:
         return self.extend(modules)
 
     @_copy_to_script_wrapper
@@ -194,7 +194,7 @@ class ModuleList(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    def insert(self, index: int, module: ModuleT) -> None:
+    def insert(self, index: int, module: Module) -> None:
         r"""Insert a given module before a given index in the list.
 
         Arguments:
@@ -205,7 +205,7 @@ class ModuleList(Module):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
-    def append(self: T, module: ModuleT) -> T:
+    def append(self: T, module: Module) -> T:
         r"""Appends a given module to the end of the list.
 
         Arguments:
@@ -214,7 +214,7 @@ class ModuleList(Module):
         self.add_module(str(len(self)), module)
         return self
 
-    def extend(self: T, modules: Iterable[ModuleT]) -> T:
+    def extend(self: T, modules: Iterable[Module]) -> T:
         r"""Appends modules from a Python iterable to the end of the list.
 
         Arguments:
