@@ -3,6 +3,9 @@ import torch
 # NOTE: These tests are inspired from test_sparse.py and may duplicate some behaviour.
 # Need to think about merging them both sometime down the line.
 
+# Major differences between testing of CSR and COO is that we don't need to test CSR
+# for coalesced/uncoalesced behaviour.
+
 # TODO: remove this global setting
 # Sparse tests use double as the default dtype
 torch.set_default_dtype(torch.double)
@@ -37,7 +40,6 @@ class TestSparseCSR(TestCase):
             return torch.sparse_csr_tensor(*args, **kwargs)
             
         self.sparse_tensor = sparse_tensor_factory
-        self.legacy_sparse_tensor = torch.sparse.DoubleTensor
         super(TestSparseCSR, self).setUp()
     
     def test_csr_layout(self):
