@@ -38,7 +38,9 @@ def set_printoptions(
         profile: Sane defaults for pretty printing. Can override with any of
             the above options. (any one of `default`, `short`, `full`)
         sci_mode: Enable (True) or disable (False) scientific notation. If
-            None (default) is specified, the value is defined by `_Formatter`
+            None (default) is specified, the value is defined by 
+            `torch._tensor_str._Formatter`. This value is automatically chosen
+            by the framework.
     """
     if profile is not None:
         if profile == "default":
@@ -161,7 +163,7 @@ class _Formatter(object):
             ret = '({{:.{}f}}{{}}{{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
             if not self.has_non_zero_decimal_val:
                 # complex tensor contains integer elements only
-                ret = "({{:.0f}}.{{}}{{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
+                ret = "({{:.0f}}.{{}}{{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))  # noqa: F523
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
