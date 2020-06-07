@@ -726,10 +726,10 @@ Tensor leaky_relu_backward(
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
-  // FIXME: do these actually need to be zeros_like or can they be empty_like?
-  auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  Tensor result;
   auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
-  log_sigmoid_stub(kCPU, result, buffer, input.contiguous());
+  auto iter = TensorIterator::binary_op(result, input, buffer, /*check_mem_overlap=*/true);
+  log_sigmoid_stub(kCPU, iter);
   return std::make_tuple(result, buffer);
 }
 
@@ -738,7 +738,16 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor&
   buffer.resize_as_(input, at::MemoryFormat::Contiguous);
   TORCH_CHECK(buffer.is_contiguous(), "Contiguous buffer required for log_sigmoid with out parameter");
   Tensor result_tmp = result.is_contiguous() ? result : at::empty_like(result, at::MemoryFormat::Contiguous);
-  log_sigmoid_stub(kCPU, result_tmp, buffer, input.contiguous());
+
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(result_tmp);
+  iter.add_input(input);
+  iter.add_input(buffer);
+  iter.add_input(input.contiguous());
+  iter.build();
+  log_sigmoid_backward_cpu_stub(kCPU, iter);
+
   if (!result.is_contiguous()) {
     result.copy_(result_tmp);
   }
