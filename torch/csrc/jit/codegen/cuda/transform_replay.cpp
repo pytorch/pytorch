@@ -15,7 +15,7 @@ using id_map = std::unordered_map<IterDomain*, IterDomain*>;
 
 namespace {
 
-struct TORCH_CUDA_API ReplaySelf : public ReplayTransformations {
+struct ReplaySelf : public ReplayTransformations {
  private:
   // Took a good bit of this from ReplayTransformations::handle(Split...)
   void handle(Split* s) override {
