@@ -620,6 +620,19 @@ graph(%a_quant, %num_groups, %weight, %bias, %eps, %cudnn_enabled, %output_scale
          %r = quantized::group_norm(%a_quant, %num_groups, %weight, %bias, %eps, %output_scale, %output_zero_point)
          return (%r) )";
 
+  // quantized::instance_norm
+  std::string instance_norm = R"(
+graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %momentum, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_in = aten::instance_norm(%a_dequant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %momentum, %eps, %cudnn_enabled)
+         %r = aten::quantize_per_tensor(%r_in, %output_scale, %output_zero_point, %scalar_type)
+         return (%r) )";
+
+  std::string quantized_instance_norm = R"(
+graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %momentum, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
+         %r = quantized::instance_norm(%a_quant, %weight, %bias, %eps, %output_scale, %output_zero_point)
+         return (%r) )";
+
   // ============= General Ops that inherit quantization paramters from input
   // tensor =============
   auto avg_pool1d = getInputTensorQParamOpFusionInfo(
@@ -820,6 +833,7 @@ graph(%a_quant, %num_groups, %weight, %bias, %eps, %cudnn_enabled, %output_scale
       {"quantized::hardswish", hardswish, quantized_hardswish},
       {"quantized::layer_norm", layer_norm, quantized_layer_norm},
       {"quantized::group_norm", group_norm, quantized_group_norm},
+      {"quantized::instance_norm", instance_norm, quantized_instance_norm},
       avg_pool1d,
       avg_pool2d,
       avg_pool3d,
