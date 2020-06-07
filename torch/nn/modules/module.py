@@ -14,15 +14,8 @@ from ...utils.hooks import RemovableHandle
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
-# the type of the subclass, not the looser type of `Module`.  Note that the
-# bound cannot be 'Module[T]' (self-referential) as that is F-bounded
-# polymorphism c.f. https://github.com/python/mypy/issues/1561
+# the type of the subclass, not the looser type of `Module`.
 T = TypeVar('T', bound='Module')
-# We parameter modules by the return type of its `forward` (and therefore `__call__`) method. This allows
-# type inference to infer that the return value of calling a module in the canonical way (via `__call__)` is the
-# same as the custom `forward` function of the submodule. Submodules that wish to opt in this functionality be
-# defined as eg class ReturnsTwoTensors(Module[Tuple[Tensor, Tensor]]): ...
-T_co = TypeVar('T_co', covariant=True)
 
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
@@ -53,7 +46,7 @@ def _addindent(s_, numSpaces):
     return s
 
 
-class Module(Generic[T_co]):
+class Module:
     r"""Base class for all neural network modules.
 
     Your models should also subclass this class.
@@ -127,7 +120,7 @@ class Module(Generic[T_co]):
         instead of this since the former takes care of running the
         registered hooks while the latter silently ignores them.
     """
-    forward: Callable[..., T_co] = _forward_unimplemented
+    forward: Callable[..., Any] = _forward_unimplemented
 
     def register_buffer(self, name: str, tensor: Tensor, persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
@@ -633,7 +626,7 @@ class Module(Generic[T_co]):
                     grad_fn.register_hook(wrapper)
         return result
 
-    __call__ : Callable[..., T_co] = _call_impl
+    __call__ : Callable[..., Any] = _call_impl
 
     def __setstate__(self, state):
         self.__dict__.update(state)

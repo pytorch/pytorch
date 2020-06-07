@@ -29,16 +29,6 @@ import textwrap
 import warnings
 import weakref
 
-from typing import TypeVar, Generic
-
-# See https://github.com/python/typing/issues/449
-try:
-    # Python 3.6 and earlier
-    from typing import GenericMeta
-except ImportError:
-    GenericMeta = type
-
-
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
@@ -1406,9 +1396,8 @@ def interface(obj):
     # Expected MRO is:
     #   User module
     #   torch.nn.modules.module.Module
-    #   typing.Generic
     #   object
-    is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 4
+    is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
 
     if not is_module_interface and len(obj.mro()) > 2:
         raise RuntimeError("TorchScript interface does not support inheritance yet. "
@@ -1568,9 +1557,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     run. This has to occur after the user-defined __init__ so that submodules and
 #     parameters are initialized _before_ the script compiler resolve references to
 #     `self.param` or `self.module`.
-# This inherits from GenericMeta because it's used to metaclass Module (which is
-# generic).  This is not necessary in Python 3.7 and later.
-class ScriptMeta(GenericMeta):
+class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods = {}

@@ -8,11 +8,10 @@ import torch
 from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Generic, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
+from typing import Any, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
 
 
 T = TypeVar('T')
-ModuleT = TypeVar('ModuleT', bound=Module)
 
 
 class Container(Module):
@@ -119,7 +118,7 @@ class Sequential(Module):
         return input
 
 
-class ModuleList(Module, Generic[ModuleT]):
+class ModuleList(Module):
     r"""Holds submodules in a list.
 
     :class:`~torch.nn.ModuleList` can be indexed like a regular Python list, but
