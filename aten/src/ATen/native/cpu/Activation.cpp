@@ -50,8 +50,11 @@ inline void _vec_log_sigmoid(Tensor& output, Tensor& buffer, const Tensor& input
   });
 }
 
-static void log_sigmoid_kernel(Tensor& output, Tensor& buffer, const Tensor& input) {
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&] {
+static void log_sigmoid_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_sigmoid_cpu", [&] {
+    auto output = iter.output();
+    auto input = iter.tensor(1);
+    auto buffer = iter.tensor(2);
     _vec_log_sigmoid<scalar_t>(output, buffer, input);
   });
 }
