@@ -32,10 +32,6 @@
 - name: _thnn_glu(Tensor self, int64_t dim)
   cname: GatedLinear
 
-- name: _thnn_log_sigmoid(Tensor self)
-  cname: LogSigmoid
-  buffers: [buffer]
-
 # NOTE: we treat noise as an input (it's really a buffer) because the codegen
 # can't handle in-place functions that have buffers
 - name: _thnn_rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator=None)
