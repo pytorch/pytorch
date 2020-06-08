@@ -523,6 +523,35 @@ TensorTypePtr TensorType::merge(TensorTypePtr other, bool merge_sizes) const {
       undef);
 }
 
+template <typename T>
+bool is_null_or_equal(c10::optional<T> a, c10::IntArrayRef b) {
+  return !a.has_value() || a.value() == b;
+}
+
+bool TensorType::matchTensor(const at::Tensor& t) {
+  bool undef = undefined().value_or(!t.defined());
+  if (undef != !t.defined()) {
+    // When the followings are true, we consider it's not a match:
+    // - undefined().has_value() == true
+    // - undefined().value() != !t.defined()
+    return false;
+  } else if (!t.defined()) {
+    // When the followings are true, we consider it's a match:
+    // - t is not defined
+    // - undefined() == null or undefined().value() == true
+    return true;
+  }
+  // Here we know t.defined() == true and compare all other properties.
+  bool rg = at::GradMode::is_enabled() && t.requires_grad();
+  bool matched_strides = (!t.has_storage() && !stride_properties().isComplete())
+    || stride_properties() == computeStrideProps(t.sizes(), t.strides(), t.is_contiguous());
+  return scalarType().value_or(t.scalar_type()) == t.scalar_type()
+    && device().value_or(t.device()) == t.device()
+    && requiresGrad().value_or(rg) == rg
+    && matched_strides
+    && is_null_or_equal(sizes().concrete_sizes(), t.sizes());
+}
+
 bool TensorType::operator==(const c10::Type& rhs) const {
   if (rhs.kind() != kind()) {
     return false;
