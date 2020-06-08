@@ -326,6 +326,7 @@ Reduction Ops
     mode
     norm
     prod
+    quantile
     std
     std_mean
     sum
