@@ -48,13 +48,6 @@
       PIP_UPLOAD_FOLDER: "nightly/"
     <<: *update_s3_htmls
 
-  # Update s3 htmls for the nightlies for devtoolset7
-  update_s3_htmls_for_nightlies_devtoolset7:
-    environment:
-      PIP_UPLOAD_FOLDER: "nightly/devtoolset7/"
-    <<: *update_s3_htmls
-
-
   # upload_binary_logs job
   # The builder hud at pytorch.org/builder shows the sizes of all the binaries
   # over time. It gets this info from html files stored in S3, which this job
