@@ -200,6 +200,9 @@ jobs:
             if [[ "${VC_YEAR}" == "2017" ]]; then
               powershell .circleci/scripts/vs_install.ps1
             fi
+            if [[ "${VC_YEAR}" == "2019" && "${VC_PRODUCT}" != "" ]]; then
+              powershell .circleci/scripts/vs2019_install.ps1
+            fi
       - run:
           name: Install Cuda
           no_output_timeout: 30m
@@ -272,6 +275,9 @@ jobs:
           command: |
             if [[ "${VC_YEAR}" == "2017" ]]; then
               powershell .circleci/scripts/vs_install.ps1
+            fi
+            if [[ "${VC_YEAR}" == "2019" && "${VC_PRODUCT}" != "" ]]; then
+              powershell .circleci/scripts/vs2019_install.ps1
             fi
       - run:
           name: Install Cuda

@@ -101,7 +101,7 @@ class VcSpec:
         return [self.prefixed_year()] + self.version_elements
 
     def get_product(self):
-        return "Community" if self.year == 2019 else "BuildTools"
+        return "Preview" if self.year == 2019 else "BuildTools"
 
     def dotted_version(self):
         return ".".join(self.version_elements)
@@ -126,15 +126,15 @@ WORKFLOW_DATA = [
     WindowsJob(None, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
     WindowsJob(None, VcSpec(2017, ["14", "16"]), None),
     # VS2019 CUDA-10.1
-    WindowsJob(None, VcSpec(2019), CudaVersion(10, 1)),
-    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1)),
-    WindowsJob(2, VcSpec(2019), CudaVersion(10, 1)),
+    WindowsJob(None, VcSpec(2019, ["14", "27"]), CudaVersion(10, 1)),
+    WindowsJob(1, VcSpec(2019, ["14", "27"]), CudaVersion(10, 1)),
+    WindowsJob(2, VcSpec(2019, ["14", "27"]), CudaVersion(10, 1)),
     # VS2019 CPU-only
-    WindowsJob(None, VcSpec(2019), None),
-    WindowsJob(1, VcSpec(2019), None),
-    WindowsJob(2, VcSpec(2019), None, master_only_pred=TruePred),
-    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
-    WindowsJob(2, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
+    WindowsJob(None, VcSpec(2019, ["14", "27"]), None),
+    WindowsJob(1, VcSpec(2019, ["14", "27"]), None),
+    WindowsJob(2, VcSpec(2019, ["14", "27"]), None, master_only_pred=TruePred),
+    WindowsJob(1, VcSpec(2019, ["14", "27"]), CudaVersion(10, 1), force_on_cpu=True),
+    WindowsJob(2, VcSpec(2019, ["14", "27"]), CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
 ]
 
 

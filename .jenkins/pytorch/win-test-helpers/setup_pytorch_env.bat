@@ -43,6 +43,8 @@ pip install "ninja==1.9.0" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil p
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
+set ASAN_OPTIONS=symbolize=1:detect_leaks=0
+set ASAN_SYMBOLIZER_PATH=%VCToolsInstallDir%\bin\HostX64\x64
 
 set DISTUTILS_USE_SDK=1
 
