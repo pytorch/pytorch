@@ -621,12 +621,12 @@ RegisterOperators reg(
 // these ops are not defined for Tensor
 #define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
   Operator(                                                                   \
-      "prim::min." decl_type "(" decl_type "[] l, " decl_type                 \
+      "prim::min." decl_type "_list(" decl_type "[] l, " decl_type            \
       "[] r) -> " decl_type "[]",                                             \
       minList<value_type>,                                                    \
       aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
-          "prim::max." decl_type "(" decl_type "[] l, " decl_type             \
+          "prim::max." decl_type "_list(" decl_type "[] l, " decl_type        \
           "[] r) -> " decl_type "[]",                                         \
           maxList<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \
