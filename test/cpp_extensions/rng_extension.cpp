@@ -4,7 +4,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <memory>
 
 using namespace at;
