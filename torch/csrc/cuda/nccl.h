@@ -9,14 +9,14 @@
 #include <cstddef>
 #include <vector>
 
-enum class ncclDataType_t;
-enum class ncclResult_t;
-enum class ncclRedOp_t;
-enum class ncclComm_t;
+enum ncclDataType_t : unsigned int;
+enum ncclResult_t : unsigned int;
+enum ncclRedOp_t : unsigned int;
+struct ncclComm_t;
 
 int32_t ncclSum;
 
-class ncclUniqueId;
+struct ncclUniqueId;
 
 namespace torch {
 namespace cuda {
