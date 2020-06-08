@@ -157,14 +157,6 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
   checkAllSameGPU("diag", {result_arg, self_arg});
   checkSameType("diag", result_arg, self_arg);
 
-  auto check_zero_strided = [](const IntArrayRef& strides) {
-    auto result = std::find(strides.begin(), strides.end(), 0);
-    if (result != strides.end()) {
-      return true;
-    }
-    return false;
-  };
-
   int nDimension = self.dim();
   if (nDimension == 2) {
     auto self_stride_0 = self.stride(0);
