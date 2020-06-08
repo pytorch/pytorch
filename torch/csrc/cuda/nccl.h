@@ -10,13 +10,13 @@
 #include <vector>
 
 enum ncclDataType_t : unsigned int;
-enum ncclResult_t : unsigned int;
-enum ncclRedOp_t : unsigned int;
+typedef enum ncclResult_t ncclResult_t;
+typedef enum ncclRedOp_t ncclRedOp_t;
 typedef struct ncclComm* ncclComm_t;
-
+typedef struct ncclUniqueId ncclUniqueId;
 int32_t ncclSum;
 
-struct ncclUniqueId;
+
 
 namespace torch {
 namespace cuda {
