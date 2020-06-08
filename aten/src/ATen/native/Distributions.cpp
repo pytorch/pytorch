@@ -494,7 +494,7 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   // Half is not supported on CPU.
   if (!with_replacement &&
       !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half)) {
-    auto rand = at::empty_like(self).uniform_();
+    auto rand = at::rand_like(self);
     std::tie(std::ignore, result) = (rand.log() / self).topk(n_sample);
     return result;
   }

@@ -155,53 +155,6 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
   }
 }
 
-template <typename scalar_t>
-__global__ void
-sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
-                                    int totalSamples,
-                                    int sample,
-                                    int64_t* dest,
-                                    int64_t distributions,
-                                    int categories,
-                                    scalar_t* origDist,
-                                    scalar_t* normDistPrefixSum) {
-  // At the moment, each warp computes one sample value in the binary
-  // search due to divergence. It seems possible to compute multiple
-  // values and limit divergence though later on.
-
-  // global index formula for 1D grid of 2D blocks
-  int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
-
-  curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, idx, seeds.second, &state);
-
-  // The block and warp determines the distribution for which we
-  // generate a point
-  for (int64_t curDist = blockIdx.x * blockDim.y + threadIdx.y;
-       curDist < distributions;
-       curDist += gridDim.x * blockDim.y) {
-
-    auto rand = curand_uniform4(&state);
-    scalar_t r = static_cast<scalar_t>(rand.x);
-
-    if (threadIdx.x == 0) {
-      // Find the bucket that a uniform sample lies in
-      int choice = binarySearchForMultinomial<scalar_t>(
-          normDistPrefixSum + curDist * categories,
-          origDist + curDist * categories,
-          categories,
-          r);
-
-      // Torch indices are 1-based
-      dest[curDist * totalSamples + sample] = choice;
-
-      // Without replacement, so update the original probability so it
-      // is not considered a second time
-      origDist[curDist * categories + choice] = static_cast<scalar_t>(0);
-    }
-  }
-}
-
 template <typename scalar_t, typename accscalar_t>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
