@@ -1,9 +1,16 @@
 #pragma once
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+
+#include <functional>
+#include <regex>
 
 namespace torch {
 namespace jit {
+
+using graph_rewrite_helper::getFuncName;
 
 // Vector of a module and the name of its method
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
@@ -32,6 +39,9 @@ TORCH_API bool mayRequireObservation(Value* v);
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
 
+// Check if value is the input of the graph
+TORCH_API bool hitGraphInput(Value* value);
+
 // =========== helper functions for Node =========
 TORCH_API bool isSingleInputGeneralValueAtenFunction(Node* n);
 
@@ -42,6 +52,16 @@ TORCH_API bool isSingleInputGeneralAtenFunction(Node* n);
 // Check if the node will produce the same result regardless of whether
 // the input tensor is quantized or not, example: aten::size
 TORCH_API bool isTensorInfoNode(Node* n);
+
+// Check if this the the propaagate op that has single input, e.g. aten::cat
+TORCH_API bool isPropagateQuantSingleInputOp(Node* n);
+
+// Check if this is the propagate op that has two inputs, e.g. aten::add
+TORCH_API bool isPropagateQuantBinaryOp(Node* n);
+
+// Check if this is the node that we'll quantize or not quantize depending on
+// whether the input of the node is quantized, example: aten::cat
+TORCH_API bool isPropagateQuantNode(Node* n);
 
 TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
     Node* n);
@@ -67,7 +87,7 @@ TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 // checks if a block will always raise an Exception
 TORCH_API bool alwaysRaisesException(Block* block);
 
-// =========== helper functions for Graph ==========
+// =========== helper functions for Module  ==========
 // TODO: remove
 TORCH_API std::vector<std::string> getModuleAccessPath(
     Value* instance,
@@ -79,7 +99,35 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
-// =========== helper functions for Module  ==========
+
+// ==================== filter functions for matches ==============
+// filter to check if the alpha argument of aten::add is constant 1
+bool aten_add_alpha_is_one(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+// filter to check if the functional in CallFunction is relu
+bool is_functional_relu(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+// filter to check if the module is torch.nn.ReLU
+bool is_relu_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+// TODO: add a macro to declare the filters
+bool is_conv1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
 
 } // namespace jit
 } // namespace torch

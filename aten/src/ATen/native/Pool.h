@@ -106,18 +106,9 @@ max_pool2d_backward_shape_check(
   check_dim_size(gradOutput, ndim, ndim-2, outputHeight);
   check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
 
-  // different CUDA/CPU behavior from TH
-  if (cuda) {
-    check_dim_size(indices, 4, 0, nbatch);
-    check_dim_size(indices, 4, 1, nOutputPlane);
-    check_dim_size(indices, 4, 2, outputHeight);
-    check_dim_size(indices, 4, 3, outputWidth);
-  }
-  else {
-    check_dim_size(indices, ndim, ndim-3, nOutputPlane);
-    check_dim_size(indices, ndim, ndim-2, outputHeight);
-    check_dim_size(indices, ndim, ndim-1, outputWidth);
-  }
+  check_dim_size(indices, ndim, ndim-3, nOutputPlane);
+  check_dim_size(indices, ndim, ndim-2, outputHeight);
+  check_dim_size(indices, ndim, ndim-1, outputWidth);
 }
 
 // AveragePool2d (backward)

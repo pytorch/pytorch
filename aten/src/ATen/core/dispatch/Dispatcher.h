@@ -154,6 +154,11 @@ public:
   RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
+   * Register a new operator by name.
+   */
+  RegistrationHandleRAII registerName(OperatorName op_name);
+
+  /**
    * Register a fallback kernel for a backend.
    * If an operator is called but there is no concrete kernel for the dispatch
    * key of the given operator arguments, it will check if there is such a
@@ -202,6 +207,7 @@ private:
     const OperatorName& op_name,
     c10::optional<DispatchKey> dispatch_key,
     std::list<impl::OperatorEntry::KernelEntry>::iterator kernel_handle);
+  void deregisterName_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterFallback_(DispatchKey dispatchKey);
   void deregisterLibrary_(const std::string& ns);
   void cleanup(const OperatorHandle& op, const OperatorName& op_name);

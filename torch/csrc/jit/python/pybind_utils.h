@@ -71,7 +71,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
       : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
 
-  PythonFutureWrapper(const PythonFutureWrapper&) = delete;
+  explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
   PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
 
   py::object wait() {
@@ -134,6 +134,14 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
           }
         },
         PyObjectType::get()));
+  }
+
+  void markCompleted(const py::object& pyValue) {
+    DCHECK(PyGILState_Check());
+    IValue value = toIValue(pyValue, PyObjectType::get());
+
+    py::gil_scoped_release release;
+    fut->markCompleted(std::move(value));
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
@@ -559,8 +567,8 @@ inline IValue toIValue(
           if (!N || !py::isinstance<py::int_>(obj)) {
             return IValue(py::cast<std::vector<int64_t>>(obj));
           } else {
-            double value = py::cast<int64_t>(obj);
-            c10::List<double> repeated;
+            int64_t value = py::cast<int64_t>(obj);
+            c10::List<int64_t> repeated;
             repeated.reserve(*N);
             for (int i = 0; i < *N; ++i) {
               repeated.push_back(value);

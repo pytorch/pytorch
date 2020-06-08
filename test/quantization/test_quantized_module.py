@@ -46,9 +46,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy6 = relu6_module(qx)
 
         self.assertEqual(y_ref, qy.dequantize(),
-                         message="ReLU module API failed")
+                         msg="ReLU module API failed")
         self.assertEqual(y6_ref, qy6.dequantize(),
-                         message="ReLU6 module API failed")
+                         msg="ReLU6 module API failed")
 
 
     @given(
@@ -92,7 +92,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         qlinear.set_weight_bias(W_q, B)
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight(), W_q, atol=1e-5)
+        self.assertEqual(qlinear.weight(), W_q, atol=1e-5, rtol=0)
         W_pack = qlinear._packed_params._packed_params
 
         qlinear.scale = float(scale)
@@ -439,8 +439,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         stride = (stride_h, stride_w)
         padding = (pad_h, pad_w)
         dilation = (dilation, dilation)
-        if torch.backends.quantized.engine == 'qnnpack':
-            use_channelwise = False
         if use_fused:
             module_name = "QuantizedConvReLU2d"
             qconv_module = nnq_fused.ConvReLU2d(
@@ -578,7 +576,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm2d module API failed")
+                         msg="BatchNorm2d module API failed")
 
     def test_batch_norm3d(self):
         """Tests the correctness of the batchnorm3d module.
@@ -596,7 +594,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm3d module API failed")
+                         msg="BatchNorm3d module API failed")
 
     def test_layer_norm(self):
         """Tests the correctness of the layernorm module.
@@ -626,9 +624,80 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qY = quant_mod(qX)
 
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         msg="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
 
+    def test_group_norm(self):
+        """Tests the correctness of the groupnorm module.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+
+        dims = (1, 4, 8)
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = torch.nn.GroupNorm(2, 4).float()
+        float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
+        float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
+
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = nnq.GroupNorm(
+            2, 2, float_mod.weight, float_mod.bias, y_scale, y_zero_point)
+        qY = quant_mod(qX)
+
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         msg="GroupNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
+
+    def test_instance_norm(self):
+        """Tests the correctness of the instancenorm{n}d modules.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+
+        dims_to_modules = [
+            ((1, 4, 8), torch.nn.InstanceNorm1d, nnq.InstanceNorm1d),
+            ((1, 4, 8, 1), torch.nn.InstanceNorm2d, nnq.InstanceNorm2d),
+            ((1, 4, 8, 1, 1), torch.nn.InstanceNorm3d, nnq.InstanceNorm3d),
+        ]
+
+        for dim_to_modules in dims_to_modules:
+            dims, float_cls, q_cls = dim_to_modules
+
+            X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+            qX = torch.quantize_per_tensor(
+                X, x_scale, x_zero_point, dtype=torch.quint8)
+            dqX = qX.dequantize()
+
+            float_mod = float_cls(dims[1], affine=True).float()
+            float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
+            float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
+
+            dqY_ref = float_mod(dqX)
+            qY_ref = torch.quantize_per_tensor(
+                dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+            quant_mod = q_cls(
+                dims[1], float_mod.weight, float_mod.bias, y_scale,
+                y_zero_point)
+            qY = quant_mod(qX)
+
+            self.assertEqual(
+                qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                msg="InstanceNorm module API failed, qY_ref\n{} vs qY\n{}"
+                .format(qY_ref, qY))
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
     @skipIfNoFBGEMM
@@ -660,7 +729,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Check if the module implementation matches calling the
         # ops directly
-        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack)
+        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack, reduce_range=True)
         self.assertEqual(Z_ref, Z_dq)
 
         # Test serialization of dynamic quantized Linear Module using state_dict

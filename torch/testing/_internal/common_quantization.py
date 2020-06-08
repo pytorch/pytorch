@@ -407,11 +407,44 @@ class NormalizationTestModel(torch.nn.Module):
         self.quant = torch.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.layer_norm = torch.nn.LayerNorm((8))
+        self.group_norm = torch.nn.GroupNorm(2, 8)
+        # TODO: add handling for affine=False (future PR)
+        self.instance_norm1d = torch.nn.InstanceNorm1d(8, affine=True)
+        self.instance_norm2d = torch.nn.InstanceNorm2d(8, affine=True)
+        self.instance_norm3d = torch.nn.InstanceNorm3d(8, affine=True)
 
     def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.layer_norm(x)
+        x = self.group_norm(x.unsqueeze(-1))
+        x = self.instance_norm1d(x)
+        x = self.instance_norm2d(x.unsqueeze(-1))
+        x = self.instance_norm3d(x.unsqueeze(-1))
+        return x
+
+class NormalizationQATTestModel(torch.nn.Module):
+    def __init__(self, qengine):
+        super().__init__()
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.quant = torch.quantization.QuantStub()
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.layer_norm = torch.nn.LayerNorm((8))
+        self.group_norm = torch.nn.GroupNorm(2, 8)
+        self.instance_norm1d = torch.nn.InstanceNorm1d(4, affine=True)
+        self.instance_norm2d = torch.nn.InstanceNorm2d(4, affine=True)
+        self.instance_norm3d = torch.nn.InstanceNorm3d(4, affine=True)
+        self.fc2 = torch.nn.Linear(8, 2)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.layer_norm(x)
+        x = self.group_norm(x.unsqueeze(-1))
+        x = self.instance_norm1d(x.reshape((2, 4, 2)))
+        x = self.instance_norm2d(x.unsqueeze(-1))
+        x = self.instance_norm3d(x.unsqueeze(-1))
+        x = self.fc2(x.reshape((2, 8)))
         return x
 
 class NestedModel(torch.nn.Module):
@@ -632,6 +665,7 @@ class ModelForFusion(nn.Module):
         self.bn2 = nn.BatchNorm3d(2).to(dtype=torch.float)
         self.relu3 = nn.ReLU(inplace=True).to(dtype=torch.float)
         self.conv3 = nn.Conv1d(3, 3, 2).to(dtype=torch.float)
+        self.bn3 = nn.BatchNorm1d(3).to(dtype=torch.float)
         self.relu4 = nn.ReLU(inplace=True).to(dtype=torch.float)
         # don't quantize sub2
         self.sub2.qconfig = None
@@ -641,6 +675,7 @@ class ModelForFusion(nn.Module):
         x = x.squeeze(2)
         x = self.quant(x)
         x = self.conv3(x)
+        x = self.bn3(x)
         x = self.relu4(x)
         x = x.unsqueeze(2)
         y = x.unsqueeze(2)
