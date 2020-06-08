@@ -634,6 +634,18 @@ Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
+    auto sizes = self.sizes();
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    if (sizes[wrap_dim] == 1) {
+      if (keepdim) {
+        result = at::zeros(sizes, self.options().dtype(at::kLong));
+      } else {
+        auto sizes_vec = sizes.vec();
+        sizes_vec.erase(sizes_vec.begin() + wrap_dim);
+        result = at::zeros(sizes_vec, self.options().dtype(at::kLong));
+      }
+      return result;
+    }
     in = self;
   } else {
     in = self.reshape({-1});
@@ -655,6 +667,18 @@ Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
   if (dim) {
+    auto sizes = self.sizes();
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    if (sizes[wrap_dim] == 1) {
+      if (keepdim) {
+        result = at::zeros(sizes, self.options().dtype(at::kLong));
+      } else {
+        auto sizes_vec = sizes.vec();
+        sizes_vec.erase(sizes_vec.begin() + wrap_dim);
+        result = at::zeros(sizes_vec, self.options().dtype(at::kLong));
+      }
+      return result;
+    }
     in = self;
   } else {
     in = self.reshape({-1});
