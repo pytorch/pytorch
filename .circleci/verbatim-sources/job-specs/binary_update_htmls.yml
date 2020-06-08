@@ -10,8 +10,7 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_workspace:
-        at: ~/workspace
+    - checkout
     - setup_linux_system_environment
     - run:
         <<: *binary_checkout
@@ -64,8 +63,7 @@
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_workspace:
-        at: ~/workspace
+    - checkout
     - setup_linux_system_environment
     - run:
         <<: *binary_checkout

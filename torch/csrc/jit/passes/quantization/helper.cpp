@@ -21,6 +21,8 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "batch_norm",
     "hardswish",
     "layer_norm",
+    "group_norm",
+    "instance_norm",
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
@@ -32,6 +34,8 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "matmul",
     "hardswish",
     "layer_norm",
+    "group_norm",
+    "instance_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
@@ -491,6 +495,95 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   auto path = getModuleAccessPath(instance, self);
   return findChildModule(module, path);
 }
+
+// ==================== filter functions for matches ==============
+bool is_int_constant(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap,
+    const std::string& vname,
+    int value) {
+  const auto& match_vmap = match.values_map;
+  auto v = toIValue(match_vmap.at(vmap.at(vname)));
+  return v && v->isInt() && v->toInt() == value;
+}
+
+bool is_functional(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap,
+    const std::string& vname,
+    const std::string& functional) {
+  const auto& match_vmap = match.values_map;
+  Value* v = match_vmap.at(vmap.at(vname));
+  return v->type()->cast<FunctionType>() &&
+    getFuncName(v) == functional;
+}
+
+bool is_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap,
+    const std::string& vname,
+    const std::string& module_qualified_name) {
+  const auto& match_vmap = match.values_map;
+  Value* relu = match_vmap.at(vmap.at(vname));
+  auto type = relu->type()->cast<ClassType>();
+  if (type && type->name()) {
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto qualified_name =
+        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
+    return qualified_name == module_qualified_name;
+  }
+  return false;
+};
+
+bool aten_add_alpha_is_one(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_int_constant(match, vmap, "alpha", 1);
+}
+
+bool is_functional_relu(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_functional(match, vmap, "relu", "relu");
+}
+
+bool is_relu_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "relu",
+                   "__torch__.torch.nn.modules.activation.ReLU");
+}
+
+bool is_conv1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv1d");
+}
+
+bool is_conv2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv2d");
+}
+
+bool is_conv3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv3d");
+}
+
+
 
 } // namespace jit
 } // namespace torch
