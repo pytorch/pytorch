@@ -87,6 +87,10 @@ static void max_kernel_impl(
     Tensor& max_indices,
     const Tensor& self,
     c10::optional<int64_t> dim) {
+
+  TORCH_CHECK(max.scalar_type() == self.scalar_type() && max_indices.scalar_type() == kLong,
+    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", max.scalar_type(), "and", max_indices.scalar_type());
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max", [&] {
     Reduction<scalar_t, int64_t>::apply(max, max_indices, self, dim, true);
   });
@@ -97,6 +101,10 @@ static void min_kernel_impl(
     Tensor& min_indices,
     const Tensor& self,
     c10::optional<int64_t> dim) {
+
+  TORCH_CHECK(min.scalar_type() == self.scalar_type() && min_indices.scalar_type() == kLong,
+    "Expect dtype ", self.scalar_type(), "and torch.long, but got ", min.scalar_type(), "and", min_indices.scalar_type());
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "min", [&] {
     Reduction<scalar_t, int64_t>::apply(min, min_indices, self, dim, false);
   });
