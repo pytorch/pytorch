@@ -473,7 +473,7 @@ class SyncBatchNorm(_BatchNorm):
         Args:
             module (nn.Module): module containing one or more attr:`BatchNorm*D` layers
             process_group (optional): process group to scope synchronization,
-        default is the whole world
+                default is the whole world
 
         Returns:
             The original :attr:`module` with the converted :class:`torch.nn.SyncBatchNorm`
