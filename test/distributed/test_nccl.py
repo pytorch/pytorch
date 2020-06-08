@@ -9,6 +9,8 @@ from torch.testing._internal.common_utils import (TestCase, run_tests,
                                                   TEST_WITH_ROCM)
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
+import re
+HIP_VERSION = 0.0 if torch.version.hip is None else float(re.search("^\d+\.\d+", torch.version.hip)[0])
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -30,7 +32,7 @@ class TestNCCL(TestCase):
         self.assertIsInstance(uid, bytes)
         self.assertGreater(len(uid), 1)
 
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38833')
+    @unittest.skipIf(TEST_WITH_ROCM && HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38833')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
@@ -45,7 +47,7 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38834')
+    @unittest.skipIf(TEST_WITH_ROCM && HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38834')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
@@ -60,6 +62,7 @@ class TestNCCL(TestCase):
 
         self.assertEqual(tensors[0], expected)
 
+    @unittest.skipIf(TEST_WITH_ROCM && HIP_VERSION < 3.5 && dtype==torch.bfloat16, "Skip bfloat16 testing for ROCm versions before 3.5")
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
@@ -75,7 +78,7 @@ class TestNCCL(TestCase):
         for tensor in tensors:
             self.assertEqual(tensor, expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
+    @unittest.skipIf(TEST_WITH_ROCM && HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
@@ -91,7 +94,7 @@ class TestNCCL(TestCase):
         for tensor in outputs:
             self.assertEqual(tensor, expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38835')
+    @unittest.skipIf(TEST_WITH_ROCM && HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38835')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
