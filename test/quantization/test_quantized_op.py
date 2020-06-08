@@ -338,19 +338,19 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     def test_qlayer_norm(self):
         # hypothesis is flaky for this test, create test cases manually
-        max_sides = (4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
-        combined = [max_sides, side_lens, torch_types, y_scales, y_zero_points]
+        channels_last = (True, False)
+        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                max_side, side_len, torch_type, Y_scale, Y_zero_point = test_case
-                shapes = [side_len] * max_side
+                side_len, torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                shapes = [side_len] * 4
 
                 # In the FP kernel, mean and variance are calculated in floating point.
                 # In the quantized kernel, they are calculated in integer arithmetic.
@@ -374,6 +374,8 @@ class TestQuantizedOps(TestCase):
                 qX = torch.quantize_per_tensor(X, scale=X_scale,
                                                zero_point=X_zero_point,
                                                dtype=torch_type)
+                if channels_last:
+                    qX = qX.contiguous(memory_format=torch.channels_last)
                 dqX = qX.dequantize()
 
                 # Enforce non-homogeneous inputs
@@ -1677,17 +1679,19 @@ class TestQuantizedOps(TestCase):
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
+        channels_last_list = [True, False]
         combined = [batches_list, num_groups_list, channels_per_groups, elements_per_channels,
-                    torch_types, y_scales, y_zero_points]
+                    torch_types, y_scales, y_zero_points, channels_last_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
                 batches, num_groups, channels_per_group, elements_per_channel, \
-                    torch_type, Y_scale, Y_zero_point = test_case
+                    torch_type, Y_scale, Y_zero_point, channels_last = test_case
                 num_channels = num_groups * channels_per_group
-                shapes = (batches, num_channels, elements_per_channel)
+                # minimum rank for for channels_last
+                shapes = (batches, num_channels, elements_per_channel, 1)
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
                 # In the int8 and uint8 versions of the quantized kernel, they are
@@ -1719,6 +1723,8 @@ class TestQuantizedOps(TestCase):
                 eps = 0.001
 
                 qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+                if channels_last:
+                    qX = qX.contiguous(memory_format=torch.channels_last)
                 dqX = qX.dequantize()
 
                 # Enforce non-homogeneous inputs
@@ -1759,14 +1765,15 @@ class TestQuantizedOps(TestCase):
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
-        combined = [max_sides, side_lens, torch_types, y_scales, y_zero_points]
+        channels_last_list = (True, False)
+        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                max_side, side_len, torch_type, Y_scale, Y_zero_point = test_case
-                shapes = [side_len] * max_side
+                side_len, torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                shapes = [side_len] * 4
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
                 # In the int8 and uint8 versions of the quantized kernel, they are
@@ -1797,6 +1804,8 @@ class TestQuantizedOps(TestCase):
                 eps = 0.001
 
                 qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+                if channels_last:
+                    qX = qX.contiguous(memory_format=torch.channels_last)
                 dqX = qX.dequantize()
 
                 # Enforce non-homogeneous inputs
