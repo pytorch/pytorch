@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
@@ -875,6 +877,14 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "_save_to_buffer_for_mobile",
+          [](Module& m, const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            std::ostringstream buf;
+            m._save_for_mobile(buf, _extra_files);
+            return py::bytes(buf.str());
+          },
+          py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "dump",
@@ -991,6 +1001,34 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("qualified_name", [](const Module& self) {
         return self.type()->name()->qualifiedName();
       });
+
+  py::class_<mobile::Module>(m, "LiteScriptModule")
+      .def(py::init<
+           c10::intrusive_ptr<c10::ivalue::Object>,
+           std::shared_ptr<mobile::CompilationUnit>>())
+      .def(
+          "run_method",
+          [](mobile::Module& m,
+             const std::string& method_name,
+             const py::tuple& input_tuple) {
+            Stack stack;
+            for (auto& input : input_tuple) {
+              stack.push_back(toTypeInferredIValue(input));
+            }
+            return m.run_method(method_name, stack);
+          },
+          py::arg("method_name"),
+          py::arg("input_tuple"))
+      .def(
+          "forward",
+          [](mobile::Module& m, const py::tuple& input_tuple) {
+            Stack stack;
+            for (auto& input : input_tuple) {
+              stack.push_back(toTypeInferredIValue(input));
+            }
+            return m.run_method("forward", stack);
+          },
+          py::arg("input_tuple"));
 
   slot_dict_impl<detail::ParameterPolicy>::bind(m, "ParameterDict");
   slot_dict_impl<detail::BufferPolicy>::bind(m, "BufferDict");
@@ -1290,6 +1328,29 @@ void initJitScriptBindings(PyObject* module) {
         }
         return import_ir_module(
             std::move(cu), in, optional_device, extra_files);
+      });
+  m.def(
+      "_load_for_lite_interpreter",
+      [](const std::string& filename, py::object map_location) {
+        c10::optional<at::Device> optional_device;
+        if (!map_location.is(py::none())) {
+          AT_ASSERT(THPDevice_Check(map_location.ptr()));
+          optional_device =
+              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+        }
+        return _load_for_mobile(filename, optional_device);
+      });
+  m.def(
+      "_load_for_lite_interpreter_from_buffer",
+      [](const std::string& buffer, py::object map_location) {
+        std::istringstream in(buffer);
+        c10::optional<at::Device> optional_device;
+        if (!map_location.is(py::none())) {
+          AT_ASSERT(THPDevice_Check(map_location.ptr()));
+          optional_device =
+              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+        }
+        return _load_for_mobile(in, optional_device);
       });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);

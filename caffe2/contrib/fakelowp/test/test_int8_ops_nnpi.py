@@ -8,12 +8,12 @@ from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from hypothesis import given, note, strategies as st, settings
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
 
-class Int8OpsTest(unittest.TestCase):
+class Int8OpsTest(serial.SerializedTestCase):
     def _get_scale_zp(self, tensor):
         tensor_max = np.max(tensor)
         tensor_min = min(0, np.min(tensor))
