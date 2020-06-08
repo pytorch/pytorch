@@ -93,7 +93,7 @@ enum class BinaryOpType {
   // TypeAs,
 
   // Logical Ops
-  // Int operations, leave position oif Mod we depend on its location of first
+  // Int operations, leave position of Mod we depend on its location of first
   Mod,
   CeilDiv,
   And,

@@ -2815,6 +2815,55 @@ void testGPU_FusionSimpleBCast() {
 
     TORCH_CHECK(t4.allclose(cg_output));
   }
+
+  {
+    torch::jit::fuser::cuda::CudaKernel prog;
+    Fusion& fusion = *prog.fusion_;
+    FusionGuard fg(&fusion);
+
+    // Set up your input tensor views
+    TensorView* tv0 = makeDummyTensor(2);
+    TensorView* tv1 = makeDummyTensor(2);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    // TODO add pointwise ops on the begining before the bcast.
+
+    TensorView* tv2 = broadcast(tv0, {false, false, true});
+    TensorView* tv3 = broadcast(tv1, {true, false, false});
+
+    TensorView* tv4 = add(tv2, tv3);
+
+    tv4->merge(0, 1);
+
+    fusion.addOutput(tv4);
+
+    tv0->computeAt(tv4, -1);
+    tv1->computeAt(tv4, -1);
+
+    tv4->axis(0)->parallelize(ParallelType::BIDx);
+
+    size_t x = 63, y = 33, z = 15;
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor t0 = at::randn({x, y}, options);
+    at::Tensor t1 = at::randn({y, z}, options);
+
+    at::Tensor cg_output = at::empty({x, y, z}, options);
+
+    prog.device_ = 0;
+    prog.grid(x * y);
+    prog.block(1);
+    torch::jit::fuser::cuda::compileKernel(&prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {cg_output});
+
+    auto t2 = t0.unsqueeze(-1).expand({x, y, z});
+    auto t3 = t1.expand({x, y, z});
+    auto t4 = t2.add(t3);
+
+    TORCH_CHECK(t4.allclose(cg_output));
+  }
 }
 
 } // namespace jit

@@ -56,7 +56,9 @@ void IndexCompute::handle(Expr* e) {
   BackwardVisitor::handle(e);
 }
 
-IndexCompute::IndexCompute(TensorDomain* td, const std::vector<Val*>& indices) {
+IndexCompute::IndexCompute(
+    const TensorDomain* td,
+    const std::vector<Val*>& indices) {
   if (td->nDims() == 0 || indices.empty()) {
     indices_.push_back(new Int(0));
     return;
@@ -103,7 +105,7 @@ IndexCompute::IndexCompute(TensorDomain* td, const std::vector<Val*>& indices) {
 }
 
 std::vector<Val*> IndexCompute::get(
-    TensorDomain* td,
+    const TensorDomain* td,
     const std::vector<Val*>& _indices) {
   IndexCompute ic(td, _indices);
   return ic.indices_;
@@ -113,56 +115,42 @@ TensorIndex* Index::getGlobalProducerIndex(
     const TensorView* producer,
     const TensorView* consumer,
     const std::vector<ForLoop*>& loops) {
-  // This replay will ignore reduction dimensions on the producer
-  auto pind =
-      TransformReplay::replayPasC(producer->domain(), consumer->domain(), -1);
+  // Grab indices from the loops
+  std::vector<Val*> indices(loops.size());
+  std::transform(loops.begin(), loops.end(), indices.begin(), [](ForLoop* fl) {
+    return fl->index();
+  });
 
-  TORCH_INTERNAL_ASSERT(
-      loops.size() == consumer->nDims(),
-      "Dimensionality error in code generator while computing tensor indexes.");
+  // What would the consumer indices be if it was global, keeping in mind
+  // reduction axes:
+  std::vector<Val*> c_inds = IndexCompute::get(consumer->domain(), indices);
 
-  std::vector<ForLoop*> loops_adjusted;
-  size_t it_c = 0, it_p = 0;
-  while (it_c < consumer->nDims() && it_p < pind->noReductions().size()) {
-    if (consumer->axis(it_c)->isBroadcast() &&
-        !pind->noReductions()[it_p]->isBroadcast()) {
-      it_c++;
-    } else {
-      loops_adjusted.push_back(loops[it_c]);
-      it_c++;
-      it_p++;
+  // Computed consumer indices should have everything we need for the producer
+  std::vector<Val*> p_inds;
+  auto p_root = TensorDomain::noReductions(producer->getRootDomain());
+  {
+    auto c_root = consumer->getRootDomain();
+    size_t it_c = 0, it_p = 0;
+    while (it_c < c_root.size() && it_p < p_root.size()) {
+      if (c_root[it_c]->isBroadcast() && !p_root[it_p]->isBroadcast()) {
+        it_c++;
+      } else {
+        p_inds.push_back(c_inds[it_c]);
+        it_c++;
+        it_p++;
+      }
     }
   }
-
   TORCH_INTERNAL_ASSERT(
-      loops_adjusted.size() == pind->noReductions().size(),
-      "Dimensionality error in code generator while computing tensor indexes.");
-
-  std::vector<Val*> indices(loops_adjusted.size());
-  std::transform(
-      loops_adjusted.begin(),
-      loops_adjusted.end(),
-      indices.begin(),
-      [](ForLoop* fl) { return fl->index(); });
-  std::vector<Val*> computed_inds = IndexCompute::get(pind, indices);
-
-  auto root_domain = producer->getRootDomain();
-
-  TORCH_INTERNAL_ASSERT(
-      computed_inds.size() == root_domain.size(),
-      "Dimensionality error in code generator while computing indexing.");
-
-  for (decltype(computed_inds.size()) i{0}; i < computed_inds.size(); i++) {
-    if (root_domain[i]->isReduction() || root_domain[i]->isBroadcast())
-      computed_inds.erase(computed_inds.begin() + i);
-  }
+      p_inds.size() == p_root.size(),
+      "Dimensionality error in code generator while computing tensor indices.");
 
   std::vector<Val*> strided_inds;
-  for (decltype(computed_inds.size()) i{0}; i < computed_inds.size(); i++) {
+  for (decltype(p_inds.size()) i{0}; i < p_inds.size(); i++) {
     std::stringstream ss;
     ss << "T" << producer->name() << ".stride[" << i << "]";
     strided_inds.push_back(
-        mul(computed_inds[i], new NamedScalar(ss.str(), DataType::Int)));
+        mul(p_inds[i], new NamedScalar(ss.str(), DataType::Int)));
   }
 
   // Probably shouldn't ever hit this
