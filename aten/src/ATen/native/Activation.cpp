@@ -728,7 +728,7 @@ Tensor leaky_relu_backward(
 std::tuple<Tensor, Tensor> log_sigmoid_forward(const Tensor& input) {
   auto result = at::empty_like(input, at::MemoryFormat::Contiguous);
   auto buffer = at::empty_like(input, at::MemoryFormat::Contiguous);
-  auto iter = TensorIterator::binary_op(result, input, buffer, /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, input.contiguous(), buffer, /*check_mem_overlap=*/true);
   log_sigmoid_stub(iter.device_type(), iter);
   return std::make_tuple(result, buffer);
 }
