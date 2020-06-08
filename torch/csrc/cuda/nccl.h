@@ -12,7 +12,7 @@
 enum ncclDataType_t : unsigned int;
 enum ncclResult_t : unsigned int;
 enum ncclRedOp_t : unsigned int;
-struct ncclComm_t;
+typedef struct ncclComm* ncclComm_t;
 
 int32_t ncclSum;
 
