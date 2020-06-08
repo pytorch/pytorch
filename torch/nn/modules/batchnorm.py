@@ -127,8 +127,10 @@ class _BatchNorm(_NormBase):
             bn_training = self.running_mean is None and self.running_var is None
 
         return F.batch_norm(
-            input, self.running_mean, self.running_var, self.weight, self.bias,
-            bn_training, exponential_average_factor, self.eps)
+            input,
+            self.running_mean if not self.training or self.track_running_stats else None,
+            self.running_var if not self.training or self.track_running_stats else None,
+            self.weight, self.bias, bn_training, exponential_average_factor, self.eps)
 
 
 class BatchNorm1d(_BatchNorm):
