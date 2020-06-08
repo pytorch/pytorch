@@ -383,6 +383,49 @@ void testHashLargeExpression() {
   ASSERT_NE(hash_t, hash_f);
 }
 
+void testHashForLoopOptions() {
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto for_stmt = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              CompareSelectOperation::kEQ),
+          mask));
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(for_stmt);
+  hasher.clearCache();
+
+  for_stmt->set_gpu_block_index(LoopOptions::IDX_X);
+  auto hash_block_idx = hasher.hash(for_stmt);
+  hasher.clearCache();
+
+  ASSERT_NE(hash_before, hash_block_idx);
+
+  for_stmt->set_gpu_block_index(LoopOptions::IDX_UNSET);
+  auto hash_reset = hasher.hash(for_stmt);
+  hasher.clearCache();
+
+  ASSERT_EQ(hash_before, hash_reset);
+  for_stmt->set_gpu_thread_index(LoopOptions::IDX_X);
+  auto hash_thread_idx = hasher.hash(for_stmt);
+
+  ASSERT_NE(hash_before, hash_thread_idx);
+  ASSERT_NE(hash_block_idx, hash_thread_idx);
+}
+
 /// (2 + x) + 4 => x + 6
 void testSimplifyAdd() {
   KernelScope kernel_scope;
