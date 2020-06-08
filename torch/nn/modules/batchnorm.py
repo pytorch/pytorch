@@ -21,6 +21,8 @@ class _NormBase(Module):
     momentum: float
     affine: bool
     track_running_stats: bool
+    # WARNING: weight and bias purposely not defined here.
+    # See https://github.com/pytorch/pytorch/issues/39670
 
     def __init__(
         self,

@@ -755,6 +755,8 @@ class RNNCellBase(Module):
     bias: bool
     weight_ih: Tensor
     weight_hh: Tensor
+    # WARNING: bias_ih and bias_hh purposely not defined here.
+    # See https://github.com/pytorch/pytorch/issues/39670
 
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int) -> None:
         super(RNNCellBase, self).__init__()

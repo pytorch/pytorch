@@ -7,7 +7,7 @@ from .. import functional as F
 from .. import init
 
 from torch import Tensor, Size
-from typing import Union, List, Optional
+from typing import Union, List
 
 
 class LocalResponseNorm(Module):
