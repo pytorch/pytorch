@@ -390,14 +390,10 @@ void testAliasAnalysis() {
     //  print1(a)
 
     // test moving with a side effectful node between
-    AT_ASSERT(
-        !aliasDb2.moveAfterTopologicallyValid(print2, print1));
-    AT_ASSERT(
-        !aliasDb2.moveBeforeTopologicallyValid(print2, print1));
-    AT_ASSERT(
-        !aliasDb2.moveAfterTopologicallyValid(print1, print2));
-    AT_ASSERT(
-        !aliasDb2.moveBeforeTopologicallyValid(print1, print2));
+    AT_ASSERT(!aliasDb2.moveAfterTopologicallyValid(print2, print1));
+    AT_ASSERT(!aliasDb2.moveBeforeTopologicallyValid(print2, print1));
+    AT_ASSERT(!aliasDb2.moveAfterTopologicallyValid(print1, print2));
+    AT_ASSERT(!aliasDb2.moveBeforeTopologicallyValid(print1, print2));
   }
 
   {
