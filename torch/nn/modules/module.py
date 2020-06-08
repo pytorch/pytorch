@@ -8,7 +8,7 @@ from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, Generic
+from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict
 from ...utils.hooks import RemovableHandle
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]

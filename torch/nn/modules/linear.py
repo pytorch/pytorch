@@ -7,8 +7,6 @@ from .. import functional as F
 from .. import init
 from .module import Module
 
-from typing import Optional
-
 
 class Identity(Module):
     r"""A placeholder identity operator that is argument-insensitive.
