@@ -45,7 +45,7 @@ from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
 from quantization.test_quantize import TestPostTrainingDynamic  # noqa: F401
 from quantization.test_quantize import TestQuantizationAwareTraining  # noqa: F401
 # TODO: move to test_quantize_script
-from quantization.test_quantize import TestGraphModePostTrainingStatic  # noqa: F401
+from quantization.test_quantize import TestQuantizeScript  # noqa: F401
 # TODO: merge with other tests in test_quantize.py?
 from quantization.test_quantize import TestFunctionalModule  # noqa: F401
 from quantization.test_quantize import TestFusion  # noqa: F401
