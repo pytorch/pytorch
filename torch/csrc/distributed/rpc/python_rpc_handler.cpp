@@ -125,13 +125,14 @@ std::shared_ptr<torch::jit::CompilationUnit> PythonRpcHandler::
   return jitCompilationUnit_;
 }
 
-py::object PythonRpcHandler::runPythonUdf(py::object&& pythonUdf) {
+py::object PythonRpcHandler::runPythonUdf(const py::object& pythonUdf) {
   PROFILE_GIL_SCOPED_ACQUIRE;
   // Throw a descriptive error message if pyRunFunction_ is already cleaned up.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !pyRunFunction_.is_none(),
-      "Cannot run python UDF since pyRunFunction_ is None. Check if python RPC handler is already cleaned up.");
-  return pyRunFunction_(std::move(pythonUdf));
+      "Cannot run python UDF since pyRunFunction_ is None. Check if python RPC "
+      "handler is already cleaned up.");
+  return pyRunFunction_(pythonUdf);
 }
 
 SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {

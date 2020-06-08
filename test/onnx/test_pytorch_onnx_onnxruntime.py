@@ -1669,6 +1669,62 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Multinomial(), (weight,))
         self.run_test(MultinomialNoReplacement(), (weight,))
 
+    def _test_reduced_ops(self, op):
+        class ReducedOpModule(torch.nn.Module):
+            def forward(self, input):
+                return op(input, dim=-1)
+
+        if op != torch.mean:  # torch.mean only supports float types
+            x = torch.randint(10, (4, 4), dtype=torch.uint8)
+            self.run_test(ReducedOpModule(), x)
+
+            x = torch.randint(10, (4, 4), dtype=torch.int8)
+            self.run_test(ReducedOpModule(), x)
+
+            x = torch.randint(10, (4, 4), dtype=torch.int16)
+            self.run_test(ReducedOpModule(), x)
+
+            x = torch.randint(10, (4, 4), dtype=torch.int32)
+            self.run_test(ReducedOpModule(), x)
+
+            x = torch.randint(10, (4, 4), dtype=torch.int64)
+            self.run_test(ReducedOpModule(), x)
+
+        # torch.mean only supports float types
+        # ORT does not support double ReduceProd for double
+        if op != torch.prod and op != torch.mean:
+            x = torch.randn(4, 5, dtype=torch.double)
+            self.run_test(ReducedOpModule(), x)
+
+        if op != torch.prod:  # torch.prod not implemented for Half
+            x = torch.randn(4, 4, dtype=torch.half)
+            self.run_test(ReducedOpModule(), x)
+
+        x = torch.randn(4, 5, dtype=torch.float)
+        self.run_test(ReducedOpModule(), x)
+
+    def test_reduced_sum(self):
+        return self._test_reduced_ops(op=torch.sum)
+
+    def test_reduced_mean(self):
+        return self._test_reduced_ops(op=torch.mean)
+
+    def test_reduced_prod(self):
+        return self._test_reduced_ops(op=torch.prod)
+
+    def test_reduced_min_max(self):
+        class ReducedMinMaxModule(torch.nn.Module):
+            def forward(self, input):
+                return torch.min(input, dim=-1)[0], torch.max(input, dim=0)[0]
+        x = torch.randint(10, (4, 4), dtype=torch.int32)
+        self.run_test(ReducedMinMaxModule(), x)
+
+        x = torch.randint(10, (4, 4), dtype=torch.int64)
+        self.run_test(ReducedMinMaxModule(), x)
+
+        x = torch.randn(4, 5, dtype=torch.float)
+        self.run_test(ReducedMinMaxModule(), x)
+
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
             def forward(self, input):

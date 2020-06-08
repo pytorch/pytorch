@@ -10,7 +10,7 @@ namespace rpc {
 // RPC call representing calling a Python function over RPC.
 class TORCH_API PythonCall final : public RpcCommandBase {
  public:
-  PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncFunction_);
+  PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncExecution);
 
   Message toMessageImpl() && override;
 
@@ -18,13 +18,13 @@ class TORCH_API PythonCall final : public RpcCommandBase {
 
   const SerializedPyObj& serializedPyObj() const;
 
-  inline bool isAsyncFunction() const {
-    return isAsyncFunction_;
+  inline bool isAsyncExecution() const {
+    return isAsyncExecution_;
   }
 
  private:
   SerializedPyObj serializedPyObj_;
-  const bool isAsyncFunction_;
+  const bool isAsyncExecution_;
 };
 
 } // namespace rpc

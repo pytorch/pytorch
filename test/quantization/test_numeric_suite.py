@@ -130,13 +130,15 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                     compare_and_validate_results(model, q_model)
 
         # Test dynamic quantization
-        model_list = [SingleLayerLinearDynamicModel()]
-        for model in model_list:
-            model.eval()
-            if hasattr(model, "fuse_model"):
-                model.fuse_model()
-            q_model = quantize_dynamic(model)
-            compare_and_validate_results(model, q_model)
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model_list = [SingleLayerLinearDynamicModel(qengine)]
+                for model in model_list:
+                    model.eval()
+                    if hasattr(model, "fuse_model"):
+                        model.fuse_model()
+                    q_model = quantize_dynamic(model)
+                    compare_and_validate_results(model, q_model)
 
     def test_compare_model_stub(self):
         r"""Compare the output of quantized conv layer and its float shadow module
@@ -219,14 +221,16 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                     self.assertTrue(v["float"].shape == v["quantized"].shape)
 
         # Test dynamic quantization
-        model_list = [SingleLayerLinearDynamicModel()]
-        module_swap_list = [nn.Linear]
-        for model in model_list:
-            model.eval()
-            if hasattr(model, "fuse_model"):
-                model.fuse_model()
-            q_model = quantize_dynamic(model)
-            compare_and_validate_results(model, q_model, module_swap_list, linear_data)
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model_list = [SingleLayerLinearDynamicModel(qengine)]
+                module_swap_list = [nn.Linear]
+                for model in model_list:
+                    model.eval()
+                    if hasattr(model, "fuse_model"):
+                        model.fuse_model()
+                    q_model = quantize_dynamic(model)
+                    compare_and_validate_results(model, q_model, module_swap_list, linear_data)
 
     def test_compare_model_outputs(self):
         r"""Compare the output of conv layer in quantized model and corresponding
@@ -301,10 +305,12 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                     self.assertTrue(v["float"].shape == v["quantized"].shape)
 
         # Test dynamic quantization
-        model_list = [SingleLayerLinearDynamicModel()]
-        for model in model_list:
-            model.eval()
-            if hasattr(model, "fuse_model"):
-                model.fuse_model()
-            q_model = quantize_dynamic(model)
-            compare_and_validate_results(model, q_model, linear_data)
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model_list = [SingleLayerLinearDynamicModel(qengine)]
+                for model in model_list:
+                    model.eval()
+                    if hasattr(model, "fuse_model"):
+                        model.fuse_model()
+                    q_model = quantize_dynamic(model)
+                    compare_and_validate_results(model, q_model, linear_data)
