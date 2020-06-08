@@ -714,6 +714,12 @@
   x2: not_implemented("_cdist_backward")
   cdist: not_implemented("_cdist_backward")
 
+- name: nanprod(Tensor self, *, ScalarType? dtype=None) -> Tensor
+  self: nanprod_backward(grad, self.to(grad.scalar_type()), result)
+
+- name: nanprod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  self: nanprod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim)
+
 - name: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 

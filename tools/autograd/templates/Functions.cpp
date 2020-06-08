@@ -271,6 +271,40 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
   return grad * (exclusive_normal * exclusive_reverse);
 }
 
+Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& result) {
+  if (input.dim() == 0) {
+    return grad * input.isnan().logical_not();
+  }
+  Tensor zero_idx = (input == 0).nonzero();
+  if (zero_idx.numel() == 0) {
+    return (grad * result) / input * input.isnan().logical_not();
+  } else if (zero_idx.size(0) > 1) {
+    return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT) * input.isnan().logical_not();
+  } else {
+    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input) * input.isnan().logical_not();
+  }
+}
+
+Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t dim, bool keepdim) {
+  if (input.dim() == 0) {
+    return grad * input.isnan().logical_not();
+  }
+  dim = at::maybe_wrap_dim(dim, input.sizes().size());
+  if (!keepdim && input.dim() != 1) {
+    grad = grad.unsqueeze(dim);
+    result = result.unsqueeze(dim);
+  }
+
+  Tensor zero_mask = (input == 0);
+  Tensor slice_zero_count = zero_mask.sum(dim, true);
+  int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
+  if (total_zeros == 0) {
+    return (grad * result) / input * input.isnan().logical_not();
+  } else {
+    return prod_safe_zeros_backward(grad, input, dim) * input.isnan().logical_not();
+  }
+}
+
 // note that the gradient for prod is equivalent to:
 // cumprod(exclusive, normal) * cumprod(exclusive, reverse), e.g.:
 // input:                        [    a,     b,     c]
