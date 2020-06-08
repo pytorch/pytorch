@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/ir/constants.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/jit_type.h>
@@ -141,8 +142,16 @@ class NaiveShapeTypePropagator {
         node->output()->setType(promoted_type);
         break;
       }
+      case aten::sum: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+        auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+        auto keepdim = constant_as<bool>(node->input(2));
+        TORCH_CHECK(dims.has_value() && keepdim.has_value(), "Shape inference cannot handle options.");
+        node->output()->setType(unary_reduce_type(out_type, dims->vec(), keepdim.value()));
+        break;
+      }
       default:
-        TORCH_CHECK(false, "shape/type inference failed.");
+        TORCH_CHECK(false, "shape/type inference failed, unrecognized operation encountered.");
         // TODO: generate a proper error log, as this probably means something
         //       went unexpected.
         break;
@@ -154,6 +163,30 @@ class NaiveShapeTypePropagator {
   }
 
  protected:
+  TensorTypePtr unary_reduce_type(
+      TensorTypePtr const& op,
+      const std::vector<int64_t>& dims,
+      bool keepdim) {
+    TORCH_CHECK(
+        op->scalarType().has_value() && op->device().has_value() && op->sizes().isComplete(),
+        "requires complete shape on input");
+    std::vector<int64_t> output_size;
+    std::vector<int64_t> input_size = *op->sizes().concrete_sizes();
+    printf("input size with dimension: %zu\n", input_size.size());
+    for (int i = 0; i < input_size.size(); i++) {
+      if (std::find(dims.begin(), dims.end(), i) == dims.end()) {
+        output_size.emplace_back(input_size[i]);
+      } else if (keepdim) {
+        output_size.emplace_back(1);
+      }
+    }
+    printf("output size with dimension: %zu\n", output_size.size());
+    return TensorType::createContiguous(
+          *op->scalarType(),
+          *op->device(),
+          output_size);
+  }
+
   // TODO: we should comply to codegen type promotion.
   TensorTypePtr binary_broadcast_type(
       TensorTypePtr const& op0,
