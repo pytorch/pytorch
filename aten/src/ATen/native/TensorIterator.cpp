@@ -99,14 +99,16 @@ ScalarType TensorIterator::compute_common_dtype() {
 //   Its intent is to:
 //     (1) determine the operation's "common dtype" or, "computation dtype,"
 //           if necessary
-//     (2) check that all inputs are on the same device, if requested
-//     (3) create temporaries as inputs and outputs, if needed and requested,
+//     (2) check that all operands are on the same device, if requested
+//     (3) check that all operands share the same dtype, if requested
+//     (4) create temporaries as inputs and outputs, if needed and requested,
 //           on the CPU
 //   The CPU-specific behavior is because CUDA kernels are expected to
 //   cast to and from the computation dtype in the kernel itself.
 //
 //   Several flags control this behavior, they are:
-//     - check_all_same_device_, if true all tensors must be on the same device
+//     - check_all_same_dtype_, if true all operands must have the same dtype
+//     - check_all_same_device_, if true all operands must be on the same device
 //     - promote_inputs_to_common_dtype_, if true allows temporaries to be
 //         created for inputs on the CPU and sets input operands' target
 //         dtypes to the computation dtype
@@ -116,12 +118,11 @@ ScalarType TensorIterator::compute_common_dtype() {
 //     - enforce_safe_casting_to_output_, if true
 //         canCast(computation_dtype, output dtype) must be true
 //
-//   NOTE: there is no check that all operands share the same dtype. Users
-//     should implement this check themselves, if needed. More specific
-//     behaviors (e.g. the first and second inputs must share a dtype, but
-//     the third must have the long dtype) also must be checked by users.
+//   NOTE: Checks for more specific behaviors (e.g. the first and second
+//     inputs must share a dtype, but the third must have the long dtype)
+//     should be implemented by users.
 //   NOTE: users should not requet the iter's common dtype without
-//     also enabling input promotion.
+//     checking that all dtypes are the same or enabling type promotion.
 void TensorIterator::compute_types() {
   // Reviews operands (1/2)
   //   - sets original tensor
@@ -166,6 +167,18 @@ void TensorIterator::compute_types() {
       } else {
         has_different_input_dtypes = true;
       }
+    }
+  }
+
+  // Checks that all inputs (and defined outputs) have the same dtype, if requested
+  if (check_all_same_dtype_) {
+    for (auto& op : operands_) {
+      if (!op.is_type_defined() || !op.tensor.defined()) {
+        continue;
+      }
+
+      TORCH_CHECK(op.target_dtype == common_dtype_,
+                  "Found dtype ", op.target_dtype, " but expected ", common_dtype_);
     }
   }
 
@@ -792,6 +805,7 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
 
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
   auto iter = TensorIterator();
+  iter.check_all_same_dtype(false);
   iter.add_output(out);
   // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
   iter.resize_outputs_ = false;
@@ -830,6 +844,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   iter.add_input(a);
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
+  iter.check_all_same_dtype(false);
   iter.build();
   return iter;
 }

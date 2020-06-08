@@ -167,6 +167,7 @@ TEST(TensorIteratorTest, SerialLoopSingleThread) {
 
 TEST(TensorIteratorTest, InputDType) {
   auto iter = at::TensorIterator();
+  iter.check_all_same_dtype(false);
   iter.add_output(at::ones({1, 1}, at::dtype(at::kBool)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
@@ -191,6 +192,7 @@ TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
 
 TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIterator();
+  iter.check_all_same_dtype(false);
   iter.add_output(at::ones({1, 1}, at::dtype(at::kLong)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));

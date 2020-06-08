@@ -64,6 +64,7 @@ Tensor fake_quantize_per_channel_affine(
   expected_shape[axis] = self.size(axis);
 
   TensorIterator iter;
+  iter.check_all_same_dtype(false);
   iter.add_output(Y);
   iter.add_input(self);
   iter.add_input(native::_unsafe_view(scale, expected_shape));
@@ -139,6 +140,7 @@ Tensor fake_quantize_per_channel_affine_backward(
   expected_shape[axis] = X.size(axis);
 
   TensorIterator iter;
+  iter.check_all_same_dtype(false);
   iter.add_output(dX);
   iter.add_input(X);
   iter.add_input(dY);

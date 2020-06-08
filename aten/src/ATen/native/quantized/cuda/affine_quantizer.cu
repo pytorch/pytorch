@@ -19,6 +19,7 @@ void quantize_tensor_per_tensor_affine_cuda(
         constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
 
         auto iter = TensorIterator();
+        iter.check_all_same_dtype(false);
         iter.add_output(qtensor);
         iter.add_input(rtensor);
         iter.add_input(qtensor);
@@ -43,6 +44,7 @@ void dequantize_tensor_per_tensor_affine_cuda(
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cuda", [&]() {
         auto iter = TensorIterator();
+        iter.check_all_same_dtype(false);
         iter.add_output(rtensor);
         iter.add_input(qtensor);
         iter.build();

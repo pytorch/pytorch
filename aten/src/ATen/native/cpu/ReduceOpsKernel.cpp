@@ -37,6 +37,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
   }
 
   auto iter = TensorIterator();
+  iter.check_all_same_dtype(false);
   iter.dont_resize_outputs();
   iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
   iter.add_output(result);

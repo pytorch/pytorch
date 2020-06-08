@@ -327,16 +327,22 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input, device, dtype);
   }
 
+  void check_all_same_dtype(const bool _check_all_same_dtype) {
+    check_all_same_dtype_ = _check_all_same_dtype;
+  }
+
   void check_all_same_device(const bool _check_all_same_device) {
     check_all_same_device_ = _check_all_same_device;
   }
 
   void promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
     promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
+    check_all_same_dtype_ = false;
   }
 
   void cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
     cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
+    check_all_same_dtype_ = false;
   }
 
   void enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
@@ -403,6 +409,7 @@ protected:
   bool requires_channels_last_output_ = false;
   bool requires_channels_last_3d_output_ = false;
   bool static_shape_ = false;
+  bool check_all_same_dtype_ = true;
   bool check_all_same_device_ = true;
   bool promote_inputs_to_common_dtype_ = false;
   bool cast_common_dtype_to_outputs_ = false;

@@ -16,6 +16,7 @@ Tensor make_per_tensor_quantized_tensor_cuda(
   AT_DISPATCH_QINT_TYPES(
       dst.scalar_type(), "make_per_tensor_quantized_tensor_cuda", [&]() {
         auto iter = TensorIterator();
+        iter.check_all_same_dtype(false);
         iter.add_output(dst);
         iter.add_input(self);
         iter.build();

@@ -12,6 +12,7 @@ Tensor int_repr_quant_cuda(const Tensor& self) {
         self.options().dtype(UNDERLYING_TYPE),
         self.suggest_memory_format());
     auto iter = TensorIterator();
+    iter.check_all_same_dtype(false);
     iter.add_output(dst);
     iter.add_input(self);
     iter.build();

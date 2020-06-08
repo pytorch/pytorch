@@ -140,6 +140,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   iter.add_output(self);
   iter.add_input(src);
   iter.dont_resize_outputs();
+  iter.check_all_same_dtype(false);
   iter.check_all_same_device(false);
   iter.build();
 

@@ -92,6 +92,7 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
   /* } */
 
   auto iter = TensorIterator();
+  iter.check_all_same_dtype(false);
   iter.dont_resize_outputs();
   iter.add_output(grad_out_restrided);
   iter.add_input(grad_in_restrided, grad_in.device(), grad_in.scalar_type());
@@ -162,6 +163,7 @@ static TensorIterator _make_unfold_backward_iter_over_grad_in(
   /* } */
 
   auto iter = TensorIterator();
+  iter.check_all_same_dtype(false);
   iter.dont_resize_outputs();
   iter.add_output(grad_out_restrided);
   iter.add_input(grad_in, grad_in.device(), grad_in.scalar_type());
