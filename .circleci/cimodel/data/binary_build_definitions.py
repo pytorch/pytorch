@@ -181,16 +181,20 @@ def get_post_upload_jobs():
             nightly=True
         )
         common_job_def["requires"].append(upload_job_name)
-    return {
-        "update_s3_htmls": {
-            "name": "update_s3_htmls",
-            **common_job_def,
+    return [
+        {
+            "update_s3_htmls": {
+                "name": "update_s3_htmls",
+                **common_job_def,
+            },
         },
-        "upload_binary_sizes": {
-            "name": "upload_binary_sizes",
-            **common_job_def,
+        {
+            "upload_binary_sizes": {
+                "name": "upload_binary_sizes",
+                **common_job_def,
+            },
         }
-    }
+    ]
 
 def get_nightly_tests():
 

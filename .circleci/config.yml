@@ -5129,7 +5129,7 @@ workflows:
             - binary_windows_libtorch_3_7_cu92_release_nightly_upload
             - binary_windows_libtorch_3_7_cu101_release_nightly_upload
             - binary_windows_libtorch_3_7_cu102_release_nightly_upload
-      upload_binary_sizes:
+      - upload_binary_sizes:
           context: org-member
           filters:
             branches:
