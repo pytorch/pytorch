@@ -309,7 +309,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
                       "bucket_view.strides() = ", bucket_view.strides());
     }
     // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-    auto wrapped = c10::scalar_to_tensor(float(1.0/process_group_->getSize()));
+    auto wrapped = c10::scalar_to_tensor(double(1.)/process_group_->getSize());
     wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
     // Divides while copying into the bucket view.
     at::native::mul_out(bucket_view, grad, wrapped);
