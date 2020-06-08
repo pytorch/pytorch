@@ -62,6 +62,8 @@ std::string getAtenOpPattern(
 
 // generate ops for quantize pattern for a scalar value
 std::string getQuantizeForScalar(const std::string& value) {
+  // 6 is `torch.float` ScalarType, we are creating a float scalar
+  // tensor from a scalar value
   std::string quantize_pattern = R"(
           )" +
       value + "_float_scalar_type : int = prim::Constant[value=6]()";
