@@ -532,6 +532,7 @@ def get_testing_overrides():
         torch.nn.functional.triplet_margin_loss: (lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06,
                                                   swap=False, size_average=None, reduce=None, reduction='mean': -1),
         torch.nn.functional.unfold: lambda input, kernel_size, dilation=1, padding=0, stride=1: -1,
+        torch.nanprod: lambda input: -1,
         torch.nonzero: lambda input, as_tuple=False: -1,
         torch.norm: lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1,
         torch.norm_except_dim: lambda v, pow=2, dim=0: -1,

@@ -324,6 +324,7 @@ Reduction Ops
     mean
     median
     mode
+    nanprod
     norm
     prod
     std

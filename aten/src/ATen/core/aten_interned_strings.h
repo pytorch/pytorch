@@ -100,6 +100,7 @@ _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
 _(aten, _nnz) \
+_(aten, _nanprod) \
 _(aten, _pack_padded_sequence) \
 _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
@@ -893,6 +894,7 @@ _(attr, mode) \
 _(attr, momentum) \
 _(attr, n) \
 _(attr, n_fft) \
+_(attr, nanprod) \
 _(attr, neg_log_likelihood) \
 _(attr, negative) \
 _(attr, negative_slope) \

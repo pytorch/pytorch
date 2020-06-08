@@ -2003,6 +2003,13 @@ mvlgamma_(p) -> Tensor
 In-place version of :meth:`~Tensor.mvlgamma`
 """)
 
+add_docstr_all('nanprod',
+               r"""
+nanprod(dim=None, keepdim=False, dtype=Nnone) -> Tensor
+
+See :func:`torch.nanprod`
+""")
+
 add_docstr_all('narrow',
                r"""
 narrow(dimension, start, length) -> Tensor
