@@ -245,12 +245,15 @@ Pointwise Ops
     abs
     absolute
     acos
+    acosh
     add
     addcdiv
     addcmul
     angle
     asin
+    asinh
     atan
+    atanh
     atan2
     bitwise_not
     bitwise_and
@@ -261,6 +264,7 @@ Pointwise Ops
     conj
     cos
     cosh
+    deg2rad
     div
     digamma
     erf
@@ -290,6 +294,7 @@ Pointwise Ops
     neg
     polygamma
     pow
+    rad2deg
     real
     reciprocal
     remainder
