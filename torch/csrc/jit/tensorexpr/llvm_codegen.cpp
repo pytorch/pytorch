@@ -337,15 +337,15 @@ class IntrinsicsExpander : public IRMutator {
     return v;
   }
 
-  // The dfeault tanh is quite slow, use the Eigen version from here:
+  // The default tanh is quite slow, use the Eigen version from here:
   // https://bitbucket.org/eigen/eigen/src/94875feeeeb9abe5509b314197da1991ba2070f5/Eigen/src/Core/MathFunctionsImpl.h#lines-26
   const Expr* fast_tanh(const Expr* v_ptr) {
     // TODO: investigate why "v = v_ptr" leads to a boolean conversion.
     ExprHandle v{v_ptr};
     Dtype dtype = v.dtype();
     int lanes = dtype.lanes();
-    // TODO: use a dedicated bind-var to make sure v is not evalualted multiple times.
-    // Clamp the input expression to [-9, 9]
+    // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
+    // times. Clamp the input expression to [-9, 9]
     ExprHandle plus_9 = to_vec(9.0f, lanes);
     ExprHandle minus_9 = to_vec(-9.0f, lanes);
     ExprHandle v1 = Min::make(v, plus_9, false);

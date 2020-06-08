@@ -801,9 +801,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::tanh: {
-      return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
-        return tanh(a);
-      });
+      return computeOneOperand(
+          "aten_tanh", v, [](const ExprHandle& a) { return tanh(a); });
     } break;
 
     case aten::sqrt: {
@@ -1137,14 +1136,16 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
       For* split1;
       For* tail1;
 
-      l.splitWithTail(loop, 8, &outer1, &split1, &tail1);
+      static const int kBodyVectorWidth = 8;
+      l.splitWithTail(loop, kBodyVectorWidth, &outer1, &split1, &tail1);
       l.vectorize(split1);
 
       if (tail1) {
         For* outer2;
         For* split2;
         For* tail2;
-        l.splitWithTail(tail1, 4, &outer2, &split2, &tail2);
+        static const int kTailVectorWidth = 4;
+        l.splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
         l.vectorize(split2);
       }
     }
