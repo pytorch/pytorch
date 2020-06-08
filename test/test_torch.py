@@ -6369,7 +6369,8 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(len(w), 1)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
-    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
     def test_nanprod(self, device, dtype):
         x   = torch.tensor([[float('nan'), 1.23], [2.06, float('nan')]], dtype=dtype, device=device)
         x_  = torch.tensor([[float('nan'), float('nan')], [1.23, 2.06]], dtype=dtype, device=device)
