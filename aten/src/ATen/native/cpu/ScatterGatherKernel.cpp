@@ -1,4 +1,4 @@
-#include <ATen/native/ScatterGatherShapeChecks.h>
+#include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
@@ -44,8 +44,7 @@ struct cpu_scatter_gather_base_kernel {
     Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
-    const func_t& f,
-    bool serial_exec = true
+    const func_t& f
   ) {
     // no-op if index is empty
     if (index.numel() == 0) {
@@ -54,6 +53,7 @@ struct cpu_scatter_gather_base_kernel {
 
     dim = maybe_wrap_dim(dim, self.dim());
 
+    scatter_gather_dtype_check(method_name, self, index, src);
     if (is_scatter_like) {
       scatter_shape_check(self, dim, index, src);
     }
@@ -81,7 +81,7 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
-    AT_DISPATCH_ALL_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
       method_name, [&] {
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -143,12 +143,7 @@ struct cpu_scatter_gather_base_kernel {
 
         };
 
-        if (serial_exec) {
-          iter.serial_for_each(loop, {0, iter.numel()});
-        }
-        else {
-          iter.for_each(loop);
-        }
+        iter.for_each(loop);
       }
     );
   }
@@ -159,8 +154,7 @@ void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Te
     result, dim, index, self,
     "gather_out_cpu", [] (auto* lhs, const auto* rhs) {
       *lhs = *rhs;
-    },
-    /*serial_exec=*/false
+    }
   );
 }
 
@@ -169,8 +163,7 @@ void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Te
     self, dim, index, src,
     "scatter_cpu_", [] (auto* lhs, const auto* rhs) {
       *lhs = *rhs;
-    },
-    /*serial_exec=*/false
+    }
   );
 }
 
@@ -180,8 +173,7 @@ void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Sca
     "scatter_fill_cpu_", [src] (auto* lhs, const auto* rhs) {
       using scalar_t = typename std::remove_pointer<decltype(lhs)>::type;
       *lhs = src.to<scalar_t>();
-    },
-    /*serial_exec=*/false
+    }
   );
 }
 
@@ -190,8 +182,7 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
     self, dim, index, src,
     "scatter_add_", [] (auto* lhs, const auto* rhs) {
       *lhs += *rhs;
-    },
-    /*serial_exec=*/true
+    }
   );
 }
 
