@@ -20,7 +20,8 @@ void THNN_(RReLU_updateOutput)(
   auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(generator, at::cuda::detail::getDefaultCUDAGenerator());
   if (train)
   {
-    input = THCTensor_(newContiguous)(state, input);
+    auto inputTensor = THTensor_wrap(input).contiguous();
+    input = inputTensor.unsafeGetTensorImpl();
     THCTensor_(resizeAs)(state, noise, input);
     scalar_t *input_data = THCTensor_(data)(state, input);
     scalar_t *noise_data = THCTensor_(data)(state, noise);
@@ -50,7 +51,6 @@ void THNN_(RReLU_updateOutput)(
         n, rng_engine_inputs, input_data, noise_data, output_data, lower, upper);
     }
     THCudaCheck(cudaGetLastError());
-    THCTensor_(free)(state, input);
   }
   else
   {
@@ -82,7 +82,8 @@ void THNN_(RReLU_updateGradInput)(
   THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU(state, 4, input, gradOutput, gradInput, noise);
 
-  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
+  auto gradOutputTensor = THTensor_wrap(gradOutput).contiguous();
+  gradOutput = gradOutputTensor.unsafeGetTensorImpl();
 
   if (train && upper - lower > 1E-6)    // e.g. if upper == lower, RReLU behaves like LeakyReLU
   {
@@ -113,8 +114,6 @@ void THNN_(RReLU_updateGradInput)(
       THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, gradInput, gradOutput, input, RReLUupdateGradInputEval_functor<scalar_t>(negSlope));
     }
   }
-
-  THCTensor_(free)(state, gradOutput);
 }
 
 #endif

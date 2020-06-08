@@ -266,9 +266,7 @@ void check_maxpool2d_params(
    int64_t inC = input.size(1);
    int64_t inH = input.size(2);
    int64_t inW = input.size(3);
-   // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
-   // regression of it is fixed.
-   Tensor input_contig = input.permute({0, 2, 3, 1}).contiguous();
+   Tensor input_contig = input.contiguous(MemoryFormat::ChannelsLast);
 
    initQNNPACK();
    const auto scale = input_contig.q_scale();
@@ -327,10 +325,11 @@ void check_maxpool2d_params(
 
    // NHWC output
    qy = at::_empty_affine_quantized(
-       {batch_size, outH, outW, outC},
+       {batch_size, outC, outH, outW},
        at::device(kCPU).dtype(kQUInt8),
        scale,
-       zero_point);
+       zero_point,
+       MemoryFormat::ChannelsLast);
 
    const pytorch_qnnp_status setupStatus =
        pytorch_qnnp_setup_max_pooling2d_nhwc_u8(
@@ -353,8 +352,7 @@ void check_maxpool2d_params(
    TORCH_INTERNAL_ASSERT(
        runStatus == pytorch_qnnp_status_success,
        "failed to run QNNPACK MaxPool operator");
-   //TODO: remove permute once MemoryLayout is added above
-   return qy.permute({0, 3, 1, 2});
+   return qy.contiguous(input.suggest_memory_format());
  }
  #endif
 }  // namespace

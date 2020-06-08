@@ -81,6 +81,8 @@ namespace jit {
   _(LiteInterpreterUpsampleNearest2d)  \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
+  _(DefaultArgTypeHinting)             \
+  _(Futures)                           \
   _(MobileTypeParser)                  \
   _(LiteInterpreterBuiltinFunction)    \
   _(LiteInterpreterPrim)               \

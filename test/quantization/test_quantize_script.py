@@ -14,19 +14,23 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
 from torch.quantization import get_default_qconfig
 
-# torch.quantization._quantize_script
-from torch.quantization._quantize_script import script_qconfig
-from torch.quantization._quantize_script import prepare_script
-from torch.quantization._quantize_script import convert_script
-from torch.quantization._quantize_script import quantize_script
-from torch.quantization._quantize_script import prepare_dynamic_script
-from torch.quantization._quantize_script import quantize_dynamic_script
+# torch.quantization.quantize_script
+from torch.quantization.quantize_script import script_qconfig
+from torch.quantization.quantize_script import prepare_script
+from torch.quantization.quantize_script import convert_script
+from torch.quantization.quantize_script import quantize_script
+from torch.quantization.quantize_script import prepare_dynamic_script
+from torch.quantization.quantize_script import convert_dynamic_script
+from torch.quantization.quantize_script import quantize_dynamic_script
 
 # Testing utils
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 from torch.testing._internal.common_quantized import override_qengines
 
-from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_quantization import (
+    QuantizationTestCase,
+    skipIfNoFBGEMM,
+)
 
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import attrs_with_prefix
@@ -358,9 +362,8 @@ graph(%input, %weight):
                 return self.conv(x)
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(default_observer())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # for input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # for weight
@@ -385,14 +388,8 @@ graph(%input, %weight):
                 return self.sub(self.conv(x))
 
         m = torch.jit.script(M())
-        qconfig = script_qconfig(default_qconfig)
-
-        qconfig_dict = {
-            'sub.fc': qconfig
-        }
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward",
-                                                                qconfig_dict,
-                                                                False))
+        qconfig_dict = {'sub.fc': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # input and output of sub
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # not quantized
@@ -448,16 +445,16 @@ graph(%input, %weight):
             return [x for x, _ in module._modules._c.items()
                     if x.startswith(prefix)]
 
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        qconfig_dict = {'': default_qconfig}
         m = torch.jit.script(ConvFunctionalReLU())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        m = prepare_script(m, qconfig_dict)
         # observer for weight of conv
         assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
         # observer for input of conv and output of relu
         assert len(attrs_with_prefix(m, '_observer_')) == 2
 
         m = torch.jit.script(ConvReLUModule())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        m = prepare_script(m, qconfig_dict)
         # observer for input of conv and output of relu
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # observer for weight of conv
@@ -466,8 +463,8 @@ graph(%input, %weight):
         assert len(attrs_with_prefix(m.relu, '_observer_')) == 0
 
         m = torch.jit.script(AddReLUModule())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         assert len(attrs_with_prefix(m, '_observer')) == 3
         assert len(attrs_with_prefix(m.relu, '_observer')) == 0
         FileCheck().check('aten::add_') \
@@ -476,8 +473,8 @@ graph(%input, %weight):
                    .run(str(get_forward_graph(m._c)))
 
         m = torch.jit.script(AddFunctionalReLU())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         assert len(attrs_with_prefix(m, '_observer')) == 3
         FileCheck().check('aten::add_') \
                    .check_not('Observer = prim::GetAttr[name="_observer_') \
@@ -495,10 +492,8 @@ graph(%input, %weight):
                 return F.relu(self.conv(x))
 
         m = torch.jit.script(M())
-        qconfig_dict = {
-            '': script_qconfig(default_qconfig)
-        }
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         activation_dtypes = set(obs.getattr('dtype') for x, obs in m._modules._c.items()
                                 if x.startswith('_observer_'))
         weight_dtypes = set(obs.getattr('dtype') for x, obs in m.conv._modules._c.items()
@@ -519,7 +514,7 @@ graph(%input, %weight):
                 return x + y
 
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig}, False)
+        m = prepare_script(m, {'': default_qconfig})
         # 3 for x, y, weight, one for output of each F.conv2d and one for output of add
         assert len(attrs_with_prefix(m, '_observer')) == 6
 
@@ -534,8 +529,8 @@ graph(%input, %weight):
                 return self.conv2(self.conv1(x))
 
         m = torch.jit.script(M())
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # conv1 and conv2 shares the same type, we need to
         # make sure we didn't quantize the type twice
         conv1_observers = attrs_with_prefix(m.conv1, '_observer_')
@@ -561,9 +556,9 @@ graph(%input, %weight):
                 x = torch.flatten(x)
                 return x
 
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
@@ -593,9 +588,9 @@ graph(%input, %weight):
                 x = self.conv2(x)
                 return x
 
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 3
         FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
@@ -626,9 +621,9 @@ graph(%input, %weight):
                 x = self.conv2(x)
                 return x
 
-        qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        qconfig_dict = {'': default_qconfig}
+        m = prepare_script(m, qconfig_dict)
         # input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 3
         FileCheck().check('Observer = prim::GetAttr[name="_observer_') \
@@ -668,13 +663,27 @@ graph(%input, %weight):
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig}, inplace=False)
+        m = prepare_script(m, {'': default_qconfig})
         # we want to test that channel_shuffle is going to pass
         # the observed property from the output of conv1 to input of conv2
         # so that we don't insert observers for input of conv2
         assert len(attrs_with_prefix(m, '_observer_',)) == 3
 
     def test_insert_observers_for_if(self):
+        class QuantProp(torch.nn.Module):
+            def __init__(self, use_skip):
+                super(QuantProp, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.use_skip = use_skip
+
+            def forward(self, x):
+                if self.use_skip:
+                    x = self.conv(x)
+                    return torch.flatten(x)
+                else:
+                    x = self.conv(x)
+                    return torch.flatten(x)
+
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
                 super(Res, self).__init__()
@@ -690,6 +699,43 @@ graph(%input, %weight):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
+                self.quant_prop = QuantProp(True)
+                self.res2 = Res(False)
+
+            def forward(self, x):
+                x = self.quant_prop(x)
+                x = self.res2(x)
+                return x
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        m = torch.jit.script(M()).eval()
+        m = prepare_script(m, {'': default_qconfig})
+        # one observer for input and one observer for output
+        # no observer for output of quant_prop
+        assert len(attrs_with_prefix(m, '_observer_',)) == 2
+        # one observer for output of conv for each branch
+        assert len(attrs_with_prefix(m.quant_prop, '_observer_',)) == 2
+
+    def test_insert_observers_for_nested_if(self):
+        class Res(torch.nn.Module):
+            def __init__(self, use_skip):
+                super(Res, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+                self.cond = use_skip
+                self.use_skip = use_skip
+
+            def forward(self, x):
+                if self.use_skip:
+                    if self.cond:
+                        return self.conv(x)
+                    else:
+                        return self.conv(x)
+                else:
+                    return self.conv(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
                 self.res1 = Res(True)
                 self.res2 = Res(False)
 
@@ -699,9 +745,13 @@ graph(%input, %weight):
                 return x
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig}, inplace=False)
-        assert len(attrs_with_prefix(m, '_observer_',)) == 3
+        for tracing in [True, False]:
+            if tracing:
+                m = torch.jit.trace(M(), data[0][0])
+            else:
+                m = torch.jit.script(M())
+            m = prepare_script(m.eval(), {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_',)) == 3
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
@@ -716,15 +766,12 @@ graph(%input, %weight):
             m = torch.jit.script(M())
             observer = default_per_channel_weight_observer.with_args(ch_axis=1) \
                 if is_per_channel else default_observer
-            qconfig = QConfig(activation=observer, weight=observer)
-            qconfig_dict = {
-                '': script_qconfig(qconfig)
-            }
-            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+            qconfig_dict = {'': QConfig(activation=observer, weight=observer)}
+            m = prepare_script(m, qconfig_dict)
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
 
             m(data)
-            m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
+            m = convert_script(m, debug=True)
             assert len(m._modules._c.items()) == 1, \
                 'Expected to have single submodule of conv'
             # make sure the quantized model is executable
@@ -763,7 +810,7 @@ graph(%input, %weight):
 
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
             m(data)
-            m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
+            m = convert_script(m, debug=True)
             m(data)
             assert m.conv1._c._type() == m.conv2._c._type()
 
@@ -968,7 +1015,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         m = torch.jit.script(M()).eval()
-        m = quantize_script(m, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        m = quantize_script(m, qconfig_dict, _test_only_eval_fn, [data])
         # make sure patterns in both branches are fused
         FileCheck().check_count("quantized::conv2d(", 4, exactly=True) \
                    .run(m.graph)
@@ -985,7 +1032,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
         # make sure there is only one quantize_per_tensor for input
         # and linear_prepack is folded
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
@@ -1008,7 +1055,7 @@ graph(%input, %weight):
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         qconfig_dict = {'': default_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=True)
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], debug=True)
         FileCheck().check_not("quantized::conv2d") \
                    .check("aten::conv2d") \
                    .check("aten::avg_pool2d") \
@@ -1124,17 +1171,23 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
     """
-    def _test_op_impl(self, module, data, quantized_op, debug=False):
-        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
-        model = torch.jit.script(module).eval()
-        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data], inplace=False)
+    def _test_op_impl(self, module, data, quantized_op, tracing=False, debug=False):
         if debug:
-            print(model.graph)
+            print('Testing:', str(module))
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        *inputs, target = data[0]
+        if tracing:
+            model = torch.jit.trace(module, inputs)
+        else:
+            model = torch.jit.script(module).eval()
+        # TODO: _test_only_eval_fn --> default_eval_fn
+        model = quantize_script(model, qconfig_dict, _test_only_eval_fn, [data])
+        if debug:
+            print('debug:', model.graph)
         FileCheck().check(quantized_op) \
                    .run(model.graph)
 
         # make sure it runs
-        *inputs, target = data[0]
         model(*inputs)
 
         return model
@@ -1205,81 +1258,199 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                    .run(model.graph)
 
     @override_qengines
-    def test_quantized_conv1d_relu(self):
-        class M(torch.nn.Module):
+    def test_quantized_convnd_relu(self):
+        """tests for conv1d_relu/conv2d_relu/conv3d_relu"""
+        conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
+        class ConvNdRelu(torch.nn.Module):
+            def __init__(self, dim, inplace):
+                super(ConvNdRelu, self).__init__()
+                self.conv = conv_module[dim](1, 4, 2, 3).float()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x):
+                return self.relu(self.conv(x))
+
+        class ConvNdFunctionalRelu(torch.nn.Module):
+            def __init__(self, dim):
+                super(ConvNdFunctionalRelu, self).__init__()
+                self.conv = conv_module[dim](1, 4, 2, 3).float()
+
+            def forward(self, x):
+                return F.relu(self.conv(x))
+
+        class ConvNdInplaceFunctionalRelu(torch.nn.Module):
+            def __init__(self, dim):
+                super(ConvNdInplaceFunctionalRelu, self).__init__()
+                self.conv = conv_module[dim](1, 4, 2, 3).float()
+
+            def forward(self, x):
+                return F.relu(self.conv(x), True)
+
+        data1d = [(torch.randn(1, 1, 10, dtype=torch.float),
+                   torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data2d = [(torch.randn(1, 1, 10, 10, dtype=torch.float),
+                   torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data3d = [(torch.randn(1, 1, 5, 5, 5, dtype=torch.float),
+                   torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+
+        input_data = {1 : data1d, 2 : data2d, 3 : data3d}
+        for dim in [1, 2, 3]:
+            if dim == 3 and not torch.backends.quantized.engine == 'fbgemm':
+                continue
+            conv_name = "conv" + str(dim) + "d"
+            data = input_data[dim]
+            for orig_m in [ConvNdRelu(dim, True), ConvNdRelu(dim, False),
+                           ConvNdFunctionalRelu(dim), ConvNdInplaceFunctionalRelu(dim)]:
+                for tracing in [True, False]:
+                    m = self._test_op_impl(orig_m, data, "quantized::" + conv_name + "_relu(", tracing=tracing)
+
+                FileCheck().check_not("aten::" + conv_name + "(") \
+                           .check_not("aten::relu") \
+                           .check_not("quantized::" + conv_name + "(") \
+                           .check_not("quantized::relu(") \
+                           .run(m.graph)
+
+    @skipIfNoFBGEMM
+    def test_quantized_add_alpha(self):
+        """ Test quant fusion for multiple aten::add using same
+        constant alpha as the third argument
+        """
+        class QuantizedAdd(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv1d(1, 4, 2, 3).float()
-                self.relu = torch.nn.ReLU()
+                super(QuantizedAdd, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
-            def forward(self, x):
-                return self.relu(self.conv(x))
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                z = x + y
+                w = y + z
+                return z + w
 
-        data = [(torch.randn(1, 1, 10, dtype=torch.float),
+        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
+                 torch.randn(1, 3, 10, 10, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv1d_relu")
-        FileCheck().check_not("aten::conv1d") \
-                   .check_not("aten::relu") \
-                   .check_not("quantized::conv1d(") \
-                   .check_not("quantized::relu(") \
-                   .run(model.graph)
+        m = QuantizedAdd()
+        m = self._test_op_impl(m, data, "quantized::add")
+        FileCheck().check_count("quantized::add", 3, exactly=True) \
+                   .run(m.graph)
+        FileCheck().check_not("aten::add") \
+                   .check_not("aten::add_") \
+                   .run(m.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
-    def test_quantized_conv2d_relu(self):
-        class M(torch.nn.Module):
+    @skipIfNoFBGEMM
+    def test_quantized_add_relu_alpha(self):
+        """ Test quant fusion for multiple aten::add using same
+        constant alpha as the third argument in add_relu pattern
+        """
+        class AddRelu(torch.nn.Module):
+            def __init__(self, inplace):
+                super(AddRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x = x + y
+                x = self.relu(x)
+                x = x + y
+                return self.relu(x)
+
+        class InplaceAddRelu(torch.nn.Module):
+            def __init__(self, inplace):
+                super(InplaceAddRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x += y
+                x = self.relu(x)
+                x += y
+                return self.relu(x)
+
+        class AddFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(1, 4, 2, 3).float()
-                self.relu = torch.nn.ReLU()
+                super(AddFunctionalRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
-            def forward(self, x):
-                return self.relu(self.conv(x))
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x = x + y
+                x = F.relu(x)
+                x = x + y
+                return F.relu(x)
 
-        data = [(torch.randn(1, 1, 10, 10, dtype=torch.float),
+        class InplaceAddFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAddFunctionalRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x += y
+                x = F.relu(x)
+                x += y
+                return F.relu(x)
+
+        class AddInplaceFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(AddInplaceFunctionalRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x = x + y
+                x = F.relu(x, True)
+                x = x + y
+                return F.relu(x, True)
+
+        class InplaceAddInplaceFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAddInplaceFunctionalRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x += y
+                x = F.relu(x, True)
+                x += y
+                return F.relu(x, True)
+
+        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
+                 torch.rand((1, 3, 10, 10), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv2d_relu")
+        for m_orig in [AddRelu(True), AddRelu(False),
+                       InplaceAddRelu(True), InplaceAddRelu(False),
+                       AddFunctionalRelu(), InplaceAddFunctionalRelu(),
+                       AddInplaceFunctionalRelu(), InplaceAddInplaceFunctionalRelu()]:
+            for tracing in [True, False]:
+                m = self._test_op_impl(m_orig, data, "quantized::add_relu(", tracing=tracing)
+                FileCheck().check_count("quantized::add_relu(", 2, exactly=True) \
+                           .run(m.graph)
+                FileCheck().check_not("aten::add(") \
+                           .check_not("aten::add_(") \
+                           .check_not("aten::relu(") \
+                           .check_not("aten::relu_(") \
+                           .check_not("quantized::add(") \
+                           .check_not("quantized::relu(") \
+                           .run(m.graph)
 
-        FileCheck().check_not("aten::conv2d") \
-                   .check_not("aten::relu") \
-                   .check_not("quantized::conv2d(") \
-                   .check_not("quantized::relu(") \
-                   .run(model.graph)
-
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
-    def test_quantized_conv3d_relu(self):
-        class M(torch.nn.Module):
-            def __init__(self, functional):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv3d(1, 4, 2, 3).float()
-                if functional:
-                    self.relu = F.relu
-                else:
-                    self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                return self.relu(self.conv(x))
-
-        data = [(torch.randn(1, 1, 5, 5, 5, dtype=torch.float),
-                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(functional=False), data,
-                                   "quantized::conv3d_relu")
-        model_functional = self._test_op_impl(M(functional=True), data,
-                                              "quantized::conv3d_relu")
-
-        checker = FileCheck().check_not("aten::conv3d") \
-                             .check_not("aten::relu") \
-                             .check_not("quantized::conv3d(") \
-                             .check_not("quantized::relu(")
-        checker.run(model.graph)
-        checker.run(model_functional.graph)
-
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     def test_quantized_add(self):
         class QuantizedAdd(torch.nn.Module):
             def __init__(self):
@@ -1392,9 +1563,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 FileCheck().check_not("quantized::add_scalar") \
                            .run(m.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     def test_quantized_add_relu(self):
         class AddRelu(torch.nn.Module):
             def __init__(self, inplace):
@@ -1595,14 +1764,14 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         # quantized cat
         m = torch.jit.script(QuantizedCat()).eval()
-        m = prepare_script(m, {'': default_qconfig}, True)
+        m = prepare_script(m, {'': default_qconfig})
         # four for input and output of conv and one for output of cat
         # this also tests the ListConstruct can preserve the observed property so that
         # torch.cat knows that inputs are observed
         assert len(attrs_with_prefix(m, '_observer_')) == 5
         data = torch.randn(1, 1, 10, 10, dtype=torch.float)
         m(data, data)
-        m = convert_script(m, True)
+        m = convert_script(m)
 
         FileCheck().check_not("aten::cat") \
                    .check("quantized::cat") \
@@ -1610,11 +1779,11 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         # non quantized cat
         m = torch.jit.script(NonQuantizedCat()).eval()
-        m = prepare_script(m, {'': default_qconfig}, True)
+        m = prepare_script(m, {'': default_qconfig})
         assert len(attrs_with_prefix(m, '_observer_')) == 0
         data = torch.randn(1, 1, 10, 10, dtype=torch.float)
         m(data, data)
-        m = convert_script(m, True)
+        m = convert_script(m)
 
         FileCheck().check_not("quantized::cat") \
                    .check("aten::cat") \
@@ -1972,6 +2141,33 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         FileCheck().check_not("aten::layer_norm") \
                    .run(m.graph)
 
+    def test_group_norm(self):
+        data = [(torch.rand((1, 4, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        group_norm = torch.nn.GroupNorm(2, 4)
+        m = self._test_op_impl(group_norm, data, "quantized::group_norm")
+        FileCheck().check_not("aten::group_norm") \
+                   .run(m.graph)
+
+    def test_instance_norm(self):
+        data = [(torch.rand((1, 4, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        # TODO: handle affine == False (separate PR)
+        instance_norm1d = torch.nn.InstanceNorm1d(4, affine=True)
+        m = self._test_op_impl(instance_norm1d, data, "quantized::instance_norm")
+        FileCheck().check_not("aten::instance_norm") \
+                   .run(m.graph)
+
+        data = [(torch.rand((1, 4, 10, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        instance_norm2d = torch.nn.InstanceNorm2d(4, affine=True)
+        m = self._test_op_impl(instance_norm2d, data, "quantized::instance_norm")
+        FileCheck().check_not("aten::instance_norm") \
+                   .run(m.graph)
+
+        data = [(torch.rand((1, 4, 10, 1, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        instance_norm3d = torch.nn.InstanceNorm3d(4, affine=True)
+        m = self._test_op_impl(instance_norm3d, data, "quantized::instance_norm")
+        FileCheck().check_not("aten::instance_norm") \
+                   .run(m.graph)
+
     def test_quantize_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general shape ops like aten::flatten
@@ -2021,7 +2217,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(
             m._c, 'forward', {'': qconfig}, inplace=False))
-        m = convert_script(m, True)
+        m = convert_script(m)
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
         # observers and also successfully fused two quantized::conv2d
@@ -2159,7 +2355,6 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
 
         m = torch.jit.script(M())
         m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-
         # for input of FC for dynamic quant
         assert len(attrs_with_prefix(m, '_observer_')) == 1
         # for weight
@@ -2220,17 +2415,11 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc2(x)
 
         m = torch.jit.script(M())
-
         m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-        data = torch.randn(5, 5, dtype=torch.float)
-
-        m(data)
-        m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False, True))
-
+        m = convert_dynamic_script(m, debug=True)
         assert len(m._modules._c.items()) == 2, \
             'Expected to have two submodule of linear'
 
-        m(data)
         quant_func = "aten::quantize_per_tensor"
 
         # quantizing activations
@@ -2255,10 +2444,9 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
             def forward(self, x):
                 return self.fc(x)
 
-        data = torch.rand((1, 5), dtype=torch.float)
         qconfig_dict = {'': default_dynamic_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_dynamic_script(model, qconfig_dict, data)
+        model = quantize_dynamic_script(model, qconfig_dict)
         FileCheck().check("quantized::linear_dynamic") \
                    .run(model.graph)
 
@@ -2273,9 +2461,8 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc1(x)
 
         m = torch.jit.script(M())
-        data = torch.randn((1, 5), dtype=torch.float)
         qconfig_dict = {'' : default_dynamic_qconfig}
-        model = quantize_dynamic_script(m, qconfig_dict, data)
+        model = quantize_dynamic_script(m, qconfig_dict)
         # add op is not dynamically quantized.
         FileCheck().check("aten::add") \
                    .check("quantized::linear_dynamic") \
@@ -2293,10 +2480,92 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc(x), size1, size2
 
         model = torch.jit.script(M()).eval()
-        data = torch.rand((1, 5), dtype=torch.float)
         qconfig_dict = {'': default_dynamic_qconfig}
 
-        model = quantize_dynamic_script(model, qconfig_dict, [data])
+        model = quantize_dynamic_script(model, qconfig_dict)
         FileCheck().check("quantized::linear_dynamic") \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
+
+    @override_qengines
+    def test_dynamic_shared_weights(self):
+        class myMod(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.linear = nn.Linear(5, 5)
+                self.linear.weight = weight
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class DynamicModel(torch.nn.Module):
+            def __init__(self):
+                super(DynamicModel, self).__init__()
+                self.weight = torch.nn.Parameter(torch.ones(5, 5))
+                self.mod1 = myMod(self.weight)
+
+            def forward(self, x):
+                y = self.mod1(x)
+                z = torch.nn.functional.linear(y, self.weight)
+                return z
+
+        model = torch.jit.script(DynamicModel()).eval()
+        data = torch.randn(5, 5, dtype=torch.float)
+        quant_ops = ['mod1', '']
+        counts = [1, 2]
+        for op, count in zip(quant_ops, counts):
+            qconfig_dict = {op: default_dynamic_qconfig}
+            m1 = quantize_dynamic_script(model, qconfig_dict)
+            out_graph = m1(data)
+
+            FileCheck().check_count("quantized::linear_dynamic(", count, exactly=True) \
+                       .check_not("aten::_choose_qparams_per_tensor") \
+                       .run(m1.graph)
+
+            # Explicitly call forward on model before convert
+            m2 = prepare_dynamic_script(model, qconfig_dict)
+            m2(data)
+            m2 = convert_dynamic_script(m2, debug=False)
+            out_ref = m2(data)
+            self.assertEqual(out_graph, out_ref)
+
+    @override_qengines
+    def test_dynamic_with_if(self):
+        class Res(torch.nn.Module):
+            def __init__(self):
+                super(Res, self).__init__()
+                self.weight = torch.nn.Parameter(torch.ones(5, 5))
+
+            def forward(self, x, cond):
+                # type: (Tensor, bool) -> Tensor
+                if cond:
+                    return torch.nn.functional.linear(x, self.weight)
+                else:
+                    return torch.nn.functional.linear(x, self.weight)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.res1 = Res()
+                self.res2 = Res()
+
+            def forward(self, x):
+                x = self.res1(x, True)
+                x = self.res2(x, False)
+                return x
+
+        model = torch.jit.script(M()).eval()
+        data = torch.randn(5, 5, dtype=torch.float)
+        qconfig_dict = {'': default_dynamic_qconfig}
+        m1 = quantize_dynamic_script(model, qconfig_dict)
+        out_graph = m1(data)
+
+        m2 = prepare_dynamic_script(model, qconfig_dict)
+        m2(data)
+        m2 = convert_dynamic_script(m2)
+        out_ref = m2(data)
+        self.assertEqual(out_graph, out_ref)
+
+        FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
+                   .check_not("aten::_choose_qparams_per_tensor") \
+                   .run(m1.graph)

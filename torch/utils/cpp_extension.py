@@ -1372,10 +1372,11 @@ def _get_cuda_arch_flags(cflags=None):
         ('Pascal', '6.0;6.1+PTX'),
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
+        ('Ampere', '8.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5']
+                        '7.0', '7.2', '7.5', '8.0']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x

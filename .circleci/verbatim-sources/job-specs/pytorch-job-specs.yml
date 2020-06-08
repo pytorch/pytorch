@@ -5,7 +5,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - checkout
     - optional_merge_target_branch
@@ -67,7 +67,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_scripts
+    - checkout
     - setup_linux_system_environment
     - setup_ci_environment
     - run:

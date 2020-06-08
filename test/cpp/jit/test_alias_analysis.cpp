@@ -369,6 +369,10 @@ void testAliasAnalysis() {
     auto print2 = graph->insertNode(graph->create(prim::Print, {a, a}, 0));
     AliasDb aliasDb(graph);
 
+    // def foo(a):
+    //  print2(a, a)
+    //  print1(a)
+
     // test moving across each other
     AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(print2, print1));
     AT_ASSERT(!aliasDb.moveBeforeTopologicallyValid(print1, print2));
@@ -377,19 +381,23 @@ void testAliasAnalysis() {
     AT_ASSERT(aliasDb.moveBeforeTopologicallyValid(print2, print1));
     AT_ASSERT(aliasDb.moveAfterTopologicallyValid(print1, print2));
 
-    auto non_side_effectful =
-        graph->insertNode(graph->create(prim::MakeTestTensor, {}, 1));
+    graph->insertNode(graph->create(prim::MakeTestTensor, {}, 1));
     AliasDb aliasDb2(graph);
+
+    // def foo(a):
+    //  print2(a, a)
+    //  non_side_effectful = makeTestTensor()
+    //  print1(a)
 
     // test moving with a side effectful node between
     AT_ASSERT(
-        !aliasDb2.moveAfterTopologicallyValid(non_side_effectful, print1));
+        !aliasDb2.moveAfterTopologicallyValid(print2, print1));
     AT_ASSERT(
-        !aliasDb2.moveBeforeTopologicallyValid(non_side_effectful, print1));
+        !aliasDb2.moveBeforeTopologicallyValid(print2, print1));
     AT_ASSERT(
-        !aliasDb2.moveAfterTopologicallyValid(print1, non_side_effectful));
+        !aliasDb2.moveAfterTopologicallyValid(print1, print2));
     AT_ASSERT(
-        !aliasDb2.moveBeforeTopologicallyValid(print1, non_side_effectful));
+        !aliasDb2.moveBeforeTopologicallyValid(print1, print2));
   }
 
   {
