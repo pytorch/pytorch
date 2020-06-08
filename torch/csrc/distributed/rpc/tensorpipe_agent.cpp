@@ -546,7 +546,7 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     lock.unlock();
 
-    // Set an error on futures added to the t\imedOutFutures vector. We do this
+    // Set an error on futures added to the timedOutFutures vector. We do this
     // outside the lock to prevent potential lock-order-inversions by callbacks
     // triggered by the setError call.
     for (auto& futureTimeoutPair : timedOutFutures) {
