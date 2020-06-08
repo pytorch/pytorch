@@ -81,8 +81,8 @@ class IrParser {
     // partition, that we only merge nodes with identical output shapes.
     int broadcast_dim = -1;
     // broadcast support hack is disabled to reduction.
-    //if (false) {
-    if (!cuda_kernel_->fusion_->hasReduction()) {
+    if (false) {
+    //if (!cuda_kernel_->fusion_->hasReduction()) {
       broadcast_dim =
           block->outputs()[0]->type()->cast<TensorType>()->dim().value();
     }
@@ -152,16 +152,26 @@ class IrParser {
     }
 
     if (has_reduction) {
+      std::cout << *cuda_kernel_->fusion_ << std::endl;
       // Run through outputs, grab all inputs of outputs
       // squeeze with computeAt to set overall structure.
       for (auto output : cuda_kernel_->fusion_->outputs()) {
         if (output->getValType() != ValType::TensorView)
           continue;
+        std::cout << "checkout output" << std::endl;
         TensorView* out_tv = static_cast<TensorView*>(output);
         for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
-          if (inp->getValType().value() == ValType::TensorView)
-            static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
+          //std::cout << *inp->as<TensorView>() << std::endl;
+          if (inp->getOrigin() == nullptr) {
+            std::cout << "is input!" << std::endl;
+          } else {
+            std::cout << "not direct input!" << std::endl;
+            std::cout << inp->getOrigin() << std::endl;
+          }
+          //if (inp->getValType().value() == ValType::TensorView)
+            //static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
         }
+        std::cout << "finished output!" << std::endl;
         out_tv->axis(0)->parallelize(ParallelType::BIDx);
       }
       // Run through intermediates, unroll, and bind their axes
