@@ -571,5 +571,15 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
+Tensor & thnn_conv2d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
+  Tensor finput = at::empty({0}, self.options());
+  Tensor fgrad_input = at::empty({0}, self.options());
+  return std::get<0>(at::thnn_conv2d_forward_out(output, finput, fgrad_input, self, weight, kernel_size, bias, stride, padding));
+}
+
+Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
+  return std::get<0>(at::thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding));
+}
+
 } // namespace native
 } // namespace at

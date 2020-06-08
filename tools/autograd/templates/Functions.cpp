@@ -15,6 +15,8 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ScalarOps.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -88,6 +90,12 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
     size *= sizes[d];
   }
   return size;
+}
+
+static Tensor wrapped_scalar_tensor(Scalar scalar) {
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
 }
 
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
@@ -195,6 +203,16 @@ Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
     dims[at::maybe_wrap_dim(fwd_dims[i], ndims)] = i;
   }
   return grad.permute(dims);
+}
+
+Tensor rad2deg_backward(const Tensor& grad) {
+  constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
+  return at::mul(grad, wrapped_scalar_tensor(Scalar(M_180_PI)));
+}
+
+Tensor deg2rad_backward(const Tensor& grad) {
+  constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
+  return at::mul(grad, wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
 
 Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
@@ -475,6 +493,35 @@ Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntAr
     result = unsqueeze_multiple(result, dim, self.sizes().size());
   }
   return grad * (self - result).exp();
+}
+
+Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim) {
+  if (grad.dim() == 0 || grad.numel() == 0) {
+    return grad;
+  }
+
+  // Reference: https://github.com/tensorflow/tensorflow/blob/
+  // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
+  return AT_DISPATCH_FLOATING_TYPES(
+      at::typeMetaToScalarType(grad.dtype()),
+      "logcumsumexp_backward",
+      [grad, self, result, dim]() {
+        auto grad_min = at::empty_like(grad);
+        grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
+        auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
+        auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
+
+        auto reverse_logcumsumexp = [dim](auto x) {
+          return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
+        };
+
+        auto output_pos =
+            (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
+        auto output_neg =
+            (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+
+        return output_pos - output_neg;
+      });
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
@@ -2511,6 +2558,95 @@ infinitely_differentiable_native_layer_norm_backward(
   }
   if (grad_input_mask[2] && dY.defined()) {
     dbeta = dY_tensor.sum(0).reshape_as(gamma);
+  }
+
+  return std::make_tuple(dX, dgamma, dbeta);
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+infinitely_differentiable_native_group_norm_backward(
+    const Tensor& dY,
+    const Tensor& dmean,
+    const Tensor& drstd,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    double eps,
+    std::array<bool, 3> grad_input_mask) {
+  const int64_t G = group;
+  const int64_t D = C / G;
+  const double s = 1.0 / static_cast<double>(D * HxW);
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  const Tensor X_tensor = X.reshape({N, G, D, HxW});
+  const Tensor mean_tensor = mean.reshape({N, G, 1, 1});
+  const Tensor rstd_tensor = rstd.reshape({N, G, 1, 1});
+  Tensor dY_tensor;
+  Tensor ds;
+  Tensor db;
+  if (dY.defined()) {
+    dY_tensor = dY.reshape({N, G, D, HxW});
+    ds = (dY_tensor * X_tensor).sum(3).unsqueeze_(-1);
+    db = dY_tensor.sum(3).unsqueeze_(-1);
+  }
+  if (grad_input_mask[0]) {
+    Tensor gamma_tensor;
+    if (gamma.defined()) {
+      gamma_tensor = gamma.reshape({1, G, D, 1});
+    }
+    const Tensor var =
+        ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
+    const Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
+    Tensor dvar;
+    if (drstd.defined()) {
+      dvar = -0.5 * rstd_cube * drstd.view({N, G, 1, 1});
+    }
+    if (dY.defined()) {
+      const Tensor a =
+          gamma.defined() ? rstd_tensor * gamma_tensor : rstd_tensor;
+      Tensor b = (gamma.defined() ? (ds * gamma_tensor).sum(2) : ds.sum(2))
+                     .unsqueeze_(-2);
+      Tensor c = (gamma.defined() ? (db * gamma_tensor).sum(2) : db.sum(2))
+                     .unsqueeze_(-2);
+      b = (c * mean_tensor - b) * rstd_cube * s;
+      c = -b * mean_tensor - c * rstd_tensor * s;
+      dX = a * dY_tensor + b * X_tensor + c;
+      if (dmean.defined() && drstd.defined()) {
+        dX += var_std_mean_backward(
+            {dvar, dmean.view({N, G, 1, 1})},
+            X_tensor,
+            var,
+            mean_tensor,
+            {2, 3},
+            false,
+            true,
+            false);
+      }
+      dX = dX.reshape_as(X);
+    } else if (dmean.defined() && drstd.defined()) {
+      dX = var_std_mean_backward(
+               {dvar, dmean.view({N, G, 1, 1})},
+               X_tensor,
+               var,
+               mean_tensor,
+               {2, 3},
+               false,
+               true,
+               false)
+               .reshape_as(X);
+    }
+  }
+  if (grad_input_mask[1] && dY.defined()) {
+    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(gamma);
+  }
+  if (grad_input_mask[2] && dY.defined()) {
+    dbeta = db.sum(0).reshape_as(gamma);
   }
 
   return std::make_tuple(dX, dgamma, dbeta);

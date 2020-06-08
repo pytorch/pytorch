@@ -99,6 +99,14 @@ public:
     );
   }
 
+  static CppFunction makeNamedNotSupported() {
+    return CppFunction(
+      c10::KernelFunction::makeNamedNotSupported(),
+      /* cpp_signature */ c10::nullopt, // not known for fallthroughs
+      /* schema */ nullptr
+    );
+  }
+
   // TODO: more user friendly API
   template<c10::KernelFunction::BoxedKernelFunction* func>
   static CppFunction makeFromBoxedFunction() {

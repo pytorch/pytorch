@@ -30,6 +30,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("batch_norm3d(Tensor qx, Tensor weight, Tensor bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm3d_relu(Tensor qx, Tensor weight, Tensor bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("clamp(Tensor qx, Scalar? min, Scalar? max) -> Tensor qy");
+  m.def("threshold(Tensor qx, Scalar threshold, Scalar value) -> Tensor qy");
   m.def("cat(Tensor[] qx, int dim, float? scale, int? zero_point) -> Tensor");
   m.def("cat_relu(Tensor[] qx, int dim, float? scale, int? zero_point) -> Tensor");
   m.def("cat_out(Tensor[] qx, int dim, Tensor(a!) out) -> Tensor(a!)");
@@ -71,9 +72,9 @@ TORCH_LIBRARY(quantized, m) {
   m.def(
       "linear_relu(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
   m.def(
-      "linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
+      "linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, bool reduce_range=False) -> Tensor Y");
   m.def(
-      "linear_relu_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
+      "linear_relu_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, bool reduce_range=False) -> Tensor Y");
   m.def(
       "linear_dynamic_fp16(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
   m.def(
@@ -115,7 +116,7 @@ TORCH_LIBRARY(_quantized, m) {
   m.def(
       "linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y");
   m.def(
-      "linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack) -> Tensor Y");
+      "linear_dynamic(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, bool reduce_range=False) -> Tensor Y");
   m.def(
       "linear_prepack(Tensor W, Tensor? B=None) -> __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack");
   m.def(

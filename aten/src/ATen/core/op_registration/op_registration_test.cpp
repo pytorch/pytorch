@@ -16,6 +16,8 @@
 #include <ATen/core/Tensor.h>
 #include <functional>
 
+#include <ATen/core/LegacyTypeDispatch.h>
+
 using c10::RegisterOperators;
 using c10::OperatorKernel;
 using c10::OperatorHandle;

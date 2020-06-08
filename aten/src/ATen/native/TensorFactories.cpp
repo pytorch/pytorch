@@ -11,6 +11,7 @@
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/TracerMode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
@@ -122,13 +123,13 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
-      dtype,
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
       /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::DispatchKey::CPU);
+  auto tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage_impl), at::DispatchKey::CPU, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -461,6 +462,7 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
     // In the future when we remove the overhead of device dispatch, we'll happily
     // revert this to following:
     //   auto result = at::empty({}, options);
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     auto result = empty_cpu({}, options);
     at::native::fill_(result, s);
@@ -953,7 +955,7 @@ template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
   });
   return result;
@@ -984,13 +986,13 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
     size_t size_bytes = my_size * dtype.itemsize();
     auto storage_impl = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
-        dtype,
         size_bytes,
         THMapAllocator::makeDataPtr(
             filename.c_str(), flags, size_bytes, nullptr),
         /*allocator=*/nullptr,
         /*resizable=*/false);
-    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::DispatchKey::CPU);
+    auto tensor = detail::make_tensor<at::TensorImpl>(
+        storage_impl, at::DispatchKey::CPU, dtype);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({my_size});
     return tensor;
 }

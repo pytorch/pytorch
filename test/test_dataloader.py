@@ -1269,6 +1269,10 @@ except RuntimeError as e:
 
         self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=0))
 
+        # raise error when replacement is non-boolean
+        with self.assertRaisesRegex(TypeError, "replacement should be a boolean value, but got replacement=0"):
+            RandomSampler(self.dataset, replacement=0)
+
     def test_random_sampler_len_with_replacement(self):
         from torch.utils.data import RandomSampler
         # add 5 extra samples
@@ -1579,6 +1583,29 @@ except RuntimeError as e:
         check_len(DataLoader(self.dataset, batch_size=2), 50)
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
+    def test_iterabledataset_len(self):
+        class IterableDataset(torch.utils.data.IterableDataset):
+            def __len__(self):
+                return 10
+
+            def __iter__(self):
+                return iter(range(10))
+
+        iterable_loader = DataLoader(IterableDataset(), batch_size=1)
+        self.assertEqual(len(iterable_loader), 10)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=1, drop_last=True)
+        self.assertEqual(len(iterable_loader), 10)
+
+        iterable_loader = DataLoader(IterableDataset(), batch_size=2)
+        self.assertEqual(len(iterable_loader), 5)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=2, drop_last=True)
+        self.assertEqual(len(iterable_loader), 5)
+
+        iterable_loader = DataLoader(IterableDataset(), batch_size=3)
+        self.assertEqual(len(iterable_loader), 4)
+        iterable_loader = DataLoader(IterableDataset(), batch_size=3, drop_last=True)
+        self.assertEqual(len(iterable_loader), 3)
+
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_numpy_scalars(self):
         import numpy as np
@@ -1646,6 +1673,11 @@ except RuntimeError as e:
 
         arr = np.array([[[object(), object(), object()]]])
         self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+
+    def test_default_collate_bad_sequence_type(self):
+        batch = [['X'], ['X', 'X']]
+        self.assertRaises(RuntimeError, lambda: _utils.collate.default_collate(batch))
+        self.assertRaises(RuntimeError, lambda: _utils.collate.default_collate(batch[::-1]))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_shared_tensor(self):

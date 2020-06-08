@@ -24,6 +24,9 @@ _(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
+_(aten, _acosh) \
+_(aten, _asinh) \
+_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _asin) \
@@ -134,7 +137,6 @@ _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
 _(aten, _sum_cuda) \
-_(aten, _sumall) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
@@ -143,9 +145,7 @@ _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_max) \
 _(aten, _th_median) \
-_(aten, _th_min) \
 _(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
@@ -285,6 +285,7 @@ _(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
+_(aten, deg2rad) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
@@ -332,6 +333,7 @@ _(aten, flatten) \
 _(aten, flip) \
 _(aten, floor) \
 _(aten, fmod) \
+_(aten, fmod_) \
 _(aten, frac) \
 _(aten, fractional_max_pool2d) \
 _(aten, fractional_max_pool2d_backward) \
@@ -420,6 +422,7 @@ _(aten, log_sigmoid_forward) \
 _(aten, log_softmax) \
 _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
+_(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
@@ -545,6 +548,7 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
+_(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
 _(aten, randint) \
@@ -724,8 +728,6 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
-_(aten, copy_real) \
-_(aten, copy_imag) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \
