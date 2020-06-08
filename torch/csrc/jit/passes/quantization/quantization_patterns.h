@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <string>
 #include <unordered_map>
@@ -326,13 +327,6 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          %r = quantized::add(%a_quant, %b_quant, %scale, %zero_point)
          return (%r) )";
 
-  auto add_filter = [](const Match& match,
-                       const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
-    return alpha && alpha->isInt() && alpha->toInt() == 1;
-  };
-
   // aten::add_
   std::string inplace_add = R"(
 graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
@@ -613,6 +607,32 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
          %r = quantized::layer_norm(%a_quant, %normalized_shape, %weight, %bias, %eps, %output_scale, %output_zero_point)
          return (%r) )";
 
+  // quantized::group_norm
+  std::string group_norm = R"(
+graph(%a_quant, %num_groups, %weight, %bias, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_gn = aten::group_norm(%a_dequant, %num_groups, %weight, %bias, %eps, %cudnn_enabled)
+         %r = aten::quantize_per_tensor(%r_gn, %output_scale, %output_zero_point, %scalar_type)
+         return (%r) )";
+
+  std::string quantized_group_norm = R"(
+graph(%a_quant, %num_groups, %weight, %bias, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
+         %r = quantized::group_norm(%a_quant, %num_groups, %weight, %bias, %eps, %output_scale, %output_zero_point)
+         return (%r) )";
+
+  // quantized::instance_norm
+  std::string instance_norm = R"(
+graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %momentum, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r_in = aten::instance_norm(%a_dequant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %momentum, %eps, %cudnn_enabled)
+         %r = aten::quantize_per_tensor(%r_in, %output_scale, %output_zero_point, %scalar_type)
+         return (%r) )";
+
+  std::string quantized_instance_norm = R"(
+graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %momentum, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
+         %r = quantized::instance_norm(%a_quant, %weight, %bias, %eps, %output_scale, %output_zero_point)
+         return (%r) )";
+
   // ============= General Ops that inherit quantization paramters from input
   // tensor =============
   auto avg_pool1d = getInputTensorQParamOpFusionInfo(
@@ -729,13 +749,22 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
       {"quantized::conv3d_relu", conv3d_relu, quantized_conv3d_relu},
       {"quantized::conv3d_relu", conv3d_inplace_relu, quantized_conv3d_relu},
       {"quantized::linear", linear, quantized_linear},
-      {"quantized::add_relu", add_relu, quantized_add_relu, add_filter},
-      {"quantized::add_relu", add_inplace_relu, quantized_add_relu, add_filter},
-      {"quantized::add_relu", inplace_add_relu, quantized_add_relu, add_filter},
+      {"quantized::add_relu",
+       add_relu,
+       quantized_add_relu,
+       aten_add_alpha_is_one},
+      {"quantized::add_relu",
+       add_inplace_relu,
+       quantized_add_relu,
+       aten_add_alpha_is_one},
+      {"quantized::add_relu",
+       inplace_add_relu,
+       quantized_add_relu,
+       aten_add_alpha_is_one},
       {"quantized::add_relu",
        inplace_add_inplace_relu,
        quantized_add_relu,
-       add_filter},
+       aten_add_alpha_is_one},
       // note that this must come before quantized::add_scalar
       {"quantized::add_scalar_relu",
        add_scalar_relu,
@@ -761,8 +790,8 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
        inplace_add_scalar,
        quantized_add_scalar_out,
        add_scalar_filter},
-      {"quantized::add", add, quantized_add, add_filter},
-      {"quantized::add", inplace_add, quantized_add, add_filter},
+      {"quantized::add", add, quantized_add, aten_add_alpha_is_one},
+      {"quantized::add", inplace_add, quantized_add, aten_add_alpha_is_one},
       {"quantized::cat", cat, quantized_cat},
       {"quantized::batch_norm2d", batch_norm2d, quantized_batch_norm2d},
       {"quantized::batch_norm2d_relu",
@@ -803,6 +832,8 @@ graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output
       {"quantized::mul", inplace_mul, quantized_mul},
       {"quantized::hardswish", hardswish, quantized_hardswish},
       {"quantized::layer_norm", layer_norm, quantized_layer_norm},
+      {"quantized::group_norm", group_norm, quantized_group_norm},
+      {"quantized::instance_norm", instance_norm, quantized_instance_norm},
       avg_pool1d,
       avg_pool2d,
       avg_pool3d,
