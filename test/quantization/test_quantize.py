@@ -60,6 +60,7 @@ from torch.testing._internal.common_quantization import (
     ActivationsTestModel,
     ActivationsQATTestModel,
     NormalizationTestModel,
+    NormalizationQATTestModel,
     test_only_eval_fn,
     test_only_train_fn,
     prepare_dynamic,
@@ -79,6 +80,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
+    override_qengines,
 )
 from hypothesis import given
 from hypothesis import strategies as st
@@ -376,7 +378,15 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkNoPrepModules(model.layer_norm)
+            self.checkNoPrepModules(model.group_norm)
+            self.checkNoPrepModules(model.instance_norm1d)
+            self.checkNoPrepModules(model.instance_norm2d)
+            self.checkNoPrepModules(model.instance_norm3d)
             self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
+            self.assertEqual(type(model.group_norm), nnq.GroupNorm)
+            self.assertEqual(type(model.instance_norm1d), nnq.InstanceNorm1d)
+            self.assertEqual(type(model.instance_norm2d), nnq.InstanceNorm2d)
+            self.assertEqual(type(model.instance_norm3d), nnq.InstanceNorm3d)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
 
@@ -904,6 +914,53 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                                      self.train_data)
                 checkQuantized(model)
 
+    @override_qengines
+    def test_normalization(self):
+        qengine = torch.backends.quantized.engine
+        model = NormalizationQATTestModel(qengine)
+        model = prepare_qat(model)
+
+        self.assertEqual(type(model.fc1), torch.nn.qat.modules.Linear)
+        self.assertEqual(
+            type(model.group_norm), torch.nn.qat.modules.GroupNorm)
+        self.assertEqual(
+            type(model.instance_norm1d),
+            torch.nn.qat.modules.InstanceNorm1d)
+        self.assertEqual(
+            type(model.instance_norm2d),
+            torch.nn.qat.modules.InstanceNorm2d)
+        self.assertEqual(
+            type(model.instance_norm3d),
+            torch.nn.qat.modules.InstanceNorm3d)
+        self.assertEqual(
+            type(model.layer_norm), torch.nn.qat.modules.LayerNorm)
+
+        self.checkObservers(model)
+        test_only_train_fn(model, self.train_data)
+        model = convert(model)
+
+        def checkQuantized(model):
+            self.assertEqual(type(model.fc1), nnq.Linear)
+            self.assertEqual(type(model.group_norm), nnq.GroupNorm)
+            self.assertEqual(type(model.fc1), nnq.Linear)
+            self.assertEqual(type(model.group_norm), nnq.GroupNorm)
+            self.assertEqual(
+                type(model.instance_norm1d), nnq.InstanceNorm1d)
+            self.assertEqual(
+                type(model.instance_norm2d), nnq.InstanceNorm2d)
+            self.assertEqual(
+                type(model.instance_norm3d), nnq.InstanceNorm3d)
+            self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
+            test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data)
+
+        checkQuantized(model)
+
+        model = quantize_qat(
+            NormalizationQATTestModel(qengine), test_only_train_fn,
+            self.train_data)
+        checkQuantized(model)
+
     def test_eval_only_fake_quant(self):
         r"""Using FakeQuant in evaluation only mode,
         this is useful for estimating accuracy loss when we quantize the
@@ -1212,8 +1269,7 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
                 for model_under_test in [model_traced, model_script]:
                     model_quantized = quantize_dynamic_script(
                         model_under_test,
-                        qconfig_dict,
-                        [self.calib_data[0][0]])
+                        qconfig_dict)
                     self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
                     # Check to make sure choose_qparams->quant->dequant->linear is numerically
@@ -1221,7 +1277,6 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
                     model_fake_quantized = quantize_dynamic_script(
                         model_under_test,
                         qconfig_dict,
-                        [self.calib_data[0][0]],
                         debug=True)
                     self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
 

@@ -39,6 +39,9 @@ TORCH_API bool mayRequireObservation(Value* v);
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
 
+// Check if value is the input of the graph
+TORCH_API bool hitGraphInput(Value* value);
+
 // =========== helper functions for Node =========
 TORCH_API bool isSingleInputGeneralValueAtenFunction(Node* n);
 
