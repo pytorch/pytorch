@@ -452,6 +452,26 @@ def hardswish(input, scale, zero_point):
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
     return torch._ops.ops.quantized.hardswish(input, scale, zero_point)
 
+def threshold(input, threshold, value):
+    # type: (Tensor, float, float) -> Tensor
+    r"""Applies the quantized version of the threshold function element-wise:
+
+    .. math::
+        x = \begin{cases}
+                x & \text{if~} x > \text{threshold} \\
+                \text{value} & \text{otherwise}
+            \end{cases}
+
+    See :class:`~torch.nn.Threshold` for more details.
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.threshold' must be quantized!")
+    if threshold is None:
+        raise ValueError("Input to 'threshold' must be specified!")
+    if value is None:
+        raise ValueError("Input to 'value' must be specified!")
+    return torch._ops.ops.quantized.threshold(input, threshold, value)
+
 def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
     # type: (Tensor, Optional[float], bool, Optional[float], Optional[int]) -> Tensor
     r"""
