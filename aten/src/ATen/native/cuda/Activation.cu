@@ -602,7 +602,7 @@ void log_sigmoid_kernel(TensorIterator& iter) {
       gpu_kernel(iter, [zero]GPU_LAMBDA(scalar_t a, scalar_t _) -> scalar_t {
         auto max = std::max(zero, -a);
         auto z = std::exp(-max) + std::exp(-a -max);
-        return max + std::log(z);
+        return -(max + std::log(z));
       });
     });
   });
