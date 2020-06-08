@@ -98,21 +98,29 @@ void sum_kernel_impl(TensorIterator &iter) {
       iter.output().fill_(scalar_t(0));
       iter.parallel_reduce(
         [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
+          int64_t in_strides[] = { strides[1], strides[3] };
+          int64_t out_strides[] = { strides[0], strides[2] };
+
           // Move reduction to be the 1st dim
-          int64_t in_strides[2], out_stride;
-          if (strides[0] == 0) {
-            out_stride = strides[2];
-            in_strides[0] = strides[1];
-            in_strides[1] = strides[3];
-          } else {
-            TORCH_INTERNAL_ASSERT(strides[2] == 0);
-            out_stride = strides[0];
-            in_strides[0] = strides[3];
-            in_strides[1] = strides[1];
+          if (out_strides[0] != 0 && out_strides[1] == 0) {
+            std::swap(in_strides[0], in_strides[1]);
+            std::swap(out_strides[0], out_strides[1]);
             std::swap(size0, size1);
           }
 
-          // TORCH_WARN(strides[0], ", ", strides[2]);
+          // Special case? - not a true reduction
+          if (out_strides[0] != 0 && out_strides[1] != 0) {
+            int64_t outer_strides[] = { strides[2], strides[3] };
+            UNARY_OUTER_LOOP(data, outer_strides, size1, [&] {
+              char* ptrs[3] = { data[0], data[0], data[1] };
+              int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
+              basic_loop(ptrs, inner_strides, 0, size0, [](scalar_t a, scalar_t b) { return a + b; });
+            });
+            return;
+          }
+
+          const int64_t out_stride = out_strides[1];
+          TORCH_INTERNAL_ASSERT(out_strides[0] == 0);
           for (int64_t j = 0; j < size1; ++j) {
             auto ans = row_sum<scalar_t>(data[1] + j * in_strides[1], in_strides[0], size0);
             dereference<scalar_t>(data[0], out_stride, j) += ans;
