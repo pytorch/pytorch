@@ -518,8 +518,7 @@ bool is_functional(
     const std::string& functional) {
   const auto& match_vmap = match.values_map;
   Value* v = match_vmap.at(vmap.at(vname));
-  return v->type()->cast<FunctionType>() &&
-    getFuncName(v) == functional;
+  return v->type()->cast<FunctionType>() && getFuncName(v) == functional;
 }
 
 bool is_module(
@@ -554,37 +553,29 @@ bool is_functional_relu(
 bool is_relu_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "relu",
-                   "__torch__.torch.nn.modules.activation.ReLU");
+  return is_module(
+      match, vmap, "relu", "__torch__.torch.nn.modules.activation.ReLU");
 }
 
 bool is_conv1d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "conv",
-                   "__torch__.torch.nn.modules.conv.Conv1d");
+  return is_module(
+      match, vmap, "conv", "__torch__.torch.nn.modules.conv.Conv1d");
 }
 
 bool is_conv2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "conv",
-                   "__torch__.torch.nn.modules.conv.Conv2d");
+  return is_module(
+      match, vmap, "conv", "__torch__.torch.nn.modules.conv.Conv2d");
 }
 
 bool is_conv3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "conv",
-                   "__torch__.torch.nn.modules.conv.Conv3d");
+  return is_module(
+      match, vmap, "conv", "__torch__.torch.nn.modules.conv.Conv3d");
 }
 
 bool is_batchnorm2d_module(
@@ -595,8 +586,6 @@ bool is_batchnorm2d_module(
                    "batchnorm",
                    "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
 }
-
-
 
 } // namespace jit
 } // namespace torch

@@ -1839,6 +1839,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         FileCheck().check_not("aten::batch_norm") \
                    .run(model.graph)
 
+    @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
         class BNRelu(torch.nn.Module):
             def __init__(self, inplace):
@@ -2239,6 +2240,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.relu(x)
                 x = F.relu(x)
                 x.relu_()
+                y = []
+                y.append(x)
+                x, _= y
                 x = self.conv(x)
                 return x
 
