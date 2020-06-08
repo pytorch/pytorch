@@ -31,12 +31,10 @@ namespace detail {
 // GatheredParameterTypes: function parameters where TensorOptions is packed as a TensorOptions argument
 // ScatteredParameterTypes: function parameters where TensorOptions doesn't exist but we have ScalarType, DeviceType and Layout parameters
 
+template<class Type, class Enable = void> struct is_tensoroptions_arg : std::false_type {};
+template<class Type> struct is_tensoroptions_arg<Type, std::enable_if_t<std::is_same<TensorOptions, std::decay_t<Type>>::value>> : std::true_type {};
 template<class Type>
-inline constexpr bool is_tensoroptions_arg() {
-    return std::is_same<TensorOptions, std::decay_t<Type>>::value;
-}
-template<class Type>
-using is_tensoroptions_arg_t = guts::bool_constant<is_tensoroptions_arg<Type>()>;
+using is_tensoroptions_arg_t = typename is_tensoroptions_arg<Type>::type;
 
 template<class FuncType>
 inline constexpr bool has_tensoroptions_arg() {
