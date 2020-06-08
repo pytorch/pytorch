@@ -2126,7 +2126,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         FileCheck().check_not("aten::layer_norm") \
                    .run(m.graph)
 
-<<<<<<< HEAD
     def test_group_norm(self):
         data = [(torch.rand((1, 4, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         group_norm = torch.nn.GroupNorm(2, 4)
@@ -2153,7 +2152,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         m = self._test_op_impl(instance_norm3d, data, "quantized::instance_norm")
         FileCheck().check_not("aten::instance_norm") \
                    .run(m.graph)
-=======
+
     @skipIfNoFBGEMM
     def test_clamp(self):
         class M(torch.nn.Module):
@@ -2183,7 +2182,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
             FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                        .run(m.graph)
->>>>>>> [quant][graphmode] Preserve numerics in debug option for clamp ops
 
     def test_quantize_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
