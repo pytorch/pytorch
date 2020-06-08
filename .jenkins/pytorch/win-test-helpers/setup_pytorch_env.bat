@@ -44,7 +44,7 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
 
-set ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
+set ASAN_OPTIONS=report_globals=0:detect_leaks=0:symbolize=1:strict_init_order=true:allocator_may_return_null=true
 set ASAN_SYMBOLIZER_PATH=%VCToolsInstallDir%bin\HostX64\x64
 set _NT_ALT_SYMBOL_PATH=%TMP_DIR_WIN%\build\torch\lib
 set PYTORCH_TEST_WITH_ASAN=1
