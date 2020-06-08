@@ -1047,10 +1047,7 @@ jobs:
     machine:
       image: ubuntu-1604:201903-01
     steps:
-    - attach_workspace:
-        at: ~/workspace
-    - attach_workspace:
-        at: /home/circleci/project
+    - checkout
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1076,10 +1073,7 @@ jobs:
     macos:
       xcode: "9.4.1"
     steps:
-      - attach_workspace:
-          at: ~/workspace
-      - attach_workspace: # TODO - we can `cp` from ~/workspace
-          at: /Users/distiller/project
+      - checkout
       - run:
           <<: *binary_checkout
       - run:

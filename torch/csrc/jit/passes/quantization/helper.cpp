@@ -21,6 +21,8 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "batch_norm",
     "hardswish",
     "layer_norm",
+    "group_norm",
+    "instance_norm",
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
@@ -32,6 +34,8 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "matmul",
     "hardswish",
     "layer_norm",
+    "group_norm",
+    "instance_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
@@ -551,6 +555,35 @@ bool is_relu_module(
                    "relu",
                    "__torch__.torch.nn.modules.activation.ReLU");
 }
+
+bool is_conv1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv1d");
+}
+
+bool is_conv2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv2d");
+}
+
+bool is_conv3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv3d");
+}
+
+
 
 } // namespace jit
 } // namespace torch
