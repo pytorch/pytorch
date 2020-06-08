@@ -94,14 +94,13 @@ def createResolutionCallbackFromEnv(lookup_base):
 
     """
     def parseNestedExpr(expr, module) -> Tuple[Any, int]:
-        print("parseNest, ", expr)
         i = 0
         while i < len(expr) and expr[i] not in (',', '[', ']'):
             i += 1
 
         base = lookupInModule(expr[:i].strip(), module)
+        assert base is not None, "Unresolvable type {}".format(expr[:i])
         if i == len(expr) or expr[i] != '[':
-            print("   ret ", base, i)
             return base, i
 
         assert expr[i] == '['
@@ -112,24 +111,16 @@ def createResolutionCallbackFromEnv(lookup_base):
             part, part_len = parseNestedExpr(expr[i:], module)
             parts.append(part)
             i += part_len
-            print(i, expr[i])
-            if part_len == 0:
-                break
-
         if len(parts) > 1:
-            print("ret ", base, parts)
-            return base[tuple(parts)], i
+            return base[tuple(parts)], i + 1
         else:
-            print("ret ", base, parts[0])
-            return base[parts[0]], i
+            return base[parts[0]], i + 1
 
     def parseExpr(expr, module):
-        # import pdb; pdb.set_trace()
         try:
             value, _ = parseNestedExpr(expr, module)
             return value
         except Exception as e:
-            print(e)
             return None
 
 
