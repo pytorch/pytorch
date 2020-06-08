@@ -39,6 +39,9 @@ TORCH_API bool mayRequireObservation(Value* v);
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
 
+// Check if value is the input of the graph
+TORCH_API bool hitGraphInput(Value* value);
+
 // =========== helper functions for Node =========
 TORCH_API bool isSingleInputGeneralValueAtenFunction(Node* n);
 
@@ -110,6 +113,19 @@ bool is_functional_relu(
 
 // filter to check if the module is torch.nn.ReLU
 bool is_relu_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+// TODO: add a macro to declare the filters
+bool is_conv1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 

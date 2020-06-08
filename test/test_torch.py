@@ -3439,66 +3439,6 @@ class AbstractTestCases:
             expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
             self.assertEqual(result, expected)
 
-        @staticmethod
-        def _test_bernoulli(self, t_dtype, p_dtype, device):
-            for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
-                x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
-                self.assertEqual(x.bernoulli().tolist(), trivial_p)
-
-            def isBinary(t):
-                return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
-
-            p = torch.rand(5, 5, dtype=p_dtype, device=device)
-            self.assertTrue(isBinary(p.bernoulli()))
-
-            p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
-            self.assertTrue(isBinary(p.bernoulli()))
-
-            p = torch.rand(5, 5, dtype=p_dtype, device=device)
-            torch.bernoulli(torch.rand_like(p), out=p)
-            self.assertTrue(isBinary(p))
-
-            p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
-            torch.bernoulli(torch.rand_like(p), out=p)
-            self.assertTrue(isBinary(p))
-
-            t = torch.empty(10, 10, dtype=t_dtype, device=device)
-
-            t.fill_(2)
-            t.bernoulli_(0.5)
-            self.assertTrue(isBinary(t))
-
-            p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
-            t.fill_(2)
-            t.bernoulli_(p)
-            self.assertTrue(isBinary(t))
-
-            t.fill_(2)
-            torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
-            self.assertTrue(isBinary(t))
-
-            t.fill_(2)
-            t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
-            self.assertTrue(isBinary(t))
-
-        def test_bernoulli(self):
-            self._test_bernoulli(self, torch.float32, torch.float64, 'cpu')
-            # test that it works with integral tensors
-            self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
-            # test that it works with bool tensors
-            self._test_bernoulli(self, torch.bool, torch.float32, 'cpu')
-
-        @slowTest
-        def test_bernoulli_edge_cases(self):
-            # Need to draw a lot of samples to cover every random floating point number.
-            a = torch.zeros(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 0
-            num_ones = (torch.bernoulli(a) == 1).sum()
-            self.assertEqual(num_ones, 0)
-
-            b = torch.ones(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 1
-            num_zeros = (torch.bernoulli(b) == 0).sum()
-            self.assertEqual(num_zeros, 0)
-
         def test_generator_cpu(self):
             # test default generators are equal
             self.assertEqual(torch.default_generator, torch.default_generator)
@@ -10871,6 +10811,71 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor([10], dtype=dtype, device=device).geometric_(0.5)
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
+
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_bernoulli_p(self, device, dtype):
+        for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
+            x = torch.tensor(trivial_p, dtype=dtype, device=device)
+            self.assertEqual(x.bernoulli().tolist(), trivial_p)
+
+        def isBinary(t):
+            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
+
+        p = torch.rand(5, 5, dtype=dtype, device=device)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, dtype=dtype, device=device).expand(5, 5)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, 5, dtype=dtype, device=device)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+        p = torch.rand(5, dtype=dtype, device=device).expand(5, 5)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+    # RngUniform not implemented for Integral type in XLA test
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCPU(*(torch.testing.get_all_dtypes(include_half=False, include_bfloat16=False, include_complex=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False)))
+    def test_bernoulli_self(self, device, dtype):
+
+        def isBinary(t):
+            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
+
+        t = torch.empty(10, 10, dtype=dtype, device=device)
+
+        t.fill_(2)
+        t.bernoulli_(0.5)
+        self.assertTrue(isBinary(t))
+
+        p = torch.rand(10, dtype=torch.float32, device=device).expand(10, 10)
+        t.fill_(2)
+        t.bernoulli_(p)
+        self.assertTrue(isBinary(t))
+
+        t.fill_(2)
+        torch.bernoulli(torch.rand_like(t, dtype=torch.float32), out=t)
+        self.assertTrue(isBinary(t))
+
+        t.fill_(2)
+        t.bernoulli_(torch.rand_like(t, dtype=torch.float32))
+        self.assertTrue(isBinary(t))
+
+    @slowTest
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_bernoulli_edge_cases(self, device, dtype):
+        # Need to draw a lot of samples to cover every random floating point number.
+        a = torch.zeros(10000, 10000, dtype=dtype, device=device)  # probability of drawing "1" is 0
+        num_ones = (torch.bernoulli(a) == 1).sum()
+        self.assertEqual(num_ones, 0)
+
+        b = torch.ones(10000, 10000, dtype=dtype, device=device)  # probability of drawing "1" is 1
+        num_zeros = (torch.bernoulli(b) == 0).sum()
+        self.assertEqual(num_zeros, 0)
 
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_exponential(self, device, dtype):
