@@ -518,15 +518,9 @@
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: bernoulli_tensor_cpu_
-    CUDA: bernoulli_tensor_cuda_
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: bernoulli_scalar_cpu_
-    CUDA: bernoulli_scalar_cuda_
 
 # This out-of-place version isn't used explicitly, but needed by jit.
 # There is no default valid on `p` here because it would introduce ambiguity

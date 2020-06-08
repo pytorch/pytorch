@@ -2175,6 +2175,33 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         FileCheck().check_not("aten::layer_norm") \
                    .run(m.graph)
 
+    def test_group_norm(self):
+        data = [(torch.rand((1, 4, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        group_norm = torch.nn.GroupNorm(2, 4)
+        m = self._test_op_impl(group_norm, data, "quantized::group_norm")
+        FileCheck().check_not("aten::group_norm") \
+                   .run(m.graph)
+
+    def test_instance_norm(self):
+        data = [(torch.rand((1, 4, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        # TODO: handle affine == False (separate PR)
+        instance_norm1d = torch.nn.InstanceNorm1d(4, affine=True)
+        m = self._test_op_impl(instance_norm1d, data, "quantized::instance_norm")
+        FileCheck().check_not("aten::instance_norm") \
+                   .run(m.graph)
+
+        data = [(torch.rand((1, 4, 10, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        instance_norm2d = torch.nn.InstanceNorm2d(4, affine=True)
+        m = self._test_op_impl(instance_norm2d, data, "quantized::instance_norm")
+        FileCheck().check_not("aten::instance_norm") \
+                   .run(m.graph)
+
+        data = [(torch.rand((1, 4, 10, 1, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        instance_norm3d = torch.nn.InstanceNorm3d(4, affine=True)
+        m = self._test_op_impl(instance_norm3d, data, "quantized::instance_norm")
+        FileCheck().check_not("aten::instance_norm") \
+                   .run(m.graph)
+
     def test_quantize_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general shape ops like aten::flatten
@@ -2362,7 +2389,6 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
 
         m = torch.jit.script(M())
         m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-
         # for input of FC for dynamic quant
         assert len(attrs_with_prefix(m, '_observer_')) == 1
         # for weight
@@ -2423,17 +2449,11 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc2(x)
 
         m = torch.jit.script(M())
-
         m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-        data = torch.randn(5, 5, dtype=torch.float)
-
-        m(data)
         m = convert_dynamic_script(m, debug=True)
-
         assert len(m._modules._c.items()) == 2, \
             'Expected to have two submodule of linear'
 
-        m(data)
         quant_func = "aten::quantize_per_tensor"
 
         # quantizing activations
@@ -2458,10 +2478,9 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
             def forward(self, x):
                 return self.fc(x)
 
-        data = torch.rand((1, 5), dtype=torch.float)
         qconfig_dict = {'': default_dynamic_qconfig}
         model = torch.jit.script(M()).eval()
-        model = quantize_dynamic_script(model, qconfig_dict, data)
+        model = quantize_dynamic_script(model, qconfig_dict)
         FileCheck().check("quantized::linear_dynamic") \
                    .run(model.graph)
 
@@ -2476,9 +2495,8 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc1(x)
 
         m = torch.jit.script(M())
-        data = torch.randn((1, 5), dtype=torch.float)
         qconfig_dict = {'' : default_dynamic_qconfig}
-        model = quantize_dynamic_script(m, qconfig_dict, data)
+        model = quantize_dynamic_script(m, qconfig_dict)
         # add op is not dynamically quantized.
         FileCheck().check("aten::add") \
                    .check("quantized::linear_dynamic") \
@@ -2496,10 +2514,92 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc(x), size1, size2
 
         model = torch.jit.script(M()).eval()
-        data = torch.rand((1, 5), dtype=torch.float)
         qconfig_dict = {'': default_dynamic_qconfig}
 
-        model = quantize_dynamic_script(model, qconfig_dict, [data])
+        model = quantize_dynamic_script(model, qconfig_dict)
         FileCheck().check("quantized::linear_dynamic") \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(model.graph)
+
+    @override_qengines
+    def test_dynamic_shared_weights(self):
+        class myMod(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.linear = nn.Linear(5, 5)
+                self.linear.weight = weight
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class DynamicModel(torch.nn.Module):
+            def __init__(self):
+                super(DynamicModel, self).__init__()
+                self.weight = torch.nn.Parameter(torch.ones(5, 5))
+                self.mod1 = myMod(self.weight)
+
+            def forward(self, x):
+                y = self.mod1(x)
+                z = torch.nn.functional.linear(y, self.weight)
+                return z
+
+        model = torch.jit.script(DynamicModel()).eval()
+        data = torch.randn(5, 5, dtype=torch.float)
+        quant_ops = ['mod1', '']
+        counts = [1, 2]
+        for op, count in zip(quant_ops, counts):
+            qconfig_dict = {op: default_dynamic_qconfig}
+            m1 = quantize_dynamic_script(model, qconfig_dict)
+            out_graph = m1(data)
+
+            FileCheck().check_count("quantized::linear_dynamic(", count, exactly=True) \
+                       .check_not("aten::_choose_qparams_per_tensor") \
+                       .run(m1.graph)
+
+            # Explicitly call forward on model before convert
+            m2 = prepare_dynamic_script(model, qconfig_dict)
+            m2(data)
+            m2 = convert_dynamic_script(m2, debug=False)
+            out_ref = m2(data)
+            self.assertEqual(out_graph, out_ref)
+
+    @override_qengines
+    def test_dynamic_with_if(self):
+        class Res(torch.nn.Module):
+            def __init__(self):
+                super(Res, self).__init__()
+                self.weight = torch.nn.Parameter(torch.ones(5, 5))
+
+            def forward(self, x, cond):
+                # type: (Tensor, bool) -> Tensor
+                if cond:
+                    return torch.nn.functional.linear(x, self.weight)
+                else:
+                    return torch.nn.functional.linear(x, self.weight)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.res1 = Res()
+                self.res2 = Res()
+
+            def forward(self, x):
+                x = self.res1(x, True)
+                x = self.res2(x, False)
+                return x
+
+        model = torch.jit.script(M()).eval()
+        data = torch.randn(5, 5, dtype=torch.float)
+        qconfig_dict = {'': default_dynamic_qconfig}
+        m1 = quantize_dynamic_script(model, qconfig_dict)
+        out_graph = m1(data)
+
+        m2 = prepare_dynamic_script(model, qconfig_dict)
+        m2(data)
+        m2 = convert_dynamic_script(m2)
+        out_ref = m2(data)
+        self.assertEqual(out_graph, out_ref)
+
+        FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
+                   .check_not("aten::_choose_qparams_per_tensor") \
+                   .run(m1.graph)
