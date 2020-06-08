@@ -557,7 +557,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
     return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt(at::sum((self.conj() * self).copy_real(), dim, keepdim));
+    return at::sqrt(at::sum(at::real(self.conj() * self), dim, keepdim));
   } else {
     return at::sqrt(at::sum((self * self), dim, keepdim));
   }
@@ -577,7 +577,7 @@ Tensor &frobenius_norm_out(
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt_out(result, at::sum((self.conj() * self).copy_real(), dim, keepdim));
+    return at::sqrt_out(result, at::sum(at::real(self.conj() * self), dim, keepdim));
   } else {
     return at::sqrt_out(result, at::sum((self * self), dim, keepdim));
   }

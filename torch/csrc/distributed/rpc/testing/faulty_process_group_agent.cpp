@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
@@ -80,7 +81,9 @@ std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
     failMessageCountMap_[key]++;
     lock.unlock();
     auto fm = std::make_shared<FutureMessage>();
-    fm->setError(c10::str("Send attempt failed intentionally for ", key));
+    fm->setError(makeRPCError(
+        c10::str("Send attempt failed intentionally for ", key),
+        RPCErrorType::INTENTIONAL_FAILURE));
     return fm;
   } else {
     lock.unlock();
@@ -96,6 +99,16 @@ void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
         static_cast<int>(msgDelay * kSecToMsConversion)));
   }
   ProcessGroupAgent::enqueueSend(std::move(work));
+}
+
+void FaultyProcessGroupAgent::sendToSelf(Message&& message) {
+  float msgDelay = getDelayForMessage(message.type());
+  if (msgDelay != 0) {
+    // Sleep for the specified delay for the message.
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        static_cast<int>(msgDelay * kSecToMsConversion)));
+  }
+  ProcessGroupAgent::sendToSelf(std::move(message));
 }
 
 bool FaultyProcessGroupAgent::shouldFailMessage(MessageType type) const {
@@ -120,9 +133,11 @@ MessageType FaultyProcessGroupAgent::messageStringToType(
       {"CLEANUP_AUTOGRAD_CONTEXT_REQ",
        MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ},
       {"PYTHON_REMOTE_CALL", MessageType::PYTHON_REMOTE_CALL},
+      {"SCRIPT_REMOTE_CALL", MessageType::SCRIPT_REMOTE_CALL},
       {"PYTHON_CALL", MessageType::PYTHON_CALL},
       {"SCRIPT_CALL", MessageType::SCRIPT_CALL},
-  };
+      {"PYTHON_RREF_FETCH_CALL", MessageType::PYTHON_RREF_FETCH_CALL},
+      {"SCRIPT_RREF_FETCH_CALL", MessageType::SCRIPT_RREF_FETCH_CALL}};
   const auto& it = msgMap.find(messageString);
   TORCH_CHECK(
       it != msgMap.end(),

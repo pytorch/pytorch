@@ -823,20 +823,6 @@ class TestCuda(TestCase):
         z = torch.cat([x, y], 0)
         self.assertEqual(z.get_device(), x.get_device())
 
-    def test_bernoulli(self):
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float32, torch.float64, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float32, torch.float16, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float16, torch.float64, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float16, torch.float16, 'cuda')
-        # test that it works with integral tensors
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
-        # test that it works with bool tensors
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.bool, torch.float16, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
-
     @unittest.skipIf(torch.cuda.device_count() >= 10, "Loading a cuda:9 tensor")
     def test_load_nonexistent_device(self):
         # Setup: create a serialized file object with a 'cuda:9' restore location
@@ -2819,6 +2805,26 @@ t2.start()
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
         loss.backward()
+
+    def test_autocast_cat_jit(self):
+        # Reported at https://github.com/pytorch/pytorch/issues/38958
+
+        class Model(torch.nn.Module):
+            def forward(self):
+                a = torch.randn(1)
+                b = torch.randn(1)
+                c = torch.cat((a, b), 0)
+                d = torch.stack([c, c], 0)
+                return d
+
+        # The JIT here doesn't really matter, we just need to call
+        # cat via the boxed API
+        model = Model()
+        model_jit_script = torch.jit.script(model)
+
+        with torch.cuda.amp.autocast(True):
+            model()
+            model_jit_script()
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
