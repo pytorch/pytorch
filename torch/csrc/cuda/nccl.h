@@ -28,7 +28,7 @@ namespace detail {
 
 TORCH_CUDA_API void throw_nccl_error(ncclResult_t status);
 
-static inline void NCCL_CHECK(ncclResult_t status);
+static void NCCL_CHECK(ncclResult_t status);
 
 struct AutoNcclGroup {
   AutoNcclGroup() {
