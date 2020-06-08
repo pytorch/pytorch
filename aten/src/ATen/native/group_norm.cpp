@@ -90,7 +90,7 @@ Tensor group_norm(
     const Tensor& weight /* optional */,
     const Tensor& bias /* optional */,
     double eps,
-    bool cudnn_enabled) {
+    bool /* cudnn_enabled, deprecated */) {
   const int64_t N = input.size(0);
   const int64_t C = input.size(1);
   TORCH_CHECK(
@@ -123,35 +123,11 @@ Tensor group_norm(
       1LL,
       std::multiplies<int64_t>());
 
-  if (input.device().is_cpu()) {
-    const auto& X = input.is_contiguous() ? input : input.contiguous();
-    const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();
-    const auto& beta = bias.is_contiguous() ? bias : bias.contiguous();
-    return std::get<0>(
-        at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps));
-  }
-
-  // Apply group norm
-  const int64_t b = input.size(0);
-  const int64_t c = input.size(1);
-  auto input_reshaped =
-      input.contiguous().view({1, b * num_groups, b ? -1 : 1});
-  auto out = at::batch_norm(
-      input_reshaped, {}, {}, {}, {}, true, 0, eps, cudnn_enabled);
-  out = out.view(input_shape);
-  if (!weight.defined() && !bias.defined()) {
-    return out;
-  }
-  std::vector<int64_t> affine_param_shape(input.dim(), 1);
-  affine_param_shape[1] = C;
-  if (weight.defined() && bias.defined()) {
-    return bias.view(affine_param_shape)
-        .addcmul(out, weight.view(affine_param_shape), 1);
-  } else if (weight.defined()) {
-    return out.mul(weight.view(affine_param_shape));
-  } else {
-    return out.add(bias.view(affine_param_shape));
-  }
+  const auto& X = input.is_contiguous() ? input : input.contiguous();
+  const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();
+  const auto& beta = bias.is_contiguous() ? bias : bias.contiguous();
+  return std::get<0>(
+      at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps));
 }
 
 DEFINE_DISPATCH(GroupNormKernel);
