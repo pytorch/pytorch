@@ -4,7 +4,9 @@ import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, load_tests
+from torch.testing._internal.common_utils import (TestCase, run_tests,
+                                                  IS_WINDOWS, load_tests,
+                                                  TEST_WITH_ROCM)
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -25,6 +27,7 @@ class TestNCCL(TestCase):
         self.assertIsInstance(uid, bytes)
         self.assertGreater(len(uid), 1)
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38833')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_broadcast(self):
@@ -38,6 +41,7 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38834')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce(self):
@@ -65,6 +69,7 @@ class TestNCCL(TestCase):
         for tensor in tensors:
             self.assertEqual(tensor, expected)
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_all_gather(self):
@@ -79,6 +84,7 @@ class TestNCCL(TestCase):
         for tensor in outputs:
             self.assertEqual(tensor, expected)
 
+    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38835')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce_scatter(self):

@@ -6023,8 +6023,8 @@ mz_bool mz_zip_writer_add_mem_ex(mz_zip_archive *pZip, const char *pArchive_name
 }
 
 mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_name, const void *pBuf, size_t buf_size, const void *pComment, mz_uint16 comment_size,
-                                    mz_uint level_and_flags, mz_uint64 uncomp_size, mz_uint32 uncomp_crc32, MZ_TIME_T *last_modified,
-                                    const char *user_extra_data, mz_uint user_extra_data_len, const char *user_extra_data_central, mz_uint user_extra_data_central_len)
+                                     mz_uint level_and_flags, mz_uint64 uncomp_size, mz_uint32 uncomp_crc32, MZ_TIME_T *last_modified,
+                                     const char *user_extra_data, mz_uint user_extra_data_len, const char *user_extra_data_central, mz_uint user_extra_data_central_len)
 {
     mz_uint16 method = 0, dos_time = 0, dos_date = 0;
     mz_uint level, ext_attributes = 0, num_alignment_padding_bytes;
@@ -6298,8 +6298,8 @@ mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_n
     }
 
     if (!mz_zip_writer_add_to_central_dir(pZip, pArchive_name, (mz_uint16)archive_name_size, pExtra_data, extra_size, pComment,
-                                          comment_size, uncomp_size, comp_size, uncomp_crc32, method, bit_flags, dos_time, dos_date, local_dir_header_ofs, ext_attributes,
-                                          user_extra_data_central, user_extra_data_central_len))
+                                        comment_size, uncomp_size, comp_size, uncomp_crc32, method, bit_flags, dos_time, dos_date, local_dir_header_ofs, ext_attributes,
+                                        user_extra_data_central, user_extra_data_central_len))
         return MZ_FALSE;
 
     pZip->m_total_files++;

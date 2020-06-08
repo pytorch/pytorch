@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
+#include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -15,17 +16,23 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-constexpr auto DISABLED_FALLBACK = true;
-
 namespace {
-
-KernelArgsReq expandSizeSupport(const at::IntArrayRef sizes) {
-  KernelArgsReq req;
-  for (auto size : sizes) {
-    req.low_.push_back(size);
-    req.hi_.push_back(size);
+std::unique_ptr<KernelArgsReq> makePWKernelSupport(
+    const at::ArrayRef<IValue>& inputs) {
+  auto req_ptr = std::make_unique<NaivePWKernelArgsReq>();
+  for (const auto& input : inputs) {
+    req_ptr->dims_.push_back(input.isTensor() ? input.toTensor().dim() : -1);
   }
-  return req;
+  return req_ptr;
+}
+
+// TODO: contiguity could be used for better kernel launch config.
+TensorContiguity infer_contiguity_from_tensor_type(
+    const std::shared_ptr<c10::TensorType>& tensor_type) {
+  TORCH_INTERNAL_ASSERT(tensor_type->isComplete());
+  return TensorContiguity(
+      *(tensor_type->sizes().concrete_sizes()),
+      *(tensor_type->strides().concrete_sizes()));
 }
 
 // CudaFusionManager holds compiled `CudaKernel` and handles all interfacing
@@ -65,7 +72,10 @@ class CudaFusionManager {
       graph_cache_[repr] = kernel_id;
 
       // create entry for cached kernel;
-      kernel_cache_.insert({kernel_id, CudaKernelCache()});
+      // Note: use make_pair instead of uniform initialization list here since
+      //       it doesn't work under some env that we still support.
+      //       eg. cuda9.2 + gcc5.4
+      kernel_cache_.insert(std::make_pair(kernel_id, CudaKernelCache()));
 
       // TODO: we should compile here using profiled information:
       //       size (range) / stride (contiguity)
@@ -84,17 +94,16 @@ class CudaFusionManager {
         kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
 
     // TODO: temporary hack
-    auto cuda_kernel =
-        kernel_cache_[kernel_id].getKernelPtr(outputs[0].sizes());
+    auto cuda_kernel = kernel_cache_[kernel_id].getKernelPtr(inputs);
     if (cuda_kernel) {
       // TODO: update launch config for specific sizes;
       //       maybe we should store it in CudaKernel and compute it later
       runKernel(*cuda_kernel, inputs, outputs);
     } else {
-      // major HACK!
-      auto kernel_arg_req = expandSizeSupport(outputs[0].sizes());
-      cuda_kernel =
-          kernel_cache_[kernel_id].allocateKernelInCache(kernel_arg_req);
+      // TODO: this should somehow be done after kernel compilation.
+      //       we will want compileKernel to return a heuristic
+      cuda_kernel = kernel_cache_[kernel_id].allocateKernelInCache(
+          makePWKernelSupport(inputs));
 
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
       Fusion fusion;
@@ -170,14 +179,14 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   // Currently we just construct I/O tensors for static graph;
   std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph)->copy();
 
-  try {
-    const auto nInputs = graph->inputs().size();
+  auto execute_lambda = [&]() {
+    auto nInputs = graph->inputs().size();
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
     // shape inference in graph
     // update shape information per the new inputs;
     EraseShapeInformation(graph);
-    for (int i = 0; i < nInputs; i++) {
+    for (decltype(nInputs) i = 0; i < nInputs; i++) {
       graph->inputs()[i]->setType(inputs[i].type());
     }
     // shape inference
@@ -215,10 +224,24 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
         stack.end(),
         std::make_move_iterator(outputs.begin()),
         std::make_move_iterator(outputs.end()));
-  } catch (...) {
-    TORCH_CHECK(!DISABLED_FALLBACK, "codegen errored out.");
-    EraseShapeInformation(graph);
-    InterpreterState{Code(graph, "fallback_cuda_fuser")}.run(stack);
+  };
+
+  const char* disable_fb_env = getenv("PYTORCH_CUDA_FUSER_DISABLE_FALLBACK");
+  int disable_fb_flag = disable_fb_env ? atoi(disable_fb_env) : 0;
+  if (disable_fb_flag) {
+    execute_lambda();
+  } else {
+    try {
+      execute_lambda();
+    } catch (...) {
+      TORCH_WARN(
+          "FALLBACK path is taken. This is an indication that codegen"
+          "Failed for some reason. To debug try disable codegen fallback path"
+          "via setting the env variable"
+          "`export PYTORCH_CUDA_FUSER_DISABLE_FALLBACK=1`");
+      EraseShapeInformation(graph);
+      InterpreterState{Code(graph, "fallback_cuda_fuser")}.run(stack);
+    }
   }
 }
 

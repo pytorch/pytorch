@@ -57,12 +57,6 @@ class TestUnsupportedOps(JitTestCase):
             print(torch.jit.script(foo).graph)
 
     def test_ops_bound_in_functional(self):
-        def unique_consec():
-            x = torch.tensor([1])
-            return torch.unique_consecutive(x, return_inverse=False, return_counts=True, dim=0)
-
-        self.assertNotEqual(unique_consec(), torch.jit.script(unique_consec)())
-
         def tensordot():
             a = torch.arange(60.).reshape(3, 4, 5)
             b = torch.arange(24.).reshape(4, 3, 2)
