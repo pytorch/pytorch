@@ -79,7 +79,7 @@ TypePtr IValue::type() const {
     case Tag::GenericList:
       return ListType::create(toList().elementType());
     case Tag::Future:
-      return toFuture()->type();
+      return FutureType::create(toFuture()->elementType());
     case Tag::RRef:
       return RRefType::create(toRRef()->type());
     case Tag::Device:
@@ -628,5 +628,52 @@ getClassConverter() {
   static std::unordered_map<std::string, std::function<PyObject*(void*)>>
       classConverter;
   return classConverter;
+}
+
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+    List<intrusive_ptr<ivalue::Future>> srcs) {
+  struct Ctx {
+    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
+        : remaining(srcs.size()),
+          srcFutures(std::move(srcs)),
+          asIvalue(srcFutures),
+          dstFuture(make_intrusive<ivalue::Future>(asIvalue.type())) {}
+    std::atomic<int32_t> remaining{0};
+    List<intrusive_ptr<ivalue::Future>> srcFutures;
+    IValue asIvalue;
+    intrusive_ptr<ivalue::Future> dstFuture;
+  };
+
+  auto ctx = std::make_shared<Ctx>(std::move(srcs));
+  std::function<void()> func = [ctx]() {
+    if (--ctx->remaining == 0) {
+      ctx->dstFuture->markCompleted(ctx->asIvalue);
+    }
+  };
+  for (int32_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+    ctx->srcFutures.get(i)->addCallback(func);
+  }
+  if (ctx->srcFutures.size() == 0) {
+    ctx->dstFuture->markCompleted(ctx->asIvalue);
+  }
+  return ctx->dstFuture;
+}
+
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+    std::vector<intrusive_ptr<ivalue::Future>> srcs) {
+  auto typePtr = srcs.empty() ? AnyType::get() : srcs[0]->elementType();
+  // Lists are generally expected to have a consistent type, check
+  // for this unless we have a compelling target use case.
+  for (size_t i = 1, len = srcs.size(); i < len; ++i) {
+    TORCH_CHECK(*srcs[i]->elementType() == *typePtr,
+                "Expected ", typePtr->str(), " type in list but saw ",
+                srcs[i]->elementType()->str());
+  }
+  List<intrusive_ptr<ivalue::Future>> asList(FutureType::create(typePtr));
+  asList.reserve(srcs.size());
+  for (auto&& s : srcs) {
+    asList.push_back(std::move(s));
+  }
+  return collectAll(asList);
 }
 } // namespace c10
