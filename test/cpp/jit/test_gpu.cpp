@@ -2521,7 +2521,8 @@ void testGPU_FusionReduction3() {
     c10::cuda::CUDAStream stream = c10::cuda::getCurrentCUDAStream();
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 
-    TORCH_CHECK(t5.allclose(cg_output));
+    TORCH_CHECK(
+        t5.allclose(cg_output), "Error of: ", t5.sub(cg_output).abs().max());
   }
 }
 
