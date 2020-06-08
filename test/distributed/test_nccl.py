@@ -21,7 +21,6 @@ if not TEST_CUDA:
 
 class TestNCCL(TestCase):
 
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_unique_id(self):
         uid = nccl.unique_id()
@@ -56,7 +55,6 @@ class TestNCCL(TestCase):
 
         self.assertEqual(tensors[0], expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_all_reduce(self):

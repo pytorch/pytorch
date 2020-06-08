@@ -24,7 +24,7 @@ const std::string kNumIdleThreads = "agent.num_idle_threads";
 const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
-const std::string kTensorPipeRPCTimeoutErrorStr =
+const std::string kRpcTimeoutErrorStr =
     "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
 
 std::string guessAddress(tensorpipe::transport::uv::Context& uvContext) {
@@ -421,8 +421,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
     {
       std::unique_lock<std::mutex> lock(timeoutMapMutex_);
       auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-      timeoutFuturesVector.emplace_back(
-          std::make_pair(futureResponseMessage, timeout));
+      timeoutFuturesVector.emplace_back(futureResponseMessage, timeout);
     }
     timeoutThreadCV_.notify_one();
   }
@@ -547,12 +546,12 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     lock.unlock();
 
-    // Set an error on futures added to the timedOutFutures vector. We do this
+    // Set an error on futures added to the t\imedOutFutures vector. We do this
     // outside the lock to prevent potential lock-order-inversions by callbacks
     // triggered by the setError call.
     for (auto& futureTimeoutPair : timedOutFutures) {
-      std::string errorMsg = fmt::format(
-          kTensorPipeRPCTimeoutErrorStr, futureTimeoutPair.second.count());
+      std::string errorMsg =
+          fmt::format(kRpcTimeoutErrorStr, futureTimeoutPair.second.count());
       auto err = makeRPCError(errorMsg, RPCErrorType::TIMEOUT);
       markFutureWithError(std::move(futureTimeoutPair.first), std::move(err));
     }

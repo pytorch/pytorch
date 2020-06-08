@@ -100,7 +100,7 @@ class WaitAllWorkersStates(object):
 # States used by `def _wait_all_workers()`.
 # `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
 _ALL_WORKER_NAMES = None
-_wait_all_workers_dict_lock = threading.Lock()
+_wait_all_workers_dict_lock = threading.RLock()
 _wait_all_workers_sequence_id = 0
 _wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkersStates)
 
@@ -124,7 +124,10 @@ def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
 
 
 def _set_proceed_shutdown_signal(sequence_id):
-    proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
+    with _wait_all_workers_dict_lock:
+        proceed_signal = _wait_all_workers_sequence_id_to_states[
+            sequence_id
+        ].proceed_signal
     assert (
         not proceed_signal.is_set()
     ), "Termination signal sequence id {} got set twice.".format(sequence_id)
@@ -168,9 +171,10 @@ def _wait_all_workers():
             timeout=timeout,
         )
 
-    proceed_signal = _wait_all_workers_sequence_id_to_states[
-        sequence_id
-    ].proceed_signal
+    with _wait_all_workers_dict_lock:
+        proceed_signal = _wait_all_workers_sequence_id_to_states[
+            sequence_id
+        ].proceed_signal
     proceed_signal.wait()
 
     # Phase 2: Leader asks followers to proceed.
@@ -482,6 +486,9 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     with ctx_manager as rf:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+
+        is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
+
         if qualified_name is not None:
             rref = _invoke_remote_builtin(dst_worker_info, qualified_name, timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
@@ -496,7 +503,13 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
-            rref = _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, timeout)
+            rref = _invoke_remote_python_udf(
+                dst_worker_info,
+                pickled_python_udf,
+                tensors,
+                timeout,
+                is_async_exec
+            )
         # attach profiling information
         if should_profile:
             assert torch.autograd._profiler_enabled()
