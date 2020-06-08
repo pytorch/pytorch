@@ -377,8 +377,7 @@ struct QuantizedCellParamsDynamicReduceRange : public QuantizedCellParamsDynamic
       c10::intrusive_ptr<LinearPackedParamsBase>
           _packed_w_hh, /* Prepacked Weight Tensor */
       Tensor _b_ih, /* float Bias Tensor */
-      Tensor _b_hh /* float Bias Tensor */,
-      bool reduce_range)
+      Tensor _b_hh /* float Bias Tensor */)
       : QuantizedCellParamsDynamic{_packed_w_ih,
                                    _packed_w_hh,
                                    _b_ih,
@@ -421,8 +420,7 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
         /*_packed_w_ih=*/std::move(w_ih_packed),
         /*_packed_w_hh=*/std::move(w_hh_packed),
         /*_b_ih=*/std::move(bias_ih),
-        /*_b_hh=*/std::move(bias_hh),
-        /*reduce_range=*/true);
+        /*_b_hh=*/std::move(bias_hh));
   }
   return c10::make_intrusive<QuantizedCellParamsDynamic>(
       /*_packed_w_ih=*/std::move(w_ih_packed),

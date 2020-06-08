@@ -908,6 +908,12 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         quant_out, quant_hidden = model_quantized(x)
         ref_out, ref_hidden = ref(x)
 
+        def checkQuantized(model):
+            self.assertTrue('DynamicQuantizedLSTM' in str(model))
+            self.checkDynamicQuantizedLSTM(model.lstm, torch.nn.quantized.dynamic.LSTM, dtype=torch.qint8)
+            self.checkScriptable(model, [(x, x)], check_save_load=True)
+        checkQuantized(model_quantized)
+
         self.assertEqual(quant_out, ref_out)
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
