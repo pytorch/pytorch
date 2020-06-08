@@ -118,12 +118,14 @@ class _BatchNorm(_NormBase):
 
         # Handle the different cases for the `training` value to forward to F.batch_norm
         if self.track_running_stats:
-            # If BN stats are tracked, we want to update them only in training mode when the buffers
-            # are not None. If they are passed as None, they will not be updated by F.batch_norm
+            """If BN stats are tracked, we want to update them only in training mode
+            when the buffers are not None.
+            If they are passed as None, they will not be updated by F.batch_norm"""
             bn_training = self.training
         else:
-            # If BN stats are not being tracked, when the buffers are not None,
-            # we ensure that they will not be updated
+            """If BN stats are not being tracked, when the buffers are not None,
+            we ensure that they will not be updated
+            """
             bn_training = self.running_mean is None and self.running_var is None
 
         return F.batch_norm(
