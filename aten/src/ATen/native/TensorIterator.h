@@ -76,6 +76,7 @@ struct CAFFE2_API OperandInfo {
       device = t.device();
       target_dtype = t.scalar_type();
       current_dtype = target_dtype;
+      is_zero_dim = (t.dim() == 0);
     }
     validate();
   }
@@ -96,7 +97,12 @@ struct CAFFE2_API OperandInfo {
   // (e.g. if dtype is changed)
   Tensor original_tensor;
 
+  // TODO: document
   OperandInfo* corresponding_output = nullptr;
+
+  // TODO: document
+  bool is_zero_dim = false;
+
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
@@ -325,25 +331,20 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input, device, dtype);
   }
 
-  void validate_common_dtype(const bool should_validate) {
-    validate_common_dtype_ = should_validate;
+  void check_all_same_device(const bool _check_all_same_device) {
+    check_all_same_device_ = _check_all_same_device;
   }
 
-  void allow_promotion() {
-    promote_inputs(true);
-    allow_copy_to_outputs(true);
+  void promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
+    promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
   }
 
-  void promote_inputs(const bool should_promote) {
-    promote_inputs_ = should_promote;
+  void cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
+    cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
   }
 
-  void allow_copy_to_outputs(const bool allow_copy_to_outputs) {
-    allow_copy_to_outputs_ = allow_copy_to_outputs;
-  }
-
-  void allow_tensors_on_multiple_devices(const bool allow_tensors_on_multiple_devices) {
-    allow_tensors_on_multiple_devices_ = allow_tensors_on_multiple_devices;
+  void enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
+    enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
   }
 
   void dont_resize_outputs() {
@@ -406,10 +407,10 @@ protected:
   bool requires_channels_last_output_ = false;
   bool requires_channels_last_3d_output_ = false;
   bool static_shape_ = false;
-  bool validate_common_dtype_ = true;
-  bool promote_inputs_ = false;
-  bool allow_copy_to_outputs_ = false;
-  bool allow_tensors_on_multiple_devices_ = false;
+  bool check_all_same_device_ = true;
+  bool promote_inputs_to_common_dtype_ = false;
+  bool cast_common_dtype_to_outputs_ = false;
+  bool enforce_safe_casting_to_output_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

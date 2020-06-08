@@ -61,7 +61,6 @@ struct cpu_scatter_gather_base_kernel {
     }
 
     auto iter = TensorIterator();
-    iter.validate_common_dtype(false);
     iter.dont_resize_outputs();
     iter.declare_static_shape(index.sizes(), /*squash_dim=*/dim);
     iter.add_output(self);

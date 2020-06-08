@@ -14,7 +14,6 @@ Tensor int_repr_quant_cuda(const Tensor& self) {
     auto iter = TensorIterator();
     iter.add_output(dst);
     iter.add_input(self);
-    iter.validate_common_dtype(false);
     iter.build();
     gpu_kernel(iter, [] GPU_LAMBDA(scalar_t value) -> underlying_t {
       return value.val_;

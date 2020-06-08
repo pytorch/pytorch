@@ -11374,7 +11374,7 @@ class TestTorchDeviceType(TestCase):
         # complex
         m1 = torch.tensor((4.0000 + 4.0000j), dtype=torch.complex64)
         m2 = torch.tensor(4., dtype=torch.float64)
-        self.assertRaisesRegex(RuntimeError, r"result type ComplexDouble can't be cast to the desired output type Double",
+        self.assertRaisesRegex(RuntimeError, r"result type ComplexFloat can't be cast to the desired output type Double",
                                lambda: torch.add(m1, m1, out=m2))
 
 

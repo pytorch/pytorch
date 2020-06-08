@@ -215,11 +215,14 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
 static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
   TORCH_CHECK(is_expandable_to(value.sizes(), info.src.sizes()), "shape mismatch: value tensor of shape ", value.sizes(),
              " cannot be broadcast to indexing result of shape ", info.src.sizes());
+  TORCH_CHECK(value.scalar_type() == info.src.scalar_type(),
+              "Index put requires the source and destination dtypes match, "
+              "got ", info.src.scalar_type(), " for the destination "
+              " and ", value.scalar_type(), " for the source.");
   auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
   iter.dont_resize_outputs();
   iter.add_output(info.src);
-  iter.add_input(value, info.src.device(), info.src.scalar_type());
+  iter.add_input(value);
   for (auto& index : info.indices) {
     iter.add_input(index);
   }
@@ -229,7 +232,6 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
 
 static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
   iter.add_output(Tensor(), info.src.device(), info.src.scalar_type());
   iter.add_input(info.src);
   for (auto& index : info.indices) {
@@ -241,7 +243,6 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
 
 static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
   auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
   iter.add_output(result, info.src.device(), info.src.scalar_type());
   iter.add_input(info.src);
   for (auto& index : info.indices) {
@@ -437,7 +438,6 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     auto slice_size = selfSlice.numel();
 
     auto iter = TensorIterator();
-    iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
     iter.add_output(resultSlice);
     iter.add_input(selfSlice);
@@ -579,7 +579,6 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar 
   }
 
   auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
   iter.dont_resize_outputs();
   iter.add_output(self);
   iter.add_input(mask);
@@ -666,7 +665,6 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   bool use_serial_kernel = self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   if (use_serial_kernel) {
     auto iter = TensorIterator();
-    iter.dont_compute_common_dtype();
     iter.dont_resize_outputs();
     iter.add_output(result_strided);
     iter.add_input(_self);
@@ -689,7 +687,6 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
 
   auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
   iter.dont_resize_outputs();
   iter.add_output(result_strided);
   iter.add_input(_self);

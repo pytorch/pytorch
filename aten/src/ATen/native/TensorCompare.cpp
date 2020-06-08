@@ -156,7 +156,6 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
   iter.add_input(condition);
   iter.add_input(self);
   iter.add_input(other);
-  iter.dont_compute_common_dtype();
   iter.build();
   where_kernel(iter.device_type(), iter, condition.scalar_type());
   return ret;

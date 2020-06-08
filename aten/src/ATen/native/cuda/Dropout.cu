@@ -164,7 +164,6 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor
    iter.add_output(ret);
    iter.add_input(src);
    iter.add_input(mask);
-   iter.dont_compute_common_dtype();
 
    iter.build();
 

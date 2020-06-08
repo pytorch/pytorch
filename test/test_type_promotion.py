@@ -256,10 +256,8 @@ class TestTypePromotion(TestCase):
     @float_double_default_dtype
     def test_non_promoting_ops(self, device):
         x = torch.ones(4, dtype=torch.double, device=device)
-        self.assertRaises(RuntimeError,
-                          lambda: torch.neg(torch.ones(4, dtype=torch.float, device=device), out=x))
-        self.assertRaises(RuntimeError,
-                          lambda: torch.lerp(x, torch.ones(4, dtype=torch.float, device=device), 1))
+        with self.assertRaises(RuntimeError):
+            torch.lerp(x, torch.ones(4, dtype=torch.float, device=device), 1)
 
     @float_double_default_dtype
     def test_alpha_mismatch(self, device):
@@ -479,15 +477,18 @@ class TestTypePromotion(TestCase):
 
     @float_double_default_dtype
     def test_indexing(self, device):
+        # https://github.com/pytorch/pytorch/issues/28010
         a = torch.ones(5, 2, dtype=torch.double, device=device)
         b = torch.zeros(5, dtype=torch.int, device=device)
-
-        # lambda cannot contain assignment
-        def f():
+        with self.assertRaises(RuntimeError):
             a[:, [1]] = b.unsqueeze(-1)
-        # https://github.com/pytorch/pytorch/issues/28010
-        self.assertRaisesRegex(RuntimeError, 'expected dtype',
-                               lambda: f())
+
+        x = torch.ones(5, 2, dtype=torch.double, device=device)
+        y = torch.zeros(5, dtype=torch.double, device=device)
+        x[:, [1]] = y.unsqueeze(-1)
+        expected = torch.tensor([(1, 0), (1, 0), (1, 0), (1, 0), (1, 0)], dtype=torch.double, device=device)
+        self.assertEqual(x, expected)
+
 
         # https://github.com/pytorch/pytorch/issues/27824
         tmp = torch.ones(9, 9, dtype=torch.float, device=device)
