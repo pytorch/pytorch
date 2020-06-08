@@ -747,7 +747,7 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out(Tensor& result, Tensor& buf
   return std::forward_as_tuple(result, buffer);
 }
 
-Tensor & log_sigmoid_out(Tensor& output, const Tensor& self) {
+Tensor& log_sigmoid_out(Tensor& output, const Tensor& self) {
   Tensor buffer = at::empty({0}, self.options());
   return std::get<0>(at::log_sigmoid_forward_out(output, buffer, self));
 }
