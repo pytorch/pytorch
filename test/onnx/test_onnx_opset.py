@@ -390,7 +390,8 @@ class TestONNXOpset(TestCase):
         f = io.BytesIO()
         torch.onnx.export(MyModule(), x, f, opset_version=10)
         model = onnx.load(io.BytesIO(f.getvalue()))
-        # Use check_model directly because check_onnx_opsets_operator checks nodes count, which will fail
+
+        # Use check_model directly. check_onnx_opsets_operator checks nodes count, which will fail
         # because fake quantization ops are broken into QuantizeLinear and DequantizeLinear pair
         onnx.checker.check_model(model)
 
