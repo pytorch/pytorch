@@ -2917,13 +2917,16 @@ void testGPU_FusionSimpleGemm() {
 
     prog.device_ = 0;
     prog.grid(1, ceilDiv_(N, 4), ceilDiv_(M, 4));
-    
+
     prog.block(32, 4, 4);
     torch::jit::fuser::cuda::compileKernel(&prog);
     torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {cg_output});
 
     auto t2 = t0.matmul(t1);
-    TORCH_CHECK(t2.allclose(cg_output, 1e-5, 1e-5), "Error of: ", t2.sub(cg_output).abs().max());
+    TORCH_CHECK(
+        t2.allclose(cg_output, 1e-5, 1e-5),
+        "Error of: ",
+        t2.sub(cg_output).abs().max());
   }
 }
 
