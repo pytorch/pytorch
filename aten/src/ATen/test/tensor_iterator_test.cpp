@@ -200,16 +200,6 @@ TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   EXPECT_TRUE(iter.dtype(2) == at::kDouble);
 }
 
-TEST(TensorIteratorTest, DoNotComputeCommonDTypeIfOutputIsUndefined) {
-  Tensor out;
-  auto iter = at::TensorIterator();
-  iter.add_output(out);
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
-  iter.promote_inputs_to_common_dtype(true);
-  ASSERT_ANY_THROW(iter.build());
-}
-
 TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   Tensor out;
   auto iter = at::TensorIterator();

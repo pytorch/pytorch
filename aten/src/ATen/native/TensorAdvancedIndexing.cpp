@@ -218,7 +218,7 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
   TORCH_CHECK(value.scalar_type() == info.src.scalar_type(),
               "Index put requires the source and destination dtypes match, "
               "got ", info.src.scalar_type(), " for the destination "
-              " and ", value.scalar_type(), " for the source.");
+              "and ", value.scalar_type(), " for the source.");
   auto iter = TensorIterator();
   iter.dont_resize_outputs();
   iter.add_output(info.src);
