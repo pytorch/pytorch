@@ -154,7 +154,7 @@ class HybridModel(nn.Module):
                 tuple(self.fc1.parameters()),
                 tuple(self.fc2.parameters()),
             )
-            gLogger.info(f"Use DDP for the second local net.")
+            gLogger.info("Use DDP for the second local net.")
             self.fc2 = DistributedDataParallel(
                 self.fc2,
                 process_group=process_group_for_ddp,
@@ -206,7 +206,7 @@ class Trainer:
             self.hybrid_module.non_ddp_params,
         )
         if ddp_mode == DdpMode.OUTSIDE:
-            gLogger.info(f"Wrapping the whole hybrid module into DDP.")
+            gLogger.info("Wrapping the whole hybrid module into DDP.")
             self.ddp_params += self.non_ddp_params
             self.non_ddp_params = ()
             self.hybrid_module = DistributedDataParallel(
@@ -312,15 +312,15 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
 
     def _remote_worker_process(self):
         process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
-        gLogger.info(f"The remote worker is running.")
+        gLogger.info("The remote worker is running.")
         dist.destroy_process_group(process_group_for_ddp)
-        gLogger.info(f"Exiting remote worker.")
+        gLogger.info("Exiting remote worker.")
 
     def _trainer_process(self, rank: int):
         gLogger.info(f"Running the trainer #{rank}...")
 
     def _master_process(self, ddp_mode: DdpMode):
-        gLogger.info(f"Running the master process...")
+        gLogger.info("Running the master process...")
         process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
         remote_em_rref = rpc.remote(
             self.remote_worker_name(), RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
@@ -330,7 +330,7 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
             RemoteNet,
             args=(D_DENSE + D_SPARSE, D_HID),
         )
-        gLogger.info(f"Created remote rrefs on master")
+        gLogger.info("Created remote rrefs on master")
         self.do_test_on_master(ddp_mode, remote_em_rref, remote_net_rref)
         dist.destroy_process_group(process_group_for_ddp)
 
@@ -366,16 +366,16 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
             for future in futures:
                 ddp_grads, non_ddp_grads = future.wait()
                 for grad in ddp_grads:
-                    self.assertAlmostEqual(
-                        0.0,
-                        float(grad.norm()),
+                    self.assertEqual(
+                        grad,
+                        torch.zeros_like(grad),
                         msg="The grad for any ddp parameter should be zeros, because "
                         "the training examples' grads cancel each other.",
                     )
                 for grad in non_ddp_grads:
-                    self.assertNotAlmostEqual(
-                        0.0,
-                        float(grad.norm()),
+                    self.assertNotEqual(
+                        grad,
+                        torch.zeros_like(grad),
                         msg="The grad for any non-ddp parameter shouldn't be zeros",
                     )
 
@@ -457,16 +457,14 @@ class TestDdpComparison(MultiProcessTestCase):
         for param in net.parameters():
             self.assertTrue(
                 param in grads_dict,
-                f"Param {param} is not in dist_auto grad dict {grads_dict}",
+                msg=f"Param {param} is not in dist_auto grad dict {grads_dict}",
             )
-            grad_diff = grads_dict[param] - param.grad
-            self.assertAlmostEqual(
-                0.0,
-                float(grad_diff.norm()),
+            self.assertEqual(
+                grads_dict[param],
+                param.grad,
                 msg=f"The grads for param {param} are different under local "
                 f"and dist autograd: {param.grad} \n---\n {grads_dict[param]}",
             )
-
         dist.destroy_process_group(process_group_for_ddp)
 
 

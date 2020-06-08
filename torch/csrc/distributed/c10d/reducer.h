@@ -226,6 +226,16 @@ class Reducer {
 
     void set(ContextPtr&& new_context_ptr);
     void clear();
+
+    struct ClearGuard {
+      explicit ClearGuard(RpcContext& context);
+      ~ClearGuard();
+
+      RpcContext& context_;
+    };
+    ClearGuard getClearGuard() {
+      return ClearGuard(*this);
+    }
   };
   RpcContext rpc_context_;
 };

@@ -733,6 +733,7 @@ void Reducer::finalize_bucket_sparse(Bucket& bucket) {
 }
 
 void Reducer::finalize_backward() {
+  auto rpc_context_clear_guard = rpc_context_.getClearGuard();
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
@@ -769,7 +770,6 @@ void Reducer::finalize_backward() {
     local_used_work_->wait();
   }
   local_used_maps_reduced_ = false;
-  rpc_context_.clear();
 }
 
 void Reducer::runGradCallbackForVariable(
@@ -801,6 +801,12 @@ void Reducer::RpcContext::clear() {
   if (context_ptr.exchange(nullptr) != nullptr) {
     context_ptr_holder.reset();
   }
+}
+
+Reducer::RpcContext::ClearGuard::ClearGuard(RpcContext& context)
+    : context_(context) {}
+Reducer::RpcContext::ClearGuard::~ClearGuard() {
+  context_.clear();
 }
 
 void Reducer::sync_bucket_indices(
