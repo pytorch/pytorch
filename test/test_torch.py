@@ -11052,9 +11052,10 @@ class TestTorchDeviceType(TestCase):
                 #   RuntimeError: dtype != ScalarType::Undefined INTERNAL ASSERT FAILED at
                 #   "/pytorch/aten/src/ATen/native/TensorIterator.cpp":125, please report a bug to PyTorch.
                 # We skip bfloat16 for now, but we should fix it.
-                with self.assertRaises(RuntimeError):
-                    torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device)
-                continue
+                if not device.startswith('xla'):
+                    with self.assertRaises(RuntimeError):
+                        torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device)
+                    return
 
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi
             expected = np.exp(a.cpu().numpy())
