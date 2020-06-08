@@ -3885,46 +3885,81 @@ def _pad_circular(input, padding):
 
     # Put original array in padded array
     if ndim == 1:
-        d0 = padding[-2]
-        d1 = padded_shape[2] - padding[-1]
-        out[..., d0:d1] = input
+        out_d0 = max(padding[-2], 0)
+        out_d1 = padded_shape[2] - max(padding[-1], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = shape[2] - max(-padding[-1], 0)
+
+        out[..., out_d0:out_d1] = input[..., in_d0:in_d1]
     elif ndim == 2:
-        d0 = padding[-2]
-        d1 = padded_shape[2] - padding[-1]
-        h0 = padding[-4]
-        h1 = padded_shape[3] - padding[-3]
-        out[..., d0:d1, h0:h1] = input
+        out_d0 = max(padding[-2], 0)
+        out_d1 = padded_shape[2] - max(padding[-1], 0)
+
+        out_h0 = max(padding[-4], 0)
+        out_h1 = padded_shape[3] - max(padding[-3], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = shape[2] - max(-padding[-1], 0)
+
+        in_h0 = max(-padding[-4], 0)
+        in_h1 = shape[3] - max(-padding[-3], 0)
+
+        out[..., out_d0:out_d1, out_h0:out_h1] = \
+            input[..., in_d0:in_d1, in_h0:in_h1]
     elif ndim == 3:
-        d0 = padding[-2]
-        d1 = padded_shape[2] - padding[-1]
-        h0 = padding[-4]
-        h1 = padded_shape[3] - padding[-3]
-        w0 = padding[-6]
-        w1 = padded_shape[4] - padding[-5]
-        out[..., d0:d1, h0:h1, w0:w1] = input
+        out_d0 = max(padding[-2], 0)
+        out_d1 = padded_shape[2] - max(padding[-1], 0)
+
+        out_h0 = max(padding[-4], 0)
+        out_h1 = padded_shape[3] - max(padding[-3], 0)
+
+        out_w0 = max(padding[-6], 0)
+        out_w1 = padded_shape[4] - max(padding[-5], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = shape[2] - max(-padding[-1], 0)
+
+        in_h0 = max(-padding[-4], 0)
+        in_h1 = shape[3] - max(-padding[-3], 0)
+
+        in_w0 = max(-padding[-6], 0)
+        in_w1 = shape[4] - max(-padding[-5], 0)
+
+        out[..., out_d0:out_d1, out_h0:out_h1, out_w0:out_w1] = \
+            input[..., in_d0:in_d1, in_h0:in_h1, in_w0:in_w1]
 
     # The following steps first pad the left side, then pad the right side
     # Note: Corners will be written more than once when ndim > 1
 
+    # Only in cases where padding values are > 0 are when additional copying
+    # is required
+
     # Pad first conv dim (depth-wise)
-    out[:, :, :padding[-2]] = \
-        out[:, :, -(padding[-2] + padding[-1]):-padding[-1]]
-    out[:, :, (padded_shape[2] - padding[-1]):] = \
-        out[:, :, padding[-2]:(padding[-2] + padding[-1])]
+    if padding[-2] > 0:
+        out[:, :, :padding[-2]] = \
+            out[:, :, -(padding[-2] + padding[-1]):-padding[-1]]
+    if padding[-1] > 0:
+        out[:, :, (padded_shape[2] - padding[-1]):] = \
+            out[:, :, padding[-2]:(padding[-2] + padding[-1])]
 
+    # Pad second conv dim (height-wise)
     if len(padding) > 2:
-        # Pad second conv dim (height-wise)
-        out[:, :, :, :padding[-4]] = \
-            out[:, :, :, -(padding[-4] + padding[-3]):-padding[-3]]
-        out[:, :, :, (padded_shape[3] - padding[-3]):] = \
-            out[:, :, :, padding[-4]:(padding[-4] + padding[-3])]
+        if padding[-4] > 0:
+            out[:, :, :, :padding[-4]] = \
+                out[:, :, :, -(padding[-4] + padding[-3]):-padding[-3]]
+        if padding[-3] > 0:
+            out[:, :, :, (padded_shape[3] - padding[-3]):] = \
+                out[:, :, :, padding[-4]:(padding[-4] + padding[-3])]
 
+    # Pad third conv dim (width-wise)
     if len(padding) > 4:
-        # Pad third conv dim (width-wise)
-        out[:, :, :, :, :padding[-6]] = \
-            out[:, :, :, :, -(padding[-6] + padding[-5]):-padding[-5]]
-        out[:, :, :, :, (padded_shape[4] - padding[-5]):] = \
-            out[:, :, :, :, padding[-6]:(padding[-6] + padding[-5])]
+        if padding[-6] > 0:
+            out[:, :, :, :, :padding[-6]] = \
+                out[:, :, :, :, -(padding[-6] + padding[-5]):-padding[-5]]
+        if padding[-5] > 0:
+            out[:, :, :, :, (padded_shape[4] - padding[-5]):] = \
+                out[:, :, :, :, padding[-6]:(padding[-6] + padding[-5])]
 
     return out
 
