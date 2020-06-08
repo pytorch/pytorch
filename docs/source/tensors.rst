@@ -162,6 +162,7 @@ view of a storage and defines numeric operations on it.
 
    .. autoattribute:: is_cuda
    .. autoattribute:: is_quantized
+   .. autoattribute:: is_meta
    .. autoattribute:: device
    .. autoattribute:: grad
       :noindex:
@@ -238,6 +239,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cos_
    .. automethod:: cosh
    .. automethod:: cosh_
+   .. automethod:: acosh
+   .. automethod:: acosh_
    .. automethod:: cpu
    .. automethod:: cross
    .. automethod:: cuda
@@ -247,6 +250,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
+   .. automethod:: deg2rad
    .. automethod:: dequantize
    .. automethod:: det
    .. automethod:: dense_dim
@@ -427,6 +431,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: q_per_channel_scales
    .. automethod:: q_per_channel_zero_points
    .. automethod:: q_per_channel_axis
+   .. automethod:: rad2deg
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
@@ -471,6 +476,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sin_
    .. automethod:: sinh
    .. automethod:: sinh_
+   .. automethod:: asinh
+   .. automethod:: asinh_
    .. automethod:: size
    .. automethod:: slogdet
    .. automethod:: solve
@@ -505,6 +512,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tan_
    .. automethod:: tanh
    .. automethod:: tanh_
+   .. automethod:: atanh
+   .. automethod:: atanh_
    .. automethod:: tolist
    .. automethod:: topk
    .. automethod:: to_sparse

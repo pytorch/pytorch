@@ -190,16 +190,13 @@ def load_deprecated_signatures(aten_decls, deprecated_path):
 
 def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_op_list=None):
     full_aten_decls = load_aten_declarations(aten_path)
+
     def filter_decls(aten_decls, selected_op_list):
         if selected_op_list is None:
             return aten_decls
         return [decl for decl in aten_decls if signature_without_args(decl) in selected_op_list]
 
-
     aten_decls = filter_decls(full_aten_decls, selected_op_list)
-
-
-
 
     # Parse and load derivatives.yaml
     from .load_derivatives import load_derivatives
@@ -220,8 +217,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_
 
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
-    gen_variable_factories(
-        out, aten_decls, template_path, disable_autograd=disable_autograd)
+    gen_variable_factories(out, aten_decls, template_path)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):
