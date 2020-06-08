@@ -62,7 +62,7 @@ class TestNCCL(TestCase):
 
         self.assertEqual(tensors[0], expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5 && dtype==torch.bfloat16, "Skip bfloat16 testing for ROCm versions before 3.5")
+    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16, "Skip bfloat16 testing for ROCm versions before 3.5")
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
