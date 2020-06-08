@@ -1,3 +1,4 @@
+#include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>

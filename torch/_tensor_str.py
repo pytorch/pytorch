@@ -265,8 +265,7 @@ def get_summarized_data(self):
     else:
         return torch.stack([get_summarized_data(x) for x in self])
 
-
-def _str(self):
+def _str_intern(self):
     prefix = 'tensor('
     indent = len(prefix)
     suffixes = []
@@ -349,3 +348,7 @@ def _str(self):
         suffixes.append('names={}'.format(self.names))
 
     return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
+
+def _str(self):
+    with torch.no_grad():
+        return _str_intern(self)
