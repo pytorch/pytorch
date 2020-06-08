@@ -31,6 +31,7 @@ android {
         }
         externalNativeBuild {
             cmake {
+                abiFilters ABI_FILTERS.split(",")
                 arguments "-DANDROID_STL=c++_shared"
             }
         }
@@ -113,7 +114,9 @@ android {
     if (!testAppAllVariantsEnabled.toBoolean()) {
         variantFilter { variant ->
             def names = variant.flavors*.name
-            if (names.contains("nightly") || names.contains("camera")) {
+            if (names.contains("nightly")
+                || names.contains("camera")
+                || names.contains("nativeBuild")) {
                 setIgnore(true)
             }
         }
