@@ -366,11 +366,17 @@ return c10::Dispatcher::singleton().redispatch<${schema_order_ret_and_arg_types}
 
 # TraceType templates
 # TODO: change `redispatch` to `NoTracerDispatchMode` + regular `call`.
-TRACE_DISPATCH_UNBOXED = CodeTemplate("""\
+UNBOXED_TRACE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
     .typed<${return_type} (${arg_types})>();
 ${assign_return_values}c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
+""")
+TRACE_DISPATCH = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${return_type} (${schema_order_arg_types})>();
+${assign_return_values}c10::Dispatcher::singleton().redispatch<${schema_order_ret_and_arg_types}>(${schema_order_trace_dispatch_args});
 """)
 
 
@@ -767,16 +773,30 @@ def emit_trace_body(declaration):
 
     arg_types = ', '.join([a['type'] for a in declaration['arguments']])
     ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
+    schema_order_arg_types = ', '.join([a['type'] for a in declaration['schema_order_arguments']])
+    schema_order_ret_and_arg_types = ', '.join(
+        [declaration['return_type']] + [a['type'] for a in declaration['schema_order_arguments']])
 
     trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['args']
+    schema_order_trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['schema_order_args']
     assign_return_values = '{} = '.format(tie_return_values) if not modifies_arguments and not returns_void else ''
-    call = TRACE_DISPATCH_UNBOXED.substitute(
-        declaration,
-        arg_types=arg_types,
-        ret_and_arg_types=ret_and_arg_types,
-        trace_dispatch_args=trace_dispatch_args,
-        assign_return_values=assign_return_values,
-    )
+    if declaration['use_c10_dispatcher'] == 'full':
+        call = TRACE_DISPATCH.substitute(
+            declaration,
+            schema_order_arg_types=schema_order_arg_types,
+            assign_return_values=assign_return_values,
+            schema_order_ret_and_arg_types=schema_order_ret_and_arg_types,
+            schema_order_trace_dispatch_args=schema_order_trace_dispatch_args,
+        )
+    else:
+        assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+        call = UNBOXED_TRACE_DISPATCH.substitute(
+            declaration,
+            arg_types=arg_types,
+            ret_and_arg_types=ret_and_arg_types,
+            trace_dispatch_args=trace_dispatch_args,
+            assign_return_values=assign_return_values,
+        )
     trace_body.append(call)
     trace_body.append(post_record_trace)
     if not returns_void:

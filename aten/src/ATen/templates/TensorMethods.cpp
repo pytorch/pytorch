@@ -8,6 +8,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
