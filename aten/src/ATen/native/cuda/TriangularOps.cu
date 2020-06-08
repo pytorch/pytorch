@@ -1,6 +1,7 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -178,9 +179,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 
     result.resize_({sz});
     if (sz > 0) {
-      if (check_zero_strided(result.strides())) {
-        result = result.contiguous();
-      }
+      TORCH_CHECK(at::has_internal_overlap(result) == at::MemOverlap::YES, "result tensor has memory overlap");
       auto result_stride = result.stride(0);
       const dim3 threads(std::min(
           int(sz),
@@ -208,9 +207,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
     result.resize_({sz, sz});
     result.zero_();
     if (sz > 0) {
-      if (check_zero_strided(result.strides())) {
-        result = result.contiguous();
-      }
+      TORCH_CHECK(at::has_internal_overlap(result) == at::MemOverlap::YES, "result tensor has memory overlap");
       auto result_stride_0 = result.stride(0);
       auto result_stride_1 = result.stride(1);
       const dim3 threads(std::min(
