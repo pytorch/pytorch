@@ -143,6 +143,7 @@ namespace jit {
   _(GPU_FusionReduction4)        \
   _(GPU_FusionReduction5)        \
   _(GPU_FusionReductionTFT)      \
+  _(GPU_FusionSimpleGemm)        \
   _(GPU_FusionSimpleBCast)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \

@@ -2866,6 +2866,67 @@ void testGPU_FusionSimpleBCast() {
   }
 }
 
+void testGPU_FusionSimpleGemm() {
+  {
+    torch::jit::fuser::cuda::CudaKernel prog;
+    Fusion& fusion = *prog.fusion_;
+    FusionGuard fg(&fusion);
+
+    // Set up your input tensor views
+    TensorView* tv0 = makeDummyTensor(2); // M, K
+    TensorView* tv1 = makeDummyTensor(2); // K, N
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    TensorView* tv2 = broadcast(tv0, {false, false, true});
+    TensorView* tv3 = broadcast(tv1, {true, false, false});
+
+    TensorView* tv4 = mul(tv2, tv3);
+    TensorView* tv5 = sum(tv4, {1});
+    fusion.addOutput(tv5);
+
+    tv5->split(1, 32);
+    auto tv6 = tv5->rFactor({1});
+
+    tv5->split(0, 4);
+    tv5->split(-1, 4);
+
+    tv0->computeAt(tv5, -1);
+    tv1->computeAt(tv5, -1);
+
+    tv0->computeAt(tv6, -1);
+    tv1->computeAt(tv6, -1);
+
+    tv5->axis(0)->parallelize(ParallelType::BIDz);
+    tv5->axis(1)->parallelize(ParallelType::TIDz);
+
+    tv5->axis(-2)->parallelize(ParallelType::BIDy);
+    tv5->axis(-1)->parallelize(ParallelType::TIDy);
+
+    tv5->axis(2)->parallelize(ParallelType::TIDx);
+    tv6->axis(2)->parallelize(ParallelType::TIDx);
+
+    size_t M = 65, K = 33, N = 17;
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor t0 = at::randn({M, K}, options);
+    at::Tensor t1 = at::randn({K, N}, options);
+
+    at::Tensor cg_output = at::empty({M, N}, options);
+
+    prog.device_ = 0;
+    prog.grid(1, ceilDiv_(N, 4), ceilDiv_(M, 4));
+    
+    prog.block(32, 4, 4);
+    torch::jit::fuser::cuda::compileKernel(&prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {cg_output});
+
+    auto t2 = t0.matmul(t1);
+    TORCH_CHECK(t2.allclose(cg_output, 1e-5, 1e-5), "Error of: ", t2.sub(cg_output).abs().max());
+  }
+}
+
 } // namespace jit
 } // namespace torch
 // #endif // #if defined(USE_CUDA)
