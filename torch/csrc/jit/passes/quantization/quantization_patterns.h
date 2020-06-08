@@ -60,7 +60,8 @@ std::string getAtenOpPattern(
   return aten_op_pattern;
 }
 
-std::string getQuantize(const std::string& value) {
+// generate ops for quantize pattern for a scalar value
+std::string getQuantizeForScalar(const std::string& value) {
   std::string quantize_pattern = R"(
           )" +
       value + "_float_scalar_type : int = prim::Constant[value=6]()";
@@ -140,7 +141,7 @@ QuantFusionInfo getClampOpFusionInfo(
   std::string graph_header = "graph(%a_quant" + extra_header_arg_list + "):";
   std::string op_pattern = graph_header;
   for (const auto& arg : extra_op_args) {
-    op_pattern += getQuantize(arg);
+    op_pattern += getQuantizeForScalar(arg);
     op_pattern += getDequantize(arg);
     op_pattern += getItem(arg);
   }
