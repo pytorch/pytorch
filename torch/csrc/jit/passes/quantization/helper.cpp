@@ -33,6 +33,7 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "addmm",
     "matmul",
     "hardswish",
+    "batch_norm",
     "layer_norm",
     "group_norm",
     "instance_norm",
@@ -584,6 +585,15 @@ bool is_conv3d_module(
                    vmap,
                    "conv",
                    "__torch__.torch.nn.modules.conv.Conv3d");
+}
+
+bool is_batchnorm2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "batchnorm",
+                   "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
 }
 
 

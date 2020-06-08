@@ -1849,7 +1849,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             def forward(self, x):
                 return self.relu(self.bn(x))
 
-        # Note Fusion for functional Relu with inplace argument isn't currently supported in fusion patterns.
         class BNFuncRelu(torch.nn.Module):
             def __init__(self):
                 super(BNFuncRelu, self).__init__()
@@ -1868,11 +1867,12 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for instance in [BNRelu(True), BNRelu(False), BNFuncRelu(), BNFuncInplaceRelu()]:
-            model = self._test_op_impl(instance, data, "quantized::batch_norm2d_relu")
-            FileCheck().check_not("aten::batch_norm") \
-                       .check_not("aten::relu") \
-                       .check_not("aten::relu_") \
-                       .run(model.graph)
+            for tracing in [True, False]:
+                model = self._test_op_impl(instance, data, "quantized::batch_norm2d_relu", tracing)
+                FileCheck().check_not("aten::batch_norm") \
+                           .check_not("aten::relu") \
+                           .check_not("aten::relu_") \
+                           .run(model.graph)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
