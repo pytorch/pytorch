@@ -76,10 +76,7 @@ struct needs_dynamic_casting {
     using cpp_type = typename traits::template arg<nargs - 1>::type;
     using cpp_map = cppmap::detail::CPPTypeAndStdComplexToScalarType<cpp_type>;
 
-    // std::cout << "Got input dtype " << iter.input_dtype(nargs-1) << std::endl;
-    // std::cout << "Expected input dtype " << cpp_map::value() << std::endl;
     if (iter.input_dtype(nargs-1) != cpp_map::value()) {
-      // std::cout << "Mismatch!" << std::endl;
       return true;
     }
     return needs_dynamic_casting<func_t, nargs - 1>::check(iter);
@@ -100,8 +97,6 @@ struct needs_dynamic_casting<func_t, 0> {
     }, /* else */ [&](auto _) {
       // decltype(_) is used to delay computation
       using dtype = typename decltype(_)::template type_identity<cpp_map>;
-      // std::cout << "Got input dtype(0) " << iter.dtype(0) << std::endl;
-      // std::cout << "Expected input dtype " << dtype::value() << std::endl;
       return iter.dtype(0) != dtype::value();
     });
   }

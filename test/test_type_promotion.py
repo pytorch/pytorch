@@ -69,7 +69,7 @@ class TestTypePromotion(TestCase):
         uint8_tensor *= int16_tensor
 
     @float_double_default_dtype
-    def test_unsinged(self, device):
+    def test_unsigned(self, device):
         dont_promote = torch.ones(3, dtype=torch.uint8, device=device) + 5
         self.assertEqual(dont_promote.dtype, torch.uint8)
 
@@ -831,6 +831,45 @@ class TestTypePromotion(TestCase):
         y = torch.tensor([4, 5, 6], device=device, dtype=torch.float)
         with self.assertRaisesRegex(RuntimeError, 'can\'t be cast'):
             torch.cat([x, y], out=out)
+
+    # Verfies that unary ops can be safely cast (like NumPy) using their
+    # out= kwargs.
+    @onlyOnCPUAndCUDA
+    @dtypes(*itertools.product((torch.float32, torch.float64, torch.int64),
+                               (torch.float32, torch.float64, torch.int64)))
+    def test_unary_op_out_casting(self, device, dtypes):
+        t = torch.tensor((1), dtype=dtypes[0], device=device)
+        out = torch.empty(1, dtype=dtypes[1], device=device)
+
+        ops = (torch.neg,)
+        for op in ops:
+            if torch.can_cast(dtypes[0], dtypes[1]):
+                self.assertEqual(op(t, out=out), out)
+            else:
+                with self.assertRaisesRegex(RuntimeError, 'can\'t be cast'):
+                    op(t, out=out)
+
+    # Verifies that the out= argument doesn't affect the computation, that
+    # is, out = op(...) and op(..., out=out) produce the same result.
+    @onlyOnCPUAndCUDA
+    def test_computation_ignores_out(self, device):
+        t = torch.tensor(33000, dtype=torch.float16, device=device)
+        out = torch.empty(1, dtype=torch.float64, device=device)
+        result = torch.add(t, t, out=out)
+        self.assertEqual(result, t + t, exact_dtype=False)
+        self.assertNotEqual(result, t.double() + t, exact_dtype=False)
+
+        a = torch.tensor(1.5, dtype=torch.float16, device=device)
+        b = torch.tensor(.666, dtype=torch.float16, device=device)
+        result = torch.true_divide(a, b, out=out)
+        self.assertEqual(result, a / b, exact_dtype=False)
+        self.assertNotEqual(result, a.double() / a, exact_dtype=False)
+
+        a = torch.tensor(5, dtype=torch.uint8, device=device)
+        b = torch.tensor(8, dtype=torch.uint8, device=device)
+        result = torch.sub(a, b, out=out)
+        self.assertEqual(result, a - b, exact_dtype=False)
+        self.assertNotEqual(result, a.double() - b, exact_dtype=False)
 
 
 instantiate_device_type_tests(TestTypePromotion, globals())

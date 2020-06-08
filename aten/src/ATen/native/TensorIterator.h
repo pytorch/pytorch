@@ -76,7 +76,6 @@ struct CAFFE2_API OperandInfo {
       device = t.device();
       target_dtype = t.scalar_type();
       current_dtype = target_dtype;
-      is_zero_dim = (t.dim() == 0);
     }
     validate();
   }
@@ -97,12 +96,9 @@ struct CAFFE2_API OperandInfo {
   // (e.g. if dtype is changed)
   Tensor original_tensor;
 
-  // TODO: document
+  // If a tensor is both an input and an output, this lets the input
+  //   operand point to the output operand for a quick lookup
   OperandInfo* corresponding_output = nullptr;
-
-  // TODO: document
-  bool is_zero_dim = false;
-
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
