@@ -286,7 +286,7 @@ void LoopsPeeler::peelLoops() {
   }
 }
 
-void PeelProfilingLoops(std::shared_ptr<Graph> graph) {
+void PeelProfilingLoops(const std::shared_ptr<Graph>& graph) {
   auto peel_predicate = [](Node* n) {
     for (auto i : n->inputs()) {
       if (i->type()->isSubtypeOf(TensorType::get())) {
@@ -298,7 +298,7 @@ void PeelProfilingLoops(std::shared_ptr<Graph> graph) {
   };
 
   LoopsPeeler lp(peel_predicate);
-  lp.run(std::move(graph));
+  lp.run(graph);
 }
 
 Node* PeelLoop(Node* n, size_t times) {
