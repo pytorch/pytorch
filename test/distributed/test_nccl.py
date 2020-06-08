@@ -32,7 +32,7 @@ class TestNCCL(TestCase):
         self.assertIsInstance(uid, bytes)
         self.assertGreater(len(uid), 1)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38833')
+    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
@@ -47,7 +47,7 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38834')
+    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
@@ -62,7 +62,8 @@ class TestNCCL(TestCase):
 
         self.assertEqual(tensors[0], expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16, "Skip bfloat16 testing for ROCm versions before 3.5")
+    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5 and dtype == torch.bfloat16, 
+        "Skip bfloat16 testing for ROCm versions before 3.5")
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
@@ -94,7 +95,7 @@ class TestNCCL(TestCase):
         for tensor in outputs:
             self.assertEqual(tensor, expected)
 
-    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm, see https://github.com/pytorch/pytorch/issues/38835')
+    @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @dtypes(*datatypes)
