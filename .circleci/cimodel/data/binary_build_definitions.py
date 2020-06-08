@@ -1,9 +1,9 @@
 from collections import OrderedDict
 
+import cimodel.data.simple.util.branch_filters as branch_filters
 import cimodel.data.binary_build_data as binary_build_data
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-
 
 class Conf(object):
     def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant, libtorch_config_variant):
@@ -68,13 +68,19 @@ class Conf(object):
             job_def["requires"] = [
                 "update_s3_htmls",
             ]
-            job_def["filters"] = gen_binary_filter_branch("nightly")
+            job_def["filters"] = branch_filters.gen_filter_dict(
+                branches_list=["nightly"],
+                tags_list=[branch_filters.RC_PATTERN],
+            )
         else:
             if phase in ["upload"]:
                 filter_branch = "nightly"
             else:
                 filter_branch = r"/.*/"
-            job_def["filters"] = gen_binary_filter_branch(filter_branch)
+            job_def["filters"] = branch_filters.gen_filter_dict(
+                branches_list=[filter_branch],
+                tags_list=[branch_filters.RC_PATTERN],
+            )
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
@@ -104,19 +110,6 @@ class Conf(object):
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
         return {job_name : job_def}
-
-def gen_binary_filter_branch(branch):
-    return {
-        "branches": {
-            "only": branch
-        },
-        # Will run on tags like v1.5.0-rc1, etc.
-        "tags": {
-            # Using a raw string here to avoid having to escape
-            # anything
-            "only": r"/v[0-9]+(\.[0-9]+)*-rc[0-9]+/"
-        }
-    }
 
 def get_root(smoke, name):
 
@@ -172,7 +165,10 @@ def get_post_upload_jobs():
     configs = gen_build_env_list(False)
     common_job_def = {
         "context": "org-member",
-        "filters": gen_binary_filter_branch("nightly"),
+        "filters": branch_filters.gen_filter_dict(
+            branches_list=["nightly"],
+            tags_list=[branch_filters.RC_PATTERN],
+        ),
         "requires": [],
     }
     for conf in configs:
