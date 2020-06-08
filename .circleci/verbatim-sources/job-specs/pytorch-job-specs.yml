@@ -200,7 +200,7 @@ jobs:
             if [[ "${VC_YEAR}" == "2017" ]]; then
               powershell .circleci/scripts/vs_install.ps1
             fi
-            if [[ "${VC_YEAR}" == "2019" && "${VC_PRODUCT}" != "" ]]; then
+            if [[ "${VC_YEAR}" == "2019" && "${VC_VERSION}" != "" ]]; then
               powershell .circleci/scripts/vs2019_install.ps1
             fi
       - run:
@@ -276,7 +276,7 @@ jobs:
             if [[ "${VC_YEAR}" == "2017" ]]; then
               powershell .circleci/scripts/vs_install.ps1
             fi
-            if [[ "${VC_YEAR}" == "2019" && "${VC_PRODUCT}" != "" ]]; then
+            if [[ "${VC_YEAR}" == "2019" && "${VC_VERSION}" != "" ]]; then
               powershell .circleci/scripts/vs2019_install.ps1
             fi
       - run:
