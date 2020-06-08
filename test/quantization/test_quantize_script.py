@@ -1142,7 +1142,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
     """
-    def _test_op_impl(self, module, data, quantized_op, tracing=False, debug=False):
+    def _test_op_impl(self, module, data, quantized_op, tracing=False, debug=False, check=True):
         if debug:
             print('Testing:', str(module))
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
@@ -1163,7 +1163,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         if debug:
             print('debug graph:', model[True].graph)
             print('non debug graph:', model[False].graph)
-        else:
+        elif check:
             # debug and non-debug option should have the same numerics
             self.assertEqual(outputs[True], outputs[False])
 
