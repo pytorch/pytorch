@@ -92,6 +92,8 @@ white_list = [
     ('aten::le', datetime.date(2020, 6, 30)),
     ('aten::ge', datetime.date(2020, 6, 30)),
     ('aten::pow', datetime.date(2020, 6, 30)),
+    ('prim::min', datetime.date(2020, 6, 30)),
+    ('prim::max', datetime.date(2020, 6, 30)),
 ]
 
 
