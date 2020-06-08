@@ -1,11 +1,14 @@
+import warnings
+
 import torch
+
 from . import nccl
 from torch._utils import _take_tensors, _flatten_dense_tensors, \
     _unflatten_dense_tensors, _reorder_tensors_as
 
 
-def broadcast(tensor, devices):
-    """Broadcasts a tensor to a number of GPUs.
+def broadcast(tensor, devices=None, *, out=None):
+    r"""Broadcasts a tensor to a number of GPUs.
 
     Arguments:
         tensor (Tensor): tensor to broadcast.
@@ -17,11 +20,19 @@ def broadcast(tensor, devices):
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
-    return torch._C._broadcast(tensor, devices)
+    if not ((devices is None) ^ (out is None)):
+        raise RuntimeError(
+            "Exactly one of 'devices' and 'out' must be specified, but got "
+            "devices={} and out={}".format(devices, out))
+    if devices is not None:
+        devices = [torch.cuda._utils._get_device_index(d) for d in devices]
+        return torch._C._broadcast(tensor, devices)
+    else:
+        return torch._C._broadcast_out(tensor, out)
 
 
 def broadcast_coalesced(tensors, devices, buffer_size=10485760):
-    """Broadcasts a sequence tensors to the specified GPUs.
+    r"""Broadcasts a sequence tensors to the specified GPUs.
     Small tensors are first coalesced into a buffer to reduce the number
     of synchronizations.
 
@@ -36,6 +47,7 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
+    devices = [torch.cuda._utils._get_device_index(d) for d in devices]
     return torch._C._broadcast_coalesced(tensors, devices, buffer_size)
 
 
@@ -129,8 +141,8 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     return tuple(_reorder_tensors_as(output, ref_order))
 
 
-def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
-    """Scatters tensor across multiple GPUs.
+def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=None):
+    r"""Scatters tensor across multiple GPUs.
 
     Arguments:
         tensor (Tensor): tensor to scatter.
@@ -146,11 +158,22 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
         A tuple containing chunks of the ``tensor``, spread across given
         ``devices``.
     """
-    return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
+    if out is None:
+        devices = [torch.cuda._utils._get_device_index(d) for d in devices]
+        return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
+    else:
+        if devices is not None:
+            raise RuntimeError(
+                "'devices' must not be specified when 'out' is specified, but "
+                "got devices={}".format(devices))
+        if chunk_sizes is not None:
+            raise RuntimeError(
+                "'chunk_sizes' must not be specified when 'out' is specified, "
+                "but got chunk_sizes={}".format(chunk_sizes))
+        return tuple(torch._C._scatter_out(tensor, out, dim, streams))
 
-
-def gather(tensors, dim=0, destination=None):
-    """Gathers tensors from multiple GPUs.
+def gather(tensors, dim=0, destination=None, *, out=None):
+    r"""Gathers tensors from multiple GPUs.
 
     Tensor sizes in all dimension different than ``dim`` have to match.
 
@@ -164,4 +187,16 @@ def gather(tensors, dim=0, destination=None):
         A tensor located on ``destination`` device, that is a result of
         concatenating ``tensors`` along ``dim``.
     """
-    return torch._C._gather(tensors, dim, destination)
+    if out is None:
+        if destination == -1:
+            warnings.warn(
+                'Using -1 to represent CPU tensor is deprecated. Please use a '
+                'device object or string instead, e.g., "cpu".')
+        destination = torch.cuda._utils._get_device_index(destination, allow_cpu=True, optional=True)
+        return torch._C._gather(tensors, dim, destination)
+    else:
+        if destination is not None:
+            raise RuntimeError(
+                "'destination' must not be specified when 'out' is specified, but "
+                "got destination={}".format(destination))
+        return torch._C._gather_out(tensors, out, dim)
