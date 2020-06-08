@@ -616,10 +616,10 @@ void log_sigmoid_backward_kernel(TensorIterator& iter) {
       const scalar_t neg_one(-1.0f);
       gpu_kernel(iter, [zero, one, neg_one]GPU_LAMBDA(scalar_t a, scalar_t _, scalar_t b) -> scalar_t {
         auto max_deriv = a < zero ? neg_one : zero;
-        auto sign = a < zero? one : neg_one;
+        auto sign = a < zero ? one : neg_one;
         auto max = std::max(zero, -a);
         auto z = std::exp(-max) + std::exp(-a -max);
-        return b * (-max_deriv - sign*((z - 1.f)/z));
+        return b * (-max_deriv - sign*((z - one)/z));
       });
     });
   });
