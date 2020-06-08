@@ -5,7 +5,6 @@ if "%DEBUG%" == "1" (
 )
 
 set REL_WITH_DEB_INFO=1
-set USE_ASAN=1
 
 set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
 
@@ -22,6 +21,9 @@ call %INSTALLER_DIR%\install_mkl.bat
 call %INSTALLER_DIR%\install_magma.bat
 call %INSTALLER_DIR%\install_sccache.bat
 call %INSTALLER_DIR%\install_miniconda3.bat
+
+set CFLAGS= -fsanitize=address
+set LDFLAGS= clang_rt.asan_dynamic-x86_64.lib clang_rt.asan_dynamic_runtime_thunk-x86_64.lib -wholearchive:clang_rt.asan_dynamic-x86_64.lib -wholearchive:clang_rt.asan_dynamic_runtime_thunk-x86_64.lib
 
 
 :: Install ninja
