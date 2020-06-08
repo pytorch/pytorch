@@ -718,6 +718,8 @@ struct CAFFE2_API TensorType : public Type {
 
   TensorTypePtr merge(TensorTypePtr other, bool merge_sizes = true) const;
 
+  bool matchTensor(const at::Tensor& t);
+
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist
   // in the type-hierarchy. Excluding require_grad and undefined allows

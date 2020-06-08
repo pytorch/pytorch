@@ -15,7 +15,7 @@ import copy
 class TestNormalizeOp(hu.HypothesisTestCase):
     @given(
         X=hu.tensor(
-            min_dim=1, max_dim=5, elements=st.floats(min_value=0.5, max_value=1.0)
+            min_dim=1, max_dim=5, elements=hu.floats(min_value=0.5, max_value=1.0)
         ),
         **hu.gcs
     )
@@ -37,7 +37,7 @@ class TestNormalizeOp(hu.HypothesisTestCase):
 
     @given(
         X=hu.tensor(
-            min_dim=1, max_dim=5, elements=st.floats(min_value=0.5, max_value=1.0)
+            min_dim=1, max_dim=5, elements=hu.floats(min_value=0.5, max_value=1.0)
         ),
         **hu.gcs
     )
