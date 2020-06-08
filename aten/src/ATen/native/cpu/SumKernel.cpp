@@ -43,7 +43,8 @@ scalar_t row_sum(const char * C10_RESTRICT in_data, const int64_t in_stride, con
   constexpr int64_t num_levels = 4;
   constexpr int64_t ilp_factor = 4;
 
-  const int64_t level_power = std::max(4l, std::lround(std::floor(std::log2(size) / num_levels)));
+  const int64_t level_power =
+    std::max(4l, std::lround(std::ceil(std::log2(size) / (num_levels + 1))));
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
