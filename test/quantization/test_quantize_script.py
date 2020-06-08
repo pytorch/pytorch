@@ -22,7 +22,7 @@ from torch.quantization import (
 )
 
 # torch.quantization.quantize_script
-rom torch.quantization.quantize_script import (
+from torch.quantization.quantize_script import (
     script_qconfig,
     prepare_script,
     convert_script,
