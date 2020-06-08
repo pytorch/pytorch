@@ -1637,5 +1637,140 @@ def a(x, y:int=1):
   auto cu = compile(text_hinted);
 }
 
+void testFutures() {
+  // Basic set case.
+  {
+    auto f1 = c10::make_intrusive<Future>(IntType::get());
+    ASSERT_FALSE(f1->completed());
+    int32_t sat1 = 0;
+    int32_t sat2 = 0;
+    f1->addCallback([&]() { ++sat1; });
+    f1->markCompleted(43);
+    ASSERT_TRUE(f1->completed());
+    ASSERT_FALSE(f1->hasError());
+    ASSERT_EQ(sat1, 1);
+    ASSERT_EQ(f1->constValue().toInt(), 43);
+    ASSERT_EQ(f1->value().toInt(), 43);
+    f1->addCallback([&]() { ++sat2; });
+    ASSERT_EQ(sat1, 1);
+    ASSERT_EQ(sat2, 1);
+  }
+
+  // Basic error cases.
+  {
+    auto f1 = c10::make_intrusive<Future>(IntType::get());
+    int sat1 = 0;
+    int sat2 = 0;
+    f1->addCallback([&]() { ++sat1; });
+    f1->setError("Failed");
+    ASSERT_EQ(sat1, 1);
+    ASSERT_TRUE(f1->completed());
+    ASSERT_TRUE(f1->hasError());
+    try {
+      (void)f1->value();
+      ASSERT_TRUE(false); // Supposed to throw.
+    } catch (const std::exception& e) {
+      ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
+    }
+    try {
+      (void)f1->constValue();
+    } catch (const std::exception& e) {
+      ASSERT_TRUE(false); // Not supposed to throw.
+    }
+    f1->addCallback([&]() { ++sat2; });
+    ASSERT_EQ(sat1, 1);
+    ASSERT_EQ(sat2, 1);
+    f1->setErrorIfNeeded("Dup");
+    ASSERT_TRUE(strcmp(f1->error()->what(), "Failed") == 0);
+    ASSERT_EQ(sat1, 1);
+    ASSERT_EQ(sat2, 1);
+  }
+
+  // then
+  {
+    auto f1 = c10::make_intrusive<Future>(IntType::get());
+    auto f2 = f1->then(
+        [f1]() -> IValue { return f1->constValue().toInt() + 1; },
+        IntType::get());
+    auto f3 = f2->then(
+        [f2]() -> IValue { return f2->constValue().toInt() * 3; },
+        IntType::get());
+    bool done = false;
+    f3->addCallback([f3, &done]() {
+      ASSERT_EQ(f3->constValue().toInt(), (42 + 1) * 3);
+      done = true;
+    });
+    ASSERT_FALSE(done);
+    f1->markCompleted(42);
+    ASSERT_TRUE(done);
+  }
+
+  // collectAll()
+  {
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    auto s2 = c10::make_intrusive<Future>(IntType::get());
+    auto s3 = c10::make_intrusive<Future>(IntType::get());
+
+    // Empty case
+    std::vector<intrusive_ptr<ivalue::Future>> futures;
+    auto c1 = collectAll(futures);
+    ASSERT_TRUE(c1->completed());
+    ASSERT_EQ(c1->value().toList().size(), 0);
+    ASSERT_TRUE(
+        *(c1->value().toList().elementType()) ==
+        *FutureType::create(AnyType::get()));
+
+    // 1-element, initially not completed.
+    futures.push_back(s1);
+    auto c2 = collectAll(futures);
+    ASSERT_FALSE(c2->completed());
+    s1->markCompleted(5);
+    ASSERT_TRUE(c2->completed());
+    ASSERT_EQ(c2->value().toList().size(), 1);
+    ASSERT_TRUE(
+        *(c2->value().toList().elementType()) ==
+        *FutureType::create(IntType::get()));
+    ASSERT_EQ(c2->value().toList().get(0).toFuture()->value().toInt(), 5);
+
+    // 1-element, already completed
+    auto c3 = collectAll(futures);
+    ASSERT_TRUE(c3->completed());
+    ASSERT_EQ(c3->value().toList().size(), 1);
+    ASSERT_EQ(c3->value().toList().get(0).toFuture()->value().toInt(), 5);
+
+    // 3 elements.
+    futures.push_back(s2);
+    futures.push_back(s3);
+    auto c4 = collectAll(futures);
+    ASSERT_FALSE(c4->completed());
+    s3->markCompleted(7);
+    ASSERT_FALSE(c4->completed());
+    s2->markCompleted(6);
+    ASSERT_TRUE(c4->completed());
+    ASSERT_EQ(c4->value().toList().size(), 3);
+    ASSERT_EQ(c4->value().toList().get(0).toFuture()->value().toInt(), 5);
+    ASSERT_EQ(c4->value().toList().get(1).toFuture()->value().toInt(), 6);
+    ASSERT_EQ(c4->value().toList().get(2).toFuture()->value().toInt(), 7);
+    ASSERT_TRUE(
+        *(c4->value().toList().elementType()) ==
+        *FutureType::create(IntType::get()));
+
+    // Handle exception in the list.
+    auto s4 = c10::make_intrusive<Future>(IntType::get());
+    futures.push_back(s4);
+    auto c5 = collectAll(futures);
+    ASSERT_FALSE(c5->completed());
+    s4->setError("Failed");
+    ASSERT_TRUE(c5->completed());
+    ASSERT_EQ(c5->value().toList().size(), 4);
+    try {
+      (void)c5->value().toList().get(3).toFuture()->value();
+      ASSERT_TRUE(false); // supposed to throw
+    } catch (const std::exception& e) {
+      ASSERT_EQ(std::string(e.what()), "Failed");
+    }
+  }
+}
+
 } // namespace jit
 } // namespace torch
