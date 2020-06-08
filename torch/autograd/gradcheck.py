@@ -410,7 +410,8 @@ def gradgradcheck(
     rtol: float = 1e-3,
     gen_non_contig_grad_outputs: bool = False,
     raise_exception: bool = True,
-    nondet_tol: float = 0.0
+    nondet_tol: float = 0.0,
+    check_undefined_grad: bool = True
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
@@ -455,6 +456,8 @@ def gradgradcheck(
             exactly (default, 0.0) or be within this tolerance. Note that a small amount
             of nondeterminism in the gradient will lead to larger inaccuracies in
             the second derivative.
+        check_undefined_grad (bool, options): if True, check if undefined output grads
+            are supported and treated as zeros
 
     Returns:
         True if all differences satisfy allclose condition
@@ -486,4 +489,4 @@ def gradgradcheck(
         return grad_inputs
 
     return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
-                     nondet_tol=nondet_tol)
+                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad)
