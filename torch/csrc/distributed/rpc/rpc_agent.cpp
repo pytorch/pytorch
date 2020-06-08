@@ -252,7 +252,8 @@ void RpcAgent::setCurrentRpcAgent(std::shared_ptr<RpcAgent> rpcAgent) {
   if (rpcAgent) {
     std::shared_ptr<RpcAgent> previousAgent;
     // Use compare_exchange so that we don't actually perform the exchange if
-    // that would trigger the assert just below.
+    // that would trigger the assert just below. See:
+    // https://en.cppreference.com/w/cpp/atomic/atomic_compare_exchange
     std::atomic_compare_exchange_strong(
         &currentRpcAgent_, &previousAgent, std::move(rpcAgent));
     TORCH_INTERNAL_ASSERT(
