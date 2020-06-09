@@ -1,7 +1,6 @@
 import torch
 import torch._C as _C
 import torch.utils.hooks as hooks
-from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
@@ -107,7 +106,7 @@ class FunctionMeta(type):
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
 
-class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
+class Function(_C._FunctionBase, _ContextMethodMixin, _HookMixin, metaclass=FunctionMeta):
     r"""Records operation history and defines formulas for differentiating ops.
 
     See the Note on extending the autograd engine for more details on how to use

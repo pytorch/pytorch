@@ -11,7 +11,7 @@ from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
-from torch._six import with_metaclass, string_classes
+from torch._six import string_classes
 from torch.utils import set_module
 from torch.autograd.grad_mode import _DecoratorContextManager
 
@@ -1617,7 +1617,8 @@ if _enabled:
         def __get__(self, obj, cls):
             return self.__getattr__('forward')
 
-    class ScriptModule(with_metaclass(ScriptMeta, Module)):
+
+    class ScriptModule(Module, metaclass=ScriptMeta):
         """
         ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
