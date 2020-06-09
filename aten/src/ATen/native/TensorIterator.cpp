@@ -340,8 +340,11 @@ void TensorIterator::compute_names() {
 
   for (auto& op : operands_) {
     if (!op.tensor.defined()) continue;
-    // don't include output tensors that are not also input tensors.
-    if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
+    // Don't include output tensors if we are resizing, since we will
+    // clobber their names in any case.  (If the output tensor was
+    // also an input tensor, we'll pick it up when it shows up again
+    // in operands).
+    if (resize_outputs_ && op.is_output) continue;
     // perform name inference
     if (names_.empty()) {
       names_ = op.tensor.names();
