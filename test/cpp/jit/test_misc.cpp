@@ -1712,7 +1712,8 @@ void testFutures() {
     auto s3 = c10::make_intrusive<Future>(IntType::get());
 
     // Empty case
-    c10::List<intrusive_ptr<ivalue::Future>> futures(FutureType::create(IntType::get()));
+    c10::List<intrusive_ptr<ivalue::Future>> futures(
+        FutureType::create(IntType::get()));
     auto c1 = collectAll(futures);
     ASSERT_TRUE(c1->completed());
     ASSERT_EQ(c1->value().toList().size(), 0);
@@ -1776,7 +1777,8 @@ void testFutures() {
     auto s1 = c10::make_intrusive<Future>(IntType::get());
 
     // Empty case
-    c10::List<intrusive_ptr<ivalue::Future>> futures(FutureType::create(IntType::get()));
+    c10::List<intrusive_ptr<ivalue::Future>> futures(
+        FutureType::create(IntType::get()));
     auto c1 = collectAny(futures);
     ASSERT_TRUE(c1->completed());
 
