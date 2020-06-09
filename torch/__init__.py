@@ -45,6 +45,10 @@ if sys.platform == 'win32':
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 
+    # When users create a virtualenv that inherits the base environment,
+    # we will need to add the corresponding library directory into
+    # DLL search directories. Otherwise, it will rely on `PATH` which
+    # is dependent on user settings.
     if sys.exec_prefix != sys.base_exec_prefix:
         base_py_dll_path = os.path.join(sys.base_exec_prefix, 'Library', 'bin')
     else:
@@ -52,7 +56,7 @@ if sys.platform == 'win32':
 
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
 
-    if all([not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in  dll_paths]):
+    if all([not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths]):
         nvtoolsext_dll_path = os.path.join(
             os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt'), 'bin', 'x64')
     else:
@@ -60,7 +64,7 @@ if sys.platform == 'win32':
 
     from .version import cuda as cuda_version
     import glob
-    if cuda_version and all([len(glob.glob(os.path.join(p, 'cudart64*.dll'))) == 0 for p in dll_paths]):
+    if cuda_version and all([not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths]):
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
         default_path = 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v' + cuda_version
