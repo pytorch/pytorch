@@ -9,14 +9,6 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace cuda {
-namespace nccl {
-
-// NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
-// Don't use them outside of these files.
-namespace detail {
-
 enum ncclDataType_t : unsigned int;
 enum ncclResult_t : unsigned int;
 enum ncclRedOp_t : unsigned int;
@@ -24,6 +16,15 @@ typedef struct ncclComm* ncclComm_t;
 struct ncclUniqueId;
 int32_t ncclSum;
 
+
+
+namespace torch {
+namespace cuda {
+namespace nccl {
+
+// NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
+// Don't use them outside of these files.
+namespace detail {
 
 TORCH_CUDA_API void throw_nccl_error(ncclResult_t status);
 

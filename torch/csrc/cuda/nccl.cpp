@@ -1,4 +1,5 @@
 #include <torch/csrc/cuda/nccl.h>
+#include <nccl.h>
 #include <torch/csrc/cuda/device_set.h>
 #include <ATen/core/functional.h>
 #include <torch/csrc/utils/hash.h>
@@ -8,8 +9,6 @@
 #include <c10/util/Exception.h>
 
 #include <THC/THC.h>
-
-#include <nccl.h>
 
 #include <limits>
 #include <sstream>
