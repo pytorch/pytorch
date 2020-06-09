@@ -481,8 +481,12 @@ RegisterOperators reg(
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
          float),
-
-     DEFINE_BINARY_OP(aten::pow, pow(a, b)),
+     DEFINE_SCALAR_BINARY_OP(
+         aten::pow.Scalar,
+         static_cast<double>(pow(a, b)),
+         static_cast<double>(pow(a, b)),
+         Scalar),
+     DEFINE_INT_OP(aten::pow.int_to_int, pow(a, b)),
      // min and max are in prim:: because there is a difference between
      // the python builtin 'min' and 'torch.min'
      DEFINE_BINARY_OP(prim::min, a < b ? a : b),
@@ -581,6 +585,22 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+         [](Stack& stack) {
+           bool non_blocking;
+           bool copy;
+           pop(stack, non_blocking, copy);
+           c10::optional<at::ScalarType> scalarType =
+               pop(stack).toOptional<at::ScalarType>();
+           c10::optional<c10::Device> device = c10::nullopt;
+           at::Tensor self = pop(stack).toTensor();
+           push(
+               stack,
+               to_dispatch(self, device, scalarType, non_blocking, copy));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_cuda(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
@@ -601,12 +621,12 @@ RegisterOperators reg(
 // these ops are not defined for Tensor
 #define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
   Operator(                                                                   \
-      "prim::min." decl_type "(" decl_type "[] l, " decl_type                 \
+      "prim::min." decl_type "_list(" decl_type "[] l, " decl_type            \
       "[] r) -> " decl_type "[]",                                             \
       minList<value_type>,                                                    \
       aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
-          "prim::max." decl_type "(" decl_type "[] l, " decl_type             \
+          "prim::max." decl_type "_list(" decl_type "[] l, " decl_type        \
           "[] r) -> " decl_type "[]",                                         \
           maxList<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \
