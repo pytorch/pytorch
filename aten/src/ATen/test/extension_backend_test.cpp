@@ -10,7 +10,7 @@ using namespace at;
 
 static int test_int;
 
-Tensor empty_override(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> optional_memory_format) {
+Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> scalar_type, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
   test_int = 1;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
