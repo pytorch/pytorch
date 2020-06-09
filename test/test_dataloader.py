@@ -1325,18 +1325,15 @@ except RuntimeError as e:
     def test_sampler_reproducibility(self):
         from torch.utils.data import RandomSampler, WeightedRandomSampler, SubsetRandomSampler
 
-        generator = torch.Generator().manual_seed(42)
-
+        weights = [0.1, 0.9, 0.4, 0.7, 3.0, 0.6]
         for fn in (
-            lambda: RandomSampler(self.dataset, num_samples=5, replacement=True, generator=generator),
-            lambda: RandomSampler(self.dataset, replacement=False, generator=generator),
-            lambda: WeightedRandomSampler(self.dataset, num_samples=5, replacement=True, generator=generator),
-            lambda: WeightedRandomSampler(self.dataset, replacement=False, generator=generator),
-            lambda: SubsetRandomSampler(range(10), generator=generator),
+            lambda: RandomSampler(self.dataset, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
+            lambda: RandomSampler(self.dataset, replacement=False, generator=torch.Generator().manual_seed(42)),
+            lambda: WeightedRandomSampler(weights, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
+            lambda: WeightedRandomSampler(weights, num_samples=5, replacement=False, generator=torch.Generator().manual_seed(42)),
+            lambda: SubsetRandomSampler(range(10), generator=torch.Generator().manual_seed(42)),
         ):
-            print(fn)
-            print(list(fn()))
-            assert(list(fn()) == list(fn()))
+            self.assertEqual(list(fn()), list(fn()))
 
 
     def _test_sampler(self, **kwargs):
