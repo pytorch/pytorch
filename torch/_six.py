@@ -44,12 +44,6 @@ else:
 
 
 if PY2:
-    FileNotFoundError = IOError
-else:
-    FileNotFoundError = builtins.FileNotFoundError
-
-
-if PY2:
     import Queue as queue  # noqa: F401
 else:
     import queue  # noqa: F401
