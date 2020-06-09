@@ -3,7 +3,7 @@
 import torch
 from torch import Tensor
 from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload, Iterator, NamedTuple, Sequence, TypeVar, Type
-from torch._six import inf
+from math import inf
 
 from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Number, Device
 
