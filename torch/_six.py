@@ -18,5 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import sys
+PY3 = sys.version_info[0] == 3
+
 # Keep it here as it is also used in torchvision
 string_classes = (str, bytes)
