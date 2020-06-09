@@ -797,14 +797,6 @@ class Intrinsics : public CallNode<Intrinsics> {
   IntrinsicsOp op_type_;
 };
 
-class NoOp : public ExprNode<NoOp> {
- public:
-  NoOp() : ExprNodeBase(kVoid) {}
-  static ExprHandle make() {
-    return ExprHandle(new NoOp());
-  }
-};
-
 class Polynomial;
 class Term;
 

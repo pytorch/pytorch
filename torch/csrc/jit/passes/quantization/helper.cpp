@@ -21,6 +21,8 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "batch_norm",
     "hardswish",
     "layer_norm",
+    "group_norm",
+    "instance_norm",
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
@@ -30,14 +32,10 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "linear",
     "addmm",
     "matmul",
-    "add_",
-    "add",
-    "cat",
-    "lstm",
-    "mul",
-    "mul_",
     "hardswish",
     "layer_norm",
+    "group_norm",
+    "instance_norm",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
@@ -140,6 +138,13 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     "leaky_relu_",
 };
 
+std::vector<std::string> _clamp_funcs = {
+    "hardtanh",
+    "hardtanh_",
+    "clamp",
+    // "clamp_",  // Enable when quantized `clamp_` is ready
+};
+
 const float _asym_scale = 1.0f / 256.0f;
 const int _asym_zero_point = 0;
 const float _sym_scale = 2.0f / 256.0f;
@@ -181,6 +186,20 @@ CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
 
 // Aten functions for getting tensor information
 std::vector<std::string> _tensor_info_funcs = {"size"};
+
+// Aten functions whose output will be quantized or not quantized depending
+// on input tensor
+std::vector<std::string> _propagate_quant_single_input_ops = {"cat"};
+
+// Rules are slightly different for binary ops like `aten::add`, for these ops,
+// if both of the inputs are Tensor, we'll quantize the output only if both of
+// the inputs are quantized
+// if the second input is a Scalar, we'll only look at the first input to decide
+// if we need to quantize the output
+std::vector<std::string> _propagate_quant_binary_ops = {"add",
+                                                        "add_",
+                                                        "mul",
+                                                        "mul_"};
 
 // Check if `use` is an aten function of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function.
@@ -230,11 +249,8 @@ bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      AtenFuncArgs({{"conv1d", 1},
-                    {"conv2d", 1},
-                    {"conv3d", 1},
-                    {"linear", 1},
-                    {"lstm", 2}}),
+      AtenFuncArgs(
+          {{"conv1d", 1}, {"conv2d", 1}, {"conv3d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
   return result;
 }
@@ -248,8 +264,16 @@ bool isBiasOfConvOrLinear(Value* v) {
   return result;
 }
 
-bool mayRequireObservation(Value* v) {
-  return !hasScalarInput(v->node());
+c10::optional<Use> getClampScalarInputUse(Value* v) {
+  for (const auto& use : v->uses()) {
+    for (const auto& aten_func : _clamp_funcs) {
+      if (matchAtenFuncToUse(use, aten_func, 1) ||
+          matchAtenFuncToUse(use, aten_func, 2)) {
+        return use;
+      }
+    }
+  }
+  return c10::nullopt;
 }
 
 std::vector<Value*> getPassThroughInputs(Value* v) {
@@ -350,8 +374,24 @@ bool isSingleInputGeneralAtenFunction(Node* n) {
       isAtenFunc(n, fixed_qparams_aten_funcs);
 }
 
+bool isClamp(Node* n) {
+  return isAtenFunc(n, _clamp_funcs);
+}
+
 bool isTensorInfoNode(Node* n) {
   return isAtenFunc(n, _tensor_info_funcs);
+}
+
+bool isPropagateQuantSingleInputOp(Node* n) {
+  return isAtenFunc(n, _propagate_quant_single_input_ops);
+}
+
+bool isPropagateQuantBinaryOp(Node* n) {
+  return isAtenFunc(n, _propagate_quant_binary_ops);
+}
+
+bool isPropagateQuantNode(Node* n) {
+  return isPropagateQuantSingleInputOp(n) || isPropagateQuantBinaryOp(n);
 }
 
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
@@ -371,14 +411,6 @@ bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
       !isSingleInputGeneralCallFunction(n) &&
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
-}
-
-bool hasScalarInput(Node* n) {
-  std::vector<std::string> scalar_ops = {"add", "add_", "mul", "mul_"};
-
-  return isAtenFunc(n, scalar_ops) &&
-      n->input(0)->type()->isSubtypeOf(TensorType::get()) &&
-      n->input(1)->type()->isSubtypeOf(NumberType::get());
 }
 
 bool nodeQuantizable(Node* n, bool is_dynamic) {
@@ -403,10 +435,6 @@ bool useQuantizable(const Use& use, bool is_dynamic) {
     if (matchCallFuncToUse(use, func_input.func_name, c10::nullopt)) {
       return use.offset == func_input.arg_index;
     }
-  }
-  // Dynamic quantized ops that require special handling for inputs.
-  if (is_dynamic && matchAtenFuncToUse(use, "lstm", c10::nullopt)) {
-    return use.offset == 2;
   }
 
   return nodeQuantizable(use.user, is_dynamic);
@@ -490,6 +518,95 @@ Module getInvokedModule(Module& module, Node* n, Value* self) {
   auto path = getModuleAccessPath(instance, self);
   return findChildModule(module, path);
 }
+
+// ==================== filter functions for matches ==============
+bool is_int_constant(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap,
+    const std::string& vname,
+    int value) {
+  const auto& match_vmap = match.values_map;
+  auto v = toIValue(match_vmap.at(vmap.at(vname)));
+  return v && v->isInt() && v->toInt() == value;
+}
+
+bool is_functional(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap,
+    const std::string& vname,
+    const std::string& functional) {
+  const auto& match_vmap = match.values_map;
+  Value* v = match_vmap.at(vmap.at(vname));
+  return v->type()->cast<FunctionType>() &&
+    getFuncName(v) == functional;
+}
+
+bool is_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap,
+    const std::string& vname,
+    const std::string& module_qualified_name) {
+  const auto& match_vmap = match.values_map;
+  Value* relu = match_vmap.at(vmap.at(vname));
+  auto type = relu->type()->cast<ClassType>();
+  if (type && type->name()) {
+    static std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto qualified_name =
+        std::regex_replace(type->name()->qualifiedName(), mangle_re, "");
+    return qualified_name == module_qualified_name;
+  }
+  return false;
+};
+
+bool aten_add_alpha_is_one(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_int_constant(match, vmap, "alpha", 1);
+}
+
+bool is_functional_relu(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_functional(match, vmap, "relu", "relu");
+}
+
+bool is_relu_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "relu",
+                   "__torch__.torch.nn.modules.activation.ReLU");
+}
+
+bool is_conv1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv1d");
+}
+
+bool is_conv2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv2d");
+}
+
+bool is_conv3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(match,
+                   vmap,
+                   "conv",
+                   "__torch__.torch.nn.modules.conv.Conv3d");
+}
+
+
 
 } // namespace jit
 } // namespace torch

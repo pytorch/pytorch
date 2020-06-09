@@ -1,6 +1,11 @@
 # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
+# ---[ Vulkan code gen
+if(USE_VULKAN)
+  include(../cmake/VulkanCodegen.cmake)
+endif()
+
 # ---[ Declare source file lists
 
 # ---[ ATen build
@@ -39,9 +44,11 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
+  list(APPEND Caffe2_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
+  list(APPEND Caffe2_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
   list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
@@ -177,6 +184,11 @@ if(FALSE)
   foreach(tmp ${ATen_HIP_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
+
+  message(STATUS "ATen Vulkan test sources: ")
+  foreach(tmp ${ATen_VULKAN_TEST_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
@@ -274,6 +286,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
     )
   endif()
 
@@ -321,6 +338,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
     "${TOOLS_PATH}/autograd/templates/ProfiledType.cpp"
+    "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_functions.h"
@@ -359,12 +377,19 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT MSVC)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
   endif()
+  # Disable certain warnings for GCC-9.X
+  if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+    # See https://github.com/pytorch/pytorch/issues/38856
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
+    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
+  endif()
 
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
     set(MOBILE_SRCS
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        )
@@ -422,6 +447,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_rfactor.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/register_interface.cpp
@@ -429,7 +455,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
     if(MSVC)
-      # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine 
+      # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine
       set(DELAY_LOAD_FLAGS "-DELAYLOAD:nvcuda.dll;delayimp.lib")
     else()
       set(DELAY_LOAD_FLAGS "")
@@ -1115,6 +1141,24 @@ if(BUILD_TEST)
     foreach(test_src ${Caffe2_GPU_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       cuda_add_executable(${test_name} "${test_src}")
+      target_link_libraries(${test_name} torch_library gtest_main)
+      target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
+      if(INSTALL_TEST)
+        install(TARGETS ${test_name} DESTINATION test)
+        # Install PDB files for MSVC builds
+        if(MSVC AND BUILD_SHARED_LIBS)
+          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+        endif()
+      endif()
+    endforeach()
+  endif()
+
+  if(USE_VULKAN)
+    foreach(test_src ${Caffe2_VULKAN_TEST_SRCS})
+      get_filename_component(test_name ${test_src} NAME_WE)
+      add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})

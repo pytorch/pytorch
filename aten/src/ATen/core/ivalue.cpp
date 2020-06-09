@@ -1,9 +1,10 @@
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
+#include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/core/function.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/StringUtil.h>
 #include <cmath>
-#include <ATen/core/Dict.h>
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
@@ -78,7 +79,7 @@ TypePtr IValue::type() const {
     case Tag::GenericList:
       return ListType::create(toList().elementType());
     case Tag::Future:
-      return toFuture()->type();
+      return FutureType::create(toFuture()->elementType());
     case Tag::RRef:
       return RRefType::create(toRRef()->type());
     case Tag::Device:
@@ -131,9 +132,9 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       subValues.insert(*this);
       auto obj_type = type()->expect<ClassType>();
       auto obj_value = toObject();
-      auto attribute_names = obj_type->attributeNames();
-      for (const auto& name: attribute_names) {
-        auto attribute = obj_value->getAttr(name);
+      auto attributes = obj_type->getAttributes();
+      for (const auto& attr: attributes) {
+        auto attribute = obj_value->getAttr(attr.getName());
         attribute.getSubValues(subValues);
       }
       break;
@@ -516,18 +517,28 @@ IValue IValue::deepcopy(
     }
       break;
     case IValue::Tag::Object: {
-      copy = IValue(toObject()->deepcopy(memo));
-      break;
+      auto class_type = type()->expect<ClassType>();
+      if (class_type->hasMethod("__getstate__") &&
+          class_type->hasMethod("__setstate__")) {
+        copy = ivalue::Object::create(
+            c10::StrongTypePtr(class_type->compilation_unit(), type()),
+            class_type->numAttributes());
+        auto state = class_type->getMethod("__getstate__")({*this});
+        class_type->getMethod("__setstate__")({copy, std::move(state)});
+      } else {
+        copy = IValue(toObject()->deepcopy(memo));
+      }
+    } break;
     case IValue::Tag::String:
     case IValue::Tag::None:
     case IValue::Tag::Double:
     case IValue::Tag::Int:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
-    case IValue::Tag::Uninitialized:
+    case IValue::Tag::Uninitialized: {
       copy = *this;
-      break;
-    default:
+    } break;
+    default: {
       AT_ERROR("Can't deepcopy IValue with tag: ", tagKind());
     }
   }
@@ -579,7 +590,21 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
   auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
-  for (auto i = 0; i < slots_.size(); ++i) {
+  for (size_t i = 0; i < slots_.size(); ++i) {
+    if (slots_[i].type() == c10::CapsuleType::get()) {
+      // If we've gotten here, it means that we have *not* copied this
+      // class via __getstate__ and __setstate__. That fact and the
+      // fact that we have a Capsule attribute mean that this is a
+      // custom C++ class without serialization methods defined.
+      std::stringstream err;
+      err << "Cannot serialize custom bound C++ class";
+      if (auto qualname = type()->name()) {
+        err << " " << qualname->qualifiedName();
+      }
+      err << ". Please define serialization methods via def_pickle() for "
+            "this class.";
+      AT_ERROR(err.str());
+    }
     object->setSlot(i, slots_[i].deepcopy(memo));
   }
   return object;
@@ -603,5 +628,52 @@ getClassConverter() {
   static std::unordered_map<std::string, std::function<PyObject*(void*)>>
       classConverter;
   return classConverter;
+}
+
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+    List<intrusive_ptr<ivalue::Future>> srcs) {
+  struct Ctx {
+    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
+        : remaining(srcs.size()),
+          srcFutures(std::move(srcs)),
+          asIvalue(srcFutures),
+          dstFuture(make_intrusive<ivalue::Future>(asIvalue.type())) {}
+    std::atomic<int32_t> remaining{0};
+    List<intrusive_ptr<ivalue::Future>> srcFutures;
+    IValue asIvalue;
+    intrusive_ptr<ivalue::Future> dstFuture;
+  };
+
+  auto ctx = std::make_shared<Ctx>(std::move(srcs));
+  std::function<void()> func = [ctx]() {
+    if (--ctx->remaining == 0) {
+      ctx->dstFuture->markCompleted(ctx->asIvalue);
+    }
+  };
+  for (int32_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+    ctx->srcFutures.get(i)->addCallback(func);
+  }
+  if (ctx->srcFutures.size() == 0) {
+    ctx->dstFuture->markCompleted(ctx->asIvalue);
+  }
+  return ctx->dstFuture;
+}
+
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+    std::vector<intrusive_ptr<ivalue::Future>> srcs) {
+  auto typePtr = srcs.empty() ? AnyType::get() : srcs[0]->elementType();
+  // Lists are generally expected to have a consistent type, check
+  // for this unless we have a compelling target use case.
+  for (size_t i = 1, len = srcs.size(); i < len; ++i) {
+    TORCH_CHECK(*srcs[i]->elementType() == *typePtr,
+                "Expected ", typePtr->str(), " type in list but saw ",
+                srcs[i]->elementType()->str());
+  }
+  List<intrusive_ptr<ivalue::Future>> asList(FutureType::create(typePtr));
+  asList.reserve(srcs.size());
+  for (auto&& s : srcs) {
+    asList.push_back(std::move(s));
+  }
+  return collectAll(asList);
 }
 } // namespace c10

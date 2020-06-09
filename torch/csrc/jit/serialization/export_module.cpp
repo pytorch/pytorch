@@ -179,7 +179,7 @@ class ScriptModuleSerializer {
     writeExtraFiles(module, extra_files);
     // Serialize the model object
     writeArchive("data", module._ivalue());
-    // Then we werialize all code info.
+    // Then we serialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
@@ -211,8 +211,9 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
     for (const auto& td : data_pickle.tensorData()) {
+      WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-      writer_.writeRecord(fname, td.data(), td.sizeInBytes());
+      writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
     }
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());
