@@ -13,6 +13,7 @@ from torch.quantization import (
     default_observer,
     default_per_channel_weight_observer,
     default_qconfig,
+    get_default_qconfig,
 
     quantize,
     quantize_dynamic,
