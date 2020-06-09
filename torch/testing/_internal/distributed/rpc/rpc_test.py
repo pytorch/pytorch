@@ -432,6 +432,11 @@ def run_mocked_rpc_sync():
     return rpc.rpc_sync("non_exist", torch.add, args=(torch.ones(2), 1)) + 1
 
 
+def run_mocked_rpc_async():
+    fut = rpc.rpc_async("non_exist", torch.add, args=(torch.ones(2), 1))
+    return fut.wait() + 2
+
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -448,10 +453,18 @@ class RpcTest(RpcAgentTestFixture):
         return decorator
 
     @mock.patch("torch.distributed.rpc.rpc_sync")
-    def test_mock(self, mock_rpc_sync):
+    def test_mock_rpc_sync(self, mock_rpc_sync):
         expected = torch.ones(2) + 5
         mock_rpc_sync.return_value = expected
         self.assertEqual(run_mocked_rpc_sync(), expected + 1)
+
+    @mock.patch("torch.distributed.rpc.rpc_async")
+    def test_mock_rpc_async(self, mock_rpc_async):
+        expected = torch.ones(2) + 5
+        fut = torch.futures.Future()
+        mock_rpc_async.return_value = fut
+        fut.set_result(expected)
+        self.assertEqual(run_mocked_rpc_async(), expected + 2)
 
     @mock.patch("torch.distributed.rpc.rpc_sync", side_effect=mock_rpc_sync)
     def test_mock_function(self, mock_rpc_sync):
