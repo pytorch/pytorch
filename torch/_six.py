@@ -55,14 +55,6 @@ def with_metaclass(meta, *bases):
     return type.__new__(metaclass, 'temporary_class', (), {})
 
 
-# A portable way of referring to the generator version of map
-# in both Python 2 and Python 3.
-if hasattr(itertools, 'imap'):
-    imap = itertools.imap  # type: ignore
-else:
-    imap = map  # type: ignore
-
-
 if PY3:
     import builtins
     # See https://github.com/PyCQA/flake8-bugbear/issues/64
