@@ -14,7 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import List, Tuple
+from typing import List, Tuple, Iterable
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -485,6 +485,7 @@ class TestClassType(JitTestCase):
 
     def test_interface(self):
         global Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2
+
         @torch.jit.script
         class Foo(object):
             def __init__(self):
@@ -647,6 +648,7 @@ class TestClassType(JitTestCase):
 
     def test_overloaded_fn(self):
         global Foo, MyClass  # see [local resolution in python]
+
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):
@@ -802,6 +804,7 @@ class TestClassType(JitTestCase):
 
     def test_cast_overloads(self):
         global Foo  # see [local resolution in python]
+
         @torch.jit.script
         class Foo(object):
             def __init__(self, val):
@@ -945,7 +948,7 @@ class TestClassType(JitTestCase):
                 return self.count
 
             @torch.jit.unused
-            def unused(self, x: int, y: str) -> int:
+            def unused(self, x: int, y: Iterable[int], **kwargs) -> int:
                 a = next(self.items)
                 return a
 

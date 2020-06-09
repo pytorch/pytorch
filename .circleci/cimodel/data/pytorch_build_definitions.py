@@ -4,7 +4,7 @@ from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-from cimodel.data.simple.util.branch_filters import gen_branches_only_filter_dict
+from cimodel.data.simple.util.branch_filters import gen_filter_dict
 from cimodel.data.simple.util.docker_constants import gen_docker_image_path
 
 from dataclasses import dataclass, field
@@ -87,10 +87,8 @@ class Conf:
         return parameters
 
     def gen_workflow_job(self, phase):
-        # All jobs require the setup job
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase)
-        job_def["requires"] = ["setup"]
 
         if phase == "test":
 
@@ -100,13 +98,13 @@ class Conf:
             #  pytorch build job (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259452641)
 
             dependency_build = self.parent_build or self
-            job_def["requires"].append(dependency_build.gen_build_name("build"))
+            job_def["requires"] = [dependency_build.gen_build_name("build")]
             job_name = "pytorch_linux_test"
         else:
             job_name = "pytorch_linux_build"
 
         if not self.is_important:
-            job_def["filters"] = gen_branches_only_filter_dict()
+            job_def["filters"] = gen_filter_dict()
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}
@@ -221,7 +219,8 @@ def instantiate_configs():
 
         if cuda_version in ["9.2", "10", "10.1", "10.2"]:
             # TODO The gcc version is orthogonal to CUDA version?
-            parms_list.append("gcc7")
+            cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
+            parms_list.append(cuda_gcc_version)
 
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False

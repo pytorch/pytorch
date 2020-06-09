@@ -22,8 +22,8 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, \
+    slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -823,20 +823,6 @@ class TestCuda(TestCase):
         z = torch.cat([x, y], 0)
         self.assertEqual(z.get_device(), x.get_device())
 
-    def test_bernoulli(self):
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float32, torch.float64, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float32, torch.float16, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float16, torch.float64, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.float16, torch.float16, 'cuda')
-        # test that it works with integral tensors
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
-        # test that it works with bool tensors
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.bool, torch.float16, 'cuda')
-        AbstractTestCases._TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
-
     @unittest.skipIf(torch.cuda.device_count() >= 10, "Loading a cuda:9 tensor")
     def test_load_nonexistent_device(self):
         # Setup: create a serialized file object with a 'cuda:9' restore location
@@ -1063,8 +1049,6 @@ class TestCuda(TestCase):
         self.assertTrue("torch.cuda.Event" in e.__repr__())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    # Note: fails sometimes on the CI, passes on dual gfx906
-    @skipIfRocm
     def test_stream_context(self):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream(device=1)
@@ -1723,7 +1707,6 @@ class TestCuda(TestCase):
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
@@ -2433,7 +2416,6 @@ t2.start()
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
-    @skipIfRocm
     def test_cublas_multiple_threads_same_device(self):
         # Note, these parameters should be very carefully tuned
         # Too small number makes it hard for the racing condition
@@ -2538,7 +2520,6 @@ t2.start()
                     self.assertEqual(results[t].sum().item(),
                                      (2048 - test_iters) * (2048 - test_iters))
 
-    @skipIfRocm
     def test_cusparse_multiple_threads_same_device(self):
         size = 1024
         num_threads = 2
@@ -2662,72 +2643,66 @@ t2.start()
         else:
             return op_with_args[0], op_with_args[1], op_with_args[2]
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
         with torch.backends.cudnn.flags(deterministic=True):
-            for op, args in self.autocast_lists.torch_fp16:
-                self._run_autocast_outofplace(op, args, torch.float16)
+            for op_with_args in self.autocast_lists.torch_fp16:
+                skip_test = False
+                op, args = op_with_args[0], op_with_args[1]
+                if len(op_with_args) == 3:
+                    skip_test = op_with_args[2]  # TEST_WITH_ROCM
+                if not skip_test:
+                    self._run_autocast_outofplace(op, args, torch.float16)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp32(self):
         for op_with_args in self.autocast_lists.torch_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_need_autocast_promote(self):
         for op, args in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args, torch.float32)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_expect_builtin_promote(self):
         for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
             self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp16(self):
         with torch.backends.cudnn.flags(deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp32(self):
         for op, args in self.autocast_lists.nn_fp32:
             self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp16(self):
         with torch.backends.cudnn.flags(deterministic=True):
             for op, args in self.autocast_lists.methods_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=None)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp32(self):
         for op, args in self.autocast_lists.methods_fp32:
             self._run_autocast_outofplace(op, args, torch.float32, module=None)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_expect_builtin_promote(self):
         for op, args, out_type in self.autocast_lists.methods_expect_builtin_promote:
             self._run_autocast_outofplace(op, args, torch.float32, module=None, out_type=out_type)
 
-    @skipIfRocm
     def test_autocast_banned(self):
         with torch.cuda.amp.autocast():
             for op, args, module in self.autocast_lists.banned:
                 with self.assertRaises(RuntimeError):
                     getattr(module, op)(*args)
 
-    @skipIfRocm
     def test_autocast_ignored_types(self):
         with torch.cuda.amp.autocast():
             for ignore_type in (torch.double, torch.int32):
@@ -2761,7 +2736,6 @@ t2.start()
                         type_no_autocast = torch.norm(a_ignore).dtype
                     self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
 
-    @skipIfRocm
     def test_autocast_custom_enabled(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -2791,7 +2765,6 @@ t2.start()
             loss = output.sum()
         loss.backward()
 
-    @skipIfRocm
     def test_autocast_custom_disabled(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -2824,6 +2797,26 @@ t2.start()
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
         loss.backward()
+
+    def test_autocast_cat_jit(self):
+        # Reported at https://github.com/pytorch/pytorch/issues/38958
+
+        class Model(torch.nn.Module):
+            def forward(self):
+                a = torch.randn(1)
+                b = torch.randn(1)
+                c = torch.cat((a, b), 0)
+                d = torch.stack([c, c], 0)
+                return d
+
+        # The JIT here doesn't really matter, we just need to call
+        # cat via the boxed API
+        model = Model()
+        model_jit_script = torch.jit.script(model)
+
+        with torch.cuda.amp.autocast(True):
+            model()
+            model_jit_script()
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")

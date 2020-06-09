@@ -200,7 +200,7 @@ void initJITBindings(PyObject* module) {
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
-          py::arg("inplace") = false,
+          py::arg("inplace"),
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
@@ -212,7 +212,7 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("module"),
           py::arg("method_name"),
-          py::arg("inplace") = false,
+          py::arg("inplace"),
           py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_prepack_unpack",
@@ -231,7 +231,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def("_jit_pass_replicate_dequantize", &ReplicateDeQuant)
-      .def("_jit_pass_swap_dequantize", &PropagateQuantizationOps)
       .def(
           "_jit_pass_swap_functional_linear",
           [](std::shared_ptr<Graph>& graph) { SwapFunctionalLinear(graph); })
@@ -406,8 +405,8 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
-      .def("_jit_register_cuda_fuser", &RegisterCudaFuseGraph::registerPass)
-      .def("_jit_clear_cuda_fuser", &RegisterCudaFuseGraph::clearPass)
+      .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -736,6 +735,29 @@ void initJITBindings(PyObject* module) {
             std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
+      .def(
+          "get_storage_from_record",
+          [](PyTorchStreamReader& self,
+             const std::string& key,
+             size_t numel,
+             py::object data_type_obj) {
+            at::DataPtr data(std::get<0>(self.getRecord(key)));
+            auto scalar_type =
+                reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+
+            c10::Storage storage(
+                c10::Storage::use_byte_size_t(),
+                numel * elementSize(scalar_type),
+                std::move(data),
+                /*allocator=*/nullptr,
+                /*resizable=*/false);
+            auto ptr =
+                c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+                    std::move(storage),
+                    at::DispatchKeySet(),
+                    at::CPU(scalar_type).typeMeta());
+            return at::Tensor(std::move(ptr));
+          })
       .def("get_all_records", [](PyTorchStreamReader& self) {
         return self.getAllRecords();
       });
@@ -833,13 +855,40 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
       m, "Future")
+      .def(py::init([]() {
+        return std::make_shared<PythonFutureWrapper>(
+            c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
+      }))
       .def(
           "wait",
           &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_then",
+          "then",
           &PythonFutureWrapper::then,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_result",
+          // Intentionally not releasing GIL
+          &PythonFutureWrapper::markCompleted)
+      .def(
+          py::pickle(
+              /* __getstate__ */
+              [](const PythonFutureWrapper& /* unused */) {
+                TORCH_CHECK(false, "Can not pickle torch.futures.Future");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy Pybind API's
+                // requirement.
+                return py::make_tuple();
+              },
+              /* __setstate__ */
+              [](const py::tuple& /* unused */) { // NOLINT
+                TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy PyBind's API
+                // requirement.
+                return nullptr;
+              }),
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
