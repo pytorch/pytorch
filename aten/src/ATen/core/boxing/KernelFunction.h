@@ -211,6 +211,8 @@ private:
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
 
+  void checkBoxedKernel(const OperatorHandle& opHandle) const;
+
   OperatorKernel* getFunctor_() const;
 
   std::shared_ptr<OperatorKernel> functor_;
