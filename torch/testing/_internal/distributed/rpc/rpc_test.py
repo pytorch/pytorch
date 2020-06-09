@@ -422,7 +422,13 @@ def return_future():
     return torch.futures.Future()
 
 
-def test_mocked_rpc_sync():
+def mock_rpc_sync(to, func, args=None, kwargs=None):
+    args = () if args is None else args
+    kwargs = {} if kwargs is None else kwargs
+    return func(*args, **kwargs)
+
+
+def run_mocked_rpc_sync():
     return rpc.rpc_sync("non_exist", torch.add, args=(torch.ones(2), 1)) + 1
 
 
@@ -445,7 +451,12 @@ class RpcTest(RpcAgentTestFixture):
     def test_mock(self, mock_rpc_sync):
         expected = torch.ones(2) + 5
         mock_rpc_sync.return_value = expected
-        self.assertEqual(test_mocked_rpc_sync(), expected + 1)
+        self.assertEqual(run_mocked_rpc_sync(), expected + 1)
+
+    @mock.patch("torch.distributed.rpc.rpc_sync", side_effect=mock_rpc_sync)
+    def test_mock_function(self, mock_rpc_sync):
+        ret = rpc.rpc_sync("non_exist", torch.add, args=(torch.ones(2), 2))
+        self.assertEqual(ret, torch.ones(2) + 2)
 
     @dist_init
     def test_worker_id(self):
