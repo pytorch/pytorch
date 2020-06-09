@@ -422,8 +422,8 @@ def return_future():
     return torch.futures.Future()
 
 
-def mock_rpc_sync(to, func, args=None, kwargs=None):
-    return func(*args, **kwargs)
+def test_mocked_rpc_sync():
+    return rpc.rpc_sync("non_exist", torch.add, args=(torch.ones(2), 1)) + 1
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -441,9 +441,11 @@ class RpcTest(RpcAgentTestFixture):
 
         return decorator
 
-    @mock.patch.object(torch.distributed.rpc, "rpc_sync")
+    @mock.patch("torch.distributed.rpc.rpc_sync")
     def test_mock(self, mock_rpc_sync):
-        print(rpc.rpc_sync("non_exist", torch.add, args=(torch.ones(2), 1)))
+        expected = torch.ones(2) + 5
+        mock_rpc_sync.return_value = expected
+        self.assertEqual(test_mocked_rpc_sync(), expected + 1)
 
     @dist_init
     def test_worker_id(self):
