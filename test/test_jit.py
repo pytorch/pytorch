@@ -8060,8 +8060,7 @@ a")
                 FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
 
         @torch.jit.script
-        def test_dtype(inp_dtype):
-            # type: (int) -> Tuple[Tensor, Tensor]
+        def test_dtype(inp_dtype: torch.dtype):
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
             return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
