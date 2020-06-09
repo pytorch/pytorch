@@ -967,11 +967,12 @@ def parse_cpu_trace(thread_records):
                     is_async=is_async, is_remote=is_remote_event,
                     cpu_start_offset=cpu_start_offset)
                 # note: async events have only cpu total time
-                # TODO: CUDA support for remote events.
                 if not is_async and start.has_cuda():
                     if is_remote_event:
                         if not remote_start_cuda_records:
                             assert all([r.is_remote() for r in thread_record_list])
+                            # N.B.: There should be a __cuda_start_event for each
+                            # CUDA device.
                             remote_start_cuda_records = {
                                 r.device() : record
                                 for r in thread_record_list
