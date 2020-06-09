@@ -157,10 +157,7 @@ void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const Functi
   if (schema.isDefaultAliasAnalysisKind()) {
     TORCH_CHECK(false, toString(op.operator_name()), " can not be defined more than once");
   } else if (op.schema().isDefaultAliasAnalysisKind()) {
-    // [BACKWARDS COMPAT] If you POST-FACTO specify a non-default alias analysis
-    // kind after we already have a schema for a function, bong it in for BC
-    // reasons.
-    op.operatorIterator_->op.updateSchemaAliasAnalysis(schema.aliasAnalysis());
+    TORCH_CHECK(false, toString(op.operator_name()), " can not be defined more than once");
   } else {
     TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
       "Tried to define the schema for ", toString(op.operator_name()), " with different alias analysis kinds: ",

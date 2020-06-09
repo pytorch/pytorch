@@ -30,8 +30,8 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 }
 
 TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl_UNBOXED("aten::empty.memory_format",  &empty_override);
-  m.impl_UNBOXED("aten::add.Tensor",           &add_override);
+  m.impl_UNBOXED("aten::empty.memory_format",  empty_override);
+  m.impl_UNBOXED("aten::add.Tensor",           add_override);
 }
 
 TEST(BackendExtensionTest, TestRegisterOp) {
