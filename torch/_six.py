@@ -18,26 +18,4 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import sys
-
 string_classes = (str, bytes)
-
-if sys.version_info[:2] == (3, 2):
-    exec("""def raise_from(value, from_value):
-    try:
-        if from_value is None:
-            raise value
-        raise value from from_value
-    finally:
-        value = None
-""")
-elif sys.version_info[:2] > (3, 2):
-    exec("""def raise_from(value, from_value):
-    try:
-        raise value from from_value
-    finally:
-        value = None
-""")
-else:
-    def raise_from(value, from_value):
-        raise value
