@@ -272,8 +272,14 @@ void recurseThroughNestedModules(
     auto keys_value = keys_iter->tup_.at(i);
     auto key_string = toIValue(keys_value->asValue(loc, m))->toStringRef();
 
+    std::string submodule_prefix = prefix;
+    if (prefix != "") {
+      submodule_prefix = prefix + ".";
+    }
+    submodule_prefix = submodule_prefix + key_string;
+
     recurseThroughNestedModules(
-        loc, m, module_value, prefix, field, onModuleCallback);
+        loc, m, module_value, submodule_prefix, field, onModuleCallback);
   };
 }
 
@@ -387,11 +393,11 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   } else if (field == "named_modules" || field == "modules") {
     std::vector<SugaredValuePtr> keys;
     std::vector<SugaredValuePtr> values;
-    auto lambda = [&](std::shared_ptr<ModuleValue> module,
+    auto lambda = [&keys, &values](std::shared_ptr<ModuleValue> module,
                       SugaredValuePtr value,
                       SugaredValuePtr key) -> void {
-      keys.push_back(key);
-      values.push_back(value);
+      keys.emplace_back(key);
+      values.emplace_back(value);
     };
     recurseThroughNestedModules(loc, m, self_, "", field, lambda);
     if (field == "modules") {

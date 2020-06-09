@@ -9639,6 +9639,7 @@ a")
             def method(self, x, x1, y, y1):
                 mod_names = ""
                 for name, mod in self.named_modules():
+                    print("Name: " + name)
                     mod_names = mod_names + " " + name
                     x = mod(x)
 
@@ -9652,7 +9653,7 @@ a")
 
                 for mod in self.children():
                     y1 = mod(y1)
-
+                return mod_names
                 return mod_names, children_names, x, x1, y, y1
 
             def forward(self, x):
