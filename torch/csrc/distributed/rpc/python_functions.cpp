@@ -349,6 +349,7 @@ PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
     const float rpcTimeoutSeconds,
+    const bool isAsyncExecuion,
     const py::args& args,
     const py::kwargs& kwargs) {
   DCHECK(!PyGILState_Check());
@@ -366,7 +367,12 @@ PyRRef pyRemoteTorchscript(
   }
   DCHECK(!PyGILState_Check());
   auto rrefPtr = remoteTorchscript(
-      dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeoutSeconds);
+      dstWorkerName,
+      qualifiedName,
+      functionSchema,
+      stack,
+      rpcTimeoutSeconds,
+      isAsyncExecuion);
   return PyRRef(rrefPtr);
 }
 

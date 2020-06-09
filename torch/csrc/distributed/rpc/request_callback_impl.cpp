@@ -344,6 +344,39 @@ void RequestCallbackImpl::processRpc(
         return;
       }
 
+      std::function<void(const c10::intrusive_ptr<c10::ivalue::Future>&)>
+          scriptPostProcessing;
+      if (scriptRemoteCall.isAsyncExecution()) {
+        scriptPostProcessing = [ownerRRef, postProcessing](
+            const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) {
+          try {
+            auto valueJitFuture = jitFuture->value().toFuture();
+            valueJitFuture->addCallback(
+                [valueJitFuture, ownerRRef, postProcessing]() {
+                  try {
+                    ownerRRef->setValue(valueJitFuture->value());
+                  } catch (const std::exception& e) {
+                    ownerRRef->setError(e.what());
+                  }
+                  postProcessing();
+                });
+          } catch (const std::exception& e) {
+            ownerRRef->setError(e.what());
+            postProcessing();
+          }
+        };
+      } else {
+        scriptPostProcessing = [ownerRRef, postProcessing](
+            const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) {
+          try {
+            ownerRRef->setValue(jitFuture->value());
+          } catch (const std::exception& e) {
+            ownerRRef->setError(e.what());
+          }
+          postProcessing();
+        };
+      }
+
       c10::intrusive_ptr<c10::ivalue::Future> jitFuture;
       try {
         jitFuture = PythonRpcHandler::getInstance()
@@ -351,22 +384,15 @@ void RequestCallbackImpl::processRpc(
                         ->get_function(scriptRemoteCall.qualifiedName())
                         .runAsync(stack);
         if (jitFuture->completed()) { // short-cut.
-          ownerRRef->setValue(jitFuture->value());
-          postProcessing();
+          scriptPostProcessing(jitFuture);
           return;
         }
       } catch (const std::exception& e) {
-        ownerRRef->setError(e.what());
-        postProcessing();
+        scriptPostProcessing(jitFuture);
         return;
       }
-      jitFuture->addCallback([ownerRRef, postProcessing, jitFuture]() {
-        try {
-          ownerRRef->setValue(jitFuture->value());
-        } catch (const std::exception& e) {
-          ownerRRef->setError(e.what());
-        }
-        postProcessing();
+      jitFuture->addCallback([scriptPostProcessing, jitFuture]() {
+        scriptPostProcessing(jitFuture);
       });
       return;
     }
