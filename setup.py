@@ -735,11 +735,17 @@ if __name__ == '__main__':
 
     install_requires += extra_install_requires
 
+    # Read in README.md for our long_description
+    with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
+        long_description = f.read()
+
     setup(
         name=package_name,
         version=version,
         description=("Tensors and Dynamic neural networks in "
                      "Python with strong GPU acceleration"),
+        long_description=long_description,
+        long_description_content_type="text/markdown",
         ext_modules=extensions,
         cmdclass=cmdclass,
         packages=packages,

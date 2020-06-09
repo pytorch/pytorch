@@ -4338,15 +4338,12 @@
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: diag_out
-    CUDA: legacy::cuda::_th_diag_out
+    CPU: diag_cpu_out
+    CUDA: diag_cuda_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: diag
-    CUDA: legacy::cuda::_th_diag
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -4387,7 +4384,7 @@
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_trace
-    CUDA: legacy::cuda::_th_trace
+    CUDA: trace_cuda
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
