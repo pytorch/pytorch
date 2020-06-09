@@ -33,6 +33,8 @@ else
   export BUILDER_ROOT="$workdir/builder"
 fi
 
+git config --global submodule.fetchJobs 0
+
 # Clone the Pytorch branch
 retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"
