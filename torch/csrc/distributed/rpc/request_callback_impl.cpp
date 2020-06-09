@@ -401,7 +401,7 @@ void RequestCallbackImpl::processRpc(
               [ownerRRef, rrefId, forkId](
                   const py::object& result,
                   const int64_t messageId,
-                  PythonRpcHandler& pythonRpcHandler,
+                  PythonRpcHandler& /* unused */,
                   const std::shared_ptr<FutureMessage>& responseFuture) {
                 IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
 
