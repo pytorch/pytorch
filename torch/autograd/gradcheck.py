@@ -1,6 +1,6 @@
 import torch
 from torch.types import _TensorOrTensors
-from torch._six import container_abcs, istuple
+from torch._six import container_abcs
 import torch.testing
 from itertools import product
 import warnings
@@ -178,7 +178,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
 
 
 def _as_tuple(x):
-    if istuple(x):
+    if isinstance(x, tuple):
         return x
     elif isinstance(x, list):
         return tuple(x)

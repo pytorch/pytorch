@@ -16,7 +16,7 @@ import pickle
 import textwrap
 import operator
 from torch.utils.dlpack import from_dlpack, to_dlpack
-from torch._six import inf, nan, string_classes, istuple
+from torch._six import inf, nan, string_classes
 from itertools import product, combinations, combinations_with_replacement, permutations
 from functools import reduce
 from functools import partial
@@ -9363,7 +9363,7 @@ class TestTorchDeviceType(TestCase):
 
             def fn(x, dim, keepdim=False, out=None):
                 ans = fn_attr(x, dim, keepdim=keepdim, out=out)
-                return ans if not istuple(ans) else ans[0]
+                return ans if not isinstance(ans, tuple) else ans[0]
 
             def fn_tuple(x, dim, keepdim=False, out=None):
                 return fn_attr(x, dim, keepdim=keepdim, out=out)

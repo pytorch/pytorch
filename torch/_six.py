@@ -84,14 +84,6 @@ def get_function_from_type(cls, name):
 # Copyright(c) PyTorch contributors
 #
 
-def istuple(obj):
-    # Usually instances of PyStructSequence is also an instance of tuple
-    # but in some py2 environment it is not, so we have to manually check
-    # the name of the type to determine if it is a namedtupled returned
-    # by a pytorch operator.
-    t = type(obj)
-    return isinstance(obj, tuple) or t.__module__ == 'torch.return_types'
-
 
 def bind_method(fn, obj, obj_type):
     return types.MethodType(fn, obj)

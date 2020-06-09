@@ -1,5 +1,5 @@
 import torch
-from torch._six import inf, istuple
+from torch._six import inf
 from functools import reduce
 from operator import mul, itemgetter
 import collections
@@ -1138,7 +1138,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    if istuple(args):
+    if isinstance(args, tuple):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args
