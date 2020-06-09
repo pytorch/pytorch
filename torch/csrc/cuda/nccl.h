@@ -9,9 +9,9 @@
 #include <cstddef>
 #include <vector>
 
-enum ncclDataType_t : unsigned int;
-enum ncclResult_t : unsigned int;
-enum ncclRedOp_t : unsigned int;
+enum ncclDataType_t : unsigned short;
+enum ncclResult_t : unsigned short;
+enum ncclRedOp_t : unsigned short;
 typedef struct ncclComm* ncclComm_t;
 
 #define TORCH_CUDA_NCCL_UNIQUE_ID_BYTES 128
