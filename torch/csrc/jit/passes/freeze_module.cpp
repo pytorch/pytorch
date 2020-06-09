@@ -345,8 +345,9 @@ class AttributePropagator {
     auto node = n->inputs()[0]->node();
     // Check if first parameter of fork is a module. This module is used
     // as the base module (similar to 'self' in forward) to resolve GetAttrs.
-    if (node->kind() != prim::GetAttr)
+    if (node->kind() != prim::GetAttr) {
       return;
+    }
     auto name = node->s(attr::name);
     auto input = node->inputs()[0];
     if (!findConstantAttr(input, name, attrModule, graph)) {
