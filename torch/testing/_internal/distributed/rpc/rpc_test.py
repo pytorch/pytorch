@@ -422,6 +422,10 @@ def return_future():
     return torch.futures.Future()
 
 
+def mock_rpc_sync(to, func, args=None, kwargs=None):
+    return func(*args, **kwargs)
+
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -436,6 +440,10 @@ class RpcTest(RpcAgentTestFixture):
             )(old_func)
 
         return decorator
+
+    @mock.patch.object(torch.distributed.rpc, "rpc_sync")
+    def test_mock(self, mock_rpc_sync):
+        print(rpc.rpc_sync("non_exist", torch.add, args=(torch.ones(2), 1)))
 
     @dist_init
     def test_worker_id(self):
