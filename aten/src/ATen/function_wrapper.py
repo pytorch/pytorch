@@ -512,7 +512,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_definition_body': List[str],
     'type_method_definition_dispatch': str,
     'variants': str,
-    'with_gil': bool,
 })
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
