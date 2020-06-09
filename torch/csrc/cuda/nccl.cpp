@@ -1,5 +1,5 @@
-#include <torch/csrc/cuda/nccl.h>
 #include <nccl.h>
+#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/cuda/device_set.h>
 #include <ATen/core/functional.h>
 #include <torch/csrc/utils/hash.h>
