@@ -339,6 +339,9 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
 
+    .. note::
+        A common PyTorch convention is to save tensors using .pt file extension.
+
     .. warning::
         If you are using Python 2, :func:`torch.save` does NOT support :class:`StringIO.StringIO`
         as a valid file-like object. This is because the write method should return
@@ -473,7 +476,6 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         if storage.device.type == 'cpu':
             # If it's on the CPU we can directly copy it into the zip file
             num_bytes = storage.size() * storage.element_size()
-            buf = io.BytesIO()
             zip_file.write_record(name, storage.data_ptr(), num_bytes)
         else:
             # Copy to a buffer, then serialize that
@@ -810,14 +812,12 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
     loaded_storages = {}
 
-    def load_tensor(obj, size, key, location):
-        loaded_storages[key] = restore_location(obj, location)
+    def load_tensor(data_type, size, key, location):
         name = 'data/{}'.format(key)
-        size_long = struct.pack("<Q", size)
-        tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
-        offset = None
-        is_real_file = False
-        loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
+        dtype = data_type(0).dtype
+
+        storage = zip_file.get_storage_from_record(name, size, dtype).storage()
+        loaded_storages[key] = restore_location(storage, location)
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
@@ -828,7 +828,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
             "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
         data_type, key, location, size = data
         if key not in loaded_storages:
-            load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
+            load_tensor(data_type, size, key, _maybe_decode_ascii(location))
         storage = loaded_storages[key]
         return storage
 
