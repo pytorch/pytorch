@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
@@ -38,6 +39,10 @@ at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
 
 c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
+}
+
+c10::AliasAnalysisKind aliasAnalysisConservative() {
+  return c10::AliasAnalysisKind::CONSERVATIVE;
 }
 
 c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
@@ -129,6 +134,18 @@ RegisterOperators reg_rpc_ops(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     Operator(
+         "aten::dist_backward(int context_id, Tensor[] roots, bool retain_graph=False) -> ()",
+         [](Stack& stack) {
+           bool retain_graph = pop(stack).toBool();
+           auto roots_list = pop(stack).toTensorList();
+           int64_t context_id = pop(stack).toInt();
+           torch::autograd::variable_list roots(
+               roots_list.begin(), roots_list.end());
+           dist_autograd::backward(context_id, roots, retain_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
      Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
