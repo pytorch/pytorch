@@ -432,6 +432,18 @@ def run_mocked_rpc_sync():
     return rpc.rpc_sync("non_exist", torch.add, args=(torch.ones(2), 1)) + 1
 
 
+def run_mock_rpc_sync_thread():
+    ret = []
+    def run():
+        ret.append(rpc.rpc_sync("non_exist", torch.add, args=(torch.ones(2), 1)) + 3)
+
+    import threading
+    t = threading.Thread(target=run)
+    t.start()
+    t.join()
+    return ret[0]
+
+
 def run_mocked_rpc_async():
     fut = rpc.rpc_async("non_exist", torch.add, args=(torch.ones(2), 1))
     return fut.wait() + 2
@@ -457,6 +469,7 @@ class RpcTest(RpcAgentTestFixture):
         expected = torch.ones(2) + 5
         mock_rpc_sync.return_value = expected
         self.assertEqual(run_mocked_rpc_sync(), expected + 1)
+        self.assertEqual(run_mock_rpc_sync_thread(), expected + 3)
 
     @mock.patch("torch.distributed.rpc.rpc_async")
     def test_mock_rpc_async(self, mock_rpc_async):
