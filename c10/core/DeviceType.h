@@ -35,6 +35,7 @@ enum class DeviceType : int16_t {
 constexpr DeviceType kCPU = DeviceType::CPU;
 constexpr DeviceType kCUDA = DeviceType::CUDA;
 constexpr DeviceType kHIP = DeviceType::HIP;
+constexpr DeviceType kFPGA = DeviceType::FPGA;
 constexpr DeviceType kMSNPU = DeviceType::MSNPU;
 constexpr DeviceType kXLA = DeviceType::XLA;
 constexpr DeviceType kVulkan = DeviceType::Vulkan;
