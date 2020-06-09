@@ -363,28 +363,32 @@ class TestTensorBoardSummary(BaseTestCase):
                                             self))
 
     def test_image_with_one_channel(self):
-        self.assertTrue(compare_image_proto(summary.image('dummy',
-                                                    tensor_N(shape=(1, 8, 8)),
-                                                    dataformats='CHW'),
-                                                    self))  # noqa E127
+        self.assertTrue(compare_image_proto(
+            summary.image('dummy',
+                          tensor_N(shape=(1, 8, 8)),
+                          dataformats='CHW'),
+                          self))  # noqa E127
 
     def test_image_with_one_channel_batched(self):
-        self.assertTrue(compare_image_proto(summary.image('dummy',
-                                                    tensor_N(shape=(2, 1, 8, 8)),
-                                                    dataformats='NCHW'),
-                                                    self))  # noqa E127
+        self.assertTrue(compare_image_proto(
+            summary.image('dummy',
+                          tensor_N(shape=(2, 1, 8, 8)),
+                          dataformats='NCHW'),
+                          self))  # noqa E127
 
     def test_image_with_3_channel_batched(self):
-        self.assertTrue(compare_image_proto(summary.image('dummy',
-                                                    tensor_N(shape=(2, 3, 8, 8)),
-                                                    dataformats='NCHW'),
-                                                    self))  # noqa E127
+        self.assertTrue(compare_image_proto(
+            summary.image('dummy',
+                          tensor_N(shape=(2, 3, 8, 8)),
+                          dataformats='NCHW'),
+                          self))  # noqa E127
 
     def test_image_without_channel(self):
-        self.assertTrue(compare_image_proto(summary.image('dummy',
-                                                    tensor_N(shape=(8, 8)),
-                                                    dataformats='HW'),
-                                                    self))  # noqa E127
+        self.assertTrue(compare_image_proto(
+            summary.image('dummy',
+                          tensor_N(shape=(8, 8)),
+                          dataformats='HW'),
+                          self))  # noqa E127
 
     def test_video(self):
         try:

@@ -27,15 +27,13 @@ struct Argument {
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt,
-      bool is_inferred_type = false)
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
         type_(type ? type : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)),
-        is_inferred_type_(is_inferred_type) {
+        alias_info_(std::move(alias_info)) {
   }
   const std::string& name() const {
     return name_;
@@ -56,7 +54,14 @@ struct Argument {
     return alias_info_;
   }
   bool is_inferred_type() const {
-    return is_inferred_type_;
+    bool is_inferred_type = false;
+    TORCH_INTERNAL_ASSERT(type_);
+    if (auto pt = type_->cast<TensorType>()) {
+      if (pt->isInferredType()) {
+        is_inferred_type = true;
+      }
+    }
+    return is_inferred_type;
   }
 
   std::string formatTypeMismatchMsg(const std::string& actual_type) const {
@@ -105,7 +110,6 @@ private:
   // is this only specifyable as a keyword argument?
   bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
-  bool is_inferred_type_;
 };
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {

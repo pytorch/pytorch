@@ -2,7 +2,7 @@ from collections import namedtuple
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional, Any, Dict, Tuple
+from typing import NamedTuple, List, Optional, Dict, Tuple
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
@@ -16,7 +16,7 @@ class TestScriptPy3(JitTestCase):
         def func(x):
             hello, test = "Hello", "test"
             print(f"{hello + ' ' + test}, I'm a {test}") # noqa E999
-            print(f"format blank")
+            print(f"format blank") # noqa F541
             hi = 'hi'
             print(f"stuff before {hi}")
             print(f"{hi} stuff after")
@@ -39,6 +39,7 @@ class TestScriptPy3(JitTestCase):
     @unittest.skipIf(sys.version_info[:2] < (3, 7), "`dataclasses` module not present on < 3.7")
     def test_dataclass_error(self):
         from dataclasses import dataclass
+
         @dataclass
         class NormalizationInfo(object):
             mean: float = 0.0
@@ -256,6 +257,7 @@ class TestScriptPy3(JitTestCase):
                 return str(type(args[0]))
 
         the_class = MyPythonClass()
+
         @torch.jit.script
         def fn(x):
             return the_class(x)
@@ -422,19 +424,9 @@ class TestScriptPy3(JitTestCase):
                 if True:
                     x : Optional[int] = 7
 
-    def test_any_in_class_fails(self):
-        class MyCoolNamedTuple(NamedTuple):
-            a : Any
-            b : float
-            c : List[int]
-        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
-            @torch.jit.script
-            def foo():
-                return MyCoolNamedTuple(4, 5.5, [3])
-            print(foo.graph)
-
     def test_export_opnames_interface(self):
         global OneTwoModule
+
         @torch.jit.interface
         class OneTwoModule(nn.Module):
             def one(self, x, y):

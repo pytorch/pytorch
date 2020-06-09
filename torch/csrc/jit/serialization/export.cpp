@@ -32,13 +32,14 @@ void writeArchiveAndTensors(
     const std::string& archive_name,
     const char* data,
     size_t size,
-    const std::vector<WriteableTensorData>& tensors,
+    const std::vector<at::Tensor>& tensors,
     caffe2::serialize::PyTorchStreamWriter& out) {
   std::string prefix = archive_name + "/";
   size_t i = 0;
   for (const auto& td : tensors) {
+    WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string fname = prefix + std::to_string(i++);
-    out.writeRecord(fname, td.data(), td.sizeInBytes());
+    out.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
   }
   std::string fname = archive_name + ".pkl";
   out.writeRecord(fname, data, size);
@@ -87,13 +88,18 @@ void validateBlock(
         }
       }
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
-        FAIL_EXPORT(
-            "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
-            getNodeStackTraceString(node));
+        if (operator_export_type !=
+            onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {
+          FAIL_EXPORT(
+              "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
+              getNodeStackTraceString(node));
+        }
       }
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
-          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
+          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN ||
+          operator_export_type ==
+              onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH;
       if (node->kind().is_aten() && !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
