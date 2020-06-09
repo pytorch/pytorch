@@ -315,7 +315,6 @@ Tensor& smooth_l1_loss_out(Tensor& result, const Tensor& input, const Tensor& ta
 Tensor& smooth_l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
   auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
   auto iter = at::TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(grad_input)
     .add_input(input)
     .add_input(target)
@@ -363,7 +362,6 @@ Tensor& mse_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input, const Tensor& target, int64_t reduction) {
   auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
   auto iter = at::TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(grad_input)
     .add_input(input)
     .add_input(target)

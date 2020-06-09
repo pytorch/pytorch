@@ -154,12 +154,9 @@ struct CAFFE2_API TensorIterator {
 
   void foreach_reduced_elt(loop_subiter_t loop, bool parallelize=true);
 
-  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b,
-    bool check_mem_overlap = false);
-  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b,
-    bool check_mem_overlap = false);
-  static TensorIterator unary_op(Tensor& out, const Tensor& a,
-    bool check_mem_overlap = false);
+  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator unary_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
@@ -553,7 +550,7 @@ private:
 
   c10::optional<DimVector> static_shape_ = c10::nullopt;
   c10::optional<std::pair<ScalarType, Device>> static_dtype_and_device_ = c10::nullopt;
-  bool check_mem_overlap_ = false;
+  bool check_mem_overlap_ = true;
   bool allow_cpu_scalars_ = false;
   bool is_reduction_ = false;
   bool resize_outputs_ = true;

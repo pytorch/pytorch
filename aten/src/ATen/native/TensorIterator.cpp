@@ -686,9 +686,8 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 }
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
-    const Tensor& b, bool check_mem_overlap) {
+    const Tensor& b) {
   return TensorIteratorConfig()
-     .set_check_mem_overlap(check_mem_overlap)
      .add_output(out)
      .add_input(a)
      .add_input(b)
@@ -700,9 +699,8 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
 }
 
 TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
-    const Tensor& b, bool check_mem_overlap) {
+    const Tensor& b) {
   return TensorIteratorConfig()
-    .set_check_mem_overlap(check_mem_overlap)
     .add_output(out)
     .add_input(a)
     .add_input(b)
@@ -711,10 +709,8 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     .build();
 }
 
-TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
-    bool check_mem_overlap) {
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
   return TensorIteratorConfig()
-    .set_check_mem_overlap(check_mem_overlap)
     .add_output(out)
     .add_input(a)
     .cast_common_dtype_to_outputs(false)
@@ -735,6 +731,7 @@ TensorIterator TensorIterator::nullary_op(Tensor& out) {
 TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out.defined());
   return TensorIteratorConfig()
+    .set_check_mem_overlap(false)
     .add_output(out)
     .add_input(a)
     .resize_outputs(false)

@@ -11723,6 +11723,16 @@ class TestNNDeviceType(NNTestCase):
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
+    def test_leaky_relu_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.leaky_relu(x, inplace=True)
+
+    def test_threshold_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.threshold(x, 0.5, 0.5, inplace=True)
+
 
 class TestModuleGlobalHooks(TestCase):
 

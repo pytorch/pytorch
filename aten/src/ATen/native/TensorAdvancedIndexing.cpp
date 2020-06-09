@@ -54,6 +54,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
@@ -220,6 +221,7 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
               "got ", info.src.scalar_type(), " for the destination "
               "and ", value.scalar_type(), " for the source.");
   TensorIteratorConfig config;
+  config.set_check_mem_overlap(false);
   config.resize_outputs(false);
   config.check_all_same_dtype(false);
   config.add_output(info.src);
@@ -232,7 +234,8 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
 
 static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   TensorIteratorConfig config;
-  config.check_all_same_dtype(false)
+  config.set_check_mem_overlap(false)
+        .check_all_same_dtype(false)
         .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
         .add_output(Tensor())
         .add_input(info.src);
@@ -244,7 +247,8 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
 
 static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
   TensorIteratorConfig config;
-  config.check_all_same_dtype(false)
+  config.set_check_mem_overlap(false)
+        .check_all_same_dtype(false)
         .add_output(result)
         .add_input(info.src);
   for (auto& index : info.indices) {
@@ -264,6 +268,7 @@ Tensor index(const Tensor & self, TensorList indices) {
 
 Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  at::assert_no_internal_overlap(result);
 
   auto info = make_info(self, indices);
   auto iter = make_index_out_iterator(info, result);
@@ -283,6 +288,7 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
       index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
       return self;
   }
+  at::assert_no_internal_overlap(self);
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
@@ -417,6 +423,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
               "index_select(): self and result must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(),
               "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
+  at::assert_no_internal_overlap(result);
 
   auto result_size = self.sizes().vec();
   if (self.dim() > 0) {
@@ -623,6 +630,7 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar 
   }
 
   auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(self)

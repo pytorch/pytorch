@@ -3,6 +3,7 @@
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 namespace at { namespace native {
 
@@ -10,6 +11,7 @@ namespace at { namespace native {
 
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+  at::assert_no_internal_overlap(self);
   Tensor b_mask;
   std::tie(b_mask) = expand_inplace(self, mask, "masked_fill_");
   // As we dispatch on self and TH is type-checked, we need different definitions.
@@ -27,6 +29,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
 
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & value) {
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+  at::assert_no_internal_overlap(self);
 
   TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", value.dim(), " dimension(s).");
@@ -46,6 +49,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
 }
 
 Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & source) {
+  at::assert_no_internal_overlap(self);
   Tensor b_mask;
   std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
   // As we dispatch on self and TH is type-checked, we need different definitions.
@@ -60,6 +64,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & 
 }
 
 Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, Scalar other) {
+  at::assert_no_internal_overlap(result);
   return legacy::cuda::_th_fmod_out(result, self, other);
 }
 
@@ -68,6 +73,7 @@ Tensor fmod_cuda(const Tensor & self, Scalar other) {
 }
 
 Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  at::assert_no_internal_overlap(result);
   Tensor b_self, b_other;
   // optimization that codegen used to do; avoids broadcast.
   if (other.dim() == 0) {
@@ -88,6 +94,7 @@ Tensor fmod_cuda(const Tensor & self, const Tensor & other) {
 }
 
 Tensor & fmod_cuda_(Tensor & self, Scalar other) {
+  at::assert_no_internal_overlap(self);
   return legacy::cuda::_th_fmod_(self, other);
 }
 
@@ -96,6 +103,7 @@ Tensor & fmod_cuda_(Tensor & self, const Tensor & other) {
   if (other.dim() == 0) {
     return fmod_cuda_(self, other.item());
   }
+  at::assert_no_internal_overlap(self);
   Tensor b_other;
   std::tie(b_other) = expand_inplace(self, other, "fmod_");
   return legacy::cuda::_th_fmod_(self, b_other);
