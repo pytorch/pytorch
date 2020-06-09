@@ -8,7 +8,7 @@ if [ $(which clang-tidy) ]
 then
   echo "Running pre-commit clang-tidy"
   python tools/clang_tidy.py \
-    --paths torch/csrc \
+    --paths torch/csrc aten/src/ATen/ \
     --diff HEAD \
     -g"-torch/csrc/jit/serialization/export.cpp" \
     -g"-torch/csrc/jit/serialization/import.cpp" \
