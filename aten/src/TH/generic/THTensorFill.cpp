@@ -22,9 +22,4 @@ void THTensor_(fill)(THTensor *r_, scalar_t value)
   }
 }
 
-void THTensor_(zero)(THTensor *r_)
-{
-  THTensor_(fill)(r_, 0);
-}
-
 #endif
