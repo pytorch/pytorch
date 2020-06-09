@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 
+#include <ATen/Context.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include "cub/util_allocator.cuh"
 
@@ -279,6 +280,8 @@ static void Caffe2SetCUDAMemoryPool() {
     SetUpCub();
   } else if (FLAGS_caffe2_cuda_memory_pool == "thc") {
     g_cuda_memory_pool_type = CudaMemoryPoolType::THC;
+    // Initialize caching allocator
+    at::globalContext().lazyInitCUDA();
   } else {
     CAFFE_THROW(
         "Unrecognized cuda memory pool type: ", FLAGS_caffe2_cuda_memory_pool);
