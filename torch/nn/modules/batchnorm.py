@@ -467,28 +467,31 @@ class SyncBatchNorm(_BatchNorm):
 
     @classmethod
     def convert_sync_batchnorm(cls, module, process_group=None):
-        r"""Helper function to convert `torch.nn.BatchNormND` layer in the model to
-        `torch.nn.SyncBatchNorm` layer.
+        r"""Helper function to convert all :attr:`BatchNorm*D` layers in the model to
+        :class:`torch.nn.SyncBatchNorm` layers.
 
         Args:
-            module (nn.Module): containing module
+            module (nn.Module): module containing one or more attr:`BatchNorm*D` layers
             process_group (optional): process group to scope synchronization,
-        default is the whole world
+                default is the whole world
 
         Returns:
-            The original module with the converted `torch.nn.SyncBatchNorm` layer
+            The original :attr:`module` with the converted :class:`torch.nn.SyncBatchNorm`
+            layers. If the original :attr:`module` is a :attr:`BatchNorm*D` layer,
+            a new :class:`torch.nn.SyncBatchNorm` layer object will be returned
+            instead.
 
         Example::
 
             >>> # Network with nn.BatchNorm layer
             >>> module = torch.nn.Sequential(
             >>>            torch.nn.Linear(20, 100),
-            >>>            torch.nn.BatchNorm1d(100)
+            >>>            torch.nn.BatchNorm1d(100),
             >>>          ).cuda()
             >>> # creating process group (optional)
             >>> # process_ids is a list of int identifying rank ids.
             >>> process_group = torch.distributed.new_group(process_ids)
-            >>> sync_bn_module = convert_sync_batchnorm(module, process_group)
+            >>> sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module, process_group)
 
         """
         module_output = module
