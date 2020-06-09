@@ -494,8 +494,10 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   // Half is not supported on CPU.
   if (!with_replacement &&
       !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half)) {
-    auto rand = at::rand_like(self);
-    std::tie(std::ignore, result) = (rand.log() / self).topk(n_sample);
+    auto rand = at::empty_like(self).uniform_(0, 1, gen);
+    rand.log_().div_(self); //save memory with inplace operations
+    Tensor vals = at::empty_like(self);
+    at::topk_out(vals, result, rand, n_sample);
     return result;
   }
   multinomial_stub(result.device().type(), result, self, n_sample, with_replacement, gen);
