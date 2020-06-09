@@ -1997,7 +1997,7 @@ class TestQuantizedOps(TestCase):
         pads = [0, 0]
         dilations = [1, 1]
 
-        w_packed = torch.ops.quantized.conv2d_prepack(qw, bias_float, strides, pads, (0, 0), dilations, 1, False)
+        w_packed = torch.ops.quantized.conv2d_prepack(qw, bias_float, strides, pads, dilations, 1)
         result = torch.ops.quantized.conv2d(qX, w_packed, 1.0, 0)
         self.assertEqual(result.shape, (0, 2, 3, 3))
 
@@ -2400,9 +2400,7 @@ class TestQuantizedConv(unittest.TestCase):
         else:
             dilations = (1,) * len(strides)
 
-        output_pads = (0,) * len(strides)
-        W_packed = qconv_prepack_fn(W_q, bias, strides, pads, output_pads,
-                                    dilations, groups, transpose=False)
+        W_packed = qconv_prepack_fn(W_q, bias, strides, pads, dilations, groups)
         (W_unpacked, bias) = qconv_unpack_fn(W_packed)
 
         # Assert equal
@@ -2521,10 +2519,8 @@ class TestQuantizedConv(unittest.TestCase):
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
             dtype=torch.quint8)
 
-        output_pads = (0,) * len(strides)
         W_prepack = qconv_prepack_fn(
-            W_q, bias_float, strides, pads, output_pads, dilations, groups,
-            transpose=False)
+            W_q, bias_float, strides, pads, dilations, groups)
         Y_q = qconv_fn(
             X_q,
             W_prepack,
