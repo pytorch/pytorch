@@ -1705,14 +1705,14 @@ class TestCuda(TestCase):
         with ctx.Pool(1, initializer=self.mute) as pool:
             errors = pool.map(method, [arg])
             for e in errors:
-                if 'self contains either `inf`, `nan` or element < 0' not in str(e):
+                if 'device-side assert triggered' not in str(e):
                     self.fail(e)
 
     @staticmethod
     def _test_multinomial_invalid_probs_cuda(probs):
         try:
             with torch.random.fork_rng(devices=[0]):
-                torch.multinomial(probs.to('cuda'), 2)
+                torch.multinomial(probs.to('cuda'), 2, replacement=True)
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:

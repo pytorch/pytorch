@@ -1365,7 +1365,7 @@ class AbstractTestCases:
                 torch.multinomial(probs.to('cpu'), 2)
                 return False  # Should not be reached
             except RuntimeError as e:
-                return 'self contains either `inf`, `nan` or element < 0' in str(e)
+                return 'probability tensor contains either `inf`, `nan` or element < 0' in str(e)
 
         @slowTest
         @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
@@ -17411,7 +17411,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_multinomial_invalid(self, device):
         def test(probs):
             with self.assertRaisesRegex(RuntimeError,
-                                        'self contains either `inf`, `nan` or element < 0'):
+                                        'probability tensor contains either `inf`, `nan` or element < 0'):
                 torch.multinomial(probs.to(device), 2)
         test(torch.Tensor([1, -1, 1]))
         test(torch.Tensor([1, inf, 1]))
