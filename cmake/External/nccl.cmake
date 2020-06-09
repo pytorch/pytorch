@@ -76,4 +76,29 @@ if(NOT __NCCL_INCLUDED)
     target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
     target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
   endif()
+  if(USE_GLOO)
+    if(NOT TARGET nccl_external)
+      ExternalProject_Add(nccl_external
+        SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl
+        BUILD_IN_SOURCE 1
+        CONFIGURE_COMMAND ""
+        BUILD_COMMAND
+          env
+          # TODO: remove these flags when
+          # https://github.com/pytorch/pytorch/issues/13362 is fixed
+          "CCACHE_DISABLE=1"
+          "SCCACHE_DISABLE=1"
+          make
+          "CXX=${CMAKE_CXX_COMPILER}"
+          "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
+          "NVCC=${CUDA_NVCC_EXECUTABLE}"
+          "NVCC_GENCODE=${NVCC_GENCODE}"
+          "BUILDDIR=${__NCCL_BUILD_DIR}"
+          "VERBOSE=0"
+          "-j"
+          BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
+        INSTALL_COMMAND ""
+        )
+    endif()
+  endif()
 endif()
