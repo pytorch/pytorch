@@ -12,6 +12,9 @@ class _LRScheduler:
 class LambdaLR(_LRScheduler):
     def __init__(self, optimizer: Optimizer, lr_lambda: Union[Callable[[int], float], List[Callable[[int], float]]], last_epoch: int=...) -> None: ...
 
+class MultiplicativeLR(_LRScheduler):
+    def __init__(self, optimizer: Optimizer, lr_lambda: Union[Callable[[int], float], List[Callable[[int], float]]], last_epoch: int=...) -> None: ...
+
 class StepLR(_LRScheduler):
     def __init__(self, optimizer: Optimizer, step_size: int, gamma: float=..., last_epoch: int=...) -> None:...
 
@@ -37,3 +40,10 @@ class CyclicLR(_LRScheduler):
 
 class CosineAnnealingWarmRestarts(_LRScheduler):
     def __init__(self, optimizer: Optimizer, T_0: int=..., T_mult: int=..., eta_min: int=..., last_epoch: int=...) -> None: ...
+    def step(self, epoch: Optional[int] = ...) -> None: ...
+
+class OneCycleLR(_LRScheduler):
+    def __init__(self, optimizer: Optimizer, max_l: Union[float, List[float]], total_steps: int=..., epochs: int=...,
+                 steps_per_epoc :int=..., pct_start :float=..., anneal_strategy: str=..., cycle_momentum: bool=...,
+                 base_momentum: Union[float, List[float]]=..., max_momentum: Union[float, List[float]]=...,
+                 div_factor: float=..., final_div_factor: float=..., last_epoch: int=...) -> None: ...
