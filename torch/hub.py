@@ -437,7 +437,7 @@ def load_state_dict_from_url(url, model_dir=None, file_name=None, map_location=N
     Args:
         url (string): URL of the object to download
         model_dir (string, optional): directory in which to save the object
-        file_name (string, optional): name for the downloaded file (default: from url) 
+        file_name (string, optional): name for the downloaded file. Filename from `url` will be used if not set.
         map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)
         progress (bool, optional): whether or not to display a progress bar to stderr.
             Default: True
