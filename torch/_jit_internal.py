@@ -65,6 +65,12 @@ def createResolutionCallbackFromEnv(lookup_base):
             assert len_parsed == len(expr), "whole expression was not parsed, falling back to c++ parser"
             return value
         except Exception as e:
+            """
+            The python resolver fails in several cases in known unit tests, and is intended
+            to fall back gracefully to the c++ resolver in general.  For example, python 2 style
+            annotations which are frequent in our unit tests often fail with types e.g. int not
+            resolvable from the calling frame.
+            """
             return None
 
     return lambda expr: parseExpr(expr, lookup_base)
