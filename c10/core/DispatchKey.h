@@ -52,6 +52,7 @@ enum class DispatchKey : uint8_t {
   CUDA, // registered at build/aten/src/ATen/CUDAType.cpp
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
        // CUDA]
+  FPGA, // Xilinx support lives out of tree at https://gitlab.com/pytorch-complex/vitis_kernels
   MSNPU, // unused externally, but tested at
          // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
@@ -137,6 +138,8 @@ enum class DispatchKey : uint8_t {
   Autograd,
 
   Profiler,
+
+  Tracer,
 
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
   // (aka Autograd) for operators which have a Variable kernel
