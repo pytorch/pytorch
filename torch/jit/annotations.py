@@ -11,7 +11,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, \
     DeviceObjType, RRefType, FutureType
 
 from textwrap import dedent
-from torch._six import builtins
+import builtins
 from torch._utils_internal import get_source_lines_and_file
 
 

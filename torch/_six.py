@@ -30,12 +30,6 @@ PY37 = sys.version_info[0] == 3 and sys.version_info[1] == 7
 
 
 if PY2:
-    import __builtin__ as builtins
-elif PY3:
-    import builtins
-
-
-if PY2:
     inf = float('inf')
     nan = float('nan')
 else:

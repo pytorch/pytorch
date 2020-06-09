@@ -8,7 +8,7 @@ import inspect
 import weakref
 import warnings
 import torch
-from torch._six import builtins
+import builtins
 from torch._utils_internal import get_source_lines_and_file
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
 
