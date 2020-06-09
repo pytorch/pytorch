@@ -60,14 +60,3 @@ else:
 # Gets a function from the name of a method on a type
 def get_function_from_type(cls, name):
     return getattr(cls, name, None)
-
-
-# The codes below is not copied from the six package, so the copyright
-# declaration at the beginning does not apply.
-#
-# Copyright(c) PyTorch contributors
-#
-
-
-def bind_method(fn, obj, obj_type):
-    return types.MethodType(fn, obj)

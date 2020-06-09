@@ -9,7 +9,7 @@ import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args
 from torch.jit._builtins import _find_builtin
 from torch.nn import Module
-from torch._six import get_function_from_type, bind_method
+from torch._six import get_function_from_type
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -620,7 +620,7 @@ def lazy_bind(concrete_type, unbound_method):
                 setattr(script_module, name, value)
 
         script_module = torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
-        method = bind_method(unbound_method, script_module, torch.jit.RecursiveScriptModule)
+        method = types.MethodType(unbound_method, script_module)
         return method(*args)
 
     # make the lazy binding method "look like" the original method
