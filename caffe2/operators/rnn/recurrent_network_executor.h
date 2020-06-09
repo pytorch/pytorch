@@ -39,13 +39,14 @@ class RecurrentNetworkExecutorBase {
         timestep_blob_(timestep_blob) {
     const bool net_def_has_device_option = step_net_def_.has_device_option();
     for (int i = 0; i < step_net_def_.op_size(); i++) {
-      if (!step_net_def_.op(i).has_device_option() &&
-          net_def_has_device_option) {
-        // In the case that the operator def does not specify a device option
-        // but the net def has a default option, we copy the device option over
-        // to the operator def.
-        step_net_def_.mutable_op(i)->mutable_device_option()->CopyFrom(
-            step_net_def_.device_option());
+      if (net_def_has_device_option) {
+        // In the case when net def specifies device option, final device option
+        // will be equal to merge of operator and net def device options, with
+        // preference to settings from the operator.
+        DeviceOption option;
+        option.CopyFrom(step_net_def_.device_option());
+        option.MergeFrom(step_net_def_.op(i).device_option());
+        step_net_def_.mutable_op(i)->mutable_device_option()->CopyFrom(option);
       }
       op_deps_.push_back(op_deps(i));
     }
@@ -260,7 +261,7 @@ class RecurrentNetworkExecutorBase {
           for (string& dep_out : op_deps_[i]) {
             auto oit = outputs.find(dep_out);
             if (oit != outputs.end()) {
-              // This op produces output of the orignal op, so the dependency
+              // This op produces output of the original op, so the dependency
               // passed through that op
               outputs.erase(oit);
             }

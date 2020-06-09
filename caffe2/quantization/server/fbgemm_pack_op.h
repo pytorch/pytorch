@@ -10,6 +10,13 @@ namespace caffe2 {
 
 using FCFp32Op = FullyConnectedOp<CPUContext>;
 
+void QuantizeConvBias(
+    const Blob& blob,
+    int M,
+    const dnnlowp::TensorQuantizationParams& in_qparams,
+    const vector<dnnlowp::TensorQuantizationParams>& filter_qparams,
+    std::vector<int32_t>& b_quantized);
+
 class FullyConnectedDNNLowPPackWeightOp final
     : public DNNLowPOp<std::uint8_t, FCFp32Op> {
  public:
@@ -56,6 +63,9 @@ class ConvDNNLowPPackWeightOp final
   bool TakeDepthWise3x3FastPath_();
   bool TakeDepthWise3x3x3FastPath_();
   bool TakeGConvFastPath_();
+
+  fbgemm::conv_param_t<> GetConvParam_();
+  fbgemm::conv_param_t<3> GetConv3DParam_();
 
   // Save quantized weights right after quantization before layout packing for
   // performance purpose

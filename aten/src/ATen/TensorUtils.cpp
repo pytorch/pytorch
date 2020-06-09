@@ -134,7 +134,7 @@ void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors) {
 
 void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
   TORCH_CHECK(
-    t1->type() == t2->type(),
+    t1->options().type_equal(t2->options()),
     "Expected tensor for ", t1, " to have the same type as tensor for ", t2,
     "; but type ", t1->toString(), " does not equal ", t2->toString(),
     " (while checking arguments for ", c, ")");
@@ -196,9 +196,9 @@ void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
 
 void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
   TORCH_CHECK(
-    !t.defined() || t.type().backend() == backend,
+    !t.defined() || t.options().backend() == backend,
     "Expected tensor to have ", toString(backend),
-    " Backend, but got tensor with ", toString(t.type().backend()), " Backend ",
+    " Backend, but got tensor with ", toString(t.options().backend()), " Backend ",
     "(while checking arguments for ", c, ")");
 }
 
@@ -210,9 +210,9 @@ void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Backend backe
 
 void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
   TORCH_CHECK(
-      !t.defined() || t.type().device_type() == device_type,
+      !t.defined() || t.device().type() == device_type,
       "Expected tensor to have ", device_type,
-      " DeviceType, but got tensor with ", t.type().device_type(), " DeviceType ",
+      " DeviceType, but got tensor with ", t.device().type(), " DeviceType ",
       "(while checking arguments for ", c, ")");
 }
 
@@ -298,17 +298,20 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   return strides;
 }
 
-int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
+size_t computeStorageNbytes(
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    size_t itemsize_bytes) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
-  int64_t size = 1;
+  size_t size = 1;
   for(size_t i = 0; i < sizes.size(); i++) {
     if(sizes[i] == 0) {
       return 0;
     }
     size += strides[i]*(sizes[i]-1);
   }
-  return size;
+  return size * itemsize_bytes;
 }
 
 // On a high level,
@@ -351,7 +354,7 @@ c10::optional<std::vector<int64_t>> computeStride(
     return newstride;
   }
 
-  int64_t view_d = newshape.size() - 1;
+  int64_t view_d = (int64_t)newshape.size() - 1;
   // stride for each subspace in the chunk
   int64_t chunk_base_stride = oldstride.back();
   // numel in current chunk

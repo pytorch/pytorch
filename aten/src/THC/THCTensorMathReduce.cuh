@@ -96,17 +96,17 @@ struct ReduceWelford {
 
 template <typename T, typename U>
 struct VarianceWelford {
-  VarianceWelford(const int _biased, const bool _apply_sqrt): biased{_biased}, apply_sqrt(_apply_sqrt) {}
+  VarianceWelford(const int _unbiased, const bool _apply_sqrt): unbiased{_unbiased}, apply_sqrt(_apply_sqrt) {}
 
   inline __device__ T operator()(const WelfordData<T, U> &a) const {
-    T res = THCNumerics<T>::div(a.m_2_n_, biased!=0 ? a.count_ : a.count_-1);
+    T res = THCNumerics<T>::div(a.m_2_n_, unbiased ? a.count_ : a.count_-1);
     if (apply_sqrt) {
       return THCNumerics<T>::sqrt(res);
     }
     return res;
   }
 
-  const int biased;
+  const int unbiased;
   const bool apply_sqrt;
 };
 
@@ -160,20 +160,6 @@ struct SquareFunctor {
     const T mean;
 };
 
-template <typename T>
-struct ReduceMin {
-  inline __device__ T operator()(T a, T b) const {
-    return (THCNumerics<T>::lt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
-  }
-};
-
-template <typename T>
-struct ReduceMax {
-  inline __device__ T operator()(T a, T b) const {
-    return (THCNumerics<T>::gt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
-  }
-};
-
 struct LogicalAll {
   inline __device__ unsigned char operator()(const unsigned char x,
                                              const unsigned char y) const {
@@ -211,7 +197,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
     // get norm of axis
     for (ptrdiff_t i = tx; i < size; i += step) {
       const AccT val = scalar_cast<AccT>(row[i]);
-      buffer[tx] = THCMax<AccT>(buffer[tx], THCNumerics<AccT>::abs(val));
+      buffer[tx] = THCMax<AccT>(buffer[tx], static_cast<AccT>(std::abs(val)));
     }
     // add (reduce)
     for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
@@ -228,7 +214,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
       const AccT val = scalar_cast<AccT>(row[i]);
       buffer[tx] = THCNumerics<AccT>::add(
         buffer[tx],
-        THCNumerics<AccT>::pow(THCNumerics<AccT>::abs(val), value)
+        THCNumerics<AccT>::pow(static_cast<AccT>(std::abs(val)), value)
       );
     }
     // add (reduce)
@@ -239,7 +225,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
     }
     // clip norms
     __syncthreads();
-    norm = THCNumerics<AccT>::pow(buffer[0], THCNumerics<AccT>::cinv(value));
+    norm = THCNumerics<AccT>::pow(buffer[0], static_cast<AccT>(1) / value);
   }
 
   if (THCNumerics<AccT>::gt(norm, maxnorm)) {
@@ -267,21 +253,6 @@ struct TensorNonZeroOp {
   }
 };
 
-template <typename T, int StaticExp>
-struct TensorNormOp {
-  TensorNormOp(T _exponent) : exponent{_exponent} {}
-
-  __host__ __device__ T operator()(const T x) const {
-    switch (StaticExp) {
-      case 1: return THCNumerics<T>::abs(x);
-      case 2: return THCNumerics<T>::mul(x, x);
-      default: return THCNumerics<T>::pow(THCNumerics<T>::abs(x), exponent);
-    }
-  }
-
-  const T exponent;
-};
-
 /*
   Fuses conversions and a TensorDistOp. Needed for Thrust.
 */
@@ -298,13 +269,13 @@ struct ThrustTensorDistOp {
       return scalar_cast<AccT>(1);
     }
     if (THCNumerics<AccT>::eq(exponent, scalar_cast<AccT, float>(1))) {
-      return THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y));
+      return static_cast<AccT>(std::abs(THCNumerics<AccT>::sub(x, y)));
     } else if (THCNumerics<AccT>::eq(exponent, scalar_cast<AccT, float>(2))) {
       return THCNumerics<AccT>::pow(
         THCNumerics<AccT>::sub(x, y), exponent);
     } else {
       return THCNumerics<AccT>::pow(
-        THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y)),
+        static_cast<AccT>(std::abs(THCNumerics<AccT>::sub(x, y))),
         exponent);
     }
   }
@@ -346,249 +317,6 @@ __forceinline__ __device__ T THCTensor_computeVar(
   return sum2;
 }
 
-/* A set of reduction kernels that take in binary ops on thrust pairs (of value, index).
-   These are useful when you not only have to do a reduction, but you might have
-   to preserve the location of contention (for example min/max operations).
-   The structure of the kernels follows the structure of the reduction kernels.
-*/
-template <typename K, typename Index, class BinaryFunction>
-__global__ void
-kernelTransformReduceOuterDimIndex(K *tgt1,
-                                   Index *tgt2,
-                                   K *src_,
-                                   unsigned num_orows,
-                                   unsigned num_irows,
-                                   unsigned row_size,
-                                   thrust::pair<K, Index> init,
-                                   BinaryFunction binary_op) {
-  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x;
-         irow < num_irows;
-         irow += gridDim.y * blockDim.x) {
-      K *src = src_ + orow * row_size * num_irows + irow;
-      thrust::pair<K, Index> acc = init;
-
-      for (unsigned col = 0; col < row_size; ++col) {
-        // +1 for Lua index
-        acc = binary_op(acc,
-                        thrust::make_pair<K, Index>(*src, col));
-        src += num_irows;
-      }
-
-      tgt1[orow * num_irows + irow] = acc.first;
-      tgt2[orow * num_irows + irow] = acc.second;
-    }
-  }
-}
-
-template <typename ScalarTypeK,
-          typename ScalarTypeIndex,
-          typename TensorTypeK,
-          typename TensorTypeIndex,
-          typename BinaryFunction>
-__host__ void
-THC_transformReduceOuterDimIndex(THCState *state,
-                                 TensorTypeK *tgt1,
-                                 TensorTypeIndex *tgt2,
-                                 TensorTypeK *src,
-                                 int64_t rdim,
-                                 const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
-                                 BinaryFunction binary_op) {
-  unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
-  unsigned num_orows = 1;
-  for (int64_t dim = 0; dim < rdim; dim++) {
-    num_orows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
-  }
-  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, rdim);
-  unsigned num_irows = 1;
-  for (unsigned dim = rdim + 1; dim < ndim; dim++) {
-    num_irows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
-  }
-
-  dim3 threads(min(512, num_irows));
-  unsigned maxGridDim = 1024;
-  dim3 grid(min(maxGridDim, num_orows),
-            min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
-
-  kernelTransformReduceOuterDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-      tgt1->template data<ScalarTypeK>(),
-      tgt2->template data<ScalarTypeIndex>(),
-      src->template data<ScalarTypeK>(),
-      num_orows, num_irows, row_size, init, binary_op);
-
-  THCudaCheck(cudaGetLastError());
-}
-
-/* Reduce the innermost dimension of a tensor (on thrust::pair functors which are (value, index))
- *
- * For an n-d tensor (n <= 4) where the reduction is along the innermost dimension:
- *
- * - block.x is the innermost dimension, i.e. dimension 0;
- * - block.y and grid.y make up dimension 1; and
- * - grid.x and grid z are the remaining two outer dimensions (if any)
- *
- * Reduction along other dimensions is handled in a separate kernel.
- */
-template <typename K, typename Index, class BinaryFunction>
-__global__ void
-kernelTransformReduceInnermostDimIndex(K *tgt1,
-                                       Index* tgt2,
-                                       K *src_,
-                                       unsigned num_rows,
-                                       unsigned row_size,
-                                       thrust::pair<K, Index> init,
-                                       BinaryFunction binary_op) {
-  __shared__ K sbuf[32][16 + 1]; // avoid bank conflict
-  __shared__ Index ibuf[32][16 + 1]; // avoid bank conflict
-
-  for (unsigned block_row = blockIdx.x * blockDim.y;
-       block_row < num_rows;
-       block_row += blockDim.y * gridDim.x) {
-    unsigned row = block_row + threadIdx.y;
-    thrust::pair<K, Index> acc = init;
-    if (row < num_rows) {
-      K *src = src_ + row * row_size;
-      // Sequential reduction within a thread.
-      for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
-        acc = binary_op(acc, thrust::make_pair<K, Index>(src[col], col));
-      }
-    }
-
-    sbuf[threadIdx.y][threadIdx.x] = acc.first;
-    ibuf[threadIdx.y][threadIdx.x] = acc.second;
-
-    __syncthreads();
-
-    // Reduce intermediate values to single value.
-    K* sline = &sbuf[threadIdx.y][0];
-    Index* iline = &ibuf[threadIdx.y][0];
-    for (unsigned s = 8; s > 0; s >>= 1) {
-      if (row < num_rows && threadIdx.x < s) {
-        thrust::pair<K, Index> arg1 =
-          thrust::make_pair<K, Index>(sline[threadIdx.x], iline[threadIdx.x]);
-        thrust::pair<K, Index> arg2 =
-          thrust::make_pair<K, Index>(sline[threadIdx.x + s], iline[threadIdx.x + s]);
-        thrust::pair<K, Index> res = binary_op(arg1, arg2);
-
-        sline[threadIdx.x] = res.first;
-        iline[threadIdx.x] = res.second;
-      }
-      __syncthreads();
-    }
-
-    if (row < num_rows && threadIdx.x == 0) {
-      tgt1[row] = sline[0];
-      tgt2[row] = iline[0];
-    }
-    __syncthreads();
-  }
-}
-
-template <typename ScalarTypeK,
-          typename ScalarTypeIndex,
-          typename TensorTypeK,
-          typename TensorTypeIndex,
-          typename BinaryFunction>
-__host__ void
-THC_transformReduceInnermostDimIndex(THCState *state,
-                                     TensorTypeK *tgt1,
-                                     TensorTypeIndex *tgt2,
-                                     TensorTypeK *src,
-                                     const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
-                                     BinaryFunction binary_op) {
-  unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
-  unsigned num_rows = 1;
-  for (unsigned dim = 0; dim < ndim - 1; dim++) {
-    num_rows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
-  }
-  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, ndim - 1);
-
-  dim3 threads(16, 32);
-  dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
-
-  kernelTransformReduceInnermostDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-      tgt1->template data<ScalarTypeK>(),
-      tgt2->template data<ScalarTypeIndex>(),
-      src->template data<ScalarTypeK>(),
-      num_rows, row_size, init, binary_op);
-
-  THCudaCheck(cudaGetLastError());
-}
-
-template <typename ScalarTypeK,
-          typename ScalarTypeIndex,
-          typename TensorTypeK,
-          typename TensorTypeIndex,
-          typename BinaryFunction>
-void
-THC_reduceDimIndex(THCState *state,
-                   TensorTypeK *tgt1_,
-                   TensorTypeIndex *tgt2_,
-                   TensorTypeK *src,
-                   int64_t dimension,
-                   int keepdim,
-                   const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
-                   BinaryFunction binary_op)
-{
-  THArgCheck(dimension >= 0 &&
-             dimension < THCTensor_nDimensionLegacyAll(state, src),
-             3, "dimension out of range");
-
-
-  // Unsqueeze tgt1_/tgt_2 if necessary so that their contiguity traits
-  // are preserved if they are the same size as the correct reduction output.
-  int src_dims = THCTensor_nDimensionLegacyAll(state, src);
-  THCTensor_preserveReduceDimSemantics(
-      state, tgt1_, src_dims, dimension, keepdim);
-  THCTensor_preserveReduceDimSemantics(
-      state, tgt2_, src_dims, dimension, keepdim);
-
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(src);
-  dim[dimension] = 1;
-  THCTensor_resize(state, tgt1_, dim, {});
-  THCTensor_resize(state, tgt2_, dim, {});
-
-  TensorTypeK *tgt1 = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, tgt1_);
-  TensorTypeIndex *tgt2 = (TensorTypeIndex*)THCTensor_newContiguous<ScalarTypeIndex>(state, tgt2_);
-  src = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, src);
-
-  if (dimension == THCTensor_nDimensionLegacyAll(state, src) - 1) {
-    THC_transformReduceInnermostDimIndex(state, tgt1, tgt2, src, init, binary_op);
-  } else {
-    THC_transformReduceOuterDimIndex(state, tgt1, tgt2, src, dimension, init, binary_op);
-  }
-
-  THCTensor_free(state, src);
-  THCTensor_freeCopyTo<ScalarTypeK>(state, tgt1, tgt1_);
-  THCTensor_freeCopyTo<ScalarTypeIndex>(state, tgt2, tgt2_);
-  if (!keepdim) {
-    THCTensor_squeeze1d(state, tgt1_, tgt1_, dimension);
-    THCTensor_squeeze1d(state, tgt2_, tgt2_, dimension);
-  }
-}
-
-template <typename T, typename Index>
-struct MaxValuePair {
-  __host__ __device__
-  thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
-                                    const thrust::pair<T, Index>& b) {
-    return (THCNumerics<T>::ge(a.first, b.first) ||
-            THCNumerics<T>::isnan(a.first)) ? a : b;
-  }
-};
-
-template <typename T, typename Index>
-struct MinValuePair {
-  __host__ __device__
-  thrust::pair<T, Index> operator()(const thrust::pair<T, Index>& a,
-                                    const thrust::pair<T, Index>& b) {
-    return (THCNumerics<T>::le(a.first, b.first) ||
-            THCNumerics<T>::isnan(a.first)) ? a : b;
-  }
-};
-
 template <typename T>
 struct AddOp {
   __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
@@ -600,6 +328,20 @@ template <typename T>
 struct MulOp {
   __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
     return THCNumerics<T>::mul(lhs, rhs);
+  }
+};
+
+template <typename T>
+struct MaxOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return THCNumerics<T>::gt(lhs, rhs) ? lhs : rhs;
+  }
+};
+
+template <typename T>
+struct MinOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return THCNumerics<T>::lt(lhs, rhs) ? lhs : rhs;
   }
 };
 

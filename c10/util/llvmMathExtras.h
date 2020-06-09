@@ -89,7 +89,7 @@
    }
  };
 
- #if __GNUC__ >= 4 || defined(_MSC_VER)
+ #if (defined(__GNUC__) && __GNUC__ >= 4) || defined(_MSC_VER)
  template <typename T> struct TrailingZerosCounter<T, 4> {
    static std::size_t count(T Val, ZeroBehavior ZB) {
      if (ZB != ZB_Undefined && Val == 0)
@@ -158,7 +158,7 @@
    }
  };
 
- #if __GNUC__ >= 4 || defined(_MSC_VER)
+ #if (defined(__GNUC__) && __GNUC__ >= 4) || defined(_MSC_VER)
  template <typename T> struct LeadingZerosCounter<T, 4> {
    static std::size_t count(T Val, ZeroBehavior ZB) {
      if (ZB != ZB_Undefined && Val == 0)
@@ -388,12 +388,22 @@
    return UINT64_MAX >> (64 - N);
  }
 
+ // Ignore the false warning "Arithmetic overflow" for MSVC
+ #ifdef _MSC_VER
+ # pragma warning(push)
+ # pragma warning(disable : 4146)
+ #endif
+
  /// Gets the minimum value for a N-bit signed integer.
  inline int64_t minIntN(int64_t N) {
    assert(N > 0 && N <= 64 && "integer width out of range");
 
-   return -(UINT64_C(1)<<(N-1));
+   return -(UINT64_C(1) << (N - 1));
  }
+
+ #ifdef _MSC_VER
+ # pragma warning(pop)
+ #endif
 
  /// Gets the maximum value for a N-bit signed integer.
  inline int64_t maxIntN(int64_t N) {
@@ -487,7 +497,7 @@
    static unsigned count(T Value) {
      // Generic version, forward to 32 bits.
      static_assert(SizeOfT <= 4, "Not implemented!");
- #if __GNUC__ >= 4
+ #if defined(__GNUC__) && __GNUC__ >= 4
      return __builtin_popcount(Value);
  #else
      uint32_t v = Value;
@@ -500,7 +510,7 @@
 
  template <typename T> struct PopulationCounter<T, 8> {
    static unsigned count(T Value) {
- #if __GNUC__ >= 4
+ #if defined(__GNUC__) && __GNUC__ >= 4
      return __builtin_popcountll(Value);
  #else
      uint64_t v = Value;

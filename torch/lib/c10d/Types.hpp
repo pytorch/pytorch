@@ -10,6 +10,9 @@ enum class ReduceOp : std::uint8_t {
   PRODUCT,
   MIN,
   MAX,
+  BAND, // Bitwise AND
+  BOR, // Bitwise OR
+  BXOR, // Bitwise XOR
   UNUSED,
 };
 
@@ -51,6 +54,10 @@ struct ScatterOptions {
 
 struct ReduceScatterOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+};
+
+struct AllToAllOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 

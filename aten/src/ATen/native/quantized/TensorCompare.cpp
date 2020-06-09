@@ -4,7 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/cpu/TensorCompareKernel.h>
+#include <ATen/native/TensorCompare.h>
 #include <c10/util/Exception.h>
 
 namespace at {
@@ -29,7 +29,7 @@ std::tuple<Tensor, Tensor> sort_quant(
   std::tie(sort_int, sort_indicies) =
       at::sort(self.int_repr(), dim, descending);
   return std::forward_as_tuple(
-      at::_per_tensor_affine_qtensor(
+      at::_make_per_tensor_quantized_tensor(
           sort_int, self.q_scale(), self.q_zero_point()),
       sort_indicies);
 }

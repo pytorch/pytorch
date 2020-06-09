@@ -166,9 +166,9 @@ class PredictorTest : public testing::Test {
   void SetUp() override {
     DeviceOption op;
     op.set_random_seed(1701);
-    ctx_ = caffe2::make_unique<CPUContext>(op);
+    ctx_ = std::make_unique<CPUContext>(op);
     NetDef init, run;
-    p_ = caffe2::make_unique<Predictor>(
+    p_ = std::make_unique<Predictor>(
         makePredictorConfig(parseNetDef(initSpec), parseNetDef(predictSpec)));
   }
 

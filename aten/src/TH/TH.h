@@ -9,15 +9,9 @@
 #endif
 
 #include <TH/THVector.h>
-#include <TH/THLogAdd.h>
-#include <TH/THSize.h>
 #include <TH/THStorageFunctions.h>
 #include <TH/THTensor.h>
 #include <TH/THTensorApply.h>
 #include <TH/THTensorDimApply.h>
-
-#include <TH/THFile.h>
-#include <TH/THDiskFile.h>
-#include <TH/THMemoryFile.h>
 
 #endif

@@ -708,7 +708,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
           assert(false);
         }
         if (!reason.empty()) {
-          LOG(WARNING) << "Conv with weight " << this->debug_def().input(1)
+          LOG(WARNING) << "FC with weight " << this->debug_def().input(1)
                        << " falls back to slow path because " << reason;
         }
       }
@@ -785,11 +785,14 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
         bias_qparams.scale = this->template Input<int8::Int8TensorCPU>(2).scale;
         bias_qparams.zero_point =
             this->template Input<int8::Int8TensorCPU>(2).zero_point;
-        CAFFE_ENFORCE_LE(
-            std::abs(
-                bias_qparams.scale -
-                in_qparams_[0].scale * filter_qparams_[0].scale),
-            1e-4);
+        const auto M = X.size_to_dim(canonical_axis);
+        if (M > 0) {
+          CAFFE_ENFORCE_LE(
+              std::abs(
+                  bias_qparams.scale -
+                  in_qparams_[0].scale * filter_qparams_[0].scale),
+              1e-4);
+        }
         CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
         b_quantized_data_ = bias.template data<int32_t>();
         if (dequantize_output_) {
@@ -900,6 +903,8 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 
   return true;
 }
+
+template class FullyConnectedDNNLowPOp<uint8_t>;
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,

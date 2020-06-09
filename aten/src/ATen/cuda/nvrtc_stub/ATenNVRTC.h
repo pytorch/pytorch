@@ -31,6 +31,7 @@ namespace at { namespace cuda {
 
 #define AT_FORALL_NVRTC(_)                       \
   _(nvrtcVersion)                                \
+  _(nvrtcAddNameExpression)                      \
   _(nvrtcCreateProgram)                          \
   _(nvrtcDestroyProgram)                         \
   _(nvrtcGetPTXSize)                             \
@@ -39,6 +40,7 @@ namespace at { namespace cuda {
   _(nvrtcGetErrorString)                         \
   _(nvrtcGetProgramLogSize)                      \
   _(nvrtcGetProgramLog)                          \
+  _(nvrtcGetLoweredName)                         \
   _(cuModuleLoadData)                            \
   _(cuModuleGetFunction)                         \
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
@@ -46,14 +48,17 @@ namespace at { namespace cuda {
   _(cuLaunchKernel)                              \
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
-  _(cuDevicePrimaryCtxGetState)
+  _(cuDevicePrimaryCtxGetState)                  \
+  _(cuLinkCreate)                                \
+  _(cuLinkAddData)                               \
+  _(cuLinkComplete)
 
 #else
 
 // NOTE [ ATen NVRTC Stub and HIP ]
 //
 // ATen's NVRTC stub library, caffe2_nvrtc, provides dynamic loading of both
-// NVRTC and driver APIs. While the former is not yet suppoted for HIP, the
+// NVRTC and driver APIs. While the former is not yet supported for HIP, the
 // later is supported and needed (e.g., in CUDAHooks::getDeviceWithPrimaryContext()
 // used by tensor.pin_memory()).
 //
@@ -61,8 +66,15 @@ namespace at { namespace cuda {
 // list above.
 //
 // HIP doesn't have
-//   cuOccupancyMaxActiveBlocksPerMultiprocessor
 //   cuGetErrorString  (maps to non-functional hipGetErrorString___)
+//
+// HIP from ROCm 3.5 on renamed hipOccupancyMaxActiveBlocksPerMultiprocessor
+// to hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.
+#if HIP_VERSION < 305
+#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR hipOccupancyMaxActiveBlocksPerMultiprocessor
+#else
+#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR cuOccupancyMaxActiveBlocksPerMultiprocessor
+#endif
 
 #define AT_FORALL_NVRTC(_)                       \
   _(nvrtcVersion)                                \
@@ -72,6 +84,7 @@ namespace at { namespace cuda {
   _(nvrtcGetPTX)                                 \
   _(cuModuleLoadData)                            \
   _(cuModuleGetFunction)                         \
+  _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR)\
   _(nvrtcGetErrorString)                         \
   _(nvrtcGetProgramLogSize)                      \
   _(nvrtcGetProgramLog)                          \
@@ -89,6 +102,6 @@ extern "C" typedef struct NVRTC {
 #undef CREATE_MEMBER
 } NVRTC;
 
-extern "C" AT_CUDA_API NVRTC* load_nvrtc();
+extern "C" TORCH_CUDA_API NVRTC* load_nvrtc();
 
 }} // at::cuda

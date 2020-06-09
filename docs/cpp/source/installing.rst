@@ -34,10 +34,11 @@ this:
   project(example-app)
 
   find_package(Torch REQUIRED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
   add_executable(example-app example-app.cpp)
   target_link_libraries(example-app "${TORCH_LIBRARIES}")
-  set_property(TARGET example-app PROPERTY CXX_STANDARD 11)
+  set_property(TARGET example-app PROPERTY CXX_STANDARD 14)
 
   # The following code block is suggested to be used on Windows.
   # According to https://github.com/pytorch/pytorch/issues/25457,
@@ -85,10 +86,17 @@ We can now run the following commands to build the application from within the
   mkdir build
   cd build
   cmake -DCMAKE_PREFIX_PATH=/absolute/path/to/libtorch ..
-  make
+  cmake --build . --config Release
 
 where ``/absolute/path/to/libtorch`` should be the absolute (!) path to the unzipped LibTorch
-distribution. If all goes well, it will look something like this:
+distribution. If PyTorch was installed via conda or pip, `CMAKE_PREFIX_PATH` can be queried
+using `torch.utils.cmake_prefix_path` variable. In that case CMake configuration step would look something like follows:
+
+.. code-block:: sh
+
+  cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'`
+
+If all goes well, it will look something like this:
 
 .. code-block:: sh
 
@@ -121,7 +129,7 @@ distribution. If all goes well, it will look something like this:
   -- Configuring done
   -- Generating done
   -- Build files have been written to: /example-app/build
-  root@4b5a67132e81:/example-app/build# make
+  root@4b5a67132e81:/example-app/build# cmake --build . --config Release
   Scanning dependencies of target example-app
   [ 50%] Building CXX object CMakeFiles/example-app.dir/example-app.cpp.o
   [100%] Linking CXX executable example-app
@@ -139,8 +147,9 @@ should now merrily print the tensor (exact output subject to randomness):
 
 .. tip::
   On Windows, debug and release builds are not ABI-compatible. If you plan to
-  build your project in debug mode, we recommend
-  `building PyTorch from source <https://github.com/pytorch/pytorch#from-source>`_.
+  build your project in debug mode, please try the debug version of LibTorch.
+  Also, make sure you specify the correct configuration in the ``cmake --build .``
+  line above.
 
 Support
 -------

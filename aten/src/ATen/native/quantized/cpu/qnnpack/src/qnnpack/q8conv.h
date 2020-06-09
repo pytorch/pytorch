@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define DECLARE_Q8CONV_UKERNEL_FUNCTION(fn_name) \
+#define DECLARE_PYTORCH_Q8CONV_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL void fn_name(            \
       size_t mr,                                 \
       size_t nr,                                 \
@@ -28,13 +28,14 @@ extern "C" {
       const void* w,                             \
       uint8_t* c,                                \
       size_t c_stride,                           \
+      size_t output_channel_index,               \
       const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
-DECLARE_Q8CONV_UKERNEL_FUNCTION(q8conv_ukernel_4x8__neon)
-DECLARE_Q8CONV_UKERNEL_FUNCTION(q8conv_ukernel_4x8__aarch32_neon)
-DECLARE_Q8CONV_UKERNEL_FUNCTION(q8conv_ukernel_8x8__aarch64_neon)
-DECLARE_Q8CONV_UKERNEL_FUNCTION(q8conv_ukernel_8x8__neon)
-DECLARE_Q8CONV_UKERNEL_FUNCTION(q8conv_ukernel_4x4c2__sse2)
+DECLARE_PYTORCH_Q8CONV_UKERNEL_FUNCTION(pytorch_q8conv_ukernel_4x8__neon)
+DECLARE_PYTORCH_Q8CONV_UKERNEL_FUNCTION(pytorch_q8conv_ukernel_4x8__aarch32_neon)
+DECLARE_PYTORCH_Q8CONV_UKERNEL_FUNCTION(pytorch_q8conv_ukernel_8x8__aarch64_neon)
+DECLARE_PYTORCH_Q8CONV_UKERNEL_FUNCTION(pytorch_q8conv_ukernel_8x8__neon)
+DECLARE_PYTORCH_Q8CONV_UKERNEL_FUNCTION(pytorch_q8conv_ukernel_4x4c2__sse2)
 
 #ifdef __cplusplus
 } /* extern "C" */

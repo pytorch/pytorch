@@ -12,7 +12,7 @@
 
 #include <qnnpack/u8rmax.h>
 
-uint8_t u8rmax_ukernel__neon(size_t n, const uint8_t* x) {
+uint8_t pytorch_u8rmax_ukernel__neon(size_t n, const uint8_t* x) {
   assert(n != 0);
 
   if

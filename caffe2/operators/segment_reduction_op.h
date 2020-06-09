@@ -1553,7 +1553,7 @@ class AbstractLengthsGradientOp : public Operator<Context> {
     }
 
     typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
-    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+    for (auto i = 0U; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
           reducedDataSize,
@@ -1981,7 +1981,7 @@ This op is basically Gather and Lengths{op} fused together.
 INDICES should contain integers in range 0..N-1 where N is the first dimension
 of DATA. INDICES represent which slices of DATA need to be pulled in.
 
-LENGTHS is a vector that defines slice sizes by first dimention of DATA. Values
+LENGTHS is a vector that defines slice sizes by first dimension of DATA. Values
 belonging to the same segment are aggregated together. sum(LENGTHS) has
 to match INDICES size.
 
@@ -2047,7 +2047,7 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
       SIndex,
       Context,
       ReducerGradient>;
-  // Will return 3 input version. This is aliging new CPU/GPU nets.
+  // Will return 3 input version. This is aligning new CPU/GPU nets.
   using GetGradient = LengthsOpGetGradient<
       ForwardOp,
       ReducerDef,

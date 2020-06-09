@@ -9,20 +9,17 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <THC/THC.h>
 
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
+
 namespace at {
 namespace native {
 
 using namespace at::cuda;
 
-template <typename dst_t, typename src_t>
-void copy_kernel_impl(TensorIterator& iter) {
-  gpu_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
-    return static_cast<dst_t>(static_cast<native::inter_copy_type_t<dst_t>>(x));
-  });
-}
-
 // device-to-device copy, does type conversion
-static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
+void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   int64_t numel = iter.numel();
 
   // We can memcpy the memory if both tensors have the same type AND both
@@ -57,20 +54,28 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   }
 
   if (memcpy_eligible) {
-    // Perform the copy
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        iter.data_ptr(0),
-        iter.data_ptr(1),
-        numel * iter.element_size(0),
-        cudaMemcpyDeviceToDevice,
-        copy_stream));
+    void *dst = iter.data_ptr(0);
+    void *src = iter.data_ptr(1);
+    size_t size = numel * iter.element_size(0);
+    if (src != dst || src_device != dst_device) {
+      // Perform the copy
+      AT_CUDA_CHECK(cudaMemcpyAsync(
+          dst, src, size,
+          cudaMemcpyDeviceToDevice,
+          copy_stream));
+    }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(0), "copy_", [&] {
-      using dst_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(1), "copy_", [&] {
-        copy_kernel_impl<dst_t, scalar_t>(iter);
+    auto dtype = iter.dtype(0);
+    if (isQIntType(dtype)) {
+      AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
+        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
       });
-    });
+    } else {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+          kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+            gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+          });
+    }
   }
 
   if (src_device != dst_device) {
@@ -126,7 +131,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
 
-  // Enable p2p access between devices. (No-op if it invovles the CPU)
+  // Enable p2p access between devices. (No-op if it involves the CPU)
   bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
 
   if (copy_requires_temporaries(iter, p2p_enabled)) {
@@ -139,11 +144,11 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     // Type conversions are performed on the CPU for CPU-GPU copies and on
     // the src device for GPU-GPU copies.
     if (iter.device_type(0) == kCUDA) {
-      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst);
+      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
       bool same_type = iter.dtype(0) == iter.dtype(1);
-      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1));
+      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
 
@@ -184,13 +189,17 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   int64_t nbytes = iter.numel() * iter.element_size(0);
   CUDAStream stream = getCurrentCUDAStream();
 
-  AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-
   if (non_blocking) {
+    AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     void* ptr = (dst_device == kCPU ? dst : src);
     AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(ptr, stream));
   } else {
+#if HIP_VERSION >= 301
+    AT_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+#else
+    AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+#endif
   }
 }
 

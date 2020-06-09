@@ -131,12 +131,18 @@ allows fast memory deallocation without device synchronizations. However, the
 unused memory managed by the allocator will still show as if used in
 ``nvidia-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
-tensors, and use :meth:`~torch.cuda.memory_cached` and
-:meth:`~torch.cuda.max_memory_cached` to monitor memory managed by the caching
-allocator. Calling :meth:`~torch.cuda.empty_cache` releases all **unused**
-cached memory from PyTorch so that those can be used by other GPU applications.
-However, the occupied GPU memory by tensors will not be freed so it can not
-increase the amount of GPU memory available for PyTorch.
+tensors, and use :meth:`~torch.cuda.memory_reserved` and
+:meth:`~torch.cuda.max_memory_reserved` to monitor the total amount of memory
+managed by the caching allocator. Calling :meth:`~torch.cuda.empty_cache`
+releases all **unused** cached memory from PyTorch so that those can be used
+by other GPU applications. However, the occupied GPU memory by tensors will not
+be freed so it can not increase the amount of GPU memory available for PyTorch.
+
+For more advanced users, we offer more comprehensive memory benchmarking via
+:meth:`~torch.cuda.memory_stats`. We also offer the capability to capture a
+complete snapshot of the memory allocator state via
+:meth:`~torch.cuda.memory_snapshot`, which can help you understand the
+underlying allocation patterns produced by your code.
 
 .. _cufft-plan-cache:
 
@@ -300,20 +306,30 @@ to overlap data transfers with computation.
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing ``pin_memory=True`` to its constructor.
 
-.. _cuda-nn-dataparallel-instead:
+.. _cuda-nn-ddp-instead:
 
-Use nn.DataParallel instead of multiprocessing
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Use nn.parallel.DistributedDataParallel instead of multiprocessing or nn.DataParallel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Most use cases involving batched inputs and multiple GPUs should default to
-using :class:`~torch.nn.DataParallel` to utilize more than one GPU. Even with
-the GIL, a single Python process can saturate multiple GPUs.
-
-As of version 0.1.9, large numbers of GPUs (8+) might not be fully utilized.
-However, this is a known issue that is under active development. As always,
-test your use case.
+using :class:`~torch.nn.parallel.DistributedDataParallel` to utilize more
+than one GPU.
 
 There are significant caveats to using CUDA models with
 :mod:`~torch.multiprocessing`; unless care is taken to meet the data handling
 requirements exactly, it is likely that your program will have incorrect or
 undefined behavior.
+
+It is recommended to use :class:`~torch.nn.parallel.DistributedDataParallel`,
+instead of :class:`~torch.nn.DataParallel` to do multi-GPU training, even if
+there is only a single node.
+
+The difference between :class:`~torch.nn.parallel.DistributedDataParallel` and
+:class:`~torch.nn.DataParallel` is: :class:`~torch.nn.parallel.DistributedDataParallel`
+uses multiprocessing where a process is created for each GPU, while
+:class:`~torch.nn.DataParallel` uses multithreading. By using multiprocessing,
+each GPU has its dedicated process, this avoids the performance overhead caused
+by GIL of Python interpreter. 
+
+If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use 
+`torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.

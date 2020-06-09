@@ -12,7 +12,7 @@
 
 #include <qnnpack/u8clamp.h>
 
-void u8clamp_ukernel__neon(
+void pytorch_u8clamp_ukernel__neon(
     size_t n,
     const uint8_t* x,
     uint8_t* y,

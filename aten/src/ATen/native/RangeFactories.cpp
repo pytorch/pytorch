@@ -2,11 +2,14 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Parallel.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/TensorIterator.h>
 #include <cmath>
 #include <limits>
 
 namespace at { namespace native {
 
+DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, int64_t), linspace_stub);
 
 Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
@@ -14,30 +17,16 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   if (result.numel() != steps) {
     result.resize_({steps});
   }
-  Tensor r = result.is_contiguous() ? result : result.contiguous();
 
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
-    r.fill_(start);
+    result.fill_(start);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(r.scalar_type(), "linspace_cpu", [&]() {
-      scalar_t scalar_start = start.to<scalar_t>();
-      scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t *data_ptr = r.data_ptr<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
-      at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-        scalar_t is = static_cast<scalar_t>(p_begin);
-        for (int64_t i = p_begin; i < p_end; ++i, ++is) {
-          data_ptr[i] = scalar_start + step*is;
-        }
-      });
-    });
+    auto iter = TensorIterator::nullary_op(result);
+    linspace_stub(iter.device_type(), iter, start, end, steps);
   }
 
-  if (!result.is_contiguous()) {
-    result.copy_(r);
-  }
   return result;
 }
 
@@ -53,17 +42,40 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
     // skip
   } else if (steps == 1) {
     r.fill_(std::pow(base, start.to<double>()));
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
+  } else if (isComplexType(r.scalar_type())) {
+    AT_DISPATCH_COMPLEX_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t *data_ptr = r.data_ptr<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      const int64_t halfway = steps / 2;
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
         scalar_t is = static_cast<scalar_t>(p_begin);
-        for (int64_t i = p_begin; i < p_end; ++i, ++is) {
-          data_ptr[i]= std::pow(scalar_base, scalar_start + step*is);
+        for (int64_t i = p_begin; i < p_end; ++i, is+=1) { //std::complex does not support ++operator
+          if (i < halfway) {
+            data_ptr[i] = std::pow(scalar_base, scalar_start + step*is);
+          } else {
+            data_ptr[i] = std::pow(scalar_base, scalar_end - (step * static_cast<scalar_t>(steps - i - 1)));
+          }
+        }
+      });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
+      double scalar_base = static_cast<double>(base); // will be autopromoted anyway
+      scalar_t scalar_start = start.to<scalar_t>();
+      scalar_t scalar_end = end.to<scalar_t>();
+      scalar_t *data_ptr = r.data_ptr<scalar_t>();
+      double step = static_cast<double>(scalar_end - scalar_start) / (steps-1);
+      const int64_t halfway = steps / 2;
+      at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
+        for (int64_t i=p_begin; i < p_end; i++) {
+          if (i < halfway) {
+            data_ptr[i] = std::pow(scalar_base, scalar_start + step*i);
+          } else {
+            data_ptr[i] = std::pow(scalar_base, scalar_end - step * (steps - i - 1));
+          }
         }
       });
     });
@@ -141,11 +153,20 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
              "invalid size, possible overflow?");
-    int64_t size = static_cast<int64_t>(size_d);
 
-    if (result.numel() != size) {
+    int64_t size = static_cast<int64_t>(size_d);
+    int64_t numel = result.numel();
+
+    if (numel != size) {
+      if(numel > 0){
+        TORCH_WARN("The number of elements in the out tensor of shape ", result.sizes(),
+                    " is ", numel, " which does not match the computed number of elements ", size,
+                    ". Note that this may occur as a result of rounding error. "
+                    "The out tensor will be resized to a tensor of shape (", size, ",).");
+      }
       result.resize_({size});
     }
+
     Tensor r = result.is_contiguous() ? result : result.contiguous();
     scalar_t *data_ptr = r.data_ptr<scalar_t>();
 
@@ -162,5 +183,7 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
   return result;
 }
+
+DEFINE_DISPATCH(linspace_stub);
 
 }} // namespace at::native

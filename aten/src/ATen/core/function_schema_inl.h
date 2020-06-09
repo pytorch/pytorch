@@ -68,8 +68,7 @@ inline bool Argument::isBackwardCompatibleWith(
       return false;
     }
     if (rhs->default_value().has_value() &&
-        !detail::defaultValueEquals_(lhs->default_value(),
-                                     rhs->default_value())) {
+        lhs->default_value() != rhs->default_value()) {
       return false;
     }
     return true;
@@ -186,16 +185,16 @@ inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
     optional<size_t> pos) const {
-  if (!isSubvalueOf(value, argument.type())) {
+  if (!value.type()->isSubtypeOf(argument.type())) {
     std::string position = pos ? ::c10::str(" in position ", *pos) : "";
     TORCH_CHECK(
         false,
         formatTypeMismatchMsg(
-            argument, attemptToRecoverType(value)->python_str(), pos));
+            argument, value.type()->python_str(), pos));
   }
 }
 
-inline void FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kwargs) const {
+inline std::string FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kwargs) const {
   // First check if any of the kwargs are unknown, i.e. don't match the name of
   // any argument in the schema.
   for (const auto& kwarg : kwargs) {
@@ -205,13 +204,13 @@ inline void FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kw
             [&kwarg](const Argument& argument) {
               return argument.name() == kwarg;
             })) {
-      throw std::runtime_error(c10::str(
+      return c10::str(
           "Unknown keyword argument '",
           kwarg,
           "' for operator '",
           name(),
           "'. Schema: ",
-          *this));
+          *this);
     }
   }
   // If there are unconsumed kwargs but none of them were unknown, the first
@@ -219,14 +218,15 @@ inline void FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kw
   for (const auto& argument : arguments()) {
     if (std::find(kwargs.begin(), kwargs.end(), argument.name()) != kwargs.end()) {
       AT_ASSERT(!argument.default_value());
-      throw std::runtime_error(c10::str(
+      return c10::str(
           "Argument '",
           argument.name(),
           "' specified both as positional and ",
           "keyword argument. Schema: ",
-          *this));
+          *this);
     }
   }
+  return "";
 }
 
 inline void FunctionSchema::checkAndNormalizeInputs(
@@ -274,7 +274,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
     for(const auto& k : kwargs) {
       names.emplace_back(k.first);
     }
-    findErrorInKwargs(names);
+    throw std::runtime_error(findErrorInKwargs(names));
   }
 }
 

@@ -38,7 +38,9 @@ def set_printoptions(
         profile: Sane defaults for pretty printing. Can override with any of
             the above options. (any one of `default`, `short`, `full`)
         sci_mode: Enable (True) or disable (False) scientific notation. If
-            None (default) is specified, the value is defined by `_Formatter`
+            None (default) is specified, the value is defined by 
+            `torch._tensor_str._Formatter`. This value is automatically chosen
+            by the framework.
     """
     if profile is not None:
         if profile == "default":
@@ -71,16 +73,30 @@ def set_printoptions(
 class _Formatter(object):
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
+        self.complex_dtype = tensor.dtype.is_complex
         self.int_mode = True
         self.sci_mode = False
         self.max_width = 1
+
+        # only used for complex tensors
+        self.has_non_zero_decimal_val = False
 
         with torch.no_grad():
             tensor_view = tensor.reshape(-1)
 
         if not self.floating_dtype:
+            if self.complex_dtype:
+                # max width for complex tensors depends on whether or not tensor contains ints only
+                self.has_non_zero_decimal_val = sum([not (value.item().real.is_integer() and value.item().imag.is_integer())
+                                                     for value in tensor_view])
             for value in tensor_view:
-                value_str = '{}'.format(value)
+                if self.complex_dtype:
+                    if self.has_non_zero_decimal_val:
+                        value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+                    else:
+                        value_str = "{:.0f}".format(value.item())
+                else:
+                    value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
@@ -142,6 +158,12 @@ class _Formatter(object):
                     ret += '.'
             else:
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+        elif self.complex_dtype:
+            p = PRINT_OPTS.precision
+            ret = '({{:.{}f}}{{}}{{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
+            if not self.has_non_zero_decimal_val:
+                # complex tensor contains integer elements only
+                ret = "({{:.0f}}.{{}}{{:.0f}}.j)".format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))  # noqa: F523
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
@@ -195,13 +217,13 @@ def _tensor_str(self, indent):
     if self.numel() == 0:
         return '[]'
 
-    if torch._C._BUILD_NAMEDTENSOR and self.has_names():
+    if self.has_names():
         # There are two main codepaths (possibly more) that tensor printing goes through:
         # - tensor data can fit comfortably on screen
         # - tensor data needs to be summarized
         # Some of the codepaths don't fully support named tensors, so we send in
         # an unnamed tensor to the formatting code as a workaround.
-        self = self.renamed(None)
+        self = self.rename(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
@@ -243,8 +265,7 @@ def get_summarized_data(self):
     else:
         return torch.stack([get_summarized_data(x) for x in self])
 
-
-def _str(self):
+def _str_intern(self):
     prefix = 'tensor('
     indent = len(prefix)
     suffixes = []
@@ -260,7 +281,9 @@ def _str(self):
             or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
         suffixes.append('device=\'' + str(self.device) + '\'')
 
-    has_default_dtype = self.dtype in (torch.get_default_dtype(), torch.int64, torch.bool)
+    # TODO: add an API to map real -> complex dtypes
+    _default_complex_dtype = torch.cdouble if torch.get_default_dtype() == torch.double else torch.cfloat
+    has_default_dtype = self.dtype in (torch.get_default_dtype(), _default_complex_dtype, torch.int64, torch.bool)
     if self.is_sparse:
         suffixes.append('size=' + str(tuple(self.shape)))
         suffixes.append('nnz=' + str(self._nnz()))
@@ -288,6 +311,7 @@ def _str(self):
         elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric:
             suffixes.append('scale=' + str(self.q_per_channel_scales()))
             suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
+            suffixes.append('axis=' + str(self.q_per_channel_axis()))
         tensor_str = _tensor_str(self.dequantize(), indent)
     else:
         if self.numel() == 0 and not self.is_sparse:
@@ -320,7 +344,11 @@ def _str(self):
     elif self.requires_grad:
         suffixes.append('requires_grad=True')
 
-    if torch._C._BUILD_NAMEDTENSOR and self.has_names():
+    if self.has_names():
         suffixes.append('names={}'.format(self.names))
 
     return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
+
+def _str(self):
+    with torch.no_grad():
+        return _str_intern(self)

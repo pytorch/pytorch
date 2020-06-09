@@ -1,0 +1,10 @@
+cc_library(
+    name = "miniz",
+    srcs = [
+        "miniz.c",
+    ],
+    hdrs = [
+        "miniz.h",
+    ],
+    visibility = ["//visibility:public"],
+)

@@ -14,8 +14,10 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPSigmoidOpTest(hu.HypothesisTestCase):
-    @given(size=st.integers(1024, 2048), **hu.gcs_cpu_only)
-    def test_dnnlowp_sigmoid(self, size, gc, dc):
+    @given(size=st.integers(1024, 2048), is_empty=st.booleans(), **hu.gcs_cpu_only)
+    def test_dnnlowp_sigmoid(self, size, is_empty, gc, dc):
+        if is_empty:
+            size = 0
 
         X = (np.random.rand(size) * 20 - 10).astype(np.float32)
 

@@ -22,7 +22,7 @@ or run the test independently:
 
 `python -m fastrnns.bench`
 
-should give a good comparision, or you can specify the type of model to run
+should give a good comparison, or you can specify the type of model to run
 
 `python -m fastrnns.bench --rnns cudnn aten jit --group rnns` 
 

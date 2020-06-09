@@ -24,7 +24,7 @@ class BroadcastWork {
     // Copy the output of the broadcast operation back.
     auto output_tensors = torch::utils::unflatten_dense_tensors(
         flat_tensor_.front(), bucket_tensors_);
-    AT_ASSERT(output_tensors.size() == bucket_tensors_.size());
+    TORCH_INTERNAL_ASSERT(output_tensors.size() == bucket_tensors_.size());
     for (size_t i = 0; i < output_tensors.size(); i++) {
       bucket_tensors_[i].copy_(output_tensors[i], /*non_blocking=*/true);
     }

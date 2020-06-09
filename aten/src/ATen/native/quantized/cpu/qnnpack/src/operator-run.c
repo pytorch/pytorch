@@ -33,7 +33,7 @@ struct q8gemm_context {
   uint8_t* c;
   size_t c_stride;
   union pytorch_qnnp_conv_quantization_params quantization_params;
-  const q8gemm_ukernel_function ukernel;
+  const pytorch_q8gemm_ukernel_function ukernel;
 };
 
 static void compute_q8gemm(
@@ -56,6 +56,7 @@ static void compute_q8gemm(
   uint8_t* restrict c = context->c;
   const size_t c_stride = context->c_stride;
 
+  size_t output_channel_index = nr_block_start + group_index * n;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -66,6 +67,7 @@ static void compute_q8gemm(
       c + (pixel_index + mr_block_start) * c_stride + nr_block_start +
           group_index * n,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
@@ -78,7 +80,7 @@ struct q8sum_rows_context {
   const int32_t multiplier;
   int32_t* a_sum;
   size_t a_sum_stride;
-  const q8sum_rows_ukernel_function ukernel;
+  const pytorch_q8sum_rows_ukernel_function ukernel;
 };
 
 static void compute_sum_rows(
@@ -123,7 +125,7 @@ struct q8gemm_xzp_context {
   size_t batch_size;
   size_t a_sum_stride;
   union pytorch_qnnp_q31_requantization_params requantization_params;
-  const q8gemm_xzp_ukernel_function ukernel;
+  const pytorch_q8gemm_xzp_ukernel_function ukernel;
 };
 
 static void compute_q8gemm_xzp(
@@ -178,7 +180,7 @@ struct q8conv_context {
   uint8_t* c;
   size_t c_stride;
   union pytorch_qnnp_conv_quantization_params quantization_params;
-  const q8conv_ukernel_function ukernel;
+  const pytorch_q8conv_ukernel_function ukernel;
 };
 
 static void compute_q8conv(
@@ -204,6 +206,7 @@ static void compute_q8conv(
   uint8_t* restrict c = context->c;
   const size_t c_stride = context->c_stride;
 
+  size_t output_channel_index = nr_block_start + group_index * n;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -215,6 +218,7 @@ static void compute_q8conv(
       c + (mr_block_start + image_index * m) * c_stride + group_index * n +
           nr_block_start,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
@@ -232,8 +236,8 @@ struct q8dwconv_context {
   size_t output_col_increment;
   union pytorch_qnnp_conv_quantization_params quantization_params;
   union {
-    const q8dwconv_up_ukernel_function unipass_ukernel;
-    const q8dwconv_mp_ukernel_function multipass_ukernel;
+    const pytorch_q8dwconv_up_ukernel_function unipass_ukernel;
+    const pytorch_q8dwconv_mp_ukernel_function multipass_ukernel;
   };
 };
 
@@ -301,7 +305,7 @@ struct max_pooling_context {
   size_t input_increment;
   size_t output_increment;
   union pytorch_qnnp_u8_clamping_params params;
-  u8maxpool_ukernel_function ukernel;
+  pytorch_u8maxpool_ukernel_function ukernel;
 };
 
 static void compute_max_pooling(
@@ -341,8 +345,8 @@ struct average_pooling_context {
   size_t output_increment;
   union pytorch_qnnp_avgpool_quantization_params quantization_params;
   union {
-    q8avgpool_up_ukernel_function unipass_ukernel;
-    q8avgpool_mp_ukernel_function multipass_ukernel;
+    pytorch_q8avgpool_up_ukernel_function unipass_ukernel;
+    pytorch_q8avgpool_mp_ukernel_function multipass_ukernel;
   };
 };
 
@@ -414,8 +418,8 @@ struct global_average_pooling_context {
   size_t output_batch_stride;
   union pytorch_qnnp_avgpool_quantization_params quantization_params;
   union {
-    q8gavgpool_up_ukernel_function unipass_ukernel;
-    q8gavgpool_mp_ukernel_function multipass_ukernel;
+    pytorch_q8gavgpool_up_ukernel_function unipass_ukernel;
+    pytorch_q8gavgpool_mp_ukernel_function multipass_ukernel;
   };
 };
 
@@ -476,7 +480,7 @@ struct q8add_strided_context {
   const uint8_t* y;
   size_t y_stride;
   union pytorch_qnnp_add_quantization_params quantization_params;
-  q8vadd_ukernel_function ukernel;
+  pytorch_q8vadd_ukernel_function ukernel;
 };
 
 static void compute_q8add_strided(
@@ -503,7 +507,7 @@ struct q8add_contiguous_context {
   const uint8_t* b;
   uint8_t* y;
   union pytorch_qnnp_add_quantization_params quantization_params;
-  q8vadd_ukernel_function ukernel;
+  pytorch_q8vadd_ukernel_function ukernel;
 };
 
 static void compute_q8add_contiguous(
@@ -524,8 +528,8 @@ struct channel_shuffle_context {
   size_t n;
   size_t m;
   union {
-    xzipc_ukernel_function fixed_ukernel;
-    xzipv_ukernel_function variable_ukernel;
+    pytorch_xzipc_ukernel_function fixed_ukernel;
+    pytorch_xzipv_ukernel_function variable_ukernel;
   };
 };
 
@@ -556,7 +560,7 @@ struct lut_strided_context {
   const void* t;
   void* y;
   size_t y_stride;
-  x8lut_ukernel_function ukernel;
+  pytorch_x8lut_ukernel_function ukernel;
 };
 
 static void compute_lut_strided(
@@ -575,7 +579,7 @@ struct lut_contiguous_context {
   const void* t;
   void* y;
   size_t y_stride;
-  x8lut_ukernel_function ukernel;
+  pytorch_x8lut_ukernel_function ukernel;
 };
 
 static void compute_lut_contiguous(
@@ -594,7 +598,7 @@ struct clamp_strided_context {
   size_t x_stride;
   void* y;
   size_t y_stride;
-  u8clamp_ukernel_function ukernel;
+  pytorch_u8clamp_ukernel_function ukernel;
   union pytorch_qnnp_u8_clamping_params params;
 };
 
@@ -612,7 +616,7 @@ struct clamp_contiguous_context {
   size_t x_stride;
   void* y;
   size_t y_stride;
-  u8clamp_ukernel_function ukernel;
+  pytorch_u8clamp_ukernel_function ukernel;
   union pytorch_qnnp_u8_clamping_params params;
 };
 
@@ -632,8 +636,8 @@ struct u8softargmax_context {
   const uint32_t* t;
   uint8_t* y;
   size_t y_stride;
-  u8rmax_ukernel_function rmax_ukernel;
-  u8lut32norm_ukernel_function lut_norm_ukernel;
+  pytorch_u8rmax_ukernel_function rmax_ukernel;
+  pytorch_u8lut32norm_ukernel_function lut_norm_ukernel;
 };
 
 static void compute_u8softargmax(
@@ -688,7 +692,10 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
               .output_col_increment =
                   (op->output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = op->conv_quantization_params,
-              .unipass_ukernel = pytorch_qnnp_params.q8dw9.updw,
+              .unipass_ukernel =
+                  op->per_channel ?
+                      pytorch_qnnp_params.q8dw9.updw_per_channel :
+                      pytorch_qnnp_params.q8dw9.updw,
           };
           pthreadpool_compute_2d(
               threadpool,
@@ -715,7 +722,10 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
               .output_col_increment =
                   (op->output_pixel_stride - groups) * sizeof(uint8_t),
               .quantization_params = op->conv_quantization_params,
-              .multipass_ukernel = pytorch_qnnp_params.q8dw25.mpdw,
+              .multipass_ukernel =
+                  op->per_channel ?
+                      pytorch_qnnp_params.q8dw25.mpdw_per_channel :
+                      pytorch_qnnp_params.q8dw25.mpdw,
           };
           pthreadpool_compute_2d(
               threadpool,

@@ -5,16 +5,22 @@ namespace distributed {
 namespace autograd {
 
 torch::autograd::variable_list SendRpcBackward::apply(
-    torch::autograd::variable_list&& grads) {
+    torch::autograd::variable_list&& inputs) {
+  TORCH_INTERNAL_ASSERT(
+      inputs.empty(), "SendRpcBackward should receive no inputs");
+
   // Each grad variable should be valid!
-  for (const auto& grad : grads) {
-    TORCH_CHECK(
+  for (const auto& grad : grads_) {
+    TORCH_INTERNAL_ASSERT(
         grad.defined(), "BUG!: SendRpcBackward didn't receive valid gradients");
   }
 
   // Simply forwards the gradients over.
-  // TODO: Improve this as we build out more parts of distributed autograd.
-  return std::move(grads);
+  return std::move(grads_);
+}
+
+void SendRpcBackward::setGrads(const torch::autograd::variable_list& grads) {
+  grads_ = grads;
 }
 
 } // namespace autograd

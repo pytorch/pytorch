@@ -5,18 +5,14 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-// Disable strict aliasing errors for CUDA 9.
-// The cuda_fp16.h header in CUDA 9 RC triggers this diagnostic.
-// It is included by cusparse.h as well, so guarding the
-// inclusion of that header here is not enough.
-#if CUDA_VERSION >= 9000
+#ifndef __HIP_PLATFORM_HCC__
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic push
 #endif
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif // __GNUC__
-#endif // CUDA_VERSION >= 9000
+#endif // __HIP_PLATFORM_HCC__
 
 #include <cublas_v2.h>
 #include <curand.h>
@@ -29,40 +25,11 @@
 #include "c10/cuda/CUDAMathCompat.h"
 #include <c10/cuda/CUDAGuard.h>
 
-// Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
-// corresponds to different declarations (dllexport and dllimport). On
-// Linux/Mac, it just resolves to the same "default visibility" setting.
-#if defined(_MSC_VER)
-#if defined(CAFFE2_BUILD_SHARED_LIBS)
-#define CAFFE2_CUDA_EXPORT __declspec(dllexport)
-#define CAFFE2_CUDA_IMPORT __declspec(dllimport)
-#else
-#define CAFFE2_CUDA_EXPORT
-#define CAFFE2_CUDA_IMPORT
-#endif
-#else
-#if defined(__GNUC__)
-#define CAFFE2_CUDA_EXPORT __attribute__((__visibility__("default")))
-#else
-#define CAFFE2_CUDA_EXPORT
-#endif
-#define CAFFE2_CUDA_IMPORT CAFFE2_CUDA_EXPORT
-#endif
+#define CAFFE2_CUDA_EXPORT C10_EXPORT
+#define CAFFE2_CUDA_API TORCH_CUDA_API
 
-// CAFFE2_CUDA_API is a macro that, depends on whether you are building the
-// main caffe2 library or not, resolves to either CAFFE2_CUDA_EXPORT or
-// CAFFE2_CUDA_IMPORT.
-//
-// This is used in e.g. Caffe2's protobuf files: when building the main library,
-// it is defined as CAFFE2_CUDA_EXPORT to fix a Windows global-variable-in-dll
-// issue, and for anyone dependent on Caffe2 it will be defined as
-// CAFFE2_CUDA_IMPORT.
-
-#ifdef CAFFE2_BUILD_MAIN_LIB
-#define CAFFE2_CUDA_API CAFFE2_CUDA_EXPORT
-#else
-#define CAFFE2_CUDA_API CAFFE2_CUDA_IMPORT
-#endif
+#define CAFFE2_HIP_EXPORT C10_EXPORT
+#define CAFFE2_HIP_API TORCH_HIP_API
 
 // This is a macro defined for cuda fp16 support. In default, cuda fp16 is
 // supported by NVCC 7.5, but it is also included in the Tegra X1 platform with
@@ -71,9 +38,7 @@
 // CAFFE_HAS_CUDA_FP16 manually.
 
 #ifndef CAFFE_HAS_CUDA_FP16
-#if CUDA_VERSION >= 7050 || defined(__HIP_PLATFORM_HCC__)
 #define CAFFE_HAS_CUDA_FP16
-#endif // CUDA_VERSION >= 7050
 #endif // CAFFE_HAS_CUDA_FP16
 
 #ifdef CAFFE_HAS_CUDA_FP16
@@ -88,13 +53,13 @@ constexpr int kFp16CUDADevicePropMajor = 3;
 #endif
 
 // Re-enable strict aliasing diagnostic if it was disabled.
-#if CUDA_VERSION >= 9000
+#ifndef __HIP_PLATFORM_HCC__
 #ifdef __GNUC__
 #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic pop
 #endif
 #endif // __GNUC__
-#endif // CUDA_VERSION >= 9000
+#endif // __HIP_PLATFORM_HCC__
 
 /**
  * The maximum number of peers that each gpu can have when doing p2p setup.
@@ -107,12 +72,12 @@ constexpr int kFp16CUDADevicePropMajor = 3;
 
 namespace caffe2 {
 
-#if CUDA_VERSION >= 9000
+#ifndef __HIP_PLATFORM_HCC__
 /**
  * Empty class to identify TensorCore-based math
  */
 class TensorCoreEngine {};
-#endif
+#endif // __HIP_PLATFORM_HCC__
 
 #if CUDA_VERSION >= 10000
 #define CAFFE2_CUDA_PTRATTR_MEMTYPE type
@@ -289,15 +254,6 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
        i += blockDim.x * gridDim.x)                                 \
     for (size_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
          j += blockDim.y * gridDim.y)
-
-// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
-// kernels. This is not supported by Apple platforms so we special case it.
-// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
-#define CUDA_KERNEL_ASSERT(...)
-#else // __APPLE__
-#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
-#endif // __APPLE__
 
 // The following helper functions are here so that you can write a kernel call
 // when you are not particularly interested in maxing out the kernels'

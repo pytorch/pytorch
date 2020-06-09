@@ -15,9 +15,11 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
   }
 
   auto strides = t->strides();
-  if (strides.end() != std::find_if(
-        strides.begin(), strides.end(), [](int64_t s) { return s == 0; })) {
-    return MemOverlap::YES;
+  auto sizes = t->sizes();
+  for (size_t i = 0; i < strides.size(); ++i) {
+    if (strides[i] == 0 && sizes[i] > 1) {
+      return MemOverlap::YES;
+    }
   }
 
   return MemOverlap::TOO_HARD;
@@ -39,6 +41,10 @@ MemOverlapStatus get_overlap_status(const Tensor& a, const Tensor& b) {
 }
 
 MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
+  if (a == b) return MemOverlapStatus::FULL;
+  if (a->numel() == 0 || b->numel() == 0) {
+    return MemOverlapStatus::NO;
+  }
   if (!a->is_contiguous() || !b->is_contiguous()) {
     return MemOverlapStatus::TOO_HARD;
   }

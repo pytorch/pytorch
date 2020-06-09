@@ -8,7 +8,7 @@ namespace caffe2 {
 // Static definition of GPU warp size for unrolling and code generation
 
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ <= 750
+#if __CUDA_ARCH__ <= 800
 constexpr int kWarpSize = 32;
 #else
 #error Unknown __CUDA_ARCH__; please define parameters for compute capability
@@ -109,7 +109,7 @@ __device__ __forceinline__ int getLaneId() {
   return __lane_id();
 #else
   int laneId;
-  asm("mov.s32 %0, %laneid;" : "=r"(laneId) );
+  asm("mov.s32 %0, %%laneid;" : "=r"(laneId) );
   return laneId;
 #endif // __HIP_PLATFORM_HCC__
 }

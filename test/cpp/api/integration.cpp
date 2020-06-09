@@ -1,15 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/data.h>
-#include <torch/nn/modules/batchnorm.h>
-#include <torch/nn/modules/conv.h>
-#include <torch/nn/modules/dropout.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/optim/adam.h>
-#include <torch/optim/optimizer.h>
-#include <torch/optim/sgd.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
@@ -202,10 +193,10 @@ TEST_F(IntegrationTest, CartPole) {
     std::vector<torch::Tensor> policy_loss;
     std::vector<torch::Tensor> value_loss;
     for (auto i = 0U; i < saved_log_probs.size(); i++) {
-      auto r = rewards[i] - saved_values[i].item<float>();
-      policy_loss.push_back(-r * saved_log_probs[i]);
+      auto advantage = r_t[i] - saved_values[i].item<float>();
+      policy_loss.push_back(-advantage * saved_log_probs[i]);
       value_loss.push_back(
-          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * rewards[i]));
+          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * r_t[i]));
     }
 
     auto loss =
@@ -259,7 +250,7 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto drop = Dropout(0.3);
-  auto drop2d = FeatureDropout(0.3);
+  auto drop2d = Dropout2d(0.3);
   auto linear1 = model->add(Linear(320, 50), "linear1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
@@ -293,10 +284,10 @@ TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
-  auto batchnorm2d = model->add(BatchNorm(10), "batchnorm2d");
+  auto batchnorm2d = model->add(BatchNorm2d(10), "batchnorm2d");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto linear1 = model->add(Linear(320, 50), "linear1");
-  auto batchnorm1 = model->add(BatchNorm(50), "batchnorm1");
+  auto batchnorm1 = model->add(BatchNorm1d(50), "batchnorm1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {

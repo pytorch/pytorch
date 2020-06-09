@@ -915,6 +915,44 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         except Exception as e:
             self.assertTrue("schema" in str(e))
 
+    def testDeviceOptionsPropagation(self):
+        '''
+        Test verifies that aggregation operators in a backward path will be in
+        the same device as the parameter.
+        '''
+        device_0 = 'node:0'
+
+        # init_net.
+        init_net = core.Net("init_net")
+        with core.DeviceScope(0, node_name=device_0):
+            w = init_net.UniformFill([], 'w', shape=[10000, 64])
+            ids = init_net.GivenTensorFill(
+                [],
+                'ids',
+                values=np.random.random_integers(low=0, high=10000, size=10),
+            )
+            ids_2 = init_net.GivenTensorFill(
+                [],
+                'ids_2',
+                values=np.random.random_integers(low=0, high=10000, size=10),
+            )
+
+        # train_net.
+        train_net = core.Net("train_net")
+        with core.DeviceScope(0, node_name=device_0):
+            vals = train_net.Gather([w, ids], "gathered")
+            r_vals = train_net.ReduceSum([vals], 1, axes=0)
+
+            vals_2 = train_net.Gather([w, ids_2], "gathered_2")
+            r_vals_2 = train_net.ReduceSum([vals_2], 1, axes=0)
+
+        loss = train_net.Sum([r_vals, r_vals_2], 1)
+        train_net.AddGradientOperators([loss])
+        # All concat operators should be on device_0
+        for op in train_net.Proto().op:
+            if op.type == 'Concat':
+                self.assertEqual(op.device_option.node_name, device_0)
+
 
 if __name__ == '__main__':
     unittest.main()

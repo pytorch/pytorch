@@ -42,7 +42,7 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
-#   MKLDNN_THREADING
+#   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
 #   USE_NNPACK=0
@@ -105,9 +105,6 @@
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
 #
-#   USE_FBGEMM
-#     Enables use of FBGEMM
-#
 #   USE_REDIS
 #     Whether to use Redis for distributed workflows (Linux only)
 #
@@ -160,11 +157,18 @@
 #   USE_TBB
 #      enable TBB support
 #
+#   USE_SYSTEM_LIBS (work in progress)
+#      Use system-provided libraries to satisfy the build dependencies.
+#      When turned on, the following cmake variables will be toggled as well:
+#        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-from __future__ import print_function
+import sys
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
-from distutils import core, dir_util
+from distutils import core
 from distutils.core import Distribution
 from distutils.errors import DistutilsArgError
 import setuptools.command.build_ext
@@ -174,23 +178,15 @@ import distutils.sysconfig
 import filecmp
 import subprocess
 import shutil
-import sys
 import os
 import json
 import glob
 import importlib
 
 from tools.build_pytorch_libs import build_caffe2
-from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
+from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
-from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
-
-try:
-    FileNotFoundError
-except NameError:
-    FileNotFoundError = IOError  # Python 2.7 does not have FileNotFoundError
 
 ################################################################################
 # Parameters parsed from environment
@@ -221,7 +217,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean':
+    if arg == 'clean' or arg == 'egg_info':
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -247,6 +243,12 @@ if IS_WINDOWS:
     cmake_python_library = "{}/libs/python{}.lib".format(
         distutils.sysconfig.get_config_var("prefix"),
         distutils.sysconfig.get_config_var("VERSION"))
+    # Fix virtualenv builds
+    # TODO: Fix for python < 3.3
+    if not os.path.exists(cmake_python_library):
+        cmake_python_library = "{}/libs/python{}.lib".format(
+            sys.base_prefix,
+            distutils.sysconfig.get_config_var("VERSION"))
 else:
     cmake_python_library = "{}/{}".format(
         distutils.sysconfig.get_config_var("LIBDIR"),
@@ -258,7 +260,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.3.0a0'
+version = open('version.txt', 'r').read().strip()
 sha = 'Unknown'
 
 try:
@@ -281,17 +283,10 @@ cmake = CMake()
 # all the work we need to do _before_ setup runs
 def build_deps():
     report('-- Building version ' + version)
-    version_path = os.path.join(cwd, 'torch', 'version.py')
-    with open(version_path, 'w') as f:
-        f.write("__version__ = '{}'\n".format(version))
-        # NB: This is not 100% accurate, because you could have built the
-        # library code with DEBUG, but csrc without DEBUG (in which case
-        # this would claim to be a release build when it's not.)
-        f.write("debug = {}\n".format(repr(build_type.is_debug())))
-        f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
-        f.write("git_version = {}\n".format(repr(sha)))
 
     def check_file(f):
+        if bool(os.getenv("USE_SYSTEM_LIBS", False)):
+            return
         if not os.path.exists(f):
             report("Could not find {}".format(f))
             report("Did you run 'git submodule update --init --recursive'?")
@@ -319,6 +314,19 @@ def build_deps():
                  rerun_cmake=RERUN_CMAKE,
                  cmake_only=CMAKE_ONLY,
                  cmake=cmake)
+
+    version_path = os.path.join(cwd, 'torch', 'version.py')
+    with open(version_path, 'w') as f:
+        f.write("__version__ = '{}'\n".format(version))
+        # NB: This is not 100% accurate, because you could have built the
+        # library code with DEBUG, but csrc without DEBUG (in which case
+        # this would claim to be a release build when it's not.)
+        f.write("debug = {}\n".format(repr(build_type.is_debug())))
+        cmake_cache_vars = defaultdict(lambda: None, cmake.get_cmake_cache_variables())
+        f.write("cuda = {}\n".format(repr(cmake_cache_vars['CUDA_VERSION'])))
+        f.write("git_version = {}\n".format(repr(sha)))
+        f.write("hip = {}\n".format(repr(cmake_cache_vars['HIP_VERSION'])))
+
     if CMAKE_ONLY:
         report('Finished running cmake. Run "ccmake build" or '
                '"cmake-gui build" to adjust build options and '
@@ -339,18 +347,12 @@ def build_deps():
         if not same:
             shutil.copyfile(orig_file, sym_file)
 
-    dir_util.copy_tree('third_party/pybind11/include/pybind11/',
-                       'torch/include/pybind11')
-
 ################################################################################
 # Building dependent libraries
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = []
-
-if sys.version_info <= (2, 7):
-    install_requires += ['future']
+install_requires = ['future']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -372,16 +374,15 @@ class build_ext(setuptools.command.build_ext.build_ext):
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars['USE_NUMPY']:
             report('-- Building with NumPy bindings')
-            global install_requires
-            install_requires += ['numpy']
         else:
             report('-- NumPy not found')
         if cmake_cache_vars['USE_CUDNN']:
-            report('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
+            report('-- Detected cuDNN at ' +
+                   cmake_cache_vars['CUDNN_LIBRARY'] + ', ' + cmake_cache_vars['CUDNN_INCLUDE_DIR'])
         else:
             report('-- Not using cuDNN')
         if cmake_cache_vars['USE_CUDA']:
-            report('-- Detected CUDA at ' + CUDA_HOME)
+            report('-- Detected CUDA at ' + cmake_cache_vars['CUDA_TOOLKIT_ROOT_DIR'])
         else:
             report('-- Not using CUDA')
         if cmake_cache_vars['USE_MKLDNN']:
@@ -406,6 +407,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report('-- Building with distributed package ')
         else:
             report('-- Building without distributed package')
+
+        # Do not use clang to compile exensions if `-fstack-clash-protection` is defined
+        # in system CFLAGS
+        system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
+        if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
+            os.environ['CC'] = distutils.sysconfig.get_config_var('CC')
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -552,6 +559,7 @@ def configure_extension_build():
     ################################################################################
 
     library_dirs = []
+    extra_install_requires = []
 
     if IS_WINDOWS:
         # /NODEFAULTLIB makes sure we only link to DLL runtime
@@ -560,27 +568,17 @@ def configure_extension_build():
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
         # /Z7 turns on symbolic debugging information in .obj files
-        # /EHa is about native C++ catch support for asynchronous
-        # structured exception handling (SEH)
+        # /EHsc is about standard C++ exception handling
         # /DNOMINMAX removes builtin min/max functions
         # /wdXXXX disables warning no. XXXX
         extra_compile_args = ['/MD', '/Z7',
-                              '/EHa', '/DNOMINMAX',
+                              '/EHsc', '/DNOMINMAX',
                               '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                               '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                               '/wd4275']
-        if sys.version_info[0] == 2:
-            if not check_env_flag('FORCE_PY27_BUILD'):
-                report('The support for PyTorch with Python 2.7 on Windows is very experimental.')
-                report('Please set the flag `FORCE_PY27_BUILD` to 1 to continue build.')
-                sys.exit(1)
-            # /bigobj increases number of sections in .obj file, which is needed to link
-            # against libaries in Python 2.7 under Windows
-            extra_compile_args.append('/bigobj')
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++11',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',
@@ -604,39 +602,17 @@ def configure_extension_build():
 
     library_dirs.append(lib_path)
 
-    # we specify exact lib names to avoid conflict with lua-torch installs
-    CAFFE2_LIBS = []
-
     main_compile_args = []
-    main_libraries = ['shm', 'torch_python']
+    main_libraries = ['torch_python']
     main_link_args = []
-    main_sources = ["torch/csrc/stub.cpp"]
-
-    # Before the introduction of stub.cpp, _C.so and libcaffe2.so defined
-    # some of the same symbols, and it was important for _C.so to be
-    # loaded before libcaffe2.so so that the versions in _C.so got
-    # used. This happened automatically because we loaded _C.so directly,
-    # and libcaffe2.so was brought in as a dependency (though I suspect it
-    # may have been possible to break by importing caffe2 first in the
-    # same process).
-    #
-    # Now, libtorch_python.so and libcaffe2.so define some of the same
-    # symbols. We directly load the _C.so stub, which brings both of these
-    # in as dependencies. We have to make sure that symbols continue to be
-    # looked up in libtorch_python.so first, by making sure it comes
-    # before libcaffe2.so in the linker command.
-    main_link_args.extend(CAFFE2_LIBS)
+    main_sources = ["torch/csrc/stub.c"]
 
     if cmake_cache_vars['USE_CUDA']:
-        if IS_WINDOWS:
-            cuda_lib_path = CUDA_HOME + '/lib/x64/'
-        else:
-            cuda_lib_dirs = ['lib64', 'lib']
-            for lib_dir in cuda_lib_dirs:
-                cuda_lib_path = os.path.join(CUDA_HOME, lib_dir)
-                if os.path.exists(cuda_lib_path):
-                    break
-        library_dirs.append(cuda_lib_path)
+        library_dirs.append(
+            os.path.dirname(cmake_cache_vars['CUDA_CUDA_LIB']))
+
+    if cmake_cache_vars['USE_NUMPY']:
+        extra_install_requires += ['numpy']
 
     if build_type.is_debug():
         if IS_WINDOWS:
@@ -670,7 +646,7 @@ def configure_extension_build():
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
-                  language='c++',
+                  language='c',
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
@@ -684,7 +660,7 @@ def configure_extension_build():
         extensions.append(DL)
 
     # These extensions are built by cmake and copied manually in build_extensions()
-    # inside the build_ext implementaiton
+    # inside the build_ext implementation
     extensions.append(
         Extension(
             name=str('caffe2.python.caffe2_pybind11_state'),
@@ -716,7 +692,7 @@ def configure_extension_build():
         ]
     }
 
-    return extensions, cmdclass, packages, entry_points
+    return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
@@ -755,13 +731,21 @@ if __name__ == '__main__':
     if RUN_BUILD_DEPS:
         build_deps()
 
-    extensions, cmdclass, packages, entry_points = configure_extension_build()
+    extensions, cmdclass, packages, entry_points, extra_install_requires = configure_extension_build()
+
+    install_requires += extra_install_requires
+
+    # Read in README.md for our long_description
+    with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
+        long_description = f.read()
 
     setup(
         name=package_name,
         version=version,
         description=("Tensors and Dynamic neural networks in "
                      "Python with strong GPU acceleration"),
+        long_description=long_description,
+        long_description_content_type="text/markdown",
         ext_modules=extensions,
         cmdclass=cmdclass,
         packages=packages,
@@ -772,7 +756,7 @@ if __name__ == '__main__':
                 'py.typed',
                 'bin/*',
                 'test/*',
-                '__init__.pyi',
+                '_C/*.pyi',
                 'cuda/*.pyi',
                 'optim/*.pyi',
                 'autograd/*.pyi',
@@ -796,11 +780,24 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.cuh',
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
+                'include/ATen/hip/*.cuh',
+                'include/ATen/hip/*.h',
+                'include/ATen/hip/detail/*.cuh',
+                'include/ATen/hip/detail/*.h',
+                'include/ATen/hip/impl/*.h',
                 'include/ATen/detail/*.h',
+                'include/ATen/native/*.h',
+                'include/ATen/native/cpu/*.h',
+                'include/ATen/native/quantized/*.h',
+                'include/ATen/native/quantized/cpu/*.h',
+                'include/ATen/quantized/*.h',
                 'include/caffe2/utils/*.h',
+                'include/caffe2/utils/**/*.h',
                 'include/c10/*.h',
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
+                'include/ATen/core/boxing/*.h',
+                'include/ATen/core/boxing/impl/*.h',
                 'include/ATen/core/dispatch/*.h',
                 'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',
@@ -809,6 +806,7 @@ if __name__ == '__main__':
                 'include/c10/cuda/impl/*.h',
                 'include/c10/hip/*.h',
                 'include/c10/hip/impl/*.h',
+                'include/c10d/*.hpp',
                 'include/caffe2/**/*.h',
                 'include/torch/*.h',
                 'include/torch/csrc/*.h',
@@ -822,8 +820,12 @@ if __name__ == '__main__':
                 'include/torch/csrc/api/include/torch/detail/*.h',
                 'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
                 'include/torch/csrc/api/include/torch/nn/*.h',
+                'include/torch/csrc/api/include/torch/nn/functional/*.h',
+                'include/torch/csrc/api/include/torch/nn/options/*.h',
                 'include/torch/csrc/api/include/torch/nn/modules/*.h',
+                'include/torch/csrc/api/include/torch/nn/modules/container/*.h',
                 'include/torch/csrc/api/include/torch/nn/parallel/*.h',
+                'include/torch/csrc/api/include/torch/nn/utils/*.h',
                 'include/torch/csrc/api/include/torch/optim/*.h',
                 'include/torch/csrc/api/include/torch/serialize/*.h',
                 'include/torch/csrc/autograd/*.h',
@@ -832,10 +834,17 @@ if __name__ == '__main__':
                 'include/torch/csrc/autograd/utils/*.h',
                 'include/torch/csrc/cuda/*.h',
                 'include/torch/csrc/jit/*.h',
+                'include/torch/csrc/jit/backends/*.h',
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/passes/quantization/*.h',
                 'include/torch/csrc/jit/passes/utils/*.h',
-                'include/torch/csrc/jit/script/*.h',
+                'include/torch/csrc/jit/runtime/*.h',
+                'include/torch/csrc/jit/ir/*.h',
+                'include/torch/csrc/jit/frontend/*.h',
+                'include/torch/csrc/jit/api/*.h',
+                'include/torch/csrc/jit/serialization/*.h',
+                'include/torch/csrc/jit/python/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
@@ -848,8 +857,9 @@ if __name__ == '__main__':
                 'include/THC/generic/*.h',
                 'include/THCUNN/*.cuh',
                 'include/THCUNN/generic/*.h',
-                'include/THNN/*.h',
-                'include/THNN/generic/*.h',
+                'include/THH/*.cuh',
+                'include/THH/*.h*',
+                'include/THH/generic/*.h',
                 'share/cmake/ATen/*.cmake',
                 'share/cmake/Caffe2/*.cmake',
                 'share/cmake/Caffe2/public/*.cmake',
@@ -861,13 +871,13 @@ if __name__ == '__main__':
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
-            ]
+            ],
         },
         url='https://pytorch.org/',
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*',
+        python_requires='>=3.6.1',
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',
@@ -876,12 +886,10 @@ if __name__ == '__main__':
             'Intended Audience :: Science/Research',
             'License :: OSI Approved :: BSD License',
             'Programming Language :: C++',
-            'Programming Language :: Python :: 2',
-            'Programming Language :: Python :: 2.7',
             'Programming Language :: Python :: 3',
-            'Programming Language :: Python :: 3.5',
             'Programming Language :: Python :: 3.6',
             'Programming Language :: Python :: 3.7',
+            'Programming Language :: Python :: 3.8',
             'Topic :: Scientific/Engineering',
             'Topic :: Scientific/Engineering :: Mathematics',
             'Topic :: Scientific/Engineering :: Artificial Intelligence',

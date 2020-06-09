@@ -51,7 +51,7 @@ __device__ __forceinline__ void warp_reduce(acc_t* sum) {
 // A "WARP" contains "C10_WARPS_SIZE" threads, these treads are guaranteed to belong to the same warp.
 // This is important because it means only __shfl_ instructions are required for reductions.
 // Note that this means WARP_SIZE must be a power of two and <= architecture warp size.
-// CUDA warp size is 32 for all existing GPU architecures, but there is no guarantee this will not change for future arch.
+// CUDA warp size is 32 for all existing GPU architectures, but there is no guarantee this will not change for future arch.
 // ROCm warp size is 64 for all currently ROCm-supported GPU architectures, but this may change for future archs.
 // is_log_softmax is a flag indicating whether SoftMax or LogSoftMax should be computed.
 // The template can be instantiated with any floating point type for the type arguments input_t, output_t and acc_t.
@@ -135,13 +135,13 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         if (i >= local_batches)
             break;
-        if (is_log_softmax) sum[i] = max_value[i] + std::log(sum[i]);
+        if (is_log_softmax) sum[i] = std::log(sum[i]);
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
                 if (is_log_softmax) {
-                    dst[i*element_count+it*WARP_SIZE] = elements[i][it] - sum[i];
+                    dst[i*element_count+it*WARP_SIZE] = elements[i][it] - max_value[i] - sum[i];
                 } else {
                     dst[i*element_count+it*WARP_SIZE] = elements[i][it] / sum[i];
                 }

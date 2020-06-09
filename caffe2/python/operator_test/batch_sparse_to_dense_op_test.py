@@ -17,7 +17,7 @@ class TestBatchSparseToDense(serial.SerializedTestCase):
         batch_size=st.integers(5, 10),
         dense_last_dim=st.integers(5, 10),
         default_value=st.floats(min_value=2.0, max_value=3.0),
-        **hu.gcs_cpu_only
+        **hu.gcs
     )
     def test_batch_sparse_to_dense(
         self, batch_size, dense_last_dim, default_value, gc, dc
@@ -72,7 +72,7 @@ class TestBatchSparseToDense(serial.SerializedTestCase):
     @given(
         batch_size=st.integers(5, 10),
         dense_last_dim=st.integers(5, 10),
-        **hu.gcs_cpu_only
+        **hu.gcs
     )
     def test_batch_dense_to_sparse(self, batch_size, dense_last_dim, gc, dc):
         L = np.random.randint(1, dense_last_dim + 1, size=(batch_size))

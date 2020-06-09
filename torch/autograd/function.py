@@ -5,6 +5,7 @@ from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
+from typing import Any
 
 
 class _ContextMethodMixin(object):
@@ -109,6 +110,9 @@ class FunctionMeta(type):
 class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
     r"""Records operation history and defines formulas for differentiating ops.
 
+    See the Note on extending the autograd engine for more details on how to use
+    this class: https://pytorch.org/docs/stable/notes/extending.html#extending-torch-autograd
+
     Every operation performed on :class:`Tensor` s creates a new function
     object, that performs the computation, and records that it happened.
     The history is retained in the form of a DAG of functions, with edges
@@ -120,8 +124,6 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     Normally, the only way users interact with functions is by creating
     subclasses and defining new operations. This is a recommended way of
     extending torch.autograd.
-
-    Each function object is meant to be used only once (in the forward pass).
 
     Examples::
 
@@ -137,16 +139,22 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>>     def backward(ctx, grad_output):
         >>>         result, = ctx.saved_tensors
         >>>         return grad_output * result
+        >>>
+        >>> #Use it by calling the apply method:
+        >>> output = Exp.apply(input)
     """
 
-    # only for backward compatibility
-    __call__ = _C._FunctionBase._do_forward
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError(
+            "Legacy autograd function with non-static forward method is deprecated. "
+            "Please use new-style autograd function with static forward method. "
+            "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)")
 
     # for the tracer
     is_traceable = False
 
     @staticmethod
-    def forward(ctx, *args, **kwargs):
+    def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
         r"""Performs the operation.
 
         This function is to be overridden by all subclasses.
@@ -157,10 +165,11 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         The context can be used to store tensors that can be then retrieved
         during the backward pass.
         """
-        raise NotImplementedError
+        raise NotImplementedError("You must implement the forward function for custom"
+                                  " autograd.Function.")
 
     @staticmethod
-    def backward(ctx, *grad_outputs):
+    def backward(ctx: Any, *grad_outputs: Any) -> Any:
         r"""Defines a formula for differentiating the operation.
 
         This function is to be overridden by all subclasses.
@@ -178,7 +187,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         first input to :func:`forward` needs gradient computated w.r.t. the
         output.
         """
-        raise NotImplementedError
+        raise NotImplementedError("You must implement the backward function for custom"
+                                  " autograd.Function.")
 
 
 def once_differentiable(fn):
@@ -254,7 +264,11 @@ def _nested_map(condition, fn, condition_msg=None):
         elif obj is None:
             return None
         elif isinstance(obj, (list, tuple)):
-            return type(obj)(_map(x) for x in obj)
+            mapped = (_map(x) for x in obj)
+            if hasattr(obj, '_fields'):
+                # obj is namedtuple
+                return type(obj)(*mapped)
+            return type(obj)(mapped)
         elif isinstance(obj, dict):
             return {x : _map(obj[x]) for x in obj}
         else:
@@ -337,6 +351,8 @@ _map_tensor_data = _nested_map(lambda x: isinstance(x, torch.Tensor), lambda o: 
 
 
 class NestedIOFunction(Function):
+    # The 'type: ignore' statements are needed here because these functions are declared as '@staticmethod' in the
+    # superclass (Function) but are instance methods here, which mypy reports as incompatible.
 
     def _do_forward(self, *input):
         self._nested_input = input
@@ -354,21 +370,21 @@ class NestedIOFunction(Function):
             del self._to_save_nested
         return result
 
-    def backward(self, *gradients):
+    def backward(self, *gradients: Any) -> Any:
         nested_gradients = _unflatten(gradients, self._nested_output)
         result = self.backward_extended(*nested_gradients)
         return tuple(_iter_None_tensors(result))
 
     __call__ = _do_forward
 
-    def forward(self, *args):
+    def forward(self, *args: Any) -> Any:
         nested_tensors = _map_tensor_data(self._nested_input)
         result = self.forward_extended(*nested_tensors)
         del self._nested_input
         self._nested_output = result
         return tuple(_iter_tensors(result))
 
-    def save_for_backward(self, *args):
+    def save_for_backward(self, *args: Any) -> None:
         self.to_save = tuple(_iter_tensors(args))
         self._to_save_nested = args
 
@@ -377,14 +393,14 @@ class NestedIOFunction(Function):
         flat_tensors = super(NestedIOFunction, self).saved_tensors
         return _unflatten(flat_tensors, self._to_save_nested)
 
-    def mark_dirty(self, *args, **kwargs):
+    def mark_dirty(self, *args: Any, **kwargs: Any) -> None:
         self.dirty_tensors = tuple(_iter_tensors((args, kwargs)))
 
-    def mark_non_differentiable(self, *args, **kwargs):
+    def mark_non_differentiable(self, *args: Any, **kwargs: Any) -> None:
         self.non_differentiable = tuple(_iter_tensors((args, kwargs)))
 
-    def forward_extended(self, *input):
+    def forward_extended(self, *input: Any) -> None:
         raise NotImplementedError
 
-    def backward_extended(self, *grad_output):
+    def backward_extended(self, *grad_output: Any) -> None:
         raise NotImplementedError

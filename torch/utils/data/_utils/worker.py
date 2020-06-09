@@ -1,4 +1,4 @@
-r""""Contains definitions of the methods used by the _DataLoaderIter workers.
+r""""Contains definitions of the methods used by the _BaseDataLoaderIter workers.
 
 These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
@@ -44,7 +44,7 @@ if IS_WINDOWS:
                 self.manager_dead = self.kernel32.WaitForSingleObject(self.manager_handle, 0) == 0
             return not self.manager_dead
 else:
-    class ManagerWatchdog(object):
+    class ManagerWatchdog(object):  # type: ignore[no-redef]
         def __init__(self):
             self.manager_pid = os.getppid()
             self.manager_dead = False
@@ -111,7 +111,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
     # logic of this function.
 
     try:
-        # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
+        # Initialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
         # module's handlers are executed after Python returns from C low-level
         # handlers, likely when the same fatal signal had already happened
         # again.

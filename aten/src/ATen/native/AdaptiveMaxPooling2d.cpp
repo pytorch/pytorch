@@ -1,6 +1,6 @@
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include "ATen/NativeFunctions.h"
+#include <ATen/NativeFunctions.h>
 #include <tuple>
 
 
@@ -394,7 +394,7 @@ Tensor adaptive_max_pool2d_backward_cpu(
   const Tensor& input,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_max_pool2d_backward_out_cpu_template(
     gradInput,
     gradOutput_,

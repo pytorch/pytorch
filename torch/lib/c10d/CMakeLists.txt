@@ -11,9 +11,12 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   add_definitions(-DUSE_ROCM=1)
   add_definitions(-D__HIP_PLATFORM_HCC__=1)
-  add_definitions(-DHIP_VERSION=${HIP_VERSION_MAJOR})
 else()
   message(STATUS "Building c10d without CUDA/ROCm support")
+endif()
+
+if(USE_TBB)
+include_directories(${TBB_ROOT_DIR}/include)
 endif()
 
 if(USE_GLOO)
@@ -42,7 +45,9 @@ endfunction()
 
 set(C10D_SRCS
   FileStore.cpp
+  HashStore.cpp
   ProcessGroup.cpp
+  ProcessGroupRoundRobin.cpp
   Store.cpp
   PrefixStore.cpp
   TCPStore.cpp
@@ -52,7 +57,7 @@ set(C10D_SRCS
 set(C10D_LIBS torch)
 
 if(USE_C10D_NCCL)
-  list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
+  list(APPEND C10D_SRCS ProcessGroupNCCL.cpp NCCLUtils.cpp)
   list(APPEND C10D_LIBS __caffe2_nccl)
 endif()
 
@@ -62,7 +67,7 @@ if(USE_C10D_MPI)
 endif()
 
 if(USE_C10D_GLOO)
-  list(APPEND C10D_SRCS ProcessGroupGloo.cpp)
+  list(APPEND C10D_SRCS ProcessGroupGloo.cpp GlooDeviceFactory.cpp)
   list(APPEND C10D_LIBS gloo)
   if(USE_CUDA)
     list(APPEND C10D_LIBS gloo_cuda)
@@ -71,7 +76,7 @@ endif()
 
 add_library(c10d STATIC ${C10D_SRCS})
 set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
-set_property(TARGET c10d PROPERTY CXX_STANDARD 11)
+set_property(TARGET c10d PROPERTY CXX_STANDARD 14)
 target_compile_options(c10d PUBLIC
   -Wall
   -Wextra
@@ -113,6 +118,7 @@ if(USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
+copy_header(HashStore.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
@@ -121,6 +127,7 @@ copy_header(Types.hpp)
 copy_header(Utils.hpp)
 if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
+  copy_header(GlooDeviceFactory.hpp)
 endif()
 
 if(USE_C10D_NCCL)

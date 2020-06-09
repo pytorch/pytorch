@@ -1,7 +1,9 @@
 // required for old g++ to compile PRId64 macros, see
 // https://github.com/pytorch/pytorch/issues/3571
 // for context
+#ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
+#endif
 
 #include <ATen/${Type}.h>
 
@@ -20,7 +22,6 @@ $storage_tensor_headers
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/ATenDispatch.h>
 
 #include <cstddef>
 #include <functional>
@@ -28,9 +29,16 @@ $storage_tensor_headers
 #include <utility>
 
 #include <ATen/Config.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 $extra_cuda_headers
 $legacy_th_headers
+
+namespace {
+static const char* named_tensors_unsupported_error =
+  " is not yet supported with named tensors. Please drop names via "
+  "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
+  "and set names on the result of the operation.";
+}
 
 namespace at {
 
@@ -41,10 +49,14 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 }
 */
 
+namespace ${Type} {
+
 ${type_derived_method_definitions}
 
-#ifndef USE_STATIC_DISPATCH
-static auto registerer = torch::RegisterOperators()
-  ${function_registrations};
-#endif
+}  // namespace ${Type}
+
+TORCH_LIBRARY_IMPL(aten, ${Backend}, m) {
+  ${function_registrations}
 }
+
+} // namespace at

@@ -21,6 +21,8 @@ def parse_arguments(args):
 
 def set_declaration_defaults(declaration):
     if 'schema_string' not in declaration:
+        # This happens for legacy TH bindings like
+        # _thnn_conv_depthwise2d_backward
         declaration['schema_string'] = ''
     if 'matches_jit_signature' not in declaration:
         declaration['matches_jit_signature'] = False
@@ -30,8 +32,22 @@ def set_declaration_defaults(declaration):
         declaration['cname'] = declaration['name']
     if 'backends' not in declaration:
         declaration['backends'] = ['CPU', 'CUDA']
-    if 'api_name' not in declaration:
-        declaration['api_name'] = declaration['name']
+    assert 'api_name' not in declaration
+    declaration['api_name'] = declaration['name']
+    # NB: keep this in sync with gen_autograd.py
+    if declaration.get('overload_name'):
+        declaration['type_wrapper_name'] = "{}_{}".format(
+            declaration['name'], declaration['overload_name'])
+    else:
+        declaration['type_wrapper_name'] = declaration['name']
+    # TODO: Uggggh, parsing the schema string here, really???
+    declaration['operator_name_with_overload'] = declaration['schema_string'].split('(')[0]
+    if declaration['schema_string']:
+        declaration['unqual_schema_string'] = declaration['schema_string'].split('::')[1]
+        declaration['unqual_operator_name_with_overload'] = declaration['operator_name_with_overload'].split('::')[1]
+    else:
+        declaration['unqual_schema_string'] = ''
+        declaration['unqual_operator_name_with_overload'] = ''
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
         declaration['options'] = [{'arguments': declaration['arguments']}]
@@ -53,7 +69,7 @@ def set_declaration_defaults(declaration):
 
 def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
     def exclude_arg(arg):
-        return arg.get('ignore_check') or arg['type'] == 'CONSTANT'
+        return arg['type'] == 'CONSTANT'
 
     def exclude_arg_with_self_check(arg):
         return exclude_arg(arg) or (remove_self and arg['name'] == 'self')
@@ -91,10 +107,10 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
     return unique
 
 
-def sort_by_number_of_options(declaration, reverse=True):
-    def num_checked_args(option):
-        return sum(map(lambda a: not a.get('ignore_check', False), option['arguments']))
-    declaration['options'].sort(key=num_checked_args, reverse=reverse)
+def sort_by_number_of_args(declaration, reverse=True):
+    def num_args(option):
+        return len(option['arguments'])
+    declaration['options'].sort(key=num_args, reverse=reverse)
 
 
 class Function(object):

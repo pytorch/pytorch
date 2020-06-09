@@ -7,7 +7,7 @@ namespace caffe2 { namespace onnx {
 
 void Caffe2BackendRep::CheckInit() {
   if (!predictor_) {
-    predictor_ = caffe2::make_unique<caffe2::Predictor>(
+    predictor_ = std::make_unique<caffe2::Predictor>(
         makePredictorConfig(init_net_, pred_net_));
     init_net_.Clear();
     pred_net_.Clear();

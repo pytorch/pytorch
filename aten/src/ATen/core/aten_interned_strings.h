@@ -24,6 +24,9 @@ _(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
+_(aten, _acosh) \
+_(aten, _asinh) \
+_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _asin) \
@@ -39,6 +42,9 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
+_(aten, _clamp) \
+_(aten, _clamp_max) \
+_(aten, _clamp_min) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, convolution_overrideable) \
@@ -126,25 +132,20 @@ _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
 _(aten, _sparse_sum) \
 _(aten, _sqrt) \
+_(aten, _square) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
 _(aten, _sum_cuda) \
-_(aten, _sumall) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
-_(aten, _th_clamp) \
-_(aten, _th_clamp_max) \
-_(aten, _th_clamp_min) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_max) \
 _(aten, _th_median) \
-_(aten, _th_min) \
 _(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
@@ -225,6 +226,7 @@ _(aten, binary_cross_entropy_with_logits_backward) \
 _(aten, binary_cross_entropy_with_logits_target_backward) \
 _(aten, bincount) \
 _(aten, blackman_window) \
+_(aten, block_diag) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
 _(aten, cartesian_prod) \
@@ -278,9 +280,12 @@ _(aten, cudnn_convolution_transpose_backward_weight) \
 _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
+_(aten, cummax) \
+_(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
+_(aten, deg2rad) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
@@ -326,8 +331,11 @@ _(aten, fft) \
 _(aten, fill) \
 _(aten, flatten) \
 _(aten, flip) \
+_(aten, fliplr) \
+_(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
+_(aten, fmod_) \
 _(aten, frac) \
 _(aten, fractional_max_pool2d) \
 _(aten, fractional_max_pool2d_backward) \
@@ -337,6 +345,7 @@ _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
 _(aten, ge) \
+_(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, ger) \
@@ -357,6 +366,8 @@ _(aten, hamming_window) \
 _(aten, hann_window) \
 _(aten, hardshrink) \
 _(aten, hardshrink_backward) \
+_(aten, hardsigmoid) \
+_(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \
@@ -386,6 +397,7 @@ _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
 _(aten, isclose) \
+_(aten, istft) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -412,6 +424,7 @@ _(aten, log_sigmoid_forward) \
 _(aten, log_softmax) \
 _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
+_(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
@@ -500,7 +513,11 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
+_(aten, bitwise_and) \
 _(aten, bitwise_not) \
+_(aten, bitwise_or) \
+_(aten, bitwise_xor) \
+_(aten, element_size) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
@@ -518,6 +535,7 @@ _(aten, ones_like) \
 _(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
+_(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
@@ -532,6 +550,7 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
+_(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
 _(aten, randint) \
@@ -579,7 +598,6 @@ _(aten, rrelu_with_noise) \
 _(aten, rrelu_with_noise_backward) \
 _(aten, rrelu_with_noise_forward) \
 _(aten, rsqrt) \
-_(aten, s_native_addmm) \
 _(aten, scatter) \
 _(aten, scatter_add) \
 _(aten, select) \
@@ -618,6 +636,7 @@ _(aten, sparse_resize_and_clear) \
 _(aten, split) \
 _(aten, split_with_sizes) \
 _(aten, sqrt) \
+_(aten, square) \
 _(aten, squeeze) \
 _(aten, sspaddmm) \
 _(aten, stack) \
@@ -649,9 +668,9 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
-_(aten, thnn_conv3d) \
-_(aten, thnn_conv3d_backward) \
-_(aten, thnn_conv3d_forward) \
+_(aten, slow_conv3d) \
+_(aten, slow_conv3d_backward) \
+_(aten, slow_conv3d_forward) \
 _(aten, thnn_conv_depthwise2d) \
 _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \
@@ -703,6 +722,7 @@ _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \
 _(aten, values) \
+_(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \

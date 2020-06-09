@@ -8,17 +8,15 @@ from .. import functional as F
 from .. import init
 
 
-# TODO: check contiguous in THNN
-# TODO: use separate backend functions?
-class _BatchNorm(Module):
+class _NormBase(Module):
+    """Common base of _InstanceNorm and _BatchNorm"""
     _version = 2
-    __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
-                     'running_mean', 'running_var', 'num_batches_tracked',
+    __constants__ = ['track_running_stats', 'momentum', 'eps',
                      'num_features', 'affine']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
-        super(_BatchNorm, self).__init__()
+        super(_NormBase, self).__init__()
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
@@ -55,31 +53,6 @@ class _BatchNorm(Module):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
-    def forward(self, input):
-        self._check_input_dim(input)
-
-        # exponential_average_factor is set to self.momentum 
-        # (when it is available) only so that if gets updated
-        # in ONNX graph when this node is exported to ONNX.
-        if self.momentum is None:
-            exponential_average_factor = 0.0
-        else:
-            exponential_average_factor = self.momentum
-
-        if self.training and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
-                if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-                else:  # use exponential moving average
-                    exponential_average_factor = self.momentum
-
-        return F.batch_norm(
-            input, self.running_mean, self.running_var, self.weight, self.bias,
-            self.training or not self.track_running_stats,
-            exponential_average_factor, self.eps)
-
     def extra_repr(self):
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
@@ -95,15 +68,49 @@ class _BatchNorm(Module):
             if num_batches_tracked_key not in state_dict:
                 state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
 
-        super(_BatchNorm, self)._load_from_state_dict(
+        super(_NormBase, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
+
+
+class _BatchNorm(_NormBase):
+
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
+                 track_running_stats=True):
+        super(_BatchNorm, self).__init__(
+            num_features, eps, momentum, affine, track_running_stats)
+
+    def forward(self, input):
+        self._check_input_dim(input)
+
+        # exponential_average_factor is set to self.momentum
+        # (when it is available) only so that it gets updated
+        # in ONNX graph when this node is exported to ONNX.
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.momentum
+
+        if self.training and self.track_running_stats:
+            # TODO: if statement only here to tell the jit to skip emitting this when it is None
+            if self.num_batches_tracked is not None:
+                self.num_batches_tracked = self.num_batches_tracked + 1
+                if self.momentum is None:  # use cumulative moving average
+                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                else:  # use exponential moving average
+                    exponential_average_factor = self.momentum
+
+        return F.batch_norm(
+            input, self.running_mean, self.running_var, self.weight, self.bias,
+            self.training or not self.track_running_stats,
+            exponential_average_factor, self.eps)
 
 
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -161,9 +168,6 @@ class BatchNorm1d(_BatchNorm):
         >>> m = nn.BatchNorm1d(100, affine=False)
         >>> input = torch.randn(20, 100)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -175,7 +179,8 @@ class BatchNorm1d(_BatchNorm):
 class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -233,9 +238,6 @@ class BatchNorm2d(_BatchNorm):
         >>> m = nn.BatchNorm2d(100, affine=False)
         >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -247,7 +249,8 @@ class BatchNorm2d(_BatchNorm):
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -306,9 +309,6 @@ class BatchNorm3d(_BatchNorm):
         >>> m = nn.BatchNorm3d(100, affine=False)
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def _check_input_dim(self, input):
@@ -320,7 +320,8 @@ class BatchNorm3d(_BatchNorm):
 class SyncBatchNorm(_BatchNorm):
     r"""Applies Batch Normalization over a N-Dimensional input (a mini-batch of [N-2]D inputs
     with additional channel dimension) as described in the paper
-    `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
+    `Batch Normalization: Accelerating Deep Network Training by Reducing
+    Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
     .. math::
 
@@ -349,19 +350,21 @@ class SyncBatchNorm(_BatchNorm):
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
-    Because the Batch Normalization is done over the `C` dimension, computing statistics
-    on `(N, +)` slices, it's common terminology to call this Volumetric Batch Normalization
-    or Spatio-temporal Batch Normalization.
+    Because the Batch Normalization is done for each channel in the ``C`` dimension, computing
+    statistics on ``(N, +)`` slices, it's common terminology to call this Volumetric Batch
+    Normalization or Spatio-temporal Batch Normalization.
 
-    Currently SyncBatchNorm only supports DistributedDataParallel with single GPU per process. Use
-    torch.nn.SyncBatchNorm.convert_sync_batchnorm() to convert BatchNorm layer to SyncBatchNorm before wrapping
+    Currently :class:`SyncBatchNorm` only supports
+    :class:`~torch.nn.DistributedDataParallel` (DDP) with single GPU per process. Use
+    :meth:`torch.nn.SyncBatchNorm.convert_sync_batchnorm()` to convert
+    :attr:`BatchNorm*D` layer to :class:`SyncBatchNorm` before wrapping
     Network with DDP.
 
     Args:
         num_features: :math:`C` from an expected input of size
             :math:`(N, C, +)`
         eps: a value added to the denominator for numerical stability.
-            Default: 1e-5
+            Default: ``1e-5``
         momentum: the value used for the running_mean and running_var
             computation. Can be set to ``None`` for cumulative moving average
             (i.e. simple average). Default: 0.1
@@ -398,9 +401,6 @@ class SyncBatchNorm(_BatchNorm):
         >>>                         sync_bn_network,
         >>>                         device_ids=[args.local_rank],
         >>>                         output_device=args.local_rank)
-
-    .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
-        https://arxiv.org/abs/1502.03167
     """
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
@@ -412,8 +412,8 @@ class SyncBatchNorm(_BatchNorm):
         self.ddp_gpu_size = None
 
     def _check_input_dim(self, input):
-        if input.dim() <= 2:
-            raise ValueError('expected at least 3D input (got {}D input)'
+        if input.dim() < 2:
+            raise ValueError('expected at least 2D input (got {}D input)'
                              .format(input.dim()))
 
     def _specify_ddp_gpu_num(self, gpu_size):
@@ -428,8 +428,8 @@ class SyncBatchNorm(_BatchNorm):
 
         self._check_input_dim(input)
 
-        # exponential_average_factor is set to self.momentum 
-        # (when it is available) only so that if gets updated
+        # exponential_average_factor is set to self.momentum
+        # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
             exponential_average_factor = 0.0
@@ -437,7 +437,7 @@ class SyncBatchNorm(_BatchNorm):
             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked += 1
+            self.num_batches_tracked = self.num_batches_tracked + 1
             if self.momentum is None:  # use cumulative moving average
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
             else:  # use exponential moving average
@@ -467,28 +467,31 @@ class SyncBatchNorm(_BatchNorm):
 
     @classmethod
     def convert_sync_batchnorm(cls, module, process_group=None):
-        r"""Helper function to convert `torch.nn.BatchNormND` layer in the model to
-        `torch.nn.SyncBatchNorm` layer.
+        r"""Helper function to convert all :attr:`BatchNorm*D` layers in the model to
+        :class:`torch.nn.SyncBatchNorm` layers.
 
         Args:
-            module (nn.Module): containing module
+            module (nn.Module): module containing one or more attr:`BatchNorm*D` layers
             process_group (optional): process group to scope synchronization,
-        default is the whole world
+                default is the whole world
 
         Returns:
-            The original module with the converted `torch.nn.SyncBatchNorm` layer
+            The original :attr:`module` with the converted :class:`torch.nn.SyncBatchNorm`
+            layers. If the original :attr:`module` is a :attr:`BatchNorm*D` layer,
+            a new :class:`torch.nn.SyncBatchNorm` layer object will be returned
+            instead.
 
         Example::
 
             >>> # Network with nn.BatchNorm layer
             >>> module = torch.nn.Sequential(
             >>>            torch.nn.Linear(20, 100),
-            >>>            torch.nn.BatchNorm1d(100)
+            >>>            torch.nn.BatchNorm1d(100),
             >>>          ).cuda()
             >>> # creating process group (optional)
             >>> # process_ids is a list of int identifying rank ids.
             >>> process_group = torch.distributed.new_group(process_ids)
-            >>> sync_bn_module = convert_sync_batchnorm(module, process_group)
+            >>> sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module, process_group)
 
         """
         module_output = module
@@ -499,11 +502,9 @@ class SyncBatchNorm(_BatchNorm):
                                                    module.track_running_stats,
                                                    process_group)
             if module.affine:
-                module_output.weight.data = module.weight.data.clone().detach()
-                module_output.bias.data = module.bias.data.clone().detach()
-                # keep reuqires_grad unchanged
-                module_output.weight.requires_grad = module.weight.requires_grad
-                module_output.bias.requires_grad = module.bias.requires_grad
+                with torch.no_grad():
+                    module_output.weight = module.weight
+                    module_output.bias = module.bias
             module_output.running_mean = module.running_mean
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked

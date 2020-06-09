@@ -5,24 +5,34 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/python_functions.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
+#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
-#include <torch/csrc/jit/python_tracer.h>
+#endif
+#include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/tuple_parser.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_numbers.h>
 
 using namespace torch::autograd;
-using torch::TupleParser;
 
 struct DelayedErrorCtor {
   DelayedError* operator()(PyObject* args) {
-    std::string msg;
-    int num_inputs;
 
-    TupleParser parser(args, 2);
-    parser.parse(msg, "msg");
-    parser.parse(num_inputs, "num_inputs");
-
+    TORCH_CHECK(PyTuple_GET_SIZE(args) == 2, "Requires two arguments, got ", PyTuple_GET_SIZE(args));
+    auto arg1 = PyTuple_GET_ITEM(args, 0);
+    TORCH_CHECK(THPUtils_checkString(arg1), "argument 'msg' must be a string");
+    std::string msg = THPUtils_unpackString(arg1);
+    auto arg2 = PyTuple_GET_ITEM(args, 1);
+    TORCH_CHECK(THPUtils_checkLong(arg2), "argument 'num_inputs' must be an int");
+    int num_inputs = THPUtils_unpackLong(arg2);
     return new DelayedError(msg, num_inputs);
+  }
+};
+
+struct UndefinedGradCtor {
+  UndefinedGrad* operator()(PyObject* args) {
+    TORCH_CHECK(PyTuple_GET_SIZE(args) == 0, "Requires zero arguments, got ", PyTuple_GET_SIZE(args));
+    return new UndefinedGrad();
   }
 };
 
@@ -100,12 +110,20 @@ void THPAutograd_initFunctions()
   static PyTypeObject DelayedErrorClass;
   addClass<DelayedError, DelayedErrorCtor>(module, DelayedErrorClass, "DelayedError");
 
+  static PyTypeObject UndefinedGradBackwardClass;
+  addClass<UndefinedGradBackward, NoCtor>(module, UndefinedGradBackwardClass, "UndefinedGradBackward");
+
+  static PyTypeObject UndefinedGradClass;
+  addClass<UndefinedGrad, UndefinedGradCtor>(module, UndefinedGradClass, "UndefinedGrad");
+
   static PyTypeObject CopyBackwardsClass;
   addClass<CopyBackwards, NoCtor>(module, CopyBackwardsClass, "CopyBackwards");
 
+#ifdef USE_DISTRIBUTED
   static PyTypeObject SendRpcBackwardClass;
   addClass<torch::distributed::autograd::SendRpcBackward, NoCtor>(
       module, SendRpcBackwardClass, "SendRpcBackward");
+#endif
 
   static PyTypeObject CopySlicesClass;
   addClass<CopySlices, NoCtor>(module, CopySlicesClass, "CopySlices");

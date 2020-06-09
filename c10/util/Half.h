@@ -3,14 +3,15 @@
 /// Defines the Half type (half-precision floating-point) including conversions
 /// to standard C types and basic arithmetic operations. Note that arithmetic
 /// operations are implemented by converting to floating point and
-/// performing the operation in float32, instead of using CUDA half intrinisics.
+/// performing the operation in float32, instead of using CUDA half intrinsics.
 /// Most uses of this type within ATen are memory bound, including the
-/// element-wise kernels, and the half intrinisics aren't efficient on all GPUs.
+/// element-wise kernels, and the half intrinsics aren't efficient on all GPUs.
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
+#include <c10/util/complex_type.h>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
@@ -42,11 +43,18 @@
 #include <hip/hip_fp16.h>
 #endif
 
+// Standard check for compiling CUDA with clang
+#if defined(__clang__) && defined(__CUDA__) && defined(__CUDA_ARCH__)
+#define C10_DEVICE_HOST_FUNCTION __device__ __host__
+#else
+#define C10_DEVICE_HOST_FUNCTION
+#endif
+
 namespace c10 {
 
 namespace detail {
 
-  inline float fp32_from_bits(uint32_t w) {
+  C10_DEVICE_HOST_FUNCTION inline float fp32_from_bits(uint32_t w) {
   #if defined(__OPENCL_VERSION__)
     return as_float(w);
   #elif defined(__CUDA_ARCH__)
@@ -62,7 +70,7 @@ namespace detail {
   #endif
   }
 
-  inline uint32_t fp32_to_bits(float f) {
+  C10_DEVICE_HOST_FUNCTION inline uint32_t fp32_to_bits(float f) {
   #if defined(__OPENCL_VERSION__)
     return as_uint(f);
   #elif defined(__CUDA_ARCH__)
@@ -259,7 +267,7 @@ namespace detail {
            * A normalized single-precision floating-point number is represented as:
            *    FP32 = (1 + mantissa * 2**(-23)) * 2**(exponent - 127)
            * Therefore, when the biased exponent is 126, a unit change in the mantissa of the input denormalized half-precision
-           * number causes a change of the constructud single-precision number by 2**(-24), i.e. the same ammount.
+           * number causes a change of the constructud single-precision number by 2**(-24), i.e. the same amount.
            *
            * The last step is to adjust the bias of the constructed single-precision number. When the input half-precision number
            * is zero, the constructed single-precision number has the value of
@@ -301,7 +309,11 @@ namespace detail {
     const float scale_to_inf = scale_to_inf_val;
     const float scale_to_zero = scale_to_zero_val;
 
+#if defined(_MSC_VER) && _MSC_VER == 1916
+          float base = ((signbit(f) != 0 ? -f : f) * scale_to_inf) * scale_to_zero;
+#else
           float base = (fabsf(f) * scale_to_inf) * scale_to_zero;
+#endif
 
           const uint32_t w = fp32_to_bits(f);
           const uint32_t shl1_w = w + w;
@@ -348,72 +360,22 @@ struct alignas(2) Half {
 
 // This is just a placeholder for whatever complex representation we
 // end up deciding to use for half-precision complex numbers.
-struct alignas(4) ComplexHalf {
+template<>
+struct alignas(4) complex<Half> {
+  using value_type = Half;
   Half real_;
   Half imag_;
-  ComplexHalf() = default;
+  complex() = default;
   Half real() const {
     return real_;
   }
   Half imag() const {
     return imag_;
   }
-  inline ComplexHalf(std::complex<float> value)
+  inline complex(std::complex<float> value)
       : real_(value.real()), imag_(value.imag()) {}
   inline operator std::complex<float>() const {
     return {real_, imag_};
-  }
-};
-
-template <typename T>
-struct is_complex_t : public std::false_type {};
-
-template <typename T>
-struct is_complex_t<std::complex<T>> : public std::true_type {};
-
-template <>
-struct is_complex_t<ComplexHalf> : public std::true_type {};
-
-// Extract double from std::complex<double>; is identity otherwise
-// TODO: Write in more idiomatic C++17
-template <typename T>
-struct scalar_value_type {
-  using type = T;
-};
-template <typename T>
-struct scalar_value_type<std::complex<T>> {
-  using type = T;
-};
-template <>
-struct scalar_value_type<ComplexHalf> {
-  using type = Half;
-};
-
-// The old implementation of Converter as a function made nvcc's head explode
-// when we added std::complex on top of the specializations for CUDA-only types
-// like __half, so I rewrote it as a templated class (so, no more overloads,
-// just (partial) specialization).
-
-template <typename To, typename From, typename Enable = void>
-struct Converter {
-  To operator()(From f) {
-    return static_cast<To>(f);
-  }
-};
-
-template <typename To, typename From>
-To convert(From from) {
-  return Converter<To, From>()(from);
-}
-
-template <typename To, typename FromV>
-struct Converter<
-    To,
-    std::complex<FromV>,
-    typename std::enable_if<
-        c10::guts::negation<is_complex_t<To>>::value>::type> {
-  To operator()(std::complex<FromV> f) {
-    return static_cast<To>(f.real());
   }
 };
 
@@ -425,8 +387,17 @@ struct Converter<
 #pragma warning( push )
 #pragma warning( disable : 4146 )
 #pragma warning( disable : 4804 )
+#pragma warning( disable : 4018 )
 #endif
 
+// The overflow checks may involve float to int conversion which may
+// trigger precision loss warning. Re-enable the warning once the code
+// is fixed. See T58053069.
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
+#endif
 
 // bool can be converted to any type.
 // Without specializing on bool, in pytorch_linux_trusty_py2_7_9_build:
@@ -467,6 +438,10 @@ overflows(From f) {
   return f < limit::lowest() || f > limit::max();
 }
 
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
+
 #ifdef _MSC_VER
 #pragma warning( pop )
 #endif
@@ -489,18 +464,6 @@ typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
       overflows<
              typename scalar_value_type<To>::type,
              typename From::value_type>(f.imag());
-}
-
-template <typename To, typename From>
-To checked_convert(From f, const char* name) {
-  // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
-    std::ostringstream oss;
-    oss << "value cannot be converted to type " << name
-        << " without overflow: " << f;
-    throw std::domain_error(oss.str());
-  }
-  return convert<To, From>(f);
 }
 
 C10_API std::ostream& operator<<(std::ostream& out, const Half& value);

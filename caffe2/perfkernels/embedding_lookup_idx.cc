@@ -31,11 +31,11 @@ static bool EmbeddingLookupGenericSlowIdx(
   int64_t current = 0;
   for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
-    if (current != offsets[m]) {
+    if (current != offsets[m] - offsets[0]) {
       return false;
     }
     int64_t start_offset = offsets[m];
-    int64_t end_offset = (m == output_size - 1 ? index_size : offsets[m + 1]);
+    int64_t end_offset = offsets[m + 1];
     int64_t length = end_offset - start_offset;
     for (int i = start_offset; i < end_offset; ++i) {
       int64_t idx = indices[current];
@@ -75,7 +75,7 @@ static bool EmbeddingLookupGenericSlowIdx(
 }
 
 // Proxy back to generic implementation
-#define EMBEDDING_SPECIALIZATION(                                                                     \
+#define EMBEDDING_IDX_SPECIALIZATION(                                                                 \
     IndexType, InTypeName, InType, OutType, IS_WEIGHT_POSITIONAL)                                     \
   bool                                                                                                \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base(     \
@@ -186,9 +186,7 @@ static bool EmbeddingLookupGenericSlowIdx(
     }                                                                                                 \
     int64_t current = 0;                                                                              \
     for (int m = 0; m < output_size; ++m) {                                                           \
-      for (int64_t i = offsets[m];                                                                    \
-           i < (m == output_size - 1 ? index_size : offsets[m + 1]);                                  \
-           ++i) {                                                                                     \
+      for (int64_t i = offsets[m]; i < offsets[m + 1]; ++i) {                                         \
         CAFFE_ENFORCE_LT(current, index_size);                                                        \
         IndexType idx = indices[current];                                                             \
         CAFFE_ENFORCE(                                                                                \
@@ -209,20 +207,20 @@ static bool EmbeddingLookupGenericSlowIdx(
         "the size of the indices tensor, but it appears not.");                                       \
   }
 
-EMBEDDING_SPECIALIZATION(int32_t, float, float, float, false);
-EMBEDDING_SPECIALIZATION(int64_t, float, float, float, false);
-EMBEDDING_SPECIALIZATION(int32_t, half, at::Half, float, false);
-EMBEDDING_SPECIALIZATION(int64_t, half, at::Half, float, false);
-EMBEDDING_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, false);
-EMBEDDING_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, false);
 
-EMBEDDING_SPECIALIZATION(int32_t, float, float, float, true);
-EMBEDDING_SPECIALIZATION(int64_t, float, float, float, true);
-EMBEDDING_SPECIALIZATION(int32_t, half, at::Half, float, true);
-EMBEDDING_SPECIALIZATION(int64_t, half, at::Half, float, true);
-EMBEDDING_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, true);
-EMBEDDING_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, true);
 
-#undef EMBEDDING_SPECIALIZATION
+#undef EMBEDDING_IDX_SPECIALIZATION
 
 } // namespace caffe2

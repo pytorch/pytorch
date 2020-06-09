@@ -13,6 +13,9 @@
 
 namespace c10d {
 
+constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
+constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
+
 class Reducer {
  public:
   // The constructor takes a list of variables for every model replica.
@@ -23,7 +26,8 @@ class Reducer {
       std::vector<std::vector<torch::autograd::Variable>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group,
-      std::vector<std::vector<bool>> expect_sparse_gradients);
+      std::vector<std::vector<bool>> expect_sparse_gradients,
+      int64_t bucket_bytes_cap);
 
   ~Reducer() noexcept(false);
 
@@ -74,6 +78,23 @@ class Reducer {
 
   bool has_marked_unused_parameters_;
   std::vector<VariableIndex> unused_parameters_;
+  // Locally used parameter maps indicating if parameters are used locally
+  // during the current iteration or no_sync session if no_sync is on. One
+  // tensor for each model replica and each tensor is one-dim int32 tensor of
+  // number of parameters. These tensors are marked in autograd_hook to indicate
+  // the corresponding param has been used, and get allreduced in the end of
+  // backward of current iteration or no_sync session for figuring out the
+  // globally unused parameters.
+  //
+  // local_used_maps_:     CPU tensors for bookkeeping locally used params
+  // local_used_maps_dev_: dev tensors for reducing globally unused params
+  std::vector<at::Tensor> local_used_maps_;
+  std::vector<at::Tensor> local_used_maps_dev_;
+  // Indicate that reduction is done and D2H copy is done as well.
+  bool local_used_maps_reduced_;
+
+  // Work handle for allreduce on local_used_maps_
+  std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
   void mark_variable_ready_dense(VariableIndex index);
 
@@ -90,6 +111,20 @@ class Reducer {
   void finalize_bucket_sparse(Bucket& replica);
 
   void finalize_backward();
+
+  // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
+  // the buckets
+  void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
+  // TODO this function makes broadcast communication call and
+  // could be overlapped with next forward() call, thus
+  // it could be async. Will make it async when rebuilding buckets for
+  // find_unused_parameters = true case, as we could rebuild buckets more than
+  // once for find_unused_parameters = true case, where subgraphs are trained
+  // and parameter indices order may change more frequently.
+  // For find_unused_parameters = false case, buckets are only rebuilt once,
+  // the performance cost is negligible.
+  std::vector<std::vector<size_t>> rebuildBuckets();
 
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
@@ -134,6 +169,9 @@ class Reducer {
   struct Bucket {
     std::vector<BucketReplica> replicas;
 
+    // Global indices of participating variables in the bucket
+    std::vector<size_t> variable_indices;
+
     // Number of replicas to be marked done before this bucket is ready.
     size_t pending;
 
@@ -166,11 +204,18 @@ class Reducer {
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
   int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
+
+  // Following variables are to help build dynamic bucket order
+  bool has_rebuilt_bucket_;
+  std::vector<at::Tensor> rebuilt_params_;
+  std::vector<int64_t> rebuilt_param_indices_;
+  const int64_t bucket_bytes_cap_;
 };
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
-    const std::vector<bool>& expect_sparse_gradient = {});
+    const std::vector<bool>& expect_sparse_gradient = {},
+    const std::vector<int64_t>& tensor_indices = {});
 
 } // namespace c10d

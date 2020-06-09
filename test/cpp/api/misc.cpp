@@ -1,9 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/nn/init.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
@@ -25,26 +22,27 @@ void torch_warn() {
 
 TEST(UtilsTest, WarnOnce) {
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     torch_warn_once_A();
     torch_warn_once_A();
     torch_warn_once_B();
     torch_warn_once_B();
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn once"), 1);
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn something else once"), 1);
+    ASSERT_EQ(count_substr_occurrences(warnings.str(), "warn once"), 1);
+    ASSERT_EQ(
+        count_substr_occurrences(warnings.str(), "warn something else once"),
+        1);
   }
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     torch_warn();
     torch_warn();
     torch_warn();
 
-    ASSERT_EQ(count_substr_occurrences(buffer.str(), "warn multiple times"), 3);
+    ASSERT_EQ(
+        count_substr_occurrences(warnings.str(), "warn multiple times"), 3);
   }
 }
 
@@ -56,8 +54,9 @@ TEST(NoGradTest, SetsGradModeCorrectly) {
   auto y = model->forward(x);
   torch::Tensor s = y.sum();
 
-  s.backward();
-  ASSERT_FALSE(model->weight.grad().defined());
+  // Mimicking python API behavior:
+  ASSERT_THROWS_WITH(s.backward(),
+    "element 0 of tensors does not require grad and does not have a grad_fn")
 }
 
 struct AutogradTest : torch::test::SeedingFixture {
@@ -70,7 +69,7 @@ struct AutogradTest : torch::test::SeedingFixture {
 };
 
 TEST_F(AutogradTest, CanTakeDerivatives) {
-  z.backward();
+  z.backward(torch::ones_like(z));
   ASSERT_TRUE(x.grad().allclose(y));
 }
 

@@ -84,7 +84,7 @@ class ResNetBuilder():
         return self.prev_blob
 
     '''
-    Add a "bottleneck" component as decribed in He et. al. Figure 3 (right)
+    Add a "bottleneck" component as described in He et. al. Figure 3 (right)
     '''
 
     def add_bottleneck(

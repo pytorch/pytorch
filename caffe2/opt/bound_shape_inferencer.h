@@ -10,14 +10,27 @@
 #include <unordered_set>
 
 namespace caffe2 {
-// This struct stores the max bound size for batch in the general sense. We have
-// the conventioal batch size and the look-up sequence, which is also batch in a
-// sense.
+// This struct stores the max bound size for batch in the general sense.
+// max_batch_size is the upper bound of batch_size.
+// max_seq_size is the upper bound of length of every item in a batch.
+// Upper bound of length of a batch of items should be max_batch_size *
+// max_seq_size.
 struct CAFFE2_API BoundShapeSpec {
   explicit BoundShapeSpec(int64_t b, int64_t q)
-      : max_batch_size(b), max_seq_size(q) {}
+      : max_batch_size(b),
+        max_seq_size(q),
+        num_embeddings(0),
+        embedding_length(0) {}
+  explicit BoundShapeSpec(int64_t b, int64_t q, int64_t n, int64_t e)
+      : max_batch_size(b),
+        max_seq_size(q),
+        num_embeddings(n),
+        embedding_length(e) {}
   int64_t max_batch_size;
   int64_t max_seq_size;
+  // The following two parameters are for shape inference of UnPackRecords
+  int64_t num_embeddings;
+  int64_t embedding_length;
 };
 
 /// \class A class that does bound shape inference given a C2 net. Depending on
@@ -36,10 +49,18 @@ class BoundShapeInferencerBase {
 
   virtual ~BoundShapeInferencerBase() {}
 
+  // Initializes BoundShapeInferencer and infers bound shape and type.
+  // info: shape information of some tensors,
+  // e.g. shape information of external input / output tensors;
+  // extract_feature_len:
+  // indicating whether to extract feature length from SigridTransform
+  // and other related operators. When enabled,
+  // extracted feature length information will be used to infer tensor shapes.
   virtual void InferBoundShapeAndType(
       const NetDef& net,
-      const std::unordered_map<std::string, ShapeInfo>& info,
-      caffe2::Workspace* ws) = 0;
+      const ShapeInfoMap& info,
+      caffe2::Workspace* ws,
+      bool extract_feature_len = false) = 0;
 
   const ShapeInfoMap& shape_info() const {
     return shape_info_;
@@ -50,7 +71,7 @@ class BoundShapeInferencerBase {
     std::stringstream ss;
     for (const auto& kv : shape_info_) {
       const auto& s = kv.second;
-      ss << s.shape.name() << ": dim_type: " << s.dim_type << ", dims: [";
+      ss << s.shape.name() << ": dim_type: " << s.getDimType() << ", dims: [";
       for (const auto d : s.shape.dims()) {
         ss << d << ", ";
       }
@@ -61,7 +82,8 @@ class BoundShapeInferencerBase {
 
  protected:
   const BoundShapeSpec spec_;
-  std::unordered_map<std::string, ShapeInfo> shape_info_;
+  ShapeInfoMap shape_info_;
+  bool extract_feature_len_;
 };
 
 class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
@@ -72,21 +94,22 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   virtual ~BoundShapeInferencer() override {}
   void InferBoundShapeAndType(
       const NetDef& net,
-      const std::unordered_map<std::string, ShapeInfo>& info,
-      caffe2::Workspace* ws) override;
+      const ShapeInfoMap& info,
+      caffe2::Workspace* ws,
+      bool extract_feature_len = false) override;
 
  protected:
-  TensorShape& CheckAndSetTensorShapeAndType(
+  TensorShape& CheckAndSetTensorBoundShape(
       const std::string& name,
-      ShapeInfo::DimType t,
+      const std::vector<TensorBoundShape::DimType>& t,
       std::vector<int64_t> bound_dims,
       TensorProto::DataType type,
       bool is_quantized,
       bool allow_existing_shape = false);
 
-  TensorShape& SetTensorShapeAndTypeIfNotExist(
+  TensorShape& SetTensorBoundShapeIfNotExist(
       const std::string& name,
-      ShapeInfo::DimType t,
+      const std::vector<TensorBoundShape::DimType>& t,
       std::vector<int64_t> bound_dims,
       TensorProto::DataType type,
       bool is_quantized);
@@ -94,7 +117,10 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   virtual void InferOps(const OperatorDef& op, caffe2::Workspace* ws);
 
   void InferConcatInputs(const OperatorDef& op);
+  void InferInt8QuantizeInput(const OperatorDef& op);
+  void InferElementwiseOpInput(const OperatorDef& op);
 
+  void InferElementwiseOp(const OperatorDef& op);
   void InferGivenTensorFill(const OperatorDef& op);
   void InferSparseLengthsSum(const OperatorDef& op);
   void InferFC(const OperatorDef& op);
@@ -102,14 +128,21 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferShape(const OperatorDef& op);
   void InferReshape(const OperatorDef& op);
   void InferLengthsRangeFill(const OperatorDef& op);
+  void InferQuantizationTransformation(const OperatorDef& op);
+  void InferUnPackRecords(const OperatorDef& op);
+  void InferTile(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference
   // function
   void InferCommonOp(const OperatorDef& op);
 
-  void EnsureShapeNames(std::unordered_map<std::string, ShapeInfo>* info) const;
+  // Initialize private parameters, such as shape_info, extract_feature_len_
+  // This is called at the beginning of InferBoundShapeAndType()
+  virtual void Initialize(const ShapeInfoMap& info, bool extract_feature_len);
 
-  ShapeInfo::DimType current_dim_type_{ShapeInfo::DimType::BATCH};
+  void EnsureShapeNames(ShapeInfoMap* info) const;
+
+  TensorBoundShape::DimType current_dim_type_{TensorBoundShape_DimType_BATCH};
   int64_t current_max_batch_size_{0};
 };
 

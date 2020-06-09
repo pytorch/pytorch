@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh>
 
 #include <math.h>
 
@@ -34,10 +35,14 @@ static inline void upsample_1d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = false;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 && input.size(2) != 0;
+
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 3,
-        "non-empty 3D input tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 || valid_empty) && input.dim() == 3,
+                "Non-empty 3D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 3, 0, nbatch);
     check_dim_size(grad_output, 3, 1, nchannels);
@@ -69,10 +74,14 @@ static inline void upsample_2d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = false;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0;
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 4,
-        "non-empty 4D input tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 || valid_empty) && input.dim() == 4,
+                "Non-empty 4D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 4, 0, nbatch);
     check_dim_size(grad_output, 4, 1, nchannels);
@@ -110,10 +119,14 @@ static inline void upsample_3d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = false;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0;
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 5,
-        "Non-empty 5D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 || valid_empty) && input.dim() == 5,
+                "Non-empty 5D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 5, 0, nbatch);
     check_dim_size(grad_output, 5, 1, nchannels);
@@ -123,14 +136,63 @@ static inline void upsample_3d_shape_check(
   }
 }
 
+// NOTE [ Nearest neighbor upsampling kernel implementation ]
+//
+// The nearest neighbor upsampling kernel implementation is symmetrical as
+// expected. We launch kernels with threads mapping to destination tensors where
+// kernels write data to, each thread reads data from the source tensor, this
+// means:
+// 1. In the forward kernel,
+//      src_xxx refers to properties of input tensors;
+//      dst_xxx refers to properties of output tensors;
+//      scale_factor is the ratio of src_size to dst_size;
+// 2. In the backward kernel,
+//      src_xxx refers to properties of grad_output tensors;
+//      dst_xxx refers to properties of grad_input tensors;
+//      scale_factor is the ratio of src_size to dst_size;
+//
+// Because of this, we need to take the reciprocal of the scale defined by
+// upsample layer during forward path. The motivation is to avoid slow
+// division in the kernel code, so we can use faster multiplication instead.
+// This is not necessary during backward path, since the scale_factor is already
+// the reciprocal of corresponding scale_factor used in the forward path due to
+// the swap of source and destination tensor.
+//
+// Similarly, since the mapping from grad_input to grad_output during backward
+// is the reverse of the mapping of output to input, we need to have opposite
+// mapping functions to compute the source index.
+
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
+template <typename accscalar_t>
+__host__ __forceinline__ static accscalar_t compute_scales_value(
+    const c10::optional<double> scale,
+    int64_t src_size,
+    int64_t dst_size) {
+  // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
+  return (scale.has_value() && scale.value() > 0.) ? (accscalar_t)(1.0 / scale.value())
+                                                   : (accscalar_t)src_size / dst_size;
+}
+
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
+template <typename accscalar_t>
+__host__ __forceinline__ static accscalar_t compute_scales_value_backwards(
+    const c10::optional<double> scale,
+    int64_t src_size,
+    int64_t dst_size) {
+  // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
+  return (scale.has_value() && scale.value() > 0.) ? (accscalar_t)scale.value()
+                                                   : (accscalar_t)src_size / dst_size;
+}
+
 template <typename accscalar_t>
 __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
     int input_size,
     int output_size,
-    bool align_corners) {
+    bool align_corners,
+    const c10::optional<double> scale) {
   if (output_size > 1) {
     return align_corners ? (accscalar_t)(input_size - 1) / (output_size - 1)
-                         : (accscalar_t)input_size / output_size;
+                         :  compute_scales_value<accscalar_t>(scale, input_size, output_size);
   } else {
     return static_cast<accscalar_t>(0);
   }
@@ -154,12 +216,23 @@ __device__ __forceinline__ static accscalar_t area_pixel_compute_source_index(
   }
 }
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
     const float scale,
     int dst_index,
     int input_size) {
   const int src_index =
       min(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
+  return src_index;
+}
+
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
+__device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
+    const float scale,
+    int dst_index,
+    int output_size) {
+  const int src_index =
+      static_cast<int>(ceilf(dst_index * scale));
   return src_index;
 }
 
@@ -191,10 +264,10 @@ __device__ __forceinline__ static void upsample_increment_value_bounded(
     accscalar_t value) {
   int access_y = max(min(y, height - 1), 0);
   int access_x = max(min(x, width - 1), 0);
-  /* TODO: result here is trucated to scalar_t,
+  /* TODO: result here is truncated to scalar_t,
      check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912
    */
-  atomicAdd(
+  gpuAtomicAdd(
       &data[batch][channel][access_y][access_x], static_cast<scalar_t>(value));
 }
 

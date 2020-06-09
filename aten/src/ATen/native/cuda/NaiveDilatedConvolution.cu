@@ -1,13 +1,11 @@
-
-
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/DilatedConvolutionUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <tuple>
-#include "ATen/ATen.h"
-#include "ATen/native/cuda/im2col.cuh"
-#include "ATen/native/cuda/vol2col.cuh"
+#include <ATen/ATen.h>
+#include <ATen/native/cuda/im2col.cuh>
+#include <ATen/native/cuda/vol2col.cuh>
 
 namespace at {
 namespace native {
@@ -224,7 +222,6 @@ void slow_conv_dilated_all_cuda_template(
      branching outside the CPP macro: */
 #define CALCULATE_GRAD_BIAS                          \
   at::cuda::blas::gemv<scalar_t>(                    \
-      stream,                                        \
       /*trans=*/'t',                                 \
       /*    m=*/output_vsize,                        \
       /*    n=*/nOutputPlane,                        \
@@ -245,7 +242,7 @@ void slow_conv_dilated_all_cuda_template(
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "slow_conv_dilated<>", [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batchSize; elt++) {
@@ -279,7 +276,6 @@ void slow_conv_dilated_all_cuda_template(
                slow_conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
             at::cuda::blas::gemm<scalar_t>(
-                stream,
                 /*transa=*/'n',
                 /*transb=*/'n',
                 /*     m=*/columns.size(1),
@@ -305,7 +301,6 @@ void slow_conv_dilated_all_cuda_template(
                slow_conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
             at::cuda::blas::gemm<scalar_t>(
-                stream,
                 /*transa=*/'n',
                 /*transb=*/'t',
                 /*     m=*/columns.size(1),
@@ -355,7 +350,6 @@ void slow_conv_dilated_all_cuda_template(
                slow_conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
             at::cuda::blas::gemm<scalar_t>(
-                stream,
                 /*transa=*/'t',
                 /*transb=*/'n',
                 /*     m=*/columns.size(0),

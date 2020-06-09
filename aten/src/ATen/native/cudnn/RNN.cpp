@@ -578,9 +578,6 @@ namespace {
   }
 
   cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input){
-#if CUDNN_VERSION < 7200 || CUDA_VERSION < 9010
-      return CUDNN_RNN_ALGO_STANDARD;
-#else
       cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       const int64_t bsize = tensors.mini_batch;
       //excluding Turing from using persistent rnn.
@@ -599,17 +596,12 @@ namespace {
           }
       }
       return CUDNN_RNN_ALGO_STANDARD;
-#endif
   }
 
   cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {
-#if CUDNN_VERSION != 7103
-// CUDNN 7.1.3 enforces RNN descriptor type to be identical to input/weight. This check throws an error for type
-// promotion. The check has since been removed.
     if (dtype == CUDNN_DATA_HALF) {
       return CUDNN_DATA_FLOAT;
     }
-#endif
     return dtype;
   }
 
@@ -912,7 +904,6 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
         ));
   // TODO: put this in the correct device???
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
-
   AT_CUDNN_CHECK(cudnnRNNBackwardData(
         handle,
         descs.rnn_desc.desc(),
@@ -1016,7 +1007,6 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         &workspace_size
         ));
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
-
   AT_CUDNN_CHECK(cudnnRNNBackwardWeights(
         handle,
         descs.rnn_desc.desc(),
@@ -1061,10 +1051,13 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& dropout_state, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
+  if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
+    return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>(Tensor(), Tensor(), Tensor(), std::vector<Tensor>(weight.size()));
+  }
 
-  auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output);
-  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx);
-  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx)) : grad_cy_r;
+  auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT)) : grad_cy_r;
 
   Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve
@@ -1078,6 +1071,13 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
 // to initialize just the state tensor
+//
+// NB: You can have any color you like, as long as it's a CUDA byte
+// tensor.  Why does this function take a TensorOptions at all in that case?
+// This is a factory function: it produces tensors but takes no tensors
+// as input.  The codegen currently assumes that ALL factory functions
+// take TensorOptions, so it's just a lot easier for this function to
+// be bound if it also does it.
 Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
@@ -1121,7 +1121,7 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
 struct DropoutState {
   // Both buffer and event are lazily instantiated when a dropout state is needed
   // for the first time. Note that in this case needed != used, as we don't need
-  // a bufer to e.g. run RNNs in test mode.
+  // a buffer to e.g. run RNNs in test mode.
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
@@ -1151,14 +1151,12 @@ struct DropoutState {
 
 DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions options) {
   // Each state is slightly over 2MB and initialized lazily, so it's fine to cache them.
-  static std::vector<DropoutState> ten_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
-  static std::vector<DropoutState> var_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
+  static std::vector<DropoutState> dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
   static std::mutex state_cache_mut;
 
   int device = cuda::current_device();
   std::unique_lock<std::mutex> lock {state_cache_mut};
-  auto& state = options.is_variable() ? var_dropout_state_cache.at(device)
-                                      : ten_dropout_state_cache.at(device);
+  auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0 && !state.buffer.defined()) {
     std::unique_lock<std::mutex> lock {state.mutex};
     int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();
@@ -1233,7 +1231,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
@@ -1263,7 +1261,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
   if (!weight_buf.defined()) {
-    AT_WARN(WEIGHT_FORMAT_WARN);
+    TORCH_WARN(WEIGHT_FORMAT_WARN);
   }
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());

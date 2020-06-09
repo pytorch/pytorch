@@ -17,7 +17,7 @@ configure_file(
 # transitively passed on to all libraries dependent on PyTorch.
 
 # Note: if you add a new source file/header, you will need to update
-# tools/amd_build/pyHIPIFY/cuda_to_hip_mappings.py for new files
+# torch/utils/hipify/cuda_to_hip_mappings.py for new files
 # and headers you add
 set(C10_CUDA_SRCS
     CUDAStream.cpp
@@ -40,7 +40,7 @@ set(CUDA_LINK_LIBRARIES_KEYWORD)
 # If building shared library, set dllimport/dllexport proper.
 target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
-if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10_cuda PRIVATE "-fvisibility=hidden")
 endif()
 
@@ -69,6 +69,6 @@ endforeach()
 install(FILES ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h
   DESTINATION include/c10/cuda/impl)
 
-if (MSVC AND C10_CUDA_BUILD_SHARED_LIBS)
+if(MSVC AND C10_CUDA_BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:c10_cuda> DESTINATION lib OPTIONAL)
 endif()

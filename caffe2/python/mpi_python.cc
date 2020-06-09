@@ -35,7 +35,7 @@ PYBIND11_MODULE(mpi_utils, m) {
     auto comm = GlobalMPIComm();
     auto length = str.length();
     MPI_Bcast(&length, sizeof(length), MPI_CHAR, 0, comm);
-    auto ptr = caffe2::make_unique<char[]>(length);
+    auto ptr = std::make_unique<char[]>(length);
     if (MPICommRank(comm) == 0) {
       memcpy(ptr.get(), str.data(), str.length());
     }

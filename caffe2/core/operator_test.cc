@@ -114,14 +114,14 @@ TEST(OperatorTest, ExceptionWorks) {
     // This should not happen - exception should throw above.
     LOG(FATAL) << "This should not happen.";
   } catch (const EnforceNotMet& err) {
-    LOG(INFO) << err.msg();
+    LOG(INFO) << err.what();
   }
   try {
     op->RunAsync();
     // This should not happen - exception should throw above.
     LOG(FATAL) << "This should not happen.";
   } catch (const EnforceNotMet& err) {
-    LOG(INFO) << err.msg();
+    LOG(INFO) << err.what();
   }
 }
 

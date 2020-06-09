@@ -1,37 +1,37 @@
+import collections
 import io
 import tempfile
 import unittest
 import sys
-from itertools import repeat
+from itertools import repeat, chain
 import os
+import gc
 from contextlib import contextmanager
 import threading
-import math
-if sys.version_info[0] == 3:
-    import queue
-else:
-    import Queue as queue
+import queue
+import pickle
 
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
-from torch._six import inf, nan
+from torch._six import inf, nan, container_abcs
 
-from test_torch import _TestTorchMixin
+from test_torch import AbstractTestCases
 
-from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
+from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
-from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    TEST_WITH_ROCM, load_tests, slowTest, skipCUDANonDefaultStreamIf
+from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, \
+    slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
+from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-# We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
-# because if we do that, the TEST_CUDNN line from common_cuda will be executed
+# We cannot import TEST_CUDA and TEST_MULTIGPU from torch.testing._internal.common_cuda here,
+# because if we do that, the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed
 # multiple times as well during the execution of this test suite, and it will
 # cause CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
@@ -44,30 +44,14 @@ if not TEST_CUDA:
 TEST_MAGMA = TEST_CUDA
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
+TEST_CUDNN = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
+                                torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
     TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
-
-floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
-                torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
-
-
-def is_floating(t):
-    if not isinstance(t, type):
-        raise TypeError('t should be an instance of type')
-    assert t != torch.autograd.Variable
-    return t in floating_set
-
-
-def is_half(t):
-    if isinstance(t, torch.Tensor):
-        return t.dtype == torch.float16
-    assert isinstance(t, type)
-    assert t != torch.autograd.Variable
-    return t in [torch.HalfTensor, torch.cuda.HalfTensor]
-
 
 types = [
     torch.FloatTensor,
@@ -80,54 +64,6 @@ types = [
     torch.HalfTensor,
 ]
 
-signed_types = [
-    torch.FloatTensor,
-    torch.DoubleTensor,
-    torch.LongTensor,
-    torch.IntTensor,
-    torch.ShortTensor,
-    torch.CharTensor,
-]
-
-unsigned_types = [
-    torch.ByteTensor,
-]
-
-float_types = [
-    torch.FloatTensor,
-    torch.DoubleTensor,
-    torch.HalfTensor,
-]
-
-float_types_no_half = [
-    torch.FloatTensor,
-    torch.DoubleTensor,
-]
-
-
-def number(floating, integer, t):
-    return floating if is_floating(t) else integer
-
-
-def cast_tensor(tensor, t):
-    return t(tensor.size()).copy_(tensor)
-
-S = 10
-M = 50
-G = 275000000
-
-
-def make_tensor(t, *sizes):
-    if 'Half' in t.__name__:
-        return t(*sizes).copy_(torch.randn(*sizes))
-    else:
-        tensor = t(*sizes)
-        if tensor.is_floating_point():
-            return tensor.normal_()
-        else:
-            return tensor.random_(0, 10)
-
-
 def make_sparse_tensor(t, n, *sizes):
     assert t.is_sparse
     tensor = t()
@@ -138,477 +74,7 @@ def make_sparse_tensor(t, n, *sizes):
     v = v.new(n).copy_(torch.randn(n))
     return t(i, v, torch.Size(sizes))
 
-
-def tensor_clamp(t, min, max):
-    if is_half(t):
-        return t.float().clamp(min, max).half()
-    else:
-        return t.clamp(min, max)
-
-
-def tensor_mul(t, scale):
-    if is_half(t):
-        return t.float().mul(scale).half()
-    else:
-        return t.mul(scale)
-
-
-def tensor_abs_(t):
-    if is_half(t):
-        return t.float().abs_().half()
-    else:
-        return t.abs_()
-
-
-def constant_tensor_sub(a, b):
-    # helper function to address const - torch.HalfTensor where it doesn't
-    # have resize_as()
-    if is_half(b):
-        return (a - b.float()).half()
-    else:
-        return a - b
-
-
-def constant_tensor_add(a, b):
-    # helper function to address const + torch.HalfTensor where it doesn't
-    # have add()
-    if is_half(b):
-        return (a + b.float()).half()
-    else:
-        return a + b
-
-
-def small_0d(t):
-    return make_tensor(t, (1,)).squeeze()
-
-
-def small_2d(t):
-    return make_tensor(t, S, S)
-
-
-def small_2d_scaled(t, scale=10):
-    return tensor_mul(make_tensor(t, S, S), scale)
-
-
-def small_2d_oneish(t):
-    if is_floating(t):
-        return tensor_clamp(make_tensor(t, S, S), min=0.99, max=1.01)
-    else:
-        return t(S, S).fill_(1)
-
-
-def small_3d(t):
-    return make_tensor(t, S, S, S)
-
-
-def medium_1d(t):
-    return make_tensor(t, M)
-
-
-def medium_2d(t):
-    return make_tensor(t, M, M)
-
-
-def medium_2d_expanded(t):
-    return t(1).expand(M, M)
-
-
-def medium_2d_scaled(t, scale=10):
-    return tensor_mul(make_tensor(t, M, M), scale)
-
-
-def small_3d_ones(t):
-    return t(S, S, S).copy_(torch.ones(S, S, S))
-
-
-def small_3d_positive(t):
-    # In div_tensor(), half cannot achieve float precision
-    min_val = 1e-3 if is_floating(t) and not is_half(t) else 2
-    return tensor_clamp(make_tensor(t, S, S, S), min_val, 120)
-
-
-def small_3d_unique(t):
-    return t(S, S, S).copy_(torch.arange(1, S * S * S + 1).view(S, S, S))
-
-
-def small_1d_lapack(t):
-    return t(1, 3).copy_(torch.arange(1, 4).view(3))
-
-
-def small_2d_lapack(t):
-    return t(3, 3).copy_(torch.arange(1, 10).view(3, 3))
-
-
-def small_2d_lapack_skinny(t):
-    return t(3, 4).copy_(torch.arange(1, 13).view(3, 4))
-
-
-def small_2d_lapack_fat(t):
-    return t(4, 3).copy_(torch.arange(1, 13).view(4, 3))
-
-
-def large_2d_lapack(t):
-    return t(1000, 1000).normal_()
-
-
-def giant_1d_ones(t):
-    return t(G).copy_(torch.ones(G))
-
-
-def long_type(t):
-    return torch.cuda.LongTensor if 'cuda' in t.__module__ else torch.LongTensor
-
-
-def new_t(*sizes):
-    def tmp(t):
-        return t(*sizes).copy_(torch.randn(*sizes))
-    return tmp
-
-# Content of each tuple:
-# - function name
-# - constructor for the tensor,    signature: fn(tensor_type) -> tensor
-# - constructor for the arguments, signature: fn(tensor_type) -> list
-# - postfix name for the test (must be unique for a given function) (default='')
-# - tensor types to use (default=types)
-# - disable inplace test, if set to True, no inplace test will be done (default=False)
-# - decorator, e.g., unittest.skipIf (default is no decorator)
-tests = [
-    ('add', small_3d, lambda t: [number(3.14, 3, t)]),
-    ('add', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('add', small_3d, lambda t: [number(0.2, 2, t), small_3d_positive(t)], 'scalar_tensor'),
-    ('sub', small_3d, lambda t: [number(3.14, 3, t)]),
-    ('sub', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('mul', small_3d, lambda t: [number(3.14, 3, t)]),
-    ('mul', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('mul', small_0d, lambda t: [small_0d(torch.IntTensor)], 'scalar', types, True),
-    ('div', small_3d, lambda t: [number(3.14, 3, t)]),
-    ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('pow', small_3d, lambda t: [number(3.14, 3, t)], None, float_types),
-    ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1'),
-    ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2'),
-    ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3'),
-    ('pow', small_3d, lambda t: [number(-1., -1, t)], 'pow-1', float_types),
-    # HalfTensor gives bad result at pow-2 with data sampled from torch.randn
-    ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half, False,
-        "skipIfRocm:FloatTensor"),
-    ('pow', small_3d, lambda t: [tensor_abs_(small_3d(t))], 'tensor', float_types),
-    ('addbmm', small_2d, lambda t: [small_3d(t), small_3d(t)], None, float_types),
-    ('addbmm', small_2d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
-    ('addbmm', small_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
-    ('baddbmm', small_3d, lambda t: [small_3d(t), small_3d(t)],),
-    ('baddbmm', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
-    ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
-    ('bmm', small_3d, lambda t: [small_3d(t)], '', float_types_no_half),
-    ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)]),
-    ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t), tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)],
-        'scalar'),
-    ('addcmul', small_3d, lambda t: [small_3d(t), small_3d(t)]),
-    ('addcmul', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
-    ('addmm', medium_2d, lambda t: [medium_2d(t), medium_2d(t)]),
-    ('addmm', medium_2d, lambda t: [number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'scalar'),
-    ('addmm', medium_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'two_scalars'),
-    ('addmv', medium_1d, lambda t: [medium_2d(t), medium_1d(t)],),
-    ('addmv', medium_1d, lambda t: [number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'scalar'),
-    ('addmv', medium_1d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_2d(t), medium_1d(t)], 'two_scalars'),
-    ('addr', medium_2d, lambda t: [medium_1d(t), medium_1d(t)]),
-    ('addr', medium_2d, lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar'),
-    ('addr', medium_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'),
-    ('atan2', medium_2d, lambda t: [medium_2d(t)], None, float_types + [torch.HalfTensor]),
-    ('fmod', small_3d, lambda t: [3], 'value',),
-    ('fmod', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('chunk', medium_2d, lambda t: [4],),
-    ('chunk', medium_2d, lambda t: [4, 1], 'dim'),
-    ('chunk', medium_2d, lambda t: [4, -2], 'neg_dim'),
-    ('clamp', medium_2d_scaled, lambda t: [-1, 5], None, signed_types),
-    ('clamp', medium_2d_scaled, lambda t: [1, 5], None, unsigned_types),
-    ('clone', medium_2d, lambda t: [],),
-    ('contiguous', medium_2d, lambda t: [],),
-    ('cross', new_t(M, 3, M), lambda t: [new_t(M, 3, M)(t)],),
-    ('cumprod', small_3d, lambda t: [1]),
-    ('cumprod', small_3d, lambda t: [-1], 'neg_dim'),
-    ('cumsum', small_3d, lambda t: [1]),
-    ('cumsum', small_3d, lambda t: [-1], 'neg_dim'),
-    ('dim', small_3d, lambda t: [],),
-    ('dist', small_2d, lambda t: [small_2d(t)]),
-    ('dist', small_2d, lambda t: [small_2d(t), 3], '3_norm'),
-    ('dist', small_2d, lambda t: [small_2d(t), 2.5], '2_5_norm'),
-    ('dot', medium_1d, lambda t: [medium_1d(t)], '', types, False, "skipIfRocm:HalfTensor"),
-    ('element_size', medium_1d, lambda t: [],),
-    ('eq', small_3d_ones, lambda t: [small_3d(t)],),
-    ('eq', small_3d_ones, lambda t: [small_3d_ones(t)], 'equal'),
-    ('ne', small_3d_ones, lambda t: [small_3d(t)],),
-    ('ne', small_3d_ones, lambda t: [small_3d_ones(t)], 'equal'),
-    ('equal', small_3d_ones, lambda t: [small_3d_ones(t)], 'equal'),
-    ('equal', small_3d_ones, lambda t: [small_3d(t)],),
-    ('expand', new_t(M, 1, M), lambda t: [M, 4, M],),
-    ('expand_as', new_t(M, 1, M), lambda t: [new_t(M, 4, M)(t)],),
-    ('fill', medium_2d, lambda t: [number(3.14, 3, t)]),
-    ('ge', medium_2d, lambda t: [medium_2d(t)],),
-    ('le', medium_2d, lambda t: [medium_2d(t)],),
-    ('gt', medium_2d, lambda t: [medium_2d(t)],),
-    ('lt', medium_2d, lambda t: [medium_2d(t)],),
-    ('is_contiguous', medium_2d, lambda t: [],),
-    # TODO: can't check negative case - GPU copy will be contiguous
-    ('is_same_size', medium_2d, lambda t: [small_3d(t)], 'negative'),
-    ('is_same_size', medium_2d, lambda t: [medium_2d(t)], 'positive'),
-    ('is_set_to', medium_2d, lambda t: [medium_2d(t)],),
-    # TODO: positive case
-    ('kthvalue', small_3d_unique, lambda t: [3],),
-    ('kthvalue', small_3d_unique, lambda t: [3, 1], 'dim'),
-    ('kthvalue', small_3d_unique, lambda t: [3, -1], 'neg_dim'),
-    ('lerp', small_3d, lambda t: [small_3d(t), 0.3]),
-    ('max', small_3d_unique, lambda t: []),
-    ('max', small_3d_unique, lambda t: [1], 'dim'),
-    ('max', small_3d_unique, lambda t: [-1], 'neg_dim'),
-    ('max', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
-    ('min', small_3d_unique, lambda t: []),
-    ('min', small_3d_unique, lambda t: [1], 'dim'),
-    ('min', small_3d_unique, lambda t: [-1], 'neg_dim'),
-    ('min', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
-    ('mean', small_3d, lambda t: []),
-    ('mean', small_3d, lambda t: [-1], 'neg_dim'),
-    ('mean', small_3d, lambda t: [1], 'dim'),
-    ('mean', giant_1d_ones, lambda t: [], '64bit_indexing',
-        # Double here because otherwise the CPU result will be
-        # wrong.
-        [torch.DoubleTensor]),
-    ('mode', small_3d, lambda t: []),
-    ('mode', small_3d, lambda t: [1], 'dim'),
-    ('mode', small_3d, lambda t: [-1], 'neg_dim'),
-    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.1, 10), lambda t: [1], '2d_p=1', float_types_no_half),
-    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.6, 10), lambda t: [2], '2d_p=2', float_types_no_half),
-    ('remainder', small_3d, lambda t: [3], 'value',),
-    ('remainder', small_3d, lambda t: [-3], 'negative_value', signed_types),
-    ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('remainder', small_3d, lambda t: [constant_tensor_sub(0, small_3d_positive(t))], 'negative_tensor', signed_types),
-    ('std', small_3d, lambda t: []),
-    ('std', small_3d, lambda t: [1], 'dim', types, False),
-    ('std', small_3d, lambda t: [-1], 'neg_dim', types, False),
-    ('var', small_3d, lambda t: []),
-    ('var', small_3d, lambda t: [1], 'dim'),
-    ('var', small_3d, lambda t: [-1], 'neg_dim'),
-    ('ndimension', small_3d, lambda t: [],),
-    ('nelement', small_3d, lambda t: [],),
-    ('numel', small_3d, lambda t: [],),
-    ('narrow', small_3d, lambda t: [1, 3, 2],),
-    ('narrow', small_3d, lambda t: [-1, 3, 2], 'neg_dim'),
-    ('nonzero', small_3d, lambda t: [], '', types, False),
-    ('norm', small_3d, lambda t: []),
-    ('norm', small_3d, lambda t: [3], '3_norm'),
-    ('norm', small_3d, lambda t: [3, 0], '3_norm_dim'),
-    ('norm', small_3d, lambda t: [3, -2], '3_norm_neg_dim'),
-    ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
-    ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
-    ('put_', new_t(2, 5, 3), lambda t: [long_type(t)([[0], [-2]]), t([[3], [4]])], '', types, False),
-    ('put_', new_t(2, 3), lambda t: [long_type(t)([]), t([])], 'empty'),
-    ('put_', new_t(2, 2), lambda t: [long_type(t)([[1], [-3]]), t([[1], [2]]), True], 'accumulate'),
-    ('prod', small_2d_oneish, lambda t: []),
-    ('prod', small_3d, lambda t: [1], 'dim'),
-    ('prod', small_3d, lambda t: [-1], 'neg_dim'),
-    ('sum', small_2d, lambda t: []),
-    ('sum', small_3d, lambda t: [1], 'dim'),
-    ('sum', small_3d, lambda t: [-1], 'neg_dim'),
-    ('renorm', small_3d, lambda t: [2, 1, 1], '2_norm'),
-    ('renorm', small_3d, lambda t: [2, -1, 1], '2_norm_neg_dim'),
-    ('renorm', small_3d, lambda t: [1.5, 1, 1], '1_5_norm'),
-    ('repeat', small_2d, lambda t: [2, 2, 2],),
-    ('size', new_t(1, 2, 3, 4), lambda t: [],),
-    ('size', new_t(1, 2, 3, 4), lambda t: [1], 'dim'),
-    ('size', new_t(1, 2, 3, 4), lambda t: [-2], 'neg_dim'),
-    ('sort', small_3d_unique, lambda t: [], ''),
-    ('sort', small_3d_unique, lambda t: [1], 'dim'),
-    ('sort', small_3d_unique, lambda t: [-1], 'neg_dim'),
-    ('sort', small_3d_unique, lambda t: [1, True], 'dim_descending'),
-    ('sort', small_3d_unique, lambda t: [-1, True], 'neg_dim_descending'),
-    ('split', small_3d, lambda t: [2],),
-    ('split', small_3d, lambda t: [2, 1], 'dim'),
-    ('split', small_3d, lambda t: [2, -3], 'neg_dim'),
-    ('squeeze', new_t(1, 2, 1, 4), lambda t: [],),
-    ('squeeze', new_t(1, 2, 1, 4), lambda t: [2], 'dim'),
-    ('squeeze', new_t(1, 2, 1, 4), lambda t: [-2], 'neg_dim'),
-    ('t', new_t(1, 2), lambda t: [],),
-    ('take', new_t(3, 4), lambda t: [long_type(t)([[0], [-2]])], '', types, False),
-    ('transpose', new_t(1, 2, 3, 4), lambda t: [1, 2],),
-    ('transpose', new_t(1, 2, 3, 4), lambda t: [-1, -2], 'neg_dim'),
-    ('to_list', small_3d, lambda t: [],),
-    ('topk', small_3d_unique, lambda t: [2, 1, False, True], 'dim_sort',),
-    ('topk', small_3d_unique, lambda t: [2, -1, False, True], 'neg_dim_sort',),
-    ('topk', small_3d_unique, lambda t: [2, 1, True, True], 'dim_desc_sort',),
-    ('trace', medium_2d, lambda t: []),
-    ('tril', medium_2d, lambda t: [],),
-    ('tril', medium_2d_expanded, lambda t: [], 'zero_stride', types, True),
-    ('tril', medium_2d, lambda t: [2], 'positive'),
-    ('tril', medium_2d, lambda t: [-2], 'negative'),
-    ('triu', medium_2d, lambda t: [],),
-    ('triu', medium_2d_expanded, lambda t: [], 'zero_stride', types, True),
-    ('triu', medium_2d, lambda t: [2], 'positive'),
-    ('triu', medium_2d, lambda t: [-2], 'negative'),
-    ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
-    ('unsqueeze', new_t(2, 3, 4), lambda t: [-2], 'neg_dim'),
-    ('view', small_3d, lambda t: [100, 10], 'contiguous'),
-    ('view_as', small_3d, lambda t: [make_tensor(t, 100, 10)],),
-    ('zero', small_3d, lambda t: [],),
-    ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
-    ('eye', small_2d, lambda t: [3, 4],),
-    ('flip', small_3d, lambda t: [0], 'd0', types, True),
-    ('flip', small_3d, lambda t: [0, 1, 2], 'd012', types, True),
-    ('flip', small_3d, lambda t: [0, 2], 'd02', types, True),
-    ('flip', small_3d, lambda t: [2, 0], 'd20', types, True),
-    ('flip', small_3d, lambda t: [-1], 'neg_d', types, True),
-    ('rot90', small_2d, lambda t: [1, [0, 1]], 'k1_d01', types, True),
-    ('rot90', small_3d, lambda t: [1, [1, 2]], 'k1_d12', types, True),
-    ('rot90', small_3d, lambda t: [1, [1, -1]], 'k1_neg_d', types, True),
-    ('rot90', small_3d, lambda t: [], 'default', types, True),
-    ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
-    ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
-    ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
-    ('__lshift__', lambda t: torch.pow(2, cast_tensor(torch.arange(1, 5), t)),
-        lambda t: [2], None, signed_types),
-    ('__rshift__', lambda t: torch.pow(2, cast_tensor(torch.arange(3, 7), t)),
-        lambda t: [2], None, signed_types),
-    # lapack tests
-    ('qr', small_2d_lapack, lambda t: [], 'square', float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('qr', large_2d_lapack, lambda t: [], 'big', float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('svd', new_t(10, 10), lambda t: [], 'square', float_types_no_half, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('svd', lambda t: new_t(10, 10)(t).t(), lambda t: [True], 'square_col_maj',
-        float_types_no_half, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('svd', new_t(20, 5), lambda t: [True], 'tall_some', float_types_no_half, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('svd', new_t(20, 5), lambda t: [False], 'tall_all', float_types_no_half, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('svd', lambda t: new_t(5, 20)(t).t(), lambda t: [True],
-        'tall_some_col_maj', float_types_no_half, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('svd', lambda t: new_t(5, 20)(t).t(), lambda t: [False],
-        'tall_all_col_maj', float_types_no_half, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-    ('eig', new_t(10, 10), lambda t: [True], 'with_eigvec', float_types_no_half, False,
-        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
-]
-
-# TODO: random functions, cat, gather, scatter, index*, masked*,
-#       resize, resizeAs, storage_offset, storage, stride, unfold
-
-custom_precision = {
-    'addbmm': 1e-4,
-    'addmm': 1e-4,
-    'addmv': 1e-4,
-    'addr': 1e-4,
-    'baddbmm': 1e-4,
-    'rsqrt': 1e-4,
-    'cumprod': 1e-4,
-    'qr': 3e-4,
-    'digamma': 1e0,  # large values lead to large absolute error but small relative error
-}
-
-custom_half_precision = {
-    'add': 1e-2,
-    'acos': 1e-3,
-    'addbmm': 1e-1,
-    'addcdiv': 1e-2,
-    'addcmul': 1e-2,
-    'addmm': 1e-1,
-    'addmv': 1e-2,
-    'addr': 1e-2,
-    'asin': 1e-3,
-    'atan2': 1e-3,
-    'atan': 1e-3,
-    'baddbmm': 1e-2,
-    'cos': 1e-3,
-    'cosh': 1e-2,
-    'cross': 1e-2,
-    'cumprod': 1e-2,
-    'cumsum': 1e-2,
-    'dist': 1e-2,
-    'div': 1e-3,
-    'dot': 1e-2,
-    'erf': 1e-3,
-    'erfc': 1e-3,
-    'exp': 1e-2,
-    'expm1': 1e-2,
-    'fill': 1e-3,
-    'lerp': 1e-2,
-    'lgamma': 1e-2,
-    'log': 1e-2,
-    'log10': 1e-2,
-    'log1p': 1e-3,
-    'log2': 1e-2,
-    'mean': 1e-3,
-    'mul': 1e-2,
-    'norm': 1e-1,
-    'pow': 1e-1,
-    'prod': 1e-3,
-    'reciprocal': 1e-1,
-    'remainder': 1e-3,
-    'renorm': 1e-3,
-    'rsqrt': 1e-2,
-    'sigmoid': 1e-3,
-    'sin': 1e-3,
-    'sinh': 1e-3,
-    'sqrt': 1e-3,
-    'std': 1e-3,
-    'sub': 1e-2,
-    'sum': 1e-2,
-    'tan': 1e-3,
-    'tanh': 1e-3,
-    'trace': 1e-3,
-    'var': 1e-3,
-    '__lshift__': 1e-3,
-    '__rshift__': 1e-3,
-}
-
-simple_pointwise = [
-    'abs',
-    'sign',
-]
-for fn in simple_pointwise:
-    tests.append((fn, small_3d, lambda t: []))
-
-simple_pointwise_float = [
-    'log',
-    'log10',
-    'log1p',
-    'log2',
-    'sigmoid',
-    'sin',
-    'sqrt',
-    'tanh',
-    'acos',
-    'asin',
-    'atan',
-    'cos',
-    'cosh',
-    'erf',
-    'erfc',
-    'exp',
-    'expm1',
-    'reciprocal',
-    'floor',
-    'frac',
-    'neg',
-    'round',
-    'trunc',
-    'ceil',
-    'lgamma',
-    'digamma',
-    'trigamma',
-]
-
-for fn in simple_pointwise_float:
-    tests.append((fn, small_3d, lambda t: [], None, float_types))
-
 _cycles_per_ms = None
-
 
 def get_cycles_per_ms():
     """Approximate number of cycles per millisecond for torch.cuda._sleep"""
@@ -624,47 +90,60 @@ def get_cycles_per_ms():
     return _cycles_per_ms
 
 
-def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
-    def tmp(self):
-        cpu_tensor = tensor_constructor(t)
-        gpu_tensor = to_gpu(cpu_tensor)
-        cpu_args = arg_constructor(t)
-        gpu_args = [to_gpu(arg) for arg in cpu_args]
-        if is_half(t):
-            cpu_tensor = cpu_tensor.float()
-            cpu_args = [arg.float() if isinstance(arg, torch.Tensor) and is_half(arg) else arg for arg in cpu_args]
-        cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
-        try:
-            gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
-        except RuntimeError as e:
-            reason = e.args[0]
-            data_type_reasons = {'only supports floating-point types',
-                                 'unimplemented data type',
-                                 'not implemented for'}
-            if any(data_type_reason in reason for data_type_reason in data_type_reasons):
-                raise unittest.SkipTest('unimplemented data type')
-            raise
-        except AttributeError as e:
-            reason = e.args[0]
-            if 'object has no attribute' in reason:
-                raise unittest.SkipTest('unimplemented data type')
-            raise
-        # If one changes, another should change as well
-        self.assertEqual(cpu_tensor, gpu_tensor, precision)
-        self.assertEqual(cpu_args, gpu_args, precision)
-        # Compare results
-        if fn == 'element_size' and t.__name__ == 'HalfTensor':
-            # Workaround since cpu_result is float
-            self.assertEqual(2, gpu_result)
-        else:
-            self.assertEqual(cpu_result, gpu_result, precision)
-    return tmp
-
-
 class TestCuda(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     FIFTY_MIL_CYCLES = 50000000
+
+    def setUp(self):
+        super(TestCuda, self).setUp()
+        self.autocast_lists = AutocastTestLists(torch.device('cuda:0'))
+
+    def tearDown(self):
+        del self.autocast_lists
+        super(TestCuda, self).tearDown()
+
+    def _check_memory_stat_consistency(self):
+        snapshot = torch.cuda.memory_snapshot()
+
+        expected_each_device = collections.defaultdict(lambda: collections.defaultdict(int))
+
+        for segment in snapshot:
+            expected = expected_each_device[segment["device"]]
+            pool_str = segment["segment_type"] + "_pool"
+
+            expected["segment.all.current"] += 1
+            expected["segment." + pool_str + ".current"] += 1
+
+            expected["allocated_bytes.all.current"] += segment["allocated_size"]
+            expected["allocated_bytes." + pool_str + ".current"] += segment["allocated_size"]
+
+            expected["reserved_bytes.all.current"] += segment["total_size"]
+            expected["reserved_bytes." + pool_str + ".current"] += segment["total_size"]
+
+            expected["active_bytes.all.current"] += segment["active_size"]
+            expected["active_bytes." + pool_str + ".current"] += segment["active_size"]
+
+            is_split = len(segment["blocks"]) > 1
+            for block in segment["blocks"]:
+                if block["state"] == "active_allocated":
+                    expected["allocation.all.current"] += 1
+                    expected["allocation." + pool_str + ".current"] += 1
+
+                if block["state"].startswith("active_"):
+                    expected["active.all.current"] += 1
+                    expected["active." + pool_str + ".current"] += 1
+
+                if block["state"] == "inactive" and is_split:
+                    expected["inactive_split.all.current"] += 1
+                    expected["inactive_split." + pool_str + ".current"] += 1
+                    expected["inactive_split_bytes.all.current"] += block["size"]
+                    expected["inactive_split_bytes." + pool_str + ".current"] += block["size"]
+
+        for device, expected in expected_each_device.items():
+            stats = torch.cuda.memory_stats(device)
+            for k, v in expected.items():
+                self.assertEqual(v, stats[k])
 
     @staticmethod
     def _test_memory_stats_generator(self, device=None, N=35):
@@ -674,8 +153,8 @@ class TestCuda(TestCase):
         m0 = torch.cuda.memory_allocated(device)
         last_m_arr = [torch.cuda.memory_allocated(device)]
         max_m_arr = [torch.cuda.max_memory_allocated(device)]
-        last_c_arr = [torch.cuda.memory_cached(device)]
-        max_c_arr = [torch.cuda.max_memory_cached(device)]
+        last_r_arr = [torch.cuda.memory_reserved(device)]
+        max_r_arr = [torch.cuda.max_memory_reserved(device)]
 
         def alloc(*size):
             with torch.cuda.device(device):
@@ -686,7 +165,7 @@ class TestCuda(TestCase):
                 #       memory checks below to fail.
                 return torch.cuda.FloatTensor(*size)
 
-        def assert_change(comp=1, empty_cache=False, reset_max_alloc=False, reset_max_cached=False):
+        def assert_change(comp=1, empty_cache=False, reset_peak=False):
             # comp > 0: increased
             # comp = 0: equal
             # comp < 0: decreased
@@ -703,44 +182,37 @@ class TestCuda(TestCase):
             last_m_arr[0] = new_m
             max_m_arr[0] = new_max_m
 
-            new_c = torch.cuda.memory_cached(device)
-            new_max_c = torch.cuda.max_memory_cached(device)
+            new_r = torch.cuda.memory_reserved(device)
+            new_max_r = torch.cuda.max_memory_reserved(device)
             # emptying cache may happen (due to allocation or empty_cache), so
             # we can't assert new_c >= last_c
-            self.assertLessEqual(new_c, new_max_c)
-            self.assertGreaterEqual(new_max_c, max_c_arr[0])
-            last_c_arr[0] = new_c
-            max_c_arr[0] = new_max_c
+            self.assertLessEqual(new_r, new_max_r)
+            self.assertGreaterEqual(new_max_r, max_r_arr[0])
+            last_r_arr[0] = new_r
+            max_r_arr[0] = new_max_r
 
             if empty_cache:
                 torch.cuda.empty_cache()
-                new_c = torch.cuda.memory_cached(device)
-                new_max_c = torch.cuda.max_memory_cached(device)
-                self.assertLessEqual(new_c, last_c_arr[0])
-                self.assertLessEqual(new_c, new_max_c)
-                self.assertEqual(new_max_c, max_c_arr[0])
-                last_c_arr[0] = new_c
+                new_r = torch.cuda.memory_reserved(device)
+                new_max_r = torch.cuda.max_memory_reserved(device)
+                self.assertLessEqual(new_r, last_r_arr[0])
+                self.assertLessEqual(new_r, new_max_r)
+                self.assertEqual(new_max_r, max_r_arr[0])
+                last_r_arr[0] = new_r
 
-            if reset_max_alloc:
-                torch.cuda.reset_max_memory_allocated(device)
+            if reset_peak:
+                torch.cuda.reset_peak_memory_stats(device)
                 self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
                 self.assertEqual(torch.cuda.max_memory_allocated(device), last_m_arr[0])
                 max_m_arr[0] = last_m_arr[0]
-                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
-                self.assertEqual(torch.cuda.max_memory_cached(device), max_c_arr[0])
-
-            if reset_max_cached:
-                torch.cuda.reset_max_memory_cached(device)
-                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
-                self.assertEqual(torch.cuda.max_memory_allocated(device), max_m_arr[0])
-                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
-                self.assertEqual(torch.cuda.max_memory_cached(device), last_c_arr[0])
-                max_c_arr[0] = last_c_arr[0]
+                self.assertEqual(torch.cuda.memory_reserved(device), last_r_arr[0])
+                self.assertEqual(torch.cuda.max_memory_reserved(device), last_r_arr[0])
+                max_r_arr[0] = last_r_arr[0]
 
         assert_change(0)
-        assert_change(0, reset_max_alloc=True)
+        assert_change(0, reset_peak=True)
         assert_change(0, empty_cache=True)
-        assert_change(0, reset_max_cached=True)
+        assert_change(0, reset_peak=True)
         assert_change(0)
         yield
 
@@ -760,7 +232,7 @@ class TestCuda(TestCase):
         for i in range(5, int(N / 2) + 5):
             # large ones
             tensors2.append(alloc(i, i * 7, i * 9, i * 11))
-            assert_change(1, reset_max_alloc=(i % 2 == 0), reset_max_cached=(i % 2 == 1))
+            assert_change(1, reset_peak=(i % 2 == 0))
             yield
 
         tensors2.append(alloc(0, 0, 0))
@@ -780,7 +252,7 @@ class TestCuda(TestCase):
         assert_change(0)
         yield
         del permute
-        assert_change(0, reset_max_alloc=True)
+        assert_change(0, reset_peak=True)
         yield
 
         for i in range(int(N / 2)):
@@ -795,24 +267,39 @@ class TestCuda(TestCase):
             yield
 
         del tensors2
-        assert_change(-1, reset_max_cached=True)
+        assert_change(-1, reset_peak=True)
         assert_change(0)
         self.assertEqual(torch.cuda.memory_allocated(device), m1)
         yield True
 
         del tensors1
-        assert_change(-1, reset_max_alloc=True)
+        assert_change(-1, reset_peak=True)
         self.assertEqual(torch.cuda.memory_allocated(device), m0)
 
-        # test empty_cache and reset_max_memory_*
+        # test empty_cache and reset_peak
         assert_change(0, empty_cache=True)
-        assert_change(0, reset_max_cached=True)
-        assert_change(0, reset_max_alloc=True)
+        assert_change(0, reset_peak=True)
 
     def test_memory_stats(self):
+        gc.collect()
         torch.cuda.empty_cache()
         for _ in self._test_memory_stats_generator(self):
-            pass
+            self._check_memory_stat_consistency()
+
+    def test_memory_allocation(self):
+        gc.collect()
+        torch.cuda.empty_cache()
+        mem = None
+        size = 1
+        prev = 0
+        try:
+            prev = torch.cuda.memory_allocated()
+            mem = torch.cuda.caching_allocator_alloc(size)
+            self.assertGreater(torch.cuda.memory_allocated(), prev)
+        finally:
+            if mem is not None:
+                torch.cuda.caching_allocator_delete(mem)
+                self.assertEqual(torch.cuda.memory_allocated(), prev)
 
     def test_cuda_get_device_name(self):
         # Testing the behaviour with None as an argument
@@ -997,30 +484,22 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
-    def test_copy_broadcast(self):
-        x = torch.randn(10, 5)
-        y = torch.randn(5, device='cuda')
-        x.copy_(y)
-        self.assertEqual(x[3], y.cpu())
+    @unittest.skip("skipped because test could be flaky, see #35144")
+    def test_to_non_blocking(self):
+        def _test_to_non_blocking(a, non_blocking):
+            stream = torch.cuda.current_stream()
+            with torch.cuda.stream(stream):
+                b = a.to('cuda', non_blocking=non_blocking)
+                self.assertEqual(stream.query(), not non_blocking)
+                stream.synchronize()
+                self.assertEqual(a, b)
 
-        x = torch.randn(10, 5, device='cuda')
-        y = torch.randn(5)
-        x.copy_(y)
-        self.assertEqual(x[3].cpu(), y)
+        # 10MB copies
+        x = torch.ones(10000000, dtype=torch.uint8)
+        _test_to_non_blocking(x, True)
 
-    def test_copy_noncontig(self):
-        def do_test(d0, d1):
-            x = torch.tensor([1.5, 2.5, 3.5, 4.5, 5.5, 6.5], device=d0)
-            y = torch.tensor([0, 0, 0, 0, 0, 0], device=d1)
-            self.assertNotEqual(x.dtype, y.dtype)
-
-            y[::2].copy_(x[::2])
-            self.assertEqual(y, [1, 0, 3, 0, 5, 0])
-
-        do_test('cpu', 'cuda')
-        do_test('cuda', 'cpu')
-        if TEST_MULTIGPU:
-            do_test('cuda:0', 'cuda:1')
+        y = torch.ones(10000000, dtype=torch.uint8)
+        _test_to_non_blocking(y, False)
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
@@ -1030,12 +509,12 @@ class TestCuda(TestCase):
             torch.save(q, f)
             f.seek(0)
             q_copy = torch.load(f)
-        self.assertEqual(q_copy, q, 0)
+        self.assertEqual(q_copy, q, atol=0, rtol=0)
         q_copy[0].fill_(5)
-        self.assertEqual(q_copy[0], q_copy[2], 0)
-        self.assertTrue(isinstance(q_copy[0], torch.cuda.DoubleTensor))
+        self.assertEqual(q_copy[0], q_copy[2], atol=0, rtol=0)
+        self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
-        self.assertTrue(isinstance(q_copy[2], torch.cuda.DoubleTensor))
+        self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[3], torch.cuda.IntStorage))
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
@@ -1043,50 +522,19 @@ class TestCuda(TestCase):
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
-        self.assertIsInstance(x.cuda(), torch.cuda.DoubleTensor)
+        self.assertIsInstance(x.cuda().double(), torch.cuda.DoubleTensor)
         self.assertIsInstance(x.cuda().float(), torch.cuda.FloatTensor)
         self.assertIsInstance(x.cuda().float().cpu(), torch.FloatTensor)
         self.assertIsInstance(x.cuda().float().cpu().int(), torch.IntTensor)
 
         y = x.storage()
         self.assertIsInstance(y.float(), torch.FloatStorage)
-        self.assertIsInstance(y.cuda(), torch.cuda.DoubleStorage)
+        self.assertIsInstance(y.cuda().double(), torch.cuda.DoubleStorage)
         self.assertIsInstance(y.cuda().float(), torch.cuda.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
-    def test_mul_intertype_scalar(self):
-        def test_mul(dtype):
-            x = torch.tensor(1.5, dtype=dtype, device='cuda')
-            y = torch.tensor(3, dtype=torch.int32, device='cuda')
-
-            self.assertEqual(x * y, 4.5)
-            self.assertEqual(y * x, 4.5)
-
-            with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
-                y *= x
-            x *= y
-            self.assertEqual(x, 4.5)
-
-        test_mul(torch.float16)
-        test_mul(torch.float32)
-        test_mul(torch.float64)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_type_conversions_same_gpu(self):
-        x = torch.randn(5, 5).cuda(1)
-        self.assertEqual(x.int().get_device(), 1)
-        self.assertEqual(x.type(torch.int).get_device(), 1)
-        self.assertEqual(x.to(torch.int).get_device(), 1)
-
-    def test_abs_zero(self):
-        # Both abs(0.0) and abs(-0.0) should result in 0.0
-        for dtype in (torch.float, torch.double):
-            abs_zeros = torch.tensor([0.0, -0.0], device='cuda', dtype=dtype).abs().tolist()
-            for num in abs_zeros:
-                self.assertGreater(math.copysign(1.0, num), 0.0)
-
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @unittest.skip("was disabled due to not enough memory, but actually it always fail")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')
 
@@ -1123,20 +571,6 @@ class TestCuda(TestCase):
 
     def test_broadcast_gpu(self):
         self._test_broadcast(torch.randn(5, 5).cuda())
-
-    def test_min_max_nan(self):
-        tests = [(lambda x: x.min(), 'min'),
-                 (lambda x: x.max(), 'max'),
-                 (lambda x: x.min(0)[0], 'min_dim'),
-                 (lambda x: x.max(0)[0], 'max_dim')]
-        for f, name in tests:
-            a = torch.arange(25.0).view(5, 5)
-            a[2, 2] = nan
-            actual = f(a.cuda()).cpu()
-            expected = f(a).cpu()
-            self.assertEqual(torch.isnan(actual), torch.isnan(expected), 'nans for {}'.format(name))
-            self.assertEqual(actual[~torch.isnan(actual)],
-                             expected[~torch.isnan(expected)], 'nans for {}'.format(name))
 
     @staticmethod
     def _test_broadcast_coalesced(self, tensors, buffer_size):
@@ -1202,6 +636,15 @@ class TestCuda(TestCase):
         self._test_broadcast_coalesced(self, tensors, num_bytes * 5 // 2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_broadcast_coalesced_empty_tensors(self):
+        tensors = [
+            torch.tensor([]).byte().cuda(),
+            torch.randn(5).cuda(),
+            torch.randn(5).double().cuda()
+        ]
+        self._test_broadcast_coalesced(self, tensors, 256)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce_add(self):
         x = torch.randn(5, 5)
         y = torch.randn(5, 5)
@@ -1217,15 +660,13 @@ class TestCuda(TestCase):
 
         r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
         for r, t in zip(r_tensors, tensors):
-            self.assertEqual(r.get_device(), t.get_device())
+            self.assertEqualTypeString(r, t)
             self.assertEqual(r, t * 2)
-            self.assertEqual(r.type(), t.type())
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
         self.assertEqual(r_tensors, rc_tensors)
         for r, rc in zip(r_tensors, rc_tensors):
-            self.assertEqual(rc.get_device(), r.get_device())
-            self.assertEqual(rc.type(), r.type())
+            self.assertEqualTypeString(rc, r)
 
         # Since we have both cuda:0 and cuda:1 inputs, the outputs must be new.
         # We can check that they have different version counters.
@@ -1282,7 +723,7 @@ class TestCuda(TestCase):
             chunk_end = chunk_start + chunk_sizes[i]
             index = [slice(None, None), slice(None, None)]
             index[dim] = slice(chunk_start, chunk_end)
-            self.assertEqual(r, input[tuple(index)], 0)
+            self.assertEqual(r, input[tuple(index)], atol=0, rtol=0)
             chunk_start = chunk_end
 
     def test_scatter_cpu(self):
@@ -1339,12 +780,16 @@ class TestCuda(TestCase):
     def test_gather_dim(self):
         self._test_gather(1)
 
-    def test_from_sequence(self):
-        seq = [list(range(i * 4, i * 4 + 4)) for i in range(5)]
-        reference = torch.arange(0, 20).resize_(5, 4)
-        for t in types:
-            cuda_type = get_gpu_type(t)
-            self.assertEqual(cuda_type(seq), reference)
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_memory_format_scatter_gather(self):
+        nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
+        results = torch.cuda.comm.scatter(nhwc, (0, 1), None, 0)
+        for result in results:
+            self.assertFalse(result.is_contiguous())
+            self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
+
+        gathered = torch.cuda.comm.gather(results)
+        self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
 
     def test_torch_manual_seed_seeds_cuda_devices(self):
         with freeze_rng_state():
@@ -1378,54 +823,7 @@ class TestCuda(TestCase):
         z = torch.cat([x, y], 0)
         self.assertEqual(z.get_device(), x.get_device())
 
-    def test_cat(self):
-        SIZE = 10
-        for dim in range(-3, 3):
-            pos_dim = dim if dim >= 0 else 3 + dim
-            x = torch.rand(13, SIZE, SIZE).transpose(0, pos_dim).cuda()
-            y = torch.rand(17, SIZE, SIZE).transpose(0, pos_dim).cuda()
-            z = torch.rand(19, SIZE, SIZE).transpose(0, pos_dim).cuda()
-
-            res1 = torch.cat((x, y, z), dim)
-            self.assertEqual(res1.narrow(pos_dim, 0, 13), x, 0)
-            self.assertEqual(res1.narrow(pos_dim, 13, 17), y, 0)
-            self.assertEqual(res1.narrow(pos_dim, 30, 19), z, 0)
-
-        x = torch.randn(20, SIZE, SIZE).cuda()
-        self.assertEqual(torch.cat(torch.split(x, 7)), x)
-        self.assertEqual(torch.cat(torch.chunk(x, 7)), x)
-
-        y = torch.randn(1, SIZE, SIZE).cuda()
-        z = torch.cat([x, y])
-        self.assertEqual(z.size(), (21, SIZE, SIZE))
-
-    def test_bernoulli(self):
-        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float64, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.float32, torch.float16, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float64, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.float16, torch.float16, 'cuda')
-        # test that it works with integral tensors
-        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float64, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.uint8, torch.float16, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float64, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
-        # test that it works with bool tensors
-        _TestTorchMixin._test_bernoulli(self, torch.bool, torch.float16, 'cuda')
-        _TestTorchMixin._test_bernoulli(self, torch.int64, torch.float16, 'cuda')
-
-    def test_cat_bad_input_sizes(self):
-        x = torch.randn(2, 1).cuda()
-        y = torch.randn(2, 1, 1).cuda()
-        z = torch.randn(2, 1, 1).cuda()
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z]))
-
-        x = torch.randn(2, 1, 2).cuda()
-        y = torch.randn(2, 1, 1).cuda()
-        z = torch.randn(2, 2, 1).cuda()
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
-
     @unittest.skipIf(torch.cuda.device_count() >= 10, "Loading a cuda:9 tensor")
-    @unittest.skipIf(not PY3, "Tensor was serialized with Python 3")
     def test_load_nonexistent_device(self):
         # Setup: create a serialized file object with a 'cuda:9' restore location
         tensor = torch.randn(2, device='cuda')
@@ -1438,30 +836,29 @@ class TestCuda(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             _ = torch.load(buf)
 
-    def test_serialization(self):
-        x = torch.randn(4, 4).cuda()
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(x, f)
-            f.seek(0)
-            x_copy = torch.load(f)
-        self.assertEqual(x_copy, x)
-        self.assertIs(type(x_copy), type(x))
-        self.assertEqual(x_copy.get_device(), x.get_device())
+    def test_specify_improper_device_name(self):
+        import os
+        fname = "tempfile.pt"
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
+                torch.save([torch.nn.Parameter(torch.randn(10, 10))], fname,
+                           _use_new_zipfile_serialization=True)
+                torch.load(fname, 'cuda0')
+        finally:
+            if os.path.exists(fname):
+                os.remove(fname)
+
+    def test_get_device_index(self):
+        from torch.cuda._utils import _get_device_index
+        with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
+            _get_device_index('cuda0', optional=True)
+
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device"):
+            cpu_device = torch.device('cpu')
+            _get_device_index(cpu_device, optional=True)
 
     def test_serialization_array_with_empty(self):
         x = [torch.randn(4, 4).cuda(), torch.cuda.FloatTensor()]
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(x, f)
-            f.seek(0)
-            x_copy = torch.load(f)
-        for original, copy in zip(x, x_copy):
-            self.assertEqual(copy, original)
-            self.assertIs(type(copy), type(original))
-            self.assertEqual(copy.get_device(), original.get_device())
-
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    def test_multigpu_serialization(self):
-        x = [torch.randn(4, 4).cuda(0), torch.randn(4, 4).cuda(1)]
         with tempfile.NamedTemporaryFile() as f:
             torch.save(x, f)
             f.seek(0)
@@ -1617,10 +1014,8 @@ class TestCuda(TestCase):
         with torch.cuda.stream(user_stream):
             self.assertEqual(torch.cuda.current_stream(), user_stream)
         self.assertTrue(user_stream.query())
-        # copy 10 MB tensor from CPU-GPU which should take some time
-        tensor1 = torch.ByteTensor(10000000).pin_memory()
-        tensor2 = tensor1.cuda(non_blocking=True)
-        self.assertFalse(default_stream.query())
+        tensor1 = torch.ByteTensor(5).pin_memory()
+        tensor2 = tensor1.cuda(non_blocking=True) + 1
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
@@ -1654,8 +1049,6 @@ class TestCuda(TestCase):
         self.assertTrue("torch.cuda.Event" in e.__repr__())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    # Note: fails sometimes on the CI, passes on dual gfx906
-    @skipIfRocm
     def test_stream_context(self):
         s0 = torch.cuda.current_stream()
         s1 = torch.cuda.Stream(device=1)
@@ -2037,7 +1430,7 @@ class TestCuda(TestCase):
         with torch.cuda.stream(stream):
             tmp2 = torch.cuda.FloatTensor(t.size())
             tmp2.zero_()
-            self.assertNotEqual(tmp2.data_ptr(), ptr[0], 'allocation re-used to soon')
+            self.assertNotEqual(tmp2.data_ptr(), ptr[0], msg='allocation re-used to soon')
 
         self.assertEqual(result.tolist(), [1, 2, 3, 4])
 
@@ -2045,7 +1438,39 @@ class TestCuda(TestCase):
         torch.cuda.current_stream().synchronize()
         with torch.cuda.stream(stream):
             tmp3 = torch.cuda.FloatTensor(t.size())
-            self.assertEqual(tmp3.data_ptr(), ptr[0], 'allocation not re-used')
+            self.assertEqual(tmp3.data_ptr(), ptr[0], msg='allocation not re-used')
+
+    def test_record_stream_on_shifted_view(self):
+        # See issue #27366
+
+        # This test detects unexpected block reallocation. For reliable test,
+        # the stream to allocate tensors is isolated. The allocator will not
+        # reuse free blocks which were allocated from another stream.
+        stream_alloc = torch.cuda.Stream()
+        with torch.cuda.stream(stream_alloc):
+            base = torch.cuda.FloatTensor([10, 10])
+
+        # Record another stream on a shifted view tensor.
+        view = base[5:]
+        assert view.storage_offset() > 0
+
+        stream_record = torch.cuda.Stream()
+        with torch.cuda.stream(stream_record):
+            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+
+        view.record_stream(stream_record)
+
+        # Delete those tensors to make the block free soon.
+        data_ptr = base.data_ptr()
+        del base, view
+
+        # A new tensor should not be allocated to the block above.
+        stream_alloc.synchronize()
+
+        with torch.cuda.stream(stream_alloc):
+            try_realloc = torch.cuda.FloatTensor([10, 10])
+
+        self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
@@ -2060,7 +1485,7 @@ class TestCuda(TestCase):
         ptr = t.data_ptr()
         del t
         t = torch.FloatTensor([1]).pin_memory()
-        self.assertEqual(t.data_ptr(), ptr, 'allocation not reused')
+        self.assertEqual(t.data_ptr(), ptr, msg='allocation not reused')
 
         # check that the allocation is not re-used if it's in-use by a copy
         gpu_tensor = torch.cuda.FloatTensor([0])
@@ -2068,7 +1493,7 @@ class TestCuda(TestCase):
         gpu_tensor.copy_(t, non_blocking=True)
         del t
         t = torch.FloatTensor([1]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
+        self.assertNotEqual(t.data_ptr(), ptr, msg='allocation re-used too soon')
         self.assertEqual(list(gpu_tensor), [1])
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -2088,7 +1513,7 @@ class TestCuda(TestCase):
 
         del t
         t = torch.FloatTensor([2]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
+        self.assertNotEqual(t.data_ptr(), ptr, msg='allocation re-used too soon')
 
         with torch.cuda.device(0):
             gpu_tensor0.copy_(t, non_blocking=True)
@@ -2116,29 +1541,10 @@ class TestCuda(TestCase):
         # cached blocks in case it affects future tests.
         torch.cuda.empty_cache()
 
+    # Tests for historic illegal memory access, see #17040.
     def test_reduction_gpu_memory_accessing(self):
         x = torch.ones(512, 8, dtype=torch.float32, device='cuda')
         torch.sum(x, 0)
-
-    def test_sum_cpu_gpu_mismatch(self):
-        x = torch.randn(20, dtype=torch.float32, device='cuda:0')
-        y = torch.randn(1, dtype=torch.float32)
-        with self.assertRaisesRegex(RuntimeError,
-                                    'expected device cpu but got device cuda:0'):
-            torch.sum(x, dim=[0], dtype=torch.float32, out=y)
-        # makeing sure half to float promotion is also properly working.
-        x = x.half()
-        with self.assertRaisesRegex(RuntimeError,
-                                    'expected dtype Float but got dtype Half'):
-            torch.sum(x, dim=[0], dtype=torch.float32, out=y)
-
-    @skipIfRocm
-    def test_sum_noncontig(self):
-        x = torch.randn(1, 75, 57, 20, device='cuda').permute(0, 3, 1, 2)
-        y = x.cpu()
-        self.assertEqual(x.sum().cpu(), y.sum())
-        self.assertEqual(x.sum(dim=(-1, -2)).cpu(), y.sum(dim=(-1, -2)))
-        self.assertEqual(x.sum(dim=(1, 3)).cpu(), y.sum(dim=(1, 3)))
 
     def test_sum_fp16(self):
         x = torch.zeros(10, device='cuda', dtype=torch.float16)
@@ -2171,13 +1577,9 @@ class TestCuda(TestCase):
         x = torch.ones(240000, device='cuda', dtype=torch.float32)
         self.assertEqual(x.prod(), 1)
 
-    @staticmethod
-    def _select_broadcastable_dims(dims_full=None):
-        return _TestTorchMixin._select_broadcastable_dims(dims_full)
-
     @skipIfRocm
     def test_fft_ifft_rfft_irfft(self):
-        _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+        AbstractTestCases._TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         @contextmanager
         def plan_cache_max_size(n, device=None):
@@ -2191,16 +1593,16 @@ class TestCuda(TestCase):
             plan_cache.max_size = original
 
         with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
-            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            AbstractTestCases._TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         with plan_cache_max_size(0):
-            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            AbstractTestCases._TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         torch.backends.cuda.cufft_plan_cache.clear()
 
         # check that stll works after clearing cache
         with plan_cache_max_size(10):
-            _TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+            AbstractTestCases._TestTorchMixin._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
         with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
             torch.backends.cuda.cufft_plan_cache.max_size = -1
@@ -2246,14 +1648,7 @@ class TestCuda(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
-    # passes on ROCm w/ python 2.7, fails w/ python 3.6
-    @skipIfRocm
-    def test_stft(self):
-        _TestTorchMixin._test_stft(self, device=torch.device('cuda'))
-
-    def test_multinomial(self):
-        _TestTorchMixin._test_multinomial(self, torch.cuda.FloatTensor)
-
+    def test_multinomial_ext(self):
         # Test two corner cases from older PyTorch (Issue #4858)
         freqs = torch.cuda.FloatTensor([
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -2309,12 +1704,9 @@ class TestCuda(TestCase):
         except RuntimeError as e:
             return e
 
+    @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
-    @unittest.skipIf(not PY3,
-                     "spawn start method is not supported in Python 2, \
-                     but we need it for creating another process with CUDA")
     @skipIfRocm
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
@@ -2323,54 +1715,6 @@ class TestCuda(TestCase):
         self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
         self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
-
-    def test_advancedindex_mixed_cpu_cuda(self):
-        def test(x, ia, ib):
-            # test getitem
-            self.assertEqual(x[:, ia, None, ib, 0].cpu(),
-                             x.cpu()[:, ia.cpu(), None, ib.cpu(), 0])
-            self.assertEqual(x[ia], x.cpu()[ia.cpu()])
-            # test setitem
-            x_clone1 = x.clone()
-            x_clone2 = x.clone()
-            first_shape = x[:, ia, None, ib, 0].shape
-            second_shape = x[ia].shape
-            x_clone1[:, ia, None, ib, 0] = torch.randn(first_shape).to(x_clone1)
-            x_clone2[ia] = torch.randn(second_shape).to(x_clone2)
-
-        cpu = torch.device('cpu')
-        for device in ['cuda:0', 'cuda:1'] if torch.cuda.device_count() > 1 else ['cuda']:
-            # Index cpu tensor with cuda tensor
-            x = torch.randn(3, 4, 4, 4, 3)
-            ia = torch.tensor([0, 2, 1]).to(device)
-            ib = torch.tensor([0, 2, 1]).to(device)
-            test(x, ia, ib)
-
-            # Index cuda tensor with cpu tensor
-            x = x.to(device)
-            ia = ia.to(cpu)
-            ib = ib.to(cpu)
-            test(x, ia, ib)
-
-            # Index cpu tensor with mixed cpu, cuda tensors
-            x = x.to(cpu)
-            ia = ia.to(cpu)
-            ib = ib.to(device)
-            test(x, ia, ib)
-
-            # Index cuda tensor with mixed cpu, cuda tensors
-            x = x.to(device)
-            ia = ia.to(cpu)
-            ib = ib.to(device)
-            test(x, ia, ib)
-
-            if torch.cuda.device_count() > 1:
-                other_device = 'cuda:0' if device != 'cuda:0' else 'cuda:1'
-                # Index cuda tensor with mixed cpu, cuda tensors on different devices
-                x = x.to(device)
-                ia = ia.to(cpu)
-                ib = ib.to(other_device)
-                test(x, ia, ib)
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -2381,37 +1725,33 @@ class TestCuda(TestCase):
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
 
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_lu(self):
-        _TestTorchMixin._test_lu(self, lambda t: t.cuda(), pivot=False)
-        _TestTorchMixin._test_lu(self, lambda t: t.cuda(), pivot=True)
-
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_lu_solve(self):
-        _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=False)
-        _TestTorchMixin._test_lu_solve(self, lambda t: t.cuda(), pivot=True)
-
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_lu_solve_batched(self):
-        _TestTorchMixin._test_lu_solve_batched(self, lambda t: t.cuda(), pivot=False)
-        _TestTorchMixin._test_lu_solve_batched(self, lambda t: t.cuda(), pivot=True)
-
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_lu_unpack(self):
-        _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda(), pivot=False)
-        _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda(), pivot=True)
-
     def test_tensor_gather(self):
-        _TestTorchMixin._test_gather(self, lambda t: t.cuda(), False)
+        AbstractTestCases._TestTorchMixin._test_gather(self, lambda t: t.cuda(), False)
 
     def test_tensor_scatter(self):
-        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', test_bounds=False)
 
     def test_tensor_scatterAdd(self):
-        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_add_', test_bounds=False)
+
+    def test_scatter_add_mult_index_base(self):
+        AbstractTestCases._TestTorchMixin._test_scatter_add_mult_index_base(self, lambda t: t.cuda())
 
     def test_tensor_scatterFill(self):
-        _TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_', True, test_bounds=False)
+
+    def test_tensor_scatter_complex(self):
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_', test_bounds=False, test_complex=True)
+
+    def test_tensor_scatterAdd_complex(self):
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_add_', test_bounds=False, test_complex=True)
+
+    def test_tensor_scatterFill_complex(self):
+        AbstractTestCases._TestTorchMixin._test_scatter_base(self, lambda t: t.cuda(),
+                                                             'scatter_', True, test_bounds=False, test_complex=True)
 
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
@@ -2426,135 +1766,6 @@ class TestCuda(TestCase):
         _, v = y.min(dim=0)
         self.assertEqual(v, expected)
 
-    def test_max_with_inf(self):
-        _TestTorchMixin._test_max_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
-
-    def test_min_with_inf(self):
-        _TestTorchMixin._test_min_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
-
-    def test_var(self):
-        cpu_tensor = torch.randn(2, 3, 3)
-        gpu_tensor = cpu_tensor.cuda()
-        self.assertEqual(gpu_tensor.var(), cpu_tensor.var())
-        self.assertEqual(gpu_tensor.var(1), cpu_tensor.var(1))
-        self.assertEqual(gpu_tensor.var(2), cpu_tensor.var(2))
-        self.assertEqual(gpu_tensor.std(), cpu_tensor.std())
-        self.assertEqual(gpu_tensor.std(1), cpu_tensor.std(1))
-        self.assertEqual(gpu_tensor.var(2), cpu_tensor.var(2))
-
-        cpu_tensor = torch.randn(100)
-        gpu_tensor = cpu_tensor.cuda()
-        self.assertEqual(gpu_tensor.var(), cpu_tensor.var())
-
-    def test_var_unbiased(self):
-        tensor = torch.randn(100).cuda()
-        self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
-        self.assertEqual(tensor.var(), tensor.var(unbiased=True))
-        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False))
-
-        tensor = torch.FloatTensor([1.0, 2.0]).cuda()
-        self.assertEqual(tensor.var(unbiased=True), 0.5)
-        self.assertEqual(tensor.var(unbiased=False), 0.25)
-
-        tensor = torch.randn(100).cuda()
-        self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
-        self.assertEqual(tensor.std(), tensor.std(unbiased=True))
-        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False))
-
-    def test_var_large_input(self):
-        # Large, not-nice input
-        tensor_cpu = torch.randn(2 * 32 * 1024 + 1, 2, 67)
-        tensor_cuda = tensor_cpu.cuda()
-
-        self.assertEqual(tensor_cpu.var(2), tensor_cuda.var(2).cpu())
-
-    def test_var_stability(self):
-        tensor = torch.FloatTensor([2281.5, 2281.25]).cuda()
-
-        # Stability for inner dim
-        self.assertEqual(tensor.var(0), 0.03125)
-
-        # General stability
-        self.assertEqual(tensor.var(), 0.03125)
-
-        # Stability for outer dimensions
-        tensor = tensor.unsqueeze(1)
-        self.assertEqual(tensor.var(0), 0.03125)
-
-    def test_digamma(self):
-        def test(use_double=False):
-            cpu_tensor = torch.randn(10, 10, 10)
-            gpu_tensor = cpu_tensor.cuda()
-            zeros = torch.zeros(10, 10, 10)
-            if (use_double):
-                cpu_tensor = cpu_tensor.double()
-                gpu_tensor = gpu_tensor.double()
-                zeros = zeros.double()
-            cpu_out = cpu_tensor.digamma()
-            gpu_out = gpu_tensor.digamma()
-            norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
-            self.assertEqual(norm_errors, zeros)
-
-        test(True)
-        test(False)
-
-        # Test float32 behavior near and at poles.
-        cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
-                                  -100.99999994, -1931.99999994, 0.000000111,
-                                  -0.000000111, 0, -1, -2, -931])
-        expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
-        gpu_tensor = cpu_tensor.cuda()
-        cpu_out = cpu_tensor.digamma()
-        gpu_out = gpu_tensor.digamma()
-        norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
-        self.assertEqual(norm_errors, expected_errors)
-
-    def test_polygamma(self):
-        def test(use_double=False):
-            cpu_tensor = torch.randn(10, 10, 10)
-            gpu_tensor = cpu_tensor.cuda()
-            zeros = torch.zeros(10, 10, 10)
-            if (use_double):
-                cpu_tensor = cpu_tensor.double()
-                gpu_tensor = gpu_tensor.double()
-                zeros = zeros.double()
-            for n in [0, 1]:
-                cpu_out = cpu_tensor.polygamma(n)
-                gpu_out = gpu_tensor.polygamma(n)
-                norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
-                self.assertEqual(norm_errors, zeros)
-
-        test(True)
-        test(False)
-
-    def test_arange(self):
-        for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
-            a = torch.cuda.__dict__[t]()
-            torch.arange(0, 10, out=a)
-            b = torch.__dict__[t]()
-            torch.arange(0, 10, out=b)
-            self.assertEqual(a, b.cuda())
-
-    def test_linspace(self):
-        a = torch.linspace(0, 10, 10, device='cuda')
-        b = torch.linspace(0, 10, 10)
-        self.assertEqual(a, b.cuda())
-
-    def test_logspace(self):
-        a = torch.logspace(1, 10, 10, device='cuda')
-        b = torch.logspace(1, 10, 10)
-        self.assertEqual(a, b.cuda())
-
-        # Check non-default base=2
-        a = torch.logspace(1, 10, 10, 2, device='cuda')
-        b = torch.logspace(1, 10, 10, 2)
-        self.assertEqual(a, b.cuda())
-
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    @unittest.skip("Spuriously failing")
-    def test_triangular_solve_batched(self):
-        _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t.cuda())
-
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_get_set_rng_state_all(self):
         states = torch.cuda.get_rng_state_all()
@@ -2563,8 +1774,8 @@ class TestCuda(TestCase):
         torch.cuda.set_rng_state_all(states)
         after0 = torch.cuda.FloatTensor(100, device=0).normal_()
         after1 = torch.cuda.FloatTensor(100, device=1).normal_()
-        self.assertEqual(before0, after0, 0)
-        self.assertEqual(before1, after1, 0)
+        self.assertEqual(before0, after0, atol=0, rtol=0)
+        self.assertEqual(before1, after1, atol=0, rtol=0)
 
     @skipIfRocm
     def test_nvtx(self):
@@ -2573,11 +1784,10 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
-    def test_bincount_cuda(self):
-        _TestTorchMixin._test_bincount(self, device='cuda')
+    def test_bincount_ext(self):
         # ensure CUDA code coverage
         input_size = (5000,)
-        w = torch.randn(input_size, device='cuda')
+        w = torch.randn(input_size, dtype=torch.double, device='cuda')
         w_cpu = w.cpu()
         # test shared memory impl
         t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')
@@ -2601,6 +1811,7 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
+    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
@@ -2611,8 +1822,6 @@ class TestCuda(TestCase):
         a = torch.ones(65536).cuda().half()
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
-    # Note: This test fails on ROCm CI gfx900 but passes on gfx906
-    @skipIfRocm
     # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
         l = []
@@ -2662,21 +1871,6 @@ class TestCuda(TestCase):
     def test_large_trilu_indices(self):
         for test_args in tri_large_tests_args:
             _compare_large_trilu_indices(self, *test_args, device='cuda')
-
-    def test_cuda_round(self):
-        # test half-to-even
-        a = [-5.8, -3.5, -2.3, -1.5, -0.5, 0.5, 1.5, 2.3, 3.5, 5.8]
-        res = [-6., -4., -2., -2., 0., 0., 2., 2., 4., 6.]
-
-        self.assertEqual(
-            torch.HalfTensor(a).cuda().round().cpu(),
-            torch.HalfTensor(res).cpu())
-        self.assertEqual(
-            torch.FloatTensor(a).cuda().round().cpu(),
-            torch.FloatTensor(res).cpu())
-        self.assertEqual(
-            torch.DoubleTensor(a).cuda().round().cpu(),
-            torch.DoubleTensor(res).cpu())
 
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
     def test_cuda_kernel_loop_overflow(self):
@@ -2763,94 +1957,880 @@ class TestCuda(TestCase):
 
         self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
-def load_ignore_file():
-    from os.path import join, dirname
-    global ignores
-    path = join(dirname(__file__), 'data', 'test_cuda_ignores.txt')
-    with open(path, 'r') as f:
-        ignores = {l for l in f.read().splitlines() if not l.startswith('#')}
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_streaming_backwards_device_transfer(self):
+        # This function must run with non-default current streams on all devices, otherwise it's meaningless.
+        # The intention is to test that to()'s backward (CopyBackward) interacts properly with the
+        # synchronization logic in torch/csrc/autograd/input_buffer.cpp.
+        dev0 = torch.device("cuda:0")
+        dev1 = torch.device("cuda:1")
 
+        # Unfortunately I need to make the tensors largeish.
+        # Bigger tensors = longer D2D transfers = more likely to expose races.
+        size = 2**26
 
-def generate_tests():
-    for decl in tests:
-        for t in types:
-            tensor = t()
+        a = torch.full((size,), 1, device=dev1, dtype=torch.float64, requires_grad=True)
+        b = torch.full((size,), 1, device=dev1, dtype=torch.float64, requires_grad=True)
 
-            # Default values
-            desc = ''
-            type_subset = types
-            no_inplace = False
-            decorator = None
-            if len(decl) == 3:
-                name, constr, arg_constr = decl
-            elif len(decl) == 4:
-                name, constr, arg_constr, desc = decl
-            elif len(decl) == 5:
-                name, constr, arg_constr, desc, type_subset = decl
-            elif len(decl) == 6:
-                name, constr, arg_constr, desc, type_subset, no_inplace = decl
-            elif len(decl) == 7:
-                name, constr, arg_constr, desc, type_subset, no_inplace, decorator = decl
+        # Here to_backward_recipient = a*b is used only once, so MulBackward's InputBuffer slot only expects 1 input.
+        # This tests the situation where we don't call InputBuffer::accumulate for MulBackward's InputBuffer.
+        to_backward_recipient = a * b
+        s = to_backward_recipient.to(device="cuda:0").sum()
+        torch.cuda.synchronize(device=dev0)
+        torch.cuda.synchronize(device=dev1)
+        s.backward()
+        self.assertTrue(a.grad.sum().item() == size)
+        self.assertTrue(b.grad.sum().item() == size)
 
-            if t not in type_subset:
-                continue
-            if TEST_WITH_ROCM and decorator is not None:
-                if (isinstance(decorator, str)):
-                    tensor_type_name = str(t.__name__)
-                    decorator_list = decorator.split(":")
-                    skip_type_list = decorator_list[1].split(",")
-                    if (("ByteTensor" in skip_type_list) and tensor_type_name == "ByteTensor") \
-                            or (("CharTensor" in skip_type_list) and tensor_type_name == "CharTensor") \
-                            or (("DoubleTensor" in skip_type_list) and tensor_type_name == "DoubleTensor") \
-                            or (("FloatTensor" in skip_type_list) and tensor_type_name == "FloatTensor") \
-                            or (("HalfTensor" in skip_type_list) and tensor_type_name == "HalfTensor") \
-                            or (("IntTensor" in skip_type_list) and tensor_type_name == "IntTensor") \
-                            or (("LongTensor" in skip_type_list) and tensor_type_name == "LongTensor") \
-                            or (("ShortTensor" in skip_type_list) and tensor_type_name == "ShortTensor"):
-                        decorator = skipIfRocm
-                    else:
-                        decorator = None
-            elif ((not TEST_WITH_ROCM) and (decorator is not None)):
-                if (isinstance(decorator, str)):
-                    decorator = None
+        # Here to_backward_recipient = a*b is used twice, so MulBackward's InputBuffer slot expects 2 inputs.
+        # This tests the situation where we do call InputBuffer::accumulate for MulBackward's InputBuffer.
+        a.grad = None
+        b.grad = None
+        to_backward_recipient = a * b
+        # Multiply by 2 here so to's backward creates gradient values that are different from the case above,
+        # to mitigate weirdness if the caching allocator happens to reuse memory regions that were populated
+        # with 1s by the case above
+        s0 = to_backward_recipient.to(device="cuda:0").sum() * 2.
+        s1 = to_backward_recipient.to(device="cuda:0").sum() * 2.
+        torch.cuda.synchronize(device=dev0)
+        torch.cuda.synchronize(device=dev1)
+        s0.backward(retain_graph=True)
+        s1.backward()
+        self.assertTrue(a.grad.sum().item() == 4 * size)
+        self.assertTrue(b.grad.sum().item() == 4 * size)
 
-            precision = custom_precision.get(name, TestCuda.precision)
-            if is_half(t):
-                precision = custom_half_precision.get(name, precision)
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_cuda_init_race(self):
+        # See https://github.com/pytorch/pytorch/issues/16559
+        import subprocess
+        subprocess.check_call([sys.executable, '-c', """\
+import torch
+import threading
 
-            for inplace in (True, False):
-                if inplace and no_inplace:
-                    continue
-                if inplace:
-                    name_inner = name + '_'
+def worker(rank):
+    torch.tensor([1.]).cuda(rank)
+
+t1 = threading.Thread(target=worker, args=(0,))
+t2 = threading.Thread(target=worker, args=(1,))
+t1.start()
+t2.start()
+"""])
+
+    def test_grad_scaling_builtins(self, device="cuda", dtype=torch.float):
+        inv_scale = torch.tensor([0.25], dtype=dtype, device=device)
+
+        found_inf = torch.tensor([0.0], dtype=dtype, device=device)
+        g = torch.tensor([4.0], dtype=dtype, device=device)
+        torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
+        self.assertEqual(found_inf, 0.0)
+        self.assertTrue(torch.allclose(g, torch.ones(10, dtype=torch.float32, device="cuda"), atol=1e-7))
+
+        found_inf.zero_()
+        g = torch.tensor([float('inf')], dtype=dtype, device=device)
+        torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
+        self.assertEqual(found_inf, 1.0)
+
+        found_inf.zero_()
+        g = torch.tensor([float('nan')], dtype=dtype, device=device)
+        torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
+        self.assertEqual(found_inf, 1.0)
+
+        growth = 2.0
+        backoff = 0.25
+        growth_interval = 2
+        scale = torch.tensor([4.0], dtype=dtype, device=device)
+        growth_tracker = torch.tensor([0], dtype=torch.int32, device=device)
+
+        found_inf.zero_()
+        # Simulates 2 consecutive unskipped iterations
+        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 1)
+        self.assertEqual(scale, 4.0)
+        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 8.0)
+
+        # Simulates a skipped iteration
+        found_inf.fill_(1.0)
+        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 2.0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_device_as_key(self):
+        # Ensure that different instances of "device" objects that point to the same device
+        # are treated as identical keys by dicts.  GradScaler relies on this behavior, and may
+        # error otherwise in a way that's difficult to detect (a silent performance hit).
+        d = {}
+        dev0a = torch.device("cuda:0")
+        dev0b = torch.device("cuda:0")
+        dev1a = torch.device("cuda:1")
+        dev1b = torch.device("cuda:1")
+
+        self.assertTrue(hash(dev0a) == hash(dev0b))
+        self.assertTrue(hash(dev1a) == hash(dev1b))
+
+        d[dev0a] = "0a"
+        d[dev0b] = "0b"
+        self.assertTrue(len(d) == 1)
+        self.assertTrue(d[dev0a] == "0b")
+
+        d[dev1a] = "1a"
+        d[dev1b] = "1b"
+        self.assertTrue(len(d) == 2)
+        self.assertTrue(d[dev1a] == "1b")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_scale(self):
+        scaler = torch.cuda.amp.GradScaler(init_scale=2.)
+        t0 = torch.tensor([4.0], dtype=torch.float32, device="cuda:0")
+        t1 = torch.tensor([4.0], dtype=torch.float32, device="cuda:1")
+        # Create some nested iterables of tensors on different devices.
+        outputs = (t1.clone(), (t0.clone(), t1.clone()), [t0.clone(), (t1.clone(), t0.clone())])
+        outputs = scaler.scale(outputs)
+        self.assertTrue(outputs[0] == 8.0 and outputs[1][0] == 8.0 and outputs[1][1] == 8.0 and
+                        outputs[2][0] == 8.0 and outputs[2][1][0] == 8.0 and outputs[2][1][1] == 8.0)
+        self.assertTrue(scaler._scale.device == t1.device)
+
+    def test_grad_scaling_state_dict(self):
+        for lazy_init_scale in True, False:
+            s0 = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
+            s1 = torch.cuda.amp.GradScaler(init_scale=6., growth_factor=7., backoff_factor=.8, growth_interval=1)
+
+            # sets a random value for load_state_dict to overwrite
+            s1._init_growth_tracker = 7
+
+            if lazy_init_scale:
+                # Dummy scale() call to ensure the scale tensor is lazily initialized.
+                s1.scale(torch.tensor([4.0], dtype=torch.float32, device="cuda:0"))
+                self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
+
+            s1.load_state_dict(s0.state_dict())
+
+            self.assertEqual(s1.get_scale(), 3.)
+            self.assertEqual(s1.get_growth_factor(), 4.)
+            self.assertEqual(s1.get_backoff_factor(), .5)
+            self.assertEqual(s1.get_growth_interval(), 2)
+            self.assertEqual(s1._init_growth_tracker, 0)
+
+    def _create_scaling_models_optimizers(self, device="cuda"):
+        # Create a module+optimizer that will use scaling, and a control module+optimizer
+        # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
+        mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
+        mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
+        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+            s.data.copy_(c.data)
+
+        opt_control = torch.optim.SGD(mod_control.parameters(), lr=1.0)
+        opt_scaling = torch.optim.SGD(mod_scaling.parameters(), lr=1.0)
+
+        return mod_control, mod_scaling, opt_control, opt_scaling
+
+    def _create_scaling_case(self, device="cuda", dtype=torch.float):
+        data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+                (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+                (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+                (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device))]
+
+        loss_fn = torch.nn.MSELoss().cuda()
+
+        skip_iter = 2
+
+        return self._create_scaling_models_optimizers(device=device) + (data, loss_fn, skip_iter)
+
+    # _run_scaling_case generalizes some single-optimizer test logic to avoid too much copy-pasting below.
+    def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7):
+        # Ensure scaling can be disabled without changing user control flow.
+        for enabled in True, False:
+            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case()
+
+            # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
+            # so any potential errors with the growth factor handling will be magnified.
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
+
+            _ = run(data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
+            ret = run(data, mod_scaling, opt_scaling, scaler, loss_fn, skip_iter, True)
+
+            # Allows run() to optionally return a different scaler instance.
+            scaler = ret if ret else scaler
+
+            # If scaling was enabled, the scale factor should have been multiplied by the growth factor
+            # len(data) - skipped times and the backoff factor "skipped" times.
+            if enabled:
+                net_growth = scaler.get_growth_factor()**unskipped if unskipped > 0 else 1.0
+                net_backoff = scaler.get_backoff_factor()**skipped if skipped > 0 else 1.0
+                self.assertTrue(scaler.get_scale() == (128. * net_growth * net_backoff))
+            else:
+                self.assertTrue(scaler.get_scale() == 1.0)
+
+            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+                self.assertTrue(torch.allclose(c, s, atol=atol))
+
+    # Compares no scaling + no autocasting against scaling + autocasting.
+    def test_grad_scaling_autocast(self):
+        try_pickle = False
+
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                with torch.cuda.amp.autocast(enabled=try_scaling_api):
+                    output = model(input)
+                    loss = loss_fn(output, target)
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.step(optimizer)
+                    scaler.update()
+                    if try_pickle:
+                        scaler = pickle.loads(pickle.dumps(scaler))
                 else:
-                    name_inner = name
+                    loss.backward()
+                    if (not scaler.is_enabled()) or (i != skip_iter):
+                        optimizer.step()
+            return scaler
 
-                if t != torch.HalfTensor and not hasattr(tensor, name_inner):
-                    # torch.HalfTensor doesn't support most operations,
-                    # but we use torch.FloatTensor as cpu baseline
-                    continue
-                full_name = '{}.{}'.format(tensor.type(), name_inner)
-                if full_name in ignores:
-                    continue
+        # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3)
+        # this will be picked up by try_pickle within run():
+        try_pickle = True
+        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3)
 
-                test_name = 'test_' + t.__name__ + '_' + name_inner
-                if desc:
-                    test_name += '_' + desc
+    def test_grad_scaling_clipping(self):
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm * scaler.get_scale())
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    if (not scaler.is_enabled()) or (i != skip_iter):
+                        optimizer.step()
 
-                assert not hasattr(TestCuda, test_name), "Duplicated test name: " + test_name
+        self._run_scaling_case(run, unskipped=3, skipped=1)
 
-                test_fn = compare_cpu_gpu(constr, arg_constr, name_inner, t, precision)
+    def test_grad_scaling_clipping_separate_unscale(self):
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    if (not scaler.is_enabled()) or (i != skip_iter):
+                        optimizer.step()
 
-                if decorator is not None:
-                    test_fn = decorator(test_fn)
+        self._run_scaling_case(run, unskipped=3, skipped=1)
 
-                setattr(TestCuda, test_name, test_fn)
+    def test_grad_scaling_penalty(self):
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
+
+                if try_scaling_api:
+                    grad_params = torch.autograd.grad(scaler.scale(loss),
+                                                      model.parameters(), create_graph=True)
+                    inv_scale = 1. / scaler.get_scale()
+                    grad_params = [p * inv_scale for p in grad_params]
+                else:
+                    grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+
+                grad_norm = 0
+                for grad in grad_params:
+                    grad_norm += grad.pow(2).sum()
+                grad_norm = grad_norm.sqrt()
+                loss = loss + grad_norm
+
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    if (not scaler.is_enabled()) or (i != skip_iter):
+                        optimizer.step()
+
+        self._run_scaling_case(run, unskipped=3, skipped=1)
+
+    def test_grad_scaling_accumulation(self):
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            iters_to_accumulate = 2
+            for i, (input, target) in enumerate(data):
+                output = model(input)
+                loss = loss_fn(output, target)
+                loss = loss / iters_to_accumulate
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                else:
+                    loss.backward()
+                if (i + 1) % iters_to_accumulate == 0:
+                    if try_scaling_api:
+                        scaler.step(optimizer)
+                        scaler.update()
+                        optimizer.zero_grad()
+                    else:
+                        optimizer.step()
+                        optimizer.zero_grad()
+
+        self._run_scaling_case(run, unskipped=2, skipped=0)
+
+    def test_grad_scaling_multiple(self):
+        # Tests gradient scaling with 2 models and 2 optimizers that both receive gradients from 2 losses.
+        # Some of the logic here cannot reuse the generic helper functions created for the 1-optimizer cases.
+        for enabled in True, False:
+            mod_control0, mod_scaling0, opt_control0, opt_scaling0, data, loss_fn, skip_iter = \
+                self._create_scaling_case()
+            mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
+                self._create_scaling_models_optimizers()
+
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
+
+            def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
+                for i, (input, target) in enumerate(data):
+                    optimizer0.zero_grad()
+                    optimizer1.zero_grad()
+                    output0 = model0(input)
+                    output1 = model1(input)
+                    loss0 = loss_fn(0.3 * output0 + 0.7 * output1, target)
+                    loss1 = loss_fn(0.6 * output0 - 0.4 * output1, target)
+
+                    if try_scaling_api:
+                        scaler.scale(loss0).backward(retain_graph=True)
+                        scaler.scale(loss1).backward()
+                        if i == skip_iter and scaler.is_enabled():
+                            model1[1].weight.grad.data.fill_(float('inf'))
+
+                        # As an additional stress test, separately unscale for one of the optimizers.
+                        scaler.unscale_(optimizer0)
+
+                        scaler.step(optimizer0)
+                        scaler.step(optimizer1)
+                        scaler.update()
+                    else:
+                        loss0.backward(retain_graph=True)
+                        loss1.backward()
+                        optimizer0.step()
+                        if (not scaler.is_enabled()) or (i != skip_iter):
+                            optimizer1.step()
+
+            run(mod_control0, mod_control1, opt_control0, opt_control1, False)
+            run(mod_scaling0, mod_scaling1, opt_scaling0, opt_scaling1, True)
+
+            # The loss scale should have been multiplied by the growth factor 3 times and the backoff factor once.
+            self.assertTrue(scaler.get_scale() == (128. * scaler.get_growth_factor()**3 *
+                                                   scaler.get_backoff_factor()**1) if enabled else 1.0)
+
+            for c, s in zip(chain(mod_control0.parameters(), mod_control1.parameters()),
+                            chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
+                self.assertTrue(torch.allclose(c, s, atol=1e-7))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_multigpu(self):
+        # Same as above, but runs some of the models on device 1.
+        # GradScaler should transparently handle losses and gradients on multiple devices.
+        # This test could be combined with the test above, but I think it makes sense to treat
+        # multi-GPU operations separately.
+        dev0 = torch.device("cuda:0")
+        dev1 = torch.device("cuda:1")
+
+        for enabled in True, False:
+            mod_control0, mod_scaling0, opt_control0, opt_scaling0, data, loss_fn, skip_iter = \
+                self._create_scaling_case()
+            mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
+                self._create_scaling_models_optimizers(device=dev1)
+
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
+
+            def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
+                for i, (input, target) in enumerate(data):
+                    optimizer0.zero_grad()
+                    optimizer1.zero_grad()
+                    output0 = model0(input)
+                    output1 = model1(input.to(dev1))
+                    loss0 = loss_fn(0.3 * output0 + 0.7 * output1.to(dev0), target)
+                    loss1 = loss_fn(0.6 * output0.to(dev1) - 0.4 * output1, target.to(dev1))
+
+                    if try_scaling_api:
+                        scaler.scale(loss0).backward(retain_graph=True)
+                        scaler.scale(loss1).backward()
+                        if i == skip_iter and scaler.is_enabled():
+                            model1[1].weight.grad.data.fill_(float('inf'))
+
+                        # As an additional stress test, separately unscale for one of the optimizers.
+                        scaler.unscale_(optimizer0)
+
+                        scaler.step(optimizer0)
+                        scaler.step(optimizer1)
+
+                        # Make sure the found_infs were collected properly across optimizers and devices.
+                        if scaler.is_enabled():
+                            self.assertTrue(len(scaler._found_inf_per_device(optimizer0)) == 1)
+                            self.assertTrue(len(scaler._found_inf_per_device(optimizer1)) == 1)
+                            self.assertTrue(scaler._found_inf_per_device(optimizer0)[dev0].item() == 0.)
+                            self.assertTrue(scaler._found_inf_per_device(optimizer1)[dev1].item() ==
+                                            float(i == skip_iter))
+
+                        scaler.update()
+                    else:
+                        loss0.backward(retain_graph=True)
+                        loss1.backward()
+                        optimizer0.step()
+                        if (not scaler.is_enabled()) or (i != skip_iter):
+                            optimizer1.step()
+
+            run(mod_control0, mod_control1, opt_control0, opt_control1, False)
+            run(mod_scaling0, mod_scaling1, opt_scaling0, opt_scaling1, True)
+
+            # The loss scale should have been multiplied by the growth factor 3 times and the backoff factor once.
+            self.assertTrue(scaler.get_scale() == (128. * scaler.get_growth_factor()**3 *
+                                                   scaler.get_backoff_factor()**1) if enabled else 1.0)
+
+            # Copy mod_control1 and mod_scaling1 back the device 0 for comparison
+            mod_control1.to(dev0)
+            mod_scaling1.to(dev0)
+
+            for c, s in zip(chain(mod_control0.parameters(), mod_control1.parameters()),
+                            chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
+                self.assertTrue(torch.allclose(c, s, atol=1e-7))
+
+    def test_cublas_multiple_threads_same_device(self):
+        # Note, these parameters should be very carefully tuned
+        # Too small number makes it hard for the racing condition
+        # to happen, while too large number sometimes cause hang
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 100
+
+        weight = torch.ones((size, size), device='cuda')
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = torch.cuda.Stream()
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            torch.cuda.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with torch.cuda.stream(my_stream):
+                for i in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS is its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = torch.mm(results[t], weight)
+                    results[t].div_(float(size))
+            torch.cuda.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device='cuda')
+
+            threads = [threading.Thread(target=_worker,
+                                        args=(t,)) for t in range(num_threads)]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
+    def test_cudnn_multiple_threads_same_device(self):
+        # This function is intended to test the lazy creation and reuse of per-thread
+        # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
+        # Failure here likely indicates something wrong with that logic.
+        weight = torch.ones((1, 1, 2, 2), device='cuda')
+
+        results = {}
+
+        num_threads = 2
+        trials = 3
+        test_iters = 1000
+        barrier = threading.Barrier(num_threads)
+
+        with torch.backends.cudnn.flags(enabled=True):
+            def _worker(t):
+                my_stream = torch.cuda.Stream()
+                # Hard sync so we don't need to worry about creating and using tensors
+                # across streams or the fact that default streams are thread-local.
+                # Those issues are not the target of this test.
+                torch.cuda.synchronize()
+                # Line up threads to increase likelihood of race conditions.
+                barrier.wait()
+                with torch.cuda.stream(my_stream):
+                    for _ in range(test_iters):
+                        # If all threads are sharing the same cudnn handle,
+                        # the following sequence may occur:
+                        # thread 0 calls setCuDNNStreamToCurrent()
+                        # thread 1 calls setCuDNNStreamToCurrent()
+                        # thread 0 launches its raw convolution, which it thinks is in
+                        #          its own stream, but is actually in thread 1's stream.
+                        # thread 0 enqueues its div_, which IS is its own stream,
+                        #          but now races with its convolution.
+                        results[t] = torch.nn.functional.conv2d(results[t], weight, padding=0)
+                        results[t].div_(4.0)
+                torch.cuda.synchronize()
+
+            for _ in range(trials):
+                for t in range(num_threads):
+                    results[t] = torch.ones((1, 1, 2048, 2048), device='cuda')
+
+                threads = [threading.Thread(target=_worker,
+                                            args=(t,)) for t in range(num_threads)]
+
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+                for t in range(num_threads):
+                    self.assertEqual(results[t].sum().item(),
+                                     (2048 - test_iters) * (2048 - test_iters))
+
+    def test_cusparse_multiple_threads_same_device(self):
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 500
+
+        def ones_sparse(size):
+            a = torch.arange(size, device='cuda')
+            indices = torch.cartesian_prod(a, a).t()
+            values = torch.ones(size * size, device='cuda')
+            return torch.sparse_coo_tensor(indices, values)
+
+        weight = ones_sparse(size)
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = torch.cuda.Stream()
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            torch.cuda.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with torch.cuda.stream(my_stream):
+                for i in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS is its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = weight.mm(results[t])
+                    results[t].div_(float(size))
+            torch.cuda.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device='cuda')
+
+            threads = [threading.Thread(target=_worker,
+                                        args=(t,)) for t in range(num_threads)]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
+
+    def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch, add_kwargs=None):
+        # helper to cast args
+        def cast(val, to_type):
+            if isinstance(val, torch.Tensor):
+                return val.to(to_type) if val.is_floating_point() else val
+            elif isinstance(val, container_abcs.Iterable):
+                return type(val)(cast(v, to_type) for v in val)
+            else:
+                return val
+
+        if add_kwargs is None:
+            add_kwargs = {}
+
+        self.assertFalse(torch.is_autocast_enabled())
+        with torch.cuda.amp.autocast():
+            self.assertTrue(torch.is_autocast_enabled())
+
+            out_type = out_type if out_type is not None else run_as_type
+            output = output_method = None
+
+            # Try module.* variant, if requested:
+            if module is not None and hasattr(module, op):
+                output = getattr(module, op)(*args, **add_kwargs)
+                if isinstance(output, torch.Tensor):
+                    self.assertTrue(out_type == output.dtype,
+                                    "autocast for torch.{} produced {}, should produce {}"
+                                    .format(op, output.dtype, out_type))
+
+            # Try Tensor.* variant:
+            if hasattr(torch.Tensor, op):
+                output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
+                if isinstance(output_method, torch.Tensor):
+                    self.assertTrue(out_type == output_method.dtype,
+                                    "autocast for torch.{} produced {}, should produce torch.{}"
+                                    .format(op, output_method.dtype, out_type))
+
+            self.assertTrue((output is not None) or (output_method is not None),
+                            "{} not found as an attribute on either Tensor or the requested module {}".format(
+                            op, module))
+
+            # If both torch.* and Tensor.* variants were found, check outputs are identical
+            if (output is not None) and (output_method is not None):
+                self.assertTrue(type(output) == type(output_method))
+                comparison = torch.equal(output, output_method) if isinstance(output, torch.Tensor) \
+                    else (output == output_method)
+                self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
+
+            # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
+            # as the C++-side autocasting, and should be bitwise accurate.
+            output_to_compare = output if output is not None else output_method
+            with torch.cuda.amp.autocast(enabled=False):
+                self.assertFalse(torch.is_autocast_enabled())
+
+                if module is not None and hasattr(module, op):
+                    control = getattr(module, op)(*cast(args, run_as_type), **add_kwargs)
+                else:
+                    control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
+                self.assertTrue(type(output_to_compare) == type(control))
+                comparison = torch.equal(output_to_compare, control) if isinstance(control, torch.Tensor) \
+                    else (output_to_compare == control)
+                self.assertTrue(comparison, "torch.{} result did not match control".format(op))
+            self.assertTrue(torch.is_autocast_enabled())
+        self.assertFalse(torch.is_autocast_enabled())
+
+    def args_maybe_kwargs(self, op_with_args):
+        if len(op_with_args) == 2:
+            return op_with_args[0], op_with_args[1], {}
+        else:
+            return op_with_args[0], op_with_args[1], op_with_args[2]
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_torch_fp16(self):
+        with torch.backends.cudnn.flags(deterministic=True):
+            for op_with_args in self.autocast_lists.torch_fp16:
+                skip_test = False
+                op, args = op_with_args[0], op_with_args[1]
+                if len(op_with_args) == 3:
+                    skip_test = op_with_args[2]  # TEST_WITH_ROCM
+                if not skip_test:
+                    self._run_autocast_outofplace(op, args, torch.float16)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_torch_fp32(self):
+        for op_with_args in self.autocast_lists.torch_fp32:
+            op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
+            self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_torch_need_autocast_promote(self):
+        for op, args in self.autocast_lists.torch_need_autocast_promote:
+            self._run_autocast_outofplace(op, args, torch.float32)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_torch_expect_builtin_promote(self):
+        for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
+            self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_nn_fp16(self):
+        with torch.backends.cudnn.flags(deterministic=True):
+            for op, args in self.autocast_lists.nn_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_nn_fp32(self):
+        for op, args in self.autocast_lists.nn_fp32:
+            self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_methods_fp16(self):
+        with torch.backends.cudnn.flags(deterministic=True):
+            for op, args in self.autocast_lists.methods_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16, module=None)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_methods_fp32(self):
+        for op, args in self.autocast_lists.methods_fp32:
+            self._run_autocast_outofplace(op, args, torch.float32, module=None)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_methods_expect_builtin_promote(self):
+        for op, args, out_type in self.autocast_lists.methods_expect_builtin_promote:
+            self._run_autocast_outofplace(op, args, torch.float32, module=None, out_type=out_type)
+
+    def test_autocast_banned(self):
+        with torch.cuda.amp.autocast():
+            for op, args, module in self.autocast_lists.banned:
+                with self.assertRaises(RuntimeError):
+                    getattr(module, op)(*args)
+
+    def test_autocast_ignored_types(self):
+        with torch.cuda.amp.autocast():
+            for ignore_type in (torch.double, torch.int32):
+                a_ignore = torch.ones((8, 8), dtype=ignore_type, device="cuda:0")
+                b_ignore = torch.ones((8, 8), dtype=ignore_type, device="cuda:0")
+                c_16 = torch.ones((8, 8), dtype=torch.float16, device="cuda:0")
+
+                # Tests if CastPolicy::fp16 ops ignore double and int
+                # Currently, no ops belonging to this policy support integer inputs.
+                if ignore_type is torch.double:
+                    with self.assertRaises(RuntimeError):
+                        torch.mm(a_ignore, c_16)
+                    with torch.cuda.amp.autocast(enabled=False):
+                        type_no_autocast = torch.mm(a_ignore, b_ignore).dtype
+                    self.assertTrue(torch.mm(a_ignore, b_ignore).dtype is type_no_autocast)
+
+                # Tests if CastPolicy::fp32 ops ignore double and int
+                with torch.cuda.amp.autocast(enabled=False):
+                    type_no_autocast = torch.pow(a_ignore, 2.0).dtype
+                self.assertTrue(torch.pow(a_ignore, 2.0).dtype is type_no_autocast)
+
+                # Tests if CastPolicy::fp32_set_opt_dtype ops ignore double and int
+                with torch.cuda.amp.autocast(enabled=False):
+                    type_no_autocast = torch.sum(a_ignore).dtype
+                self.assertTrue(torch.sum(a_ignore).dtype is type_no_autocast)
+
+                # Tests if CastPolicy::fp32_append_dtype ops ignore double and int
+                # Currently, no ops belonging to this policy support integer inputs.
+                if ignore_type is torch.double:
+                    with torch.cuda.amp.autocast(enabled=False):
+                        type_no_autocast = torch.norm(a_ignore).dtype
+                    self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
+
+    def test_autocast_custom_enabled(self):
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            @torch.cuda.amp.custom_fwd
+            def forward(ctx, a, b):
+                self.assertTrue(a.dtype is torch.float32)
+                self.assertTrue(b.dtype is torch.float32)
+                self.assertTrue(torch.is_autocast_enabled())
+                ctx.save_for_backward(a, b)
+                return a.mm(b)
+
+            @staticmethod
+            @torch.cuda.amp.custom_bwd
+            def backward(ctx, grad):
+                self.assertTrue(torch.is_autocast_enabled())
+                a, b = ctx.saved_tensors
+                return grad.mm(b.t()), a.t().mm(grad)
+
+        mymm = MyMM.apply
+
+        x = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
+        y = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
+
+        with torch.cuda.amp.autocast():
+            output = mymm(x, y)
+            self.assertTrue(output.dtype is torch.float16)
+            loss = output.sum()
+        loss.backward()
+
+    def test_autocast_custom_disabled(self):
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+            def forward(ctx, a, container):
+                b = container[1][0]
+                self.assertTrue(a.dtype is torch.float32)
+                self.assertTrue(b.dtype is torch.float32)
+                self.assertFalse(torch.is_autocast_enabled())
+                ctx.save_for_backward(a, b)
+                return a.mm(b)
+
+            @staticmethod
+            @torch.cuda.amp.custom_bwd
+            def backward(ctx, grad):
+                self.assertFalse(torch.is_autocast_enabled())
+                a, b = ctx.saved_tensors
+                return grad.mm(b.t()), None
+
+        mymm = MyMM.apply
+
+        x = torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
+        # Puts one input tensor in a nested container.  y's contained Tensor won't receive a gradient,
+        # because torch.autograd.Function can't hand gradients back to non-Tensor forward arguments.
+        # Sets requires_grad=False explicitly so we don't lie about expecting a gradient.
+        y = (0, {0: torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=False)})
+
+        with torch.cuda.amp.autocast():
+            output = mymm(x, y)
+            self.assertTrue(output.dtype is torch.float32)
+            loss = output.sum()
+        loss.backward()
+
+    def test_autocast_cat_jit(self):
+        # Reported at https://github.com/pytorch/pytorch/issues/38958
+
+        class Model(torch.nn.Module):
+            def forward(self):
+                a = torch.randn(1)
+                b = torch.randn(1)
+                c = torch.cat((a, b), 0)
+                d = torch.stack([c, c], 0)
+                return d
+
+        # The JIT here doesn't really matter, we just need to call
+        # cat via the boxed API
+        model = Model()
+        model_jit_script = torch.jit.script(model)
+
+        with torch.cuda.amp.autocast(True):
+            model()
+            model_jit_script()
+
+    @slowTest
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_max_large_axis(self):
+        x = torch.zeros(2**32, device='cuda', dtype=torch.int8)
+        x[-1] = 1
+        val, idx = x.max(0)
+        self.assertEqual(val, 1)
+        self.assertEqual(idx, x.shape[0] - 1)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_to_numpy(self):
+        self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
 
 
 if __name__ == '__main__':
-    if TEST_CUDA:
-        load_ignore_file()
-        generate_tests()
-
     run_tests()

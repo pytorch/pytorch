@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_NET_ASYNC_BASE_H_
 #define CAFFE2_CORE_NET_ASYNC_BASE_H_
 
+#include <c10/macros/Macros.h>
 #include "c10/core/thread_pool.h"
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
@@ -13,7 +14,6 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/prof_dag.pb.h"
 #include "caffe2/utils/proto_utils.h"
-#include <ATen/core/Tensor.h>
 
 C10_DECLARE_int(caffe2_streams_per_gpu);
 C10_DECLARE_int(caffe2_net_async_max_gpus);
@@ -55,6 +55,12 @@ struct ExecutionOptions {
   bool use_dfs_scheduling_ = false;
   // run net's root tasks in RunAsync thread instead of in thread pool
   bool run_root_tasks_inline_ = false;
+};
+
+struct CAFFE2_API AsyncNetCancelled : public std::exception {
+  const char* what() const noexcept override {
+    return "Cancelled";
+  }
 };
 
 class CAFFE2_API AsyncNetBase : public NetBase {

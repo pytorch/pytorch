@@ -2,6 +2,9 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
+#include <THC/THCAtomics.cuh>
+#include <THC/THCNumerics.cuh>
+
 namespace at {
 namespace cuda {
 #define THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM 100
@@ -72,7 +75,7 @@ __global__ void kernelHistogram1D(
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
-        atomicAdd(&smem[bin], getOp(linearIndex));
+        gpuAtomicAdd(&smem[bin], getOp(linearIndex));
       }
     }
     __syncthreads();
@@ -82,7 +85,7 @@ __global__ void kernelHistogram1D(
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
           detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
-      atomicAdd(&a.data[aOffset], smem[i]);
+      gpuAtomicAdd(&a.data[aOffset], smem[i]);
     }
 
   } else if (MemoryType == CUDAHistogramMemoryType::MULTI_BLOCK) {
@@ -101,7 +104,7 @@ __global__ void kernelHistogram1D(
         const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
         const IndexType pOffset =
             detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
-        atomicAdd(&p.data[pOffset], getOp(linearIndex));
+        gpuAtomicAdd(&p.data[pOffset], getOp(linearIndex));
       }
     }
     __syncthreads();
@@ -114,7 +117,7 @@ __global__ void kernelHistogram1D(
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
           detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
-      atomicAdd(&a.data[aOffset], p.data[pOffset + i]);
+      gpuAtomicAdd(&a.data[aOffset], p.data[pOffset + i]);
     }
 
   } else {
@@ -131,7 +134,7 @@ __global__ void kernelHistogram1D(
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType aOffset =
             detail::IndexToOffset<output_t, IndexType, ADims>::get(bin, a);
-        atomicAdd(&a.data[aOffset], getOp(linearIndex));
+        gpuAtomicAdd(&a.data[aOffset], getOp(linearIndex));
       }
     }
   }
@@ -202,6 +205,10 @@ bool CUDA_tensor_histogram(
     checkBackend("CUDA_tensor_histogram", {c}, Backend::CUDA);
   }
   auto totalElements = b.numel();
+
+  if (totalElements == 0) {
+    return false;
+  }
 
   const dim3 block = getApplyBlock();
   dim3 grid;
@@ -322,6 +329,29 @@ Tensor _histc_cuda_template(
     minvalue = minvalue - 1;
     maxvalue = maxvalue + 1;
   }
+
+#ifndef __HIP_PLATFORM_HCC__
+  TORCH_CHECK(
+      !(THCNumerics<input_t>::isinf(minvalue) ||
+        THCNumerics<input_t>::isinf(maxvalue) ||
+        THCNumerics<input_t>::isnan(minvalue) ||
+        THCNumerics<input_t>::isnan(maxvalue)),
+      "range of [",
+      minvalue,
+      ", ",
+      maxvalue,
+      "] is not finite");
+#else
+  TORCH_CHECK(
+      !(std::isinf(minvalue) || std::isinf(maxvalue) || std::isnan(minvalue) ||
+        std::isnan(maxvalue)),
+      "range of [",
+      minvalue,
+      ", ",
+      maxvalue,
+      "] is not finite");
+#endif
+  TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
 
   auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
     output, self, Tensor(), nbins, minvalue, maxvalue);

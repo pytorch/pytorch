@@ -1,10 +1,15 @@
 #pragma once
 
-#include <c10/core/QScheme.h>
-#include <ATen/Tensor.h>
 #ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
-#include "fbgemm/QuantUtils.h"
+#include <fbgemm/Fbgemm.h>
+#include <fbgemm/FbgemmFP16.h>
+#include <fbgemm/QuantUtils.h>
+
+#include <ATen/Tensor.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
+#include <c10/core/QScheme.h>
+
 
 // The struct for the packed weight matrix (PackBMatrix) and the corresponding
 // column offsets used for the fully connect layer, which are both prepared in
@@ -15,23 +20,190 @@
 // of the A rows. The column offsets are needed for the asymmetric quantization
 // (affine quantization) of input matrix.
 // Note that in JIT mode we can think of a way to fuse col_offsets with bias.
-struct FBGEMM_API PackedLinearWeight {
+struct CAFFE2_API PackedLinearWeight : public LinearPackedParamsBase {
+  PackedLinearWeight(
+      std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w,
+      c10::optional<at::Tensor> bias,
+      std::vector<int32_t> col_offsets,
+      std::vector<float> w_scale,
+      std::vector<int32_t> w_zp,
+      c10::QScheme q_scheme)
+      : w(std::move(w)),
+        bias_(std::move(bias)),
+        col_offsets(std::move(col_offsets)),
+        w_scale(std::move(w_scale)),
+        w_zp(std::move(w_zp)),
+        q_scheme(std::move(q_scheme)) {}
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
-  c10::optional<at::Tensor> bias;
+  c10::optional<at::Tensor> bias_;
   std::vector<int32_t> col_offsets;
   std::vector<float> w_scale;
   std::vector<int32_t> w_zp;
   c10::QScheme q_scheme;
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  c10::optional<at::Tensor> bias() override {
+    return bias_;
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point);
+
+  template <bool ReluFused>
+  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);
 };
 
-struct FBGEMM_API PackedConvWeight {
-  std::unique_ptr<fbgemm::PackWeightsForConv<2>> w;
+struct CAFFE2_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
+  PackedLinearWeightFp16(
+      std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w,
+      c10::optional<at::Tensor> bias)
+      : w(std::move(w)), bias_(std::move(bias)) {}
+
+  std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w;
+  c10::optional<at::Tensor> bias_;
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override {
+    TORCH_INTERNAL_ASSERT(false);
+  }
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override {
+    TORCH_INTERNAL_ASSERT(false);
+  }
+
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  c10::optional<at::Tensor> bias() override {
+    return bias_;
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+  void set_bias(c10::optional<at::Tensor> bias) override;
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_dynamic_impl(at::Tensor input);
+};
+
+template <int kSpatialDim = 2>
+struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
+  PackedConvWeight(
+      std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w,
+      c10::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      std::vector<int32_t> col_offsets,
+      std::vector<int64_t> kernel,
+      std::vector<float> w_scale,
+      std::vector<int32_t> w_zp,
+      c10::QScheme q_scheme)
+    : w(std::move(w)),
+    bias(std::move(bias)),
+    stride_(std::move(stride)),
+    padding_(std::move(padding)),
+    dilation_(std::move(dilation)),
+    groups_(groups),
+    col_offsets(std::move(col_offsets)),
+    kernel(std::move(kernel)),
+    w_scale(std::move(w_scale)),
+    w_zp(std::move(w_zp)),
+    q_scheme(q_scheme) {}
+
+  std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w;
   c10::optional<at::Tensor> bias;
+  torch::List<int64_t> stride_;
+  torch::List<int64_t> padding_;
+  torch::List<int64_t> dilation_;
+  int64_t groups_;
   std::vector<int32_t> col_offsets;
   std::vector<int64_t> kernel;
   std::vector<float> w_scale;
   std::vector<int32_t> w_zp;
   c10::QScheme q_scheme;
+
+  at::Tensor apply(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor apply_relu(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups);
+
+  const float* GetBiasData(at::Tensor* bias);
+
+  void GetQuantizationParams(
+      float act_scale,
+      float out_scale,
+      std::vector<float>* output_multiplier_float,
+      std::vector<float>* act_times_w_scale);
+
+  torch::List<int64_t> stride() const override {
+    return stride_;
+  }
+
+  torch::List<int64_t> padding() const override {
+    return padding_;
+  }
+
+  torch::List<int64_t> dilation() const override {
+    return dilation_;
+  }
+
+  int64_t groups() const override {
+    return groups_;
+  }
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point);
 };
 
 // PackWeight: Convert the weight from uint8 to int8.
@@ -54,5 +226,54 @@ inline void convert_int8_uint8(
         static_cast<uint8_t>(static_cast<int32_t>(src_int8[i]) + 128);
   }
 }
+
+namespace at {
+namespace native {
+namespace fbgemm_utils {
+
+template <int kSpatialDim = 2>
+fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
+    int N,
+    int C,
+    int M,
+    const std::vector<int>& image_shape,
+    int groups,
+    const std::vector<int>& kernels,
+    const std::vector<int>& strides,
+    const std::vector<int>& pads,
+    const std::vector<int>& dilations);
+
+// TODO: Remove functions below when ChannelsLast3d is ready.
+Tensor MakeStridedQTensorCPU(
+    const IntArrayRef& sizes,
+    const IntArrayRef& strides,
+    const TensorOptions& options,
+    QuantizerPtr quantizer);
+
+Tensor MakeEmptyAffineQuantizedChannelsLast3dTensor(
+    int64_t N,
+    int64_t C,
+    int64_t D,
+    int64_t H,
+    int64_t W,
+    const TensorOptions& options,
+    double scale,
+    int64_t zero_point);
+
+Tensor MakeEmptyPerChannelAffineQuantizedChannelsLast3dTensor(
+    int64_t N,
+    int64_t C,
+    int64_t D,
+    int64_t H,
+    int64_t W,
+    const TensorOptions& options,
+    const Tensor& scales,
+    const Tensor& zero_points);
+
+Tensor ConvertToChannelsLast3dTensor(const Tensor& src);
+
+} // namespace fbgemm_utils
+} // namespace native
+} // namespace at
 
 #endif // USE_FBGEMM

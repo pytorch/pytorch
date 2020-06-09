@@ -13,7 +13,7 @@
 //  dq: Design-time Quantization
 //  rq: Run-time Quantization
 
-static inline void pack_q8gemm_wdq(
+static inline void pytorch_pack_q8gemm_wdq(
     size_t nc,
     size_t kc,
     uint32_t nr,
@@ -30,7 +30,7 @@ static inline void pack_q8gemm_wdq(
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *((int32_t*)packed_w) = b[nr_block_start + nr_block_offset] + boff;
+      *((int32_t*)packed_w) = b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =
@@ -59,7 +59,11 @@ static inline void pack_q8gemm_wdq(
   }
 }
 
-static inline void pack_q8gemm_wrq(
+// NB: We use the same packing function for both dynamic quantization
+// and runtime quantization for linear.
+// This means that dynamic mode will suffer some perf because of the branching
+// introduced due to `if(kzp!=0)` however, that should not be too significant.
+static inline void pytorch_pack_q8gemm_wrq(
     const size_t nc,
     const size_t kc,
     const uint32_t nr,
@@ -67,6 +71,7 @@ static inline void pack_q8gemm_wrq(
     const uint32_t kr,
     const uint8_t* const k,
     const int32_t* const b,
+    const uint8_t* const kzp,
     void* const packed_w) {
   union {
     void* const as_void_ptr;
@@ -78,7 +83,7 @@ static inline void pack_q8gemm_wrq(
     const size_t nr_block_size = min(nc - nr_block_start, nr);
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *(packed.as_int32_ptr++) = b[nr_block_start + nr_block_offset];
+      *(packed.as_int32_ptr++) = b ? b[nr_block_start + nr_block_offset] : 0.0f;
     }
     packed.as_int32_ptr += (nr - nr_block_size);
     for (size_t kr_block_start = 0; kr_block_start < kc; kr_block_start += kr) {
@@ -92,14 +97,45 @@ static inline void pack_q8gemm_wrq(
                 (kr_block_start + kr_block_offset)];
           *(packed.as_uint8_ptr++) = kv;
         }
-        packed.as_uint8_ptr += (kr - kr_block_size);
+        // Weights need to be prepacked with the zero points, in their tail space
+        // where packed blocks are not multiple of input sizes
+        // e.g for ukernels with kr=2 and k is 3 then the second block must be
+        // padded with zero point. This is because when subtracting with zero point
+        // we just get zero for the padded value, which is what we want.
+        if (kzp != 0) {
+          for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
+               kr_block_offset++) {
+            const uint8_t kv =
+                kzp[(nr_block_start + nr_block_offset)];
+            *(packed.as_uint8_ptr++) = kv;
+          }
+        } else {
+          packed.as_uint8_ptr += (kr - kr_block_size);
+        }
       }
-      packed.as_uint8_ptr += ((nr - nr_block_size) & (np - 1)) * kr;
+      if (kzp != 0) {
+        // This part fills the packed weights with zero points for output channels
+        // when they are not divisble by nr blocking parameter.
+        // This is needed because in some kernels, sse2 ones, it relies on this
+        // to produce zero as a result of subtracting zero point from weight value.
+        size_t remaining_nr_blocks = ((nr - nr_block_size) & (np - 1));
+        for (size_t nr_block_offset = 0; nr_block_offset < remaining_nr_blocks;
+             nr_block_offset++) {
+          for (size_t kr_block_offset = 0; kr_block_offset < kr;
+               kr_block_offset++) {
+            const uint8_t kv =
+                kzp[(nr_block_start + nr_block_size + nr_block_offset)];
+            *(packed.as_uint8_ptr++) = kv;
+          }
+        }
+      } else {
+        packed.as_uint8_ptr += ((nr - nr_block_size) & (np - 1)) * kr;
+      }
     }
   }
 }
 
-static inline void pack_q8conv_wdq(
+static inline void pytorch_pack_q8conv_wdq(
     size_t n,
     size_t ks,
     size_t kc,
@@ -116,7 +152,7 @@ static inline void pack_q8conv_wdq(
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *((int32_t*)packed_w) = b[nr_block_start + nr_block_offset] + boff;
+      *((int32_t*)packed_w) = b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =
@@ -148,7 +184,7 @@ static inline void pack_q8conv_wdq(
   }
 }
 
-static inline void pack_q8conv_wrq(
+static inline void pytorch_pack_q8conv_wrq(
     const size_t n,
     const size_t ks,
     const size_t kc,
@@ -156,6 +192,7 @@ static inline void pack_q8conv_wrq(
     const uint32_t kr,
     const uint8_t* const k,
     const int32_t* const b,
+    const uint8_t* const kzp,
     void* const packed_w) {
   union {
     void* const as_void_ptr;
@@ -167,7 +204,7 @@ static inline void pack_q8conv_wrq(
     const size_t nr_block_size = min(n - nr_block_start, nr);
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *(packed.as_int32_ptr++) = b[nr_block_start + nr_block_offset];
+      *(packed.as_int32_ptr++) = b ? b[nr_block_start + nr_block_offset] : 0.0f;
     }
     packed.as_int32_ptr += (nr - nr_block_size);
     for (size_t ki = 0; ki < ks; ki++) {
@@ -183,15 +220,44 @@ static inline void pack_q8conv_wrq(
                   (kr_block_start + kr_block_offset)];
             *(packed.as_uint8_ptr++) = kv;
           }
-          packed.as_uint8_ptr += (kr - kr_block_size);
+          // Weights need to be prepacked with the zero points, in their tail space
+          // where packed blocks are not multiple of input sizes
+          // e.g for ukernels with kr=2 and k is 3 then the second block must be
+          // padded with zero point. This is because when subtracting with zero point
+          // we just get zero for the padded value, which is what we want.
+          if (kzp != 0) {
+            for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
+                 kr_block_offset++) {
+              const uint8_t kv =
+                  kzp[(nr_block_start + nr_block_offset)];
+              *(packed.as_uint8_ptr++) = kv;
+            }
+          } else {
+            packed.as_uint8_ptr += (kr - kr_block_size);
+          }
         }
-        packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+        if (kzp != 0) {
+          // This part fills the packed wights with zero points for output channels
+          // when they are not divisble by nr blocking parameter.
+          // In that case
+          for (size_t nr_block_offset = 0; nr_block_offset < (nr - nr_block_size);
+               nr_block_offset++) {
+            for (size_t kr_block_offset = 0; kr_block_offset < kr;
+                 kr_block_offset++) {
+              const uint8_t kv =
+                  kzp[(nr_block_start + nr_block_size + nr_block_offset)];
+              *(packed.as_uint8_ptr++) = kv;
+            }
+          }
+        } else {
+          packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+        }
       }
     }
   }
 }
 
-static inline void pack_q8deconv_wdq(
+static inline void pytorch_pack_q8deconv_wdq(
     size_t n,
     size_t ks,
     size_t kc,
@@ -208,7 +274,7 @@ static inline void pack_q8deconv_wdq(
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *((int32_t*)packed_w) = b[nr_block_start + nr_block_offset] + boff;
+      *((int32_t*)packed_w) = b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =
@@ -240,7 +306,7 @@ static inline void pack_q8deconv_wdq(
   }
 }
 
-static inline void pack_q8deconv_wrq(
+static inline void pytorch_pack_q8deconv_wrq(
     const size_t n,
     const size_t ks,
     const size_t kc,
@@ -248,6 +314,7 @@ static inline void pack_q8deconv_wrq(
     const uint32_t kr,
     const uint8_t* const k,
     const int32_t* const b,
+    const uint8_t* const kzp,
     void* const packed_w) {
   union {
     void* const as_void_ptr;
@@ -259,7 +326,7 @@ static inline void pack_q8deconv_wrq(
     const size_t nr_block_size = min(n - nr_block_start, nr);
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *(packed.as_int32_ptr++) = b[nr_block_start + nr_block_offset];
+      *(packed.as_int32_ptr++) = b ? b[nr_block_start + nr_block_offset] : 0.0f;
     }
     packed.as_int32_ptr += (nr - nr_block_size);
     for (size_t ki = 0; ki < ks; ki++) {
@@ -275,31 +342,63 @@ static inline void pack_q8deconv_wrq(
                   (nr_block_start + nr_block_offset)];
             *(packed.as_uint8_ptr++) = kv;
           }
-          packed.as_uint8_ptr += (kr - kr_block_size);
+          // Weights need to be prepacked with the zero points, in their tail space
+          // where packed blocks are not multiple of input sizes
+          // e.g for ukernels with kr=2 and k is 3 then the second block must be
+          // padded with zero point. This is because when subtracting with zero point
+          // we just get zero for the padded value, which is what we want.
+          if (kzp != 0) {
+            for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
+                 kr_block_offset++) {
+              const uint8_t kv =
+                  kzp[(nr_block_start + nr_block_offset)];
+              *(packed.as_uint8_ptr++) = kv;
+            }
+          } else {
+            packed.as_uint8_ptr += (kr - kr_block_size);
+          }
         }
-        packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+        if (kzp != 0) {
+          // This part fills the packed wights with zero points for output channels
+          // when they are not divisble by nr blocking parameter.
+          // In that case
+          for (size_t nr_block_offset = 0; nr_block_offset < (nr - nr_block_size);
+               nr_block_offset++) {
+            for (size_t kr_block_offset = 0; kr_block_offset < kr;
+                 kr_block_offset++) {
+              const uint8_t kv =
+                  kzp[(nr_block_start + nr_block_size + nr_block_offset)];
+              *(packed.as_uint8_ptr++) = kv;
+            }
+          }
+        } else {
+          packed.as_uint8_ptr += (nr - nr_block_size) * kr;
+        }
       }
     }
   }
 }
 
-static inline void pack_q8dw_wdq(
+static inline void pytorch_pack_q8dw_wdq(
     size_t h,
     size_t w,
     size_t c,
     size_t cr,
     uint8_t izp,
-    uint8_t kzp,
+    uint8_t* kzp,
     const uint8_t* k,
     const int32_t* b,
     void* packed_w) {
-  const int32_t boff = (int32_t)h * (int32_t)w * (int32_t)izp * (int32_t)kzp;
+  const int32_t boff = (int32_t)h * (int32_t)w * (int32_t)izp;
   for (size_t cr_block_start = 0; cr_block_start < c; cr_block_start += cr) {
     const size_t cr_block_size = min(c - cr_block_start, cr);
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
          cr_block_offset++) {
-      *((int32_t*)packed_w) = b[cr_block_start + cr_block_offset] + boff;
+      *((int32_t*)packed_w) =
+        b ?
+            b[cr_block_start + cr_block_offset] +
+            boff * kzp[cr_block_start + cr_block_offset] : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =
@@ -321,7 +420,7 @@ static inline void pack_q8dw_wdq(
   }
 }
 
-static inline void pack_q8dw_wrq(
+static inline void pytorch_pack_q8dw_wrq(
     const size_t h,
     const size_t w,
     const size_t c,
@@ -339,7 +438,7 @@ static inline void pack_q8dw_wrq(
     const size_t cr_block_size = min(c - cr_block_start, cr);
     for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
          cr_block_offset++) {
-      *(packed.as_int32_ptr++) = b[cr_block_start + cr_block_offset];
+      *(packed.as_int32_ptr++) = b ? b[cr_block_start + cr_block_offset] : 0.0f;
     }
     packed.as_int32_ptr += (cr - cr_block_size);
     for (size_t x = 0; x < w; x++) {
@@ -356,7 +455,7 @@ static inline void pack_q8dw_wrq(
   }
 }
 
-static inline void pack_q8dw_w_dilation(
+static inline void pytorch_pack_q8dw_w_dilation(
     size_t h,
     size_t w,
     size_t c,
@@ -368,13 +467,13 @@ static inline void pack_q8dw_w_dilation(
     const uint8_t* k,
     const int32_t* b,
     void* packed_w,
-    bool pack_b) {
+    bool pytorch_pack_b) {
   for (size_t cr_block_start = 0; cr_block_start < c; cr_block_start += cr) {
     const size_t cr_block_size = min(c - cr_block_start, cr);
-    if (pack_b) {
+    if (pytorch_pack_b) {
       for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
            cr_block_offset++) {
-        *((int32_t*)packed_w) = b[cr_block_start + cr_block_offset];
+        *((int32_t*)packed_w) = b ? b[cr_block_start + cr_block_offset] : 0.0f;
         packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
       }
       packed_w =
@@ -395,7 +494,7 @@ static inline void pack_q8dw_w_dilation(
   }
 }
 
-static inline void pack_swizzle_q8gemm_bdq(
+static inline void pytorch_pack_swizzle_q8gemm_bdq(
     size_t n,
     size_t kc,
     uint32_t nr,
@@ -412,7 +511,7 @@ static inline void pack_swizzle_q8gemm_bdq(
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *((int32_t*)packed_w) = b[nr_block_start + nr_block_offset] + boff;
+      *((int32_t*)packed_w) = b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =
@@ -461,7 +560,7 @@ static inline void pack_swizzle_q8gemm_bdq(
   }
 }
 
-static inline void pack_swizzle_q8gemm_brq(
+static inline void pytorch_pack_swizzle_q8gemm_brq(
     const size_t n,
     const size_t kc,
     const uint32_t nr,
@@ -480,7 +579,7 @@ static inline void pack_swizzle_q8gemm_brq(
     const size_t nr_block_size = min(n - nr_block_start, nr);
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *(packed.as_int32_ptr++) = b[nr_block_start + nr_block_offset];
+      *(packed.as_int32_ptr++) = b ? b[nr_block_start + nr_block_offset] : 0.0f;
     }
 
     packed.as_int32_ptr += (nr - nr_block_size);
@@ -521,7 +620,7 @@ static inline void pack_swizzle_q8gemm_brq(
   }
 }
 
-static inline void pack_hgemm_w(
+static inline void pytorch_pack_hgemm_w(
     size_t nc,
     size_t kc,
     size_t nr,
@@ -533,7 +632,7 @@ static inline void pack_hgemm_w(
     const size_t nr_block_size = min(nc - nr_block_start, nr);
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *packed_w++ = b[nr_block_start + nr_block_offset];
+      *packed_w++ = b ? b[nr_block_start + nr_block_offset] : 0.0f;
     }
     packed_w += nr - nr_block_size;
     for (size_t kr_block_start = 0; kr_block_start < kc; kr_block_start += kr) {
@@ -553,7 +652,7 @@ static inline void pack_hgemm_w(
   }
 }
 
-static inline void pack_sgemm_w(
+static inline void pytorch_pack_sgemm_w(
     size_t nc,
     size_t kc,
     size_t nr,
@@ -565,7 +664,7 @@ static inline void pack_sgemm_w(
     const size_t nr_block_size = min(nc - nr_block_start, nr);
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *packed_w++ = b[nr_block_start + nr_block_offset];
+      *packed_w++ = b ? b[nr_block_start + nr_block_offset] : 0.0f;
     }
     packed_w += nr - nr_block_size;
     for (size_t kr_block_start = 0; kr_block_start < kc; kr_block_start += kr) {
@@ -585,7 +684,7 @@ static inline void pack_sgemm_w(
   }
 }
 
-static inline void pack_sconv_w(
+static inline void pytorch_pack_sconv_w(
     size_t n,
     size_t ks,
     size_t kc,
@@ -598,7 +697,7 @@ static inline void pack_sconv_w(
     const size_t nr_block_size = min(n - nr_block_start, nr);
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *packed_w++ = b[nr_block_start + nr_block_offset];
+      *packed_w++ = b ? b[nr_block_start + nr_block_offset] : 0.0f;
     }
     packed_w += nr - nr_block_size;
     for (size_t ki = 0; ki < ks; ki++) {
@@ -623,18 +722,18 @@ static inline void pack_sconv_w(
 
 #if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
 
-#define pack_q8gemm_w pack_q8gemm_wrq
-#define pack_q8conv_w pack_q8conv_wrq
-#define pack_q8deconv_w pack_q8deconv_wrq
-#define pack_q8dw_w pack_q8dw_wrq
-#define pack_swizzle_q8gemm_b pack_swizzle_q8gemm_brq
+#define pytorch_pack_q8gemm_w pytorch_pack_q8gemm_wrq
+#define pytorch_pack_q8conv_w pytorch_pack_q8conv_wrq
+#define pytorch_pack_q8deconv_w pytorch_pack_q8deconv_wrq
+#define pytorch_pack_q8dw_w pytorch_pack_q8dw_wrq
+#define pytorch_pack_swizzle_q8gemm_b pytorch_pack_swizzle_q8gemm_brq
 
 #else
 
-#define pack_q8gemm_w pack_q8gemm_wdq
-#define pack_q8conv_w pack_q8conv_wdq
-#define pack_q8deconv_w pack_q8deconv_wdq
-#define pack_q8dw_w pack_q8dw_wdq
-#define pack_swizzle_q8gemm_b pack_swizzle_q8gemm_bdq
+#define pytorch_pack_q8gemm_w pytorch_pack_q8gemm_wdq
+#define pytorch_pack_q8conv_w pytorch_pack_q8conv_wdq
+#define pytorch_pack_q8deconv_w pytorch_pack_q8deconv_wdq
+#define pytorch_pack_q8dw_w pytorch_pack_q8dw_wdq
+#define pytorch_pack_swizzle_q8gemm_b pytorch_pack_swizzle_q8gemm_bdq
 
 #endif

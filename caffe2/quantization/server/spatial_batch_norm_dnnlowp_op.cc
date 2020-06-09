@@ -70,10 +70,7 @@ bool SpatialBNDNNLowPOp<T, ReluFused>::RunOnDevice() {
   const int N = X.dim32(0);
   const int C = (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
   const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-  const int HxW =
-      std::accumulate(
-          X_dims.cbegin() + 1, X_dims.cend(), 1, std::multiplies<int>()) /
-      C;
+  const int HxW = X.size_from_dim(1) / C;
   CAFFE_ENFORCE_EQ(scale.numel(), C);
   CAFFE_ENFORCE_EQ(bias.numel(), C);
 
@@ -89,13 +86,18 @@ bool SpatialBNDNNLowPOp<T, ReluFused>::RunOnDevice() {
       &beta_, {C}, at::dtype<float>().device(CPUContext::GetDeviceType()));
   float* alpha_data = alpha_.template mutable_data<float>();
   float* beta_data = beta_.template mutable_data<float>();
-  if (N == 0) {
-    return true;
-  }
   const auto& mean = Input(EST_MEAN);
   const auto& var = Input(EST_VAR);
   CAFFE_ENFORCE_EQ(mean.numel(), C);
   CAFFE_ENFORCE_EQ(var.numel(), C);
+
+  auto* Y = OutputTensorCPU_(OUTPUT);
+  Y->Resize(X.sizes());
+  T* Y_data = GetQuantizedOutputData_();
+  if (N == 0) {
+    return true;
+  }
+
   ComputeFusedParam_(
       C,
       scale_data,
@@ -108,9 +110,6 @@ bool SpatialBNDNNLowPOp<T, ReluFused>::RunOnDevice() {
   vector<T> X_temp;
   const T* X_data =
       dnnlowp::QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
-  auto* Y = OutputTensorCPU_(OUTPUT);
-  Y->Resize(X.sizes());
-  T* Y_data = GetQuantizedOutputData_();
 
   if (order_ == StorageOrder::NCHW) {
     for (int c = 0; c < C; ++c) {

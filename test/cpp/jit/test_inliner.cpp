@@ -1,8 +1,8 @@
 #include <test/cpp/jit/test_base.h>
 
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 const auto testSource = R"JIT(
@@ -21,7 +21,6 @@ def foo3(x):
 
 namespace torch {
 namespace jit {
-using namespace script;
 using namespace testing;
 
 struct InlinerGuard {
@@ -39,7 +38,6 @@ struct InlinerGuard {
 
 void testInliner() {
   {
-    // Test that the recursive inlining works
     // disable automatic inlining so we can test it manually
     InlinerGuard guard(/*shouldInline=*/false);
 
@@ -47,23 +45,8 @@ void testInliner() {
     auto& fn = cu.get_function("foo3");
 
     auto g = fn.graph();
-    Inline(*g, /*recurse=*/true);
+    Inline(*g);
     FileCheck().check_count("prim::Print", 3)->run(*g);
-  }
-  {
-    // disable automatic inlining so we can test it manually
-    InlinerGuard guard(/*shouldInline=*/false);
-
-    CompilationUnit cu(testSource);
-    auto& fn = cu.get_function("foo3");
-
-    auto g = fn.graph();
-    Inline(*g, /*recurse=*/false);
-    FileCheck()
-        .check("three")
-        ->check("two")
-        ->check_count("prim::CallFunction", 1)
-        ->run(*g);
   }
 }
 } // namespace jit

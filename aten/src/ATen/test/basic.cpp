@@ -2,11 +2,11 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/Reduction.h>
+#include <torch/cuda.h>
+#include <ATen/test/test_assert.h>
 
 // for TH compat test only...
 struct THFloatTensor;
-extern "C" THFloatTensor * THFloatTensor_newWithSize2d(size_t a, size_t b);
-extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 
 #include <iostream>
 #include <chrono>
@@ -73,7 +73,11 @@ void TestAdd(DeprecatedTypeProperties& type) {
   Tensor c = add(a, add(a, b));
   // TODO:0-dim Tensor d(3.f);
   Scalar d = 3.f;
-  ASSERT_TRUE(add(c, d).allclose(a + a + b + d));
+  if (type.backend() == Backend::CPU && type.scalarType() == kHalf) {
+      ASSERT_TRUE(add(c, d).allclose(a + a + b + d, 1e-2));
+  } else {
+      ASSERT_TRUE(add(c, d).allclose(a + a + b + d));
+  }
 }
 
 void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
@@ -125,10 +129,12 @@ void TestPermute(DeprecatedTypeProperties& type) {
 }
 
 void TestMm(DeprecatedTypeProperties& type) {
-  Tensor a = rand({3, 4}, type);
-  Tensor b = rand({4}, type);
-  Tensor c = mv(a, b);
-  ASSERT_TRUE(c.equal(addmv(zeros({3}, type), a, b, 0, 1)));
+  if (type.backend() != Backend::CPU || type.scalarType() != kHalf) {
+    Tensor a = rand({3, 4}, type);
+    Tensor b = rand({4}, type);
+    Tensor c = mv(a, b);
+    ASSERT_TRUE(c.equal(addmv(zeros({3}, type), a, b, 0, 1)));
+  }
 }
 
 void TestSqueeze(DeprecatedTypeProperties& type) {
@@ -203,13 +209,6 @@ void TestZeroDim(DeprecatedTypeProperties& type) {
   ASSERT_EQ_RESOLVED(f[2][0].item<double>(), 0);
 }
 
-void TestTensorFromTH() {
-  int a = 4;
-  THFloatTensor* t = THFloatTensor_newWithSize2d(a, a);
-  THFloatTensor_fill(t, a);
-  ASSERT_NO_THROW(at::unsafeTensorFromTH(t, false));
-}
-
 void TestToCFloat() {
   Tensor a = zeros({3, 4});
   Tensor b = ones({3, 7});
@@ -272,7 +271,7 @@ void TestIndexingMixedDevice(DeprecatedTypeProperties& type) {
 void TestDispatch() {
   Tensor tensor = randn({20, 20});
   Tensor other = randn({20, 20});
-  auto result = tensor.m(relu).m(mse_loss, other, Reduction::Mean);
+  auto result = tensor.m(relu).m(mse_loss, other, at::Reduction::Mean);
   ASSERT_TRUE(result.allclose(mse_loss(relu(tensor), other)));
 }
 
@@ -295,10 +294,12 @@ void TestView(DeprecatedTypeProperties& type) {
 }
 
 void TestIntArrayRefExpansion(DeprecatedTypeProperties& type) {
-  max_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
-  max_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
-  avg_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1);
-  avg_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1);
+  if (type.backend() != Backend::CPU || type.scalarType() != kHalf) {
+    max_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
+    max_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1, 1);
+    avg_pool2d(randn({3, 3, 3, 3}, type.options()), 2, 1, 1);
+    avg_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1);
+  }
 }
 
 void test(DeprecatedTypeProperties& type) {
@@ -320,7 +321,6 @@ void test(DeprecatedTypeProperties& type) {
   TestAddingAValueWithScalar(type);
   TestSelect(type);
   TestZeroDim(type);
-  TestTensorFromTH();
   TestToCFloat();
   TestToString();
   TestIndexingByScalar();
@@ -338,10 +338,98 @@ TEST(BasicTest, BasicTestCPU) {
   test(CPU(kFloat));
 }
 
+TEST(BasicTest, BasicTestHalfCPU) {
+  manual_seed(234);
+
+  test(CPU(kHalf));
+}
+
 TEST(BasicTest, BasicTestCUDA) {
   manual_seed(123);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));
+  }
+}
+
+TEST(BasicTest, FactoryMethodsTest) {
+  // Test default values
+  at::Tensor tensor0 = at::empty({4});
+  ASSERT_EQ(tensor0.dtype(), at::kFloat);
+  ASSERT_EQ(tensor0.layout(), at::kStrided);
+  ASSERT_EQ(tensor0.device(), at::kCPU);
+  ASSERT_FALSE(tensor0.requires_grad());
+  ASSERT_FALSE(tensor0.is_pinned());
+
+  // Test setting requires_grad to false.
+  tensor0 = at::empty({4}, at::TensorOptions().requires_grad(false));
+  ASSERT_EQ(tensor0.dtype(), at::kFloat);
+  ASSERT_EQ(tensor0.layout(), at::kStrided);
+  ASSERT_EQ(tensor0.device(), at::kCPU);
+  ASSERT_FALSE(tensor0.requires_grad());
+  ASSERT_FALSE(tensor0.is_pinned());
+
+  // Test setting requires_grad to true.
+  tensor0 = at::empty({4}, at::TensorOptions().requires_grad(true));
+  ASSERT_EQ(tensor0.dtype(), at::kFloat);
+  ASSERT_EQ(tensor0.layout(), at::kStrided);
+  ASSERT_EQ(tensor0.device(), at::kCPU);
+  // This is a bug. Requires_grad was set to TRUE but this is being ignored.
+  // Issue https://github.com/pytorch/pytorch/issues/30405
+  ASSERT_FALSE(tensor0.requires_grad());
+  ASSERT_FALSE(tensor0.is_pinned());
+
+  // Test setting dtype
+  at::Tensor tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf));
+  ASSERT_EQ(tensor1.dtype(), at::kHalf);
+  ASSERT_EQ(tensor1.layout(), at::kStrided);
+  ASSERT_EQ(tensor1.device(), at::kCPU);
+  ASSERT_FALSE(tensor1.requires_grad());
+  ASSERT_FALSE(tensor1.is_pinned());
+
+  if (torch::cuda::is_available()) {
+    // Test setting pin memory
+    tensor1 = at::empty({4}, at::TensorOptions().pinned_memory(true));
+    ASSERT_EQ(tensor1.dtype(), at::kFloat);
+    ASSERT_EQ(tensor1.layout(), at::kStrided);
+    ASSERT_EQ(tensor1.device(), at::kCPU);
+    ASSERT_EQ(tensor1.requires_grad(), false);
+    ASSERT_FALSE(tensor1.device().is_cuda());
+    ASSERT_TRUE(tensor1.is_pinned());
+
+    // Test setting device
+    tensor1 = at::empty({4}, at::TensorOptions().device(at::kCUDA));
+    ASSERT_EQ(tensor1.dtype(), at::kFloat);
+    ASSERT_EQ(tensor1.layout(), at::kStrided);
+    ASSERT_TRUE(tensor1.device().is_cuda());
+    ASSERT_FALSE(tensor1.requires_grad());
+    ASSERT_FALSE(tensor1.is_pinned());
+
+    // Test set everything
+    tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf).device(at::kCUDA).layout(at::kSparse).requires_grad(true));
+    ASSERT_EQ(tensor1.dtype(), at::kHalf);
+    ASSERT_EQ(tensor1.layout(), at::kSparse);
+    ASSERT_TRUE(tensor1.device().is_cuda());
+    ASSERT_THROWS(tensor1.nbytes());
+
+    // This is a bug
+    // Issue https://github.com/pytorch/pytorch/issues/30405
+    ASSERT_FALSE(tensor1.requires_grad());
+
+    // This will cause an exception
+    // Issue https://github.com/pytorch/pytorch/issues/30405
+    ASSERT_ANY_THROW(tensor1.is_pinned());
+  }
+
+  // Test _like variants
+  if (torch::cuda::is_available()) {
+    // Issue https://github.com/pytorch/pytorch/issues/28093
+    at::Tensor proto = at::empty({1}, at::kDouble);
+    tensor0 = at::empty_like(proto, at::kCUDA);
+    ASSERT_EQ(tensor0.dtype(), at::kDouble);
+    ASSERT_EQ(tensor0.layout(), at::kStrided);
+    ASSERT_TRUE(tensor0.device().is_cuda());
+    ASSERT_FALSE(tensor0.requires_grad());
+    ASSERT_FALSE(tensor0.is_pinned());
   }
 }

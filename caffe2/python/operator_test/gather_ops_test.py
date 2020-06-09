@@ -12,8 +12,8 @@ import hypothesis.strategies as st
 import hypothesis.extra.numpy as hnp
 
 # Basic implementation of gather for axis == 0, shich is lookup of indices
-# in the outer dimention. Keeping it for reference here, although is similar
-# to more general funciton below.
+# in the outer dimension. Keeping it for reference here, although is similar
+# to more general function below.
 def ref_gather_axis0():
     def inner(data, ind):
         if ind.size == 0 or data.shape[0] == 0:
@@ -177,7 +177,7 @@ def _inputs(draw):
         draw(hnp.arrays(
             np.float32,
             (batch_size, rows_num, block_size),
-            elements=st.floats(-10.0, 10.0),
+            elements=hu.floats(-10.0, 10.0),
         )),
         draw(hnp.arrays(
             np.int32,

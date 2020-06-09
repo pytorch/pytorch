@@ -16,6 +16,7 @@ struct TORCH_API ${op} : public ${superclass} {
   variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
   void release_variables() override {
+    ${thread_lock}
     ${release_variables}
   }
   ${will_release_variables}
@@ -33,6 +34,7 @@ void will_release_variables() override {
 
 FUNCTION_DEFINITION = CodeTemplate("""\
 variable_list ${op}::apply(variable_list&& grads) {
+  ${thread_lock}
   ${asserts}
   IndexRangeGenerator gen;
   ${compute_index_ranges}
@@ -172,6 +174,13 @@ def process_function(func):
     env['saved_list_sizes'] = saved_list_sizes
     env['asserts'] = asserts
 
+    # lock the mutex when we release variables and in Node::apply to protect thread safety
+    # see Note [Thread Safety on Autograd Node]
+    if len(release_variables) > 0:
+        env['thread_lock'] = "std::lock_guard<std::mutex> lock(mutex_);"
+    else:
+        env['thread_lock'] = ''
+
     if uses_retain_variables(func):
         env['will_release_variables'] = WILL_RELEASE_VARIABLES.substitute()
     else:
@@ -182,11 +191,22 @@ def process_function(func):
     if uses_single_grad(func):
         body.append('auto& grad = grads[0];')
 
-    def emit_derivative(derivative):
+    def emit_derivative(derivative, args_with_derivatives):
         formula = derivative['formula']
         var_names = derivative['var_names']
         if len(var_names) == 1:
-            return DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula)
+            checks_any_grad_defined = False
+            if 'not_implemented' not in formula:
+                matching_args = [
+                    arg for arg in args_with_derivatives
+                    if ('name' in arg) and (arg['name'] == var_names[0])]
+                if len(matching_args) == 1:
+                    # We can add undefined grad support if the input variable is a Tensor
+                    if ('simple_type' in matching_args[0].keys()) and (matching_args[0]['simple_type'] == 'Tensor'):
+                        formula = 'any_grad_defined ? (' + formula + ') : Tensor()'
+                        checks_any_grad_defined = True
+            return (checks_any_grad_defined,
+                    DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula))
         else:
             if 'grad_input_mask' in formula:
                 masks = ['should_compute_output({{ {}_ix }}),'.format(n) for n in var_names]
@@ -197,14 +217,22 @@ def process_function(func):
             copy_ranges = []
             for i, n in enumerate(var_names):
                 copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i))
-            return DERIVATIVE_MULTI.substitute(
+            return False, DERIVATIVE_MULTI.substitute(
                 idx_ranges=idx_ranges, copy_ranges=copy_ranges,
                 derivative=formula,
                 grad_input_mask=grad_input_mask)
 
     body.extend(unpack)
+    need_any_grad_defined_var = False
     for derivative in func['derivatives']:
-        body.append(emit_derivative(derivative))
+        checks_any_grad_defined, derivative_text = emit_derivative(derivative, func['args_with_derivatives'])
+        body.append(derivative_text)
+        need_any_grad_defined_var |= checks_any_grad_defined
+    # Since single-output derivative formulas need to check if grads are
+    # defined, only perform the check once, before all the formulas
+    if need_any_grad_defined_var:
+        body.insert(-len(func['derivatives']),
+                    'bool any_grad_defined = any_variable_defined(grads);')
 
     env['body'] = body
     if func['name'] in UNTRACEABLE_FUNCTIONS:

@@ -1,13 +1,12 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
 
-// Inline function and method calls. If `recurse` is true, inline all nested
-// calls as well, resulting in a completely flattened graph.
-TORCH_API void Inline(Graph& graph, bool recurse = false);
+// Inline function and method calls.
+TORCH_API void Inline(Graph& graph);
 
 } // namespace jit
 } // namespace torch

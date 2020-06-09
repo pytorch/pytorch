@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define DECLARE_SUPDWCONV_UKERNEL_FUNCTION(fn_name) \
+#define DECLARE_PYTORCH_SUPDWCONV_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL void fn_name(               \
       size_t channels,                              \
       size_t output_width,                          \
@@ -29,9 +29,9 @@ extern "C" {
       size_t output_increment,                      \
       const struct pytorch_qnnp_fp32_clamping_params* clamping_params);
 
-DECLARE_SUPDWCONV_UKERNEL_FUNCTION(sdwconv_ukernel_up4x9__psimd)
+DECLARE_PYTORCH_SUPDWCONV_UKERNEL_FUNCTION(pytorch_sdwconv_ukernel_up4x9__psimd)
 
-#define DECLARE_SMPDWCONV_UKERNEL_FUNCTION(fn_name) \
+#define DECLARE_PYTORCH_SMPDWCONV_UKERNEL_FUNCTION(fn_name) \
   PYTORCH_QNNP_INTERNAL void fn_name(               \
       size_t channels,                              \
       size_t output_width,                          \
