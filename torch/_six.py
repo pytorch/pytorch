@@ -20,7 +20,6 @@
 
 import sys
 import types
-import inspect
 
 PY37 = sys.version_info[0] == 3 and sys.version_info[1] == 7
 
@@ -72,6 +71,7 @@ else:
 
 import collections.abc
 container_abcs = collections.abc
+
 
 # Gets a function from the name of a method on a type
 def get_function_from_type(cls, name):
