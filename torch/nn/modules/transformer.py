@@ -211,7 +211,7 @@ class TransformerDecoder(Module):
 
     def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, tgt_key_padding_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None):
+                memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
         Args:

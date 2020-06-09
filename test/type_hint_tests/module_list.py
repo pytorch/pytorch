@@ -1,6 +1,9 @@
 import torch
 
 # ModuleList with elements of type Module
+class FooModule(torch.nn.Module):
+    pass
+
 class BarModule(torch.nn.Module):
     pass
 

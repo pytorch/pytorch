@@ -305,7 +305,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
         self.stride = _single(stride or kernel_size)
         self.padding = _single(padding)
 
-    def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None):
+    def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
         return F.max_unpool1d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 
@@ -382,7 +382,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
         self.stride = _pair(stride or kernel_size)
         self.padding = _pair(padding)
 
-    def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None):
+    def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
         return F.max_unpool2d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 
@@ -448,7 +448,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
         self.stride = _triple(stride or kernel_size)
         self.padding = _triple(padding)
 
-    def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None):
+    def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
         return F.max_unpool3d(input, indices, self.kernel_size, self.stride,
                               self.padding, output_size)
 

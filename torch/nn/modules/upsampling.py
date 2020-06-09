@@ -126,7 +126,7 @@ class Upsample(Module):
     align_corners: bool
 
     def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
-                 mode: str = 'nearest', align_corners: Optional[bool] = None):
+                 mode: str = 'nearest', align_corners: Optional[bool] = None) -> None:
         super(Upsample, self).__init__()
         self.name = type(self).__name__
         self.size = size

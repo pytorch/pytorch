@@ -44,7 +44,7 @@ class LocalResponseNorm(Module):
     beta: float
     k: float
 
-    def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.):
+    def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.) -> None:
         super(LocalResponseNorm, self).__init__()
         self.size = size
         self.alpha = alpha
@@ -65,7 +65,7 @@ class CrossMapLRN2d(Module):
     beta: float
     k: float
 
-    def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1):
+    def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1) -> None:
         super(CrossMapLRN2d, self).__init__()
         self.size = size
         self.alpha = alpha
@@ -143,7 +143,7 @@ class LayerNorm(Module):
     eps: float
     elementwise_affine: bool
 
-    def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True):
+    def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True) -> None:
         super(LayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
@@ -218,7 +218,7 @@ class GroupNorm(Module):
     eps: float
     affine: bool
 
-    def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True):
+    def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True) -> None:
         super(GroupNorm, self).__init__()
         self.num_groups = num_groups
         self.num_channels = num_channels

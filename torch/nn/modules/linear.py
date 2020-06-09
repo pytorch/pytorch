@@ -69,7 +69,7 @@ class Linear(Module):
     out_features: int
     weight: Tensor
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -101,7 +101,7 @@ class Linear(Module):
 class _LinearWithBias(Linear):
     bias: Tensor
 
-    def __init__(self, in_features: int, out_features: int):
+    def __init__(self, in_features: int, out_features: int) -> None:
         super().__init__(in_features, out_features, bias=True)
 
 
@@ -149,7 +149,7 @@ class Bilinear(Module):
     out_features: int
     weight: Tensor
 
-    def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True):
+    def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True) -> None:
         super(Bilinear, self).__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
@@ -168,7 +168,7 @@ class Bilinear(Module):
         if self.bias is not None:
             init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, input1: Tensor, input2: Tensor):
+    def forward(self, input1: Tensor, input2: Tensor) -> Tensor:
         return F.bilinear(input1, input2, self.weight, self.bias)
 
     def extra_repr(self) -> str:

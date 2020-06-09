@@ -864,7 +864,7 @@ class RNNCell(RNNCellBase):
     __constants__ = ['input_size', 'hidden_size', 'bias', 'nonlinearity']
     nonlinearity: str
 
-    def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh"):
+    def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh") -> None:
         super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1)
         self.nonlinearity = nonlinearity
 
@@ -953,7 +953,7 @@ class LSTMCell(RNNCellBase):
                 output.append(hx)
     """
 
-    def __init__(self, input_size: int, hidden_size: int, bias: bool = True):
+    def __init__(self, input_size: int, hidden_size: int, bias: bool = True) -> None:
         super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
@@ -1032,7 +1032,7 @@ class GRUCell(RNNCellBase):
                 output.append(hx)
     """
 
-    def __init__(self, input_size: int, hidden_size: int, bias: bool = True):
+    def __init__(self, input_size: int, hidden_size: int, bias: bool = True) -> None:
         super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:

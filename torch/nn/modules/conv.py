@@ -34,9 +34,18 @@ class _ConvNd(Module):
     weight: Tensor
     bias: Optional[Tensor]
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride,
-                 padding, dilation, transposed, output_padding,
-                 groups, bias, padding_mode):
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: _size_1_t,
+                 stride: _size_1_t,
+                 padding: _size_1_t,
+                 dilation: _size_1_t,
+                 transposed: bool,
+                 output_padding: _size_1_t,
+                 groups: int,
+                 bias: Optional[Tensor],
+                 padding_mode: str) -> None:
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')

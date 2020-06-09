@@ -12,7 +12,7 @@ class _InstanceNorm(_NormBase):
         momentum: float = 0.1,
         affine: bool = False,
         track_running_stats: bool = False
-    ):
+    ) -> None:
         super(_InstanceNorm, self).__init__(
             num_features, eps, momentum, affine, track_running_stats)
 
