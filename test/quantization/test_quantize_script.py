@@ -2573,14 +2573,12 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
 
         m2 = prepare_dynamic_script(model, qconfig_dict)
         m2 = convert_dynamic_script(m2, debug=True)
-        print(m2.graph)
         graph_params = []
-        for x, obs in model._modules._c.items():
+        for x, obs in m2._modules._c.items():
             if x == 'res1':
                 graph_params.append((obs.getattr('6_scale_0'), obs.getattr('6_zero_point_0')))
             elif x == 'res2':
                 graph_params.append((obs.getattr('10_scale_0'), obs.getattr('10_zero_point_0')))
-        print(graph_params)
         self.assertEqual(ref_qparams, graph_params)
 
     def test_dynamic_weight_observer(self):
@@ -2604,7 +2602,6 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
             ref_qparams.append((qparams[0].item(), qparams[1].item()))
         model = prepare_dynamic_script(model, qconfig_dict)
         model = convert_dynamic_script(model, debug=True)
-        print(model.graph)
         graph_params = []
         for x, obs in model._modules._c.items():
             graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
