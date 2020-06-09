@@ -542,6 +542,16 @@ class TestAsync(JitTestCase):
             def forward(self, x):
                 futs = torch.jit.annotate(List[torch.jit.Future], [])
 
+    def test_annotate(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x)
+
+        @torch.jit.script
+        def forward(self, x):
+            futs = torch.jit.annotate(List[torch.jit.Future[torch.Tensor]], [])
+            return [torch.jit._wait(fut) for fut in futs]
+
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

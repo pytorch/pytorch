@@ -48,8 +48,10 @@ TypePtr ScriptTypeParser::subscriptToType(
     }
     auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
     return OptionalType::create(elem_type);
-
-  } else if (typeName == "Future") {
+    // !!! HACK: matching explicitly on the fully-qualified `torch.jit.Future`
+    // here. We should really be using the resolver infrastructure to resolve
+    // the base type expression.
+  } else if (typeName == "Future" || typeName == "torch.jit.Future") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
           << " expected exactly one element type but found "
