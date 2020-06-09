@@ -9,9 +9,44 @@
 #include <cstddef>
 #include <vector>
 
-enum ncclDataType_t : unsigned short;
-enum ncclResult_t : unsigned short;
-enum ncclRedOp_t : unsigned short;
+/* Error type */
+typedef enum {
+  ncclSuccess = 0,
+  ncclUnhandledCudaError = 1,
+  ncclSystemError = 2,
+  ncclInternalError = 3,
+  ncclInvalidArgument = 4,
+  ncclInvalidUsage = 5,
+  ncclNumResults = 6
+} ncclResult_t;
+
+/* Reduction operation selector */
+typedef enum {
+  ncclSum = 0,
+  ncclProd = 1,
+  ncclMax = 2,
+  ncclMin = 3,
+  ncclNumOps = 4
+} ncclRedOp_t;
+
+/* Data types */
+typedef enum {
+  ncclInt8 = 0,
+  ncclChar = 0,
+  ncclUint8 = 1,
+  ncclInt32 = 2,
+  ncclInt = 2,
+  ncclUint32 = 3,
+  ncclInt64 = 4,
+  ncclUint64 = 5,
+  ncclFloat16 = 6,
+  ncclHalf = 6,
+  ncclFloat32 = 7,
+  ncclFloat = 7,
+  ncclFloat64 = 8,
+  ncclDouble = 8,
+  ncclNumTypes = 9
+} ncclDataType_t;
 typedef struct ncclComm* ncclComm_t;
 
 #define TORCH_CUDA_NCCL_UNIQUE_ID_BYTES 128
