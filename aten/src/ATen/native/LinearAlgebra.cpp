@@ -186,9 +186,8 @@ Tensor& addbmm_cpu_out(Tensor& result, const Tensor& self, const Tensor& batch1,
 }
 
 Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
-  return legacy::cpu::_th_addmm(b_self, mat1, mat2, beta, alpha);
+  Tensor result = at::empty({0}, self.options());
+  return addmm_cpu_out(result, self, mat1, mat2, beta, alpha);
 }
 
 Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
