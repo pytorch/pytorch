@@ -989,6 +989,10 @@ class TestFreezing(JitTestCase):
         # Both attribute "a" and method "modify_a" are preserved
         self.assertTrue(fm.hasattr("a"))
         self.assertFalse(fm.hasattr("b"))
+        input = torch.randn(2, 2)
+        expected = m.forward(input)
+        out = fm.forward(input)
+        self.assertEqual(out, expected)
 
     def test_freeze_module_with_user_preserved_method2(self):
         class Module(nn.Module):
