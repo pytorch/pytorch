@@ -1,5 +1,5 @@
 #include <torch/library.h>
-#include <ATen/BatchingArgTransforms.h>
+#include <ATen/VmapTransforms.h>
 #include <ATen/ATen.h>
 
 namespace at {
@@ -33,10 +33,10 @@ namespace at {
 // 4. Converts physical results back to BatchedTensors.
 //
 // Steps 1, 2, and 4 differ for operators with different batching behaviors. When
-// writing a new batching rule, please select an ArgTransform that matches the
-// batching behavior of your operation. The ArgTransform provides helper functions
+// writing a new batching rule, please select an VmapTransform that matches the
+// batching behavior of your operation. The VmapTransform provides helper functions
 // to do steps (1), (2), and (4).
-// (see NOTE: [What is an ArgTransform?] in BatchingArgTransforms.h)
+// (see NOTE: [What is an VmapTransform?] in VmapTransforms.h)
 
 // Note: [Future plans]
 // The API for writing a batching rule isn't stable. In the future, we'd like
@@ -46,7 +46,7 @@ namespace at {
 // do some refactoring.
 
 Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
-  auto self_physical = MultiBatchArgTransform::logicalToPhysical(self);
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dims_physical = self_physical.getPhysicalDims(dims);
   auto result = at::sum(self_physical.tensor(), dims_physical, keepdim, dtype);
   return self_physical.newLogicalFromPhysical(result);

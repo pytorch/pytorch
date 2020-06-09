@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/BatchedTensorImpl.h>
-#include <ATen/BatchingArgTransforms.h>
+#include <ATen/VmapTransforms.h>
 
 using namespace at;
 
@@ -171,11 +171,11 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
         kVmapMaxTensorDims - 1);
   }
 }
-TEST(VmapTest, TestMultiBatchArgTransform) {
+TEST(VmapTest, TestMultiBatchVmapTransform) {
   {
     // Input is regular Tensor
     auto tensor = ones({2, 3, 5});
-    ASSERT_THROW(MultiBatchArgTransform::logicalToPhysical(tensor), c10::Error);
+    ASSERT_THROW(MultiBatchVmapTransform::logicalToPhysical(tensor), c10::Error);
   }
   {
     // Input is BatchedTensor, Batch dims are already at the front
@@ -183,7 +183,7 @@ TEST(VmapTest, TestMultiBatchArgTransform) {
     BatchDims bdims = {{/*lvl*/1, /*dim*/0}, {/*lvl*/3, /*dim*/1}};
     auto batched = makeBatched(tensor, bdims);
 
-    auto result = MultiBatchArgTransform::logicalToPhysical(batched);
+    auto result = MultiBatchVmapTransform::logicalToPhysical(batched);
     ASSERT_TRUE(result.tensor().is_same(tensor));
   }
   {
@@ -192,7 +192,7 @@ TEST(VmapTest, TestMultiBatchArgTransform) {
     BatchDims bdims = {{/*lvl*/1, /*dim*/1}};
     auto batched = makeBatched(tensor, bdims);
 
-    auto result = MultiBatchArgTransform::logicalToPhysical(batched);
+    auto result = MultiBatchVmapTransform::logicalToPhysical(batched);
     ASSERT_EQ(result.tensor().data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(result.tensor(), tensor.permute({1, 0, 2})));
   }
@@ -202,7 +202,7 @@ TEST(VmapTest, TestMultiBatchArgTransform) {
     BatchDims bdims = {{/*lvl*/1, /*dim*/1}, {/*lvl*/2,/*dim*/2}, {/*lvl*/3,/*dim*/0}};
     auto batched = makeBatched(tensor, bdims);
 
-    auto result = MultiBatchArgTransform::logicalToPhysical(batched);
+    auto result = MultiBatchVmapTransform::logicalToPhysical(batched);
     ASSERT_EQ(result.tensor().data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(result.tensor(), tensor.permute({1, 2, 0})));
   }
@@ -220,7 +220,7 @@ TEST(VmapTest, TestMultiBatchArgTransform) {
     auto tensor = ones(sizes);
 
     auto batched = makeBatched(tensor, batch_dims);
-    auto result = MultiBatchArgTransform::logicalToPhysical(batched);
+    auto result = MultiBatchVmapTransform::logicalToPhysical(batched);
     ASSERT_TRUE(result.tensor().is_same(tensor));
   }
   {
@@ -252,7 +252,7 @@ TEST(VmapTest, TestMultiBatchArgTransform) {
     auto tensor = ones(sizes);
 
     auto batched = makeBatched(tensor, batch_dims);
-    auto result = MultiBatchArgTransform::logicalToPhysical(batched);
+    auto result = MultiBatchVmapTransform::logicalToPhysical(batched);
     ASSERT_EQ(result.tensor().data_ptr(), tensor.data_ptr());
     ASSERT_EQ(result.tensor().sizes(), expected_result_sizes);
   }

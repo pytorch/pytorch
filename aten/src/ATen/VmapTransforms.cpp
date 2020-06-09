@@ -1,4 +1,4 @@
-#include <ATen/BatchingArgTransforms.h>
+#include <ATen/VmapTransforms.h>
 #include <ATen/ATen.h>
 
 namespace at {
@@ -47,7 +47,7 @@ static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
   return physical_tensor.permute(permutation);
 }
 
-PhysicalView MultiBatchArgTransform::logicalToPhysical(const Tensor& logical_tensor) {
+PhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logical_tensor) {
   auto* batched = maybeGetBatched(logical_tensor);
   TORCH_INTERNAL_ASSERT(
       batched,
@@ -56,7 +56,7 @@ PhysicalView MultiBatchArgTransform::logicalToPhysical(const Tensor& logical_ten
 }
 
 std::vector<PhysicalView>
-MultiBatchArgTransform::logicalToPhysical(TensorList logical_tensors) {
+MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   TORCH_INTERNAL_ASSERT(false, "NYI");
 }
 

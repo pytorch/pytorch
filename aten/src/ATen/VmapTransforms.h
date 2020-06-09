@@ -28,20 +28,20 @@ namespace at {
 // Forward declared; see NOTE: [What is a PhysicalView?]
 struct PhysicalView;
 
-// NOTE: [What is an ArgTransform?]
-// An *ArgTransform* converts logical views of tensors to physical views.
+// NOTE: [What is an VmapTransform?]
+// An *VmapTransform* converts logical views of tensors to physical views.
 //
-// Batching rules use ArgTransforms to convert logical arguments to
+// Batching rules use VmapTransforms to convert logical arguments to
 // physical arguments, then call one or more at:: operator that handles the
 // physical arguments, and then converts the physical result back to a logical
 // argument.
 
-// ArgTransform for operators that take tensors with multiple batch dims.
+// VmapTransform for operators that take tensors with multiple batch dims.
 // Given one or more logical views on Tensors, `logicalToPhysical` 
 // permutes all of the batch dims to the front of the tensor, aligns
 // and expands the batch dims to match each other (according to their `level`),
 // and returns a PhysicalView on the tensor(s).
-struct TORCH_API MultiBatchArgTransform {
+struct TORCH_API MultiBatchVmapTransform {
   static PhysicalView logicalToPhysical(const Tensor& logical_tensor);
   static std::vector<PhysicalView> logicalToPhysical(TensorList logical_tensors);
 };
@@ -51,7 +51,7 @@ struct TORCH_API MultiBatchArgTransform {
 //
 // One can use it to further convert logical dimension indices, logical shapes,
 // and more to their physical variants, or convert a new (physical) tensor into
-// a logical BatchedTensor. (TODO(rzou): these are not yet implemented).
+// a logical BatchedTensor. (TODO(rzou): some of these are not yet implemented).
 //
 // PhysicalView stores a physical tensor with all of its batch dimensions at
 // the front and some levels that correspond to said batch dimensions.
@@ -83,6 +83,8 @@ struct TORCH_API PhysicalView {
 
   // Maps a physical tensor to a new logical tensor (BatchedTensor),
   // using the mapping info stored in this PhysicalView.
+  // Assumes that all of the "batch dimensions" are at the front
+  // of the physical tensor.
   Tensor newLogicalFromPhysical(const Tensor& physical);
 
  private:
