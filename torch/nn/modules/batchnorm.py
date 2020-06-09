@@ -116,16 +116,17 @@ class _BatchNorm(_NormBase):
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
 
-        # Decide whether the mini-batch stats should be used for normalization rather than the buffers
+        """ Decide whether the mini-batch stats should be used for normalization rather than the buffers.
+        Mini-batch stats are used in training mode, and in eval mode when buffers are None.
+        """
         if self.training:
             bn_training = True
         else:
-            # Mini-batch stats are used in eval mode when buffers are None
             bn_training = (self.running_mean is None) and (self.running_var is None)
 
         """Buffers are only updated if they are to be tracked and we are in training mode. Thus they only need to be
         passed when the update should occur (i.e. in training mode when they are tracked), or when buffer stats are
-        used for normalization (i.e. in eval mode when buffers are not None)
+        used for normalization (i.e. in eval mode when buffers are not None).
         """
         return F.batch_norm(
             input,
