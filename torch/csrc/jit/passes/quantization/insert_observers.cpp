@@ -1208,7 +1208,7 @@ Module InsertObservers(
   InsertObserversHelper helper(module_qconfig_map);
   helper.setDynamicFlag(is_dynamic);
   helper.preprocess(module, method_name);
-  helper.insertObservers(module, method_name, true /* is_entry_point */);
+  helper.insertObservers(module, method_name, /* is_entry_point */ true);
   return module;
 }
 } // namespace jit

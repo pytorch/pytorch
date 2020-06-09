@@ -19,8 +19,8 @@ namespace jit {
  *    x = self.conv2(x)
  *    x = self.relu(x)
  *
- *  self.relu needs to be deduplicated for conv-bn folding to work
- *  properly.
+ *  self.relu needs to be deduplicated for potential future destructive passes
+ *  to work properly.
  */
 TORCH_API void DedupModuleUses(Module& module);
 
