@@ -116,20 +116,20 @@ class _BatchNorm(_NormBase):
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
 
-        # Handle the different cases for the `training` value to forward to F.batch_norm
-        if self.track_running_stats:
-            """If BN stats are tracked, we want to update them only in training mode
-            when the buffers are not None.
-            If they are passed as None, they will not be updated by F.batch_norm"""
-            bn_training = self.training
+        # Decide whether the mini-batch stats should be used for normalization rather than the buffers
+        if self.training:
+            bn_training = True
         else:
-            """If BN stats are not being tracked, when the buffers are not None,
-            we ensure that they will not be updated
-            """
-            bn_training = self.running_mean is None and self.running_var is None
+            # Mini-batch stats are used in eval mode when buffers are None
+            bn_training = (self.running_mean is None) and (self.running_var is None)
 
+        """Buffers are only updated if they are to be tracked and we are in training mode. Thus they only need to be
+        passed when the update should occur (i.e. in training mode when they are tracked), or when buffer stats are
+        used for normalization (i.e. in eval mode when buffers are not None)
+        """
         return F.batch_norm(
             input,
+            # If buffers are not to be tracked, ensure that they won't be updated
             self.running_mean if not self.training or self.track_running_stats else None,
             self.running_var if not self.training or self.track_running_stats else None,
             self.weight, self.bias, bn_training, exponential_average_factor, self.eps)
