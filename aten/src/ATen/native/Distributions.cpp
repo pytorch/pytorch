@@ -457,19 +457,6 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   } else {
     result.resize_({n_sample});
   }
-
-  // Fast-path based on RobertoLat example.
-  // Reference:
-  // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
-  // Half is not supported on CPU.
-  if (!with_replacement &&
-      !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half)) {
-    auto rand = at::empty_like(self).uniform_(0, 1, gen);
-    rand.log_().div_(self); //save memory with inplace operations
-    Tensor vals = at::empty_like(self);
-    at::topk_out(vals, result, rand, n_sample);
-    return result;
-  }
   multinomial_stub(result.device().type(), result, self, n_sample, with_replacement, gen);
   return result;
 }
