@@ -338,7 +338,6 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
     }
     // TODO: fast exp
     // TODO: fast erf
-    // TODO: fast sigmoid
     return GenericIntrinsicsExpander::mutate(v);
   }
 
