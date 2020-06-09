@@ -4,6 +4,7 @@ import warnings
 import torch
 import torch.backends.cudnn as cudnn
 
+from torch._six import PY37
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, _list_with_default
 
 from collections import OrderedDict
@@ -121,7 +122,8 @@ def _get_builtin_table():
 
     _builtin_ops.append((math.gcd, "aten::gcd"))
     _builtin_ops.append((math.isfinite, "aten::isfinite"))
-    _builtin_ops.append((math.remainder, "aten::mathremainder"))
+    if PY37:
+        _builtin_ops.append((math.remainder, "aten::mathremainder"))
 
     import torch.distributed.autograd as dist_autograd
     if dist_autograd.is_available():
