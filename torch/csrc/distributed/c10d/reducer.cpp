@@ -733,7 +733,6 @@ void Reducer::finalize_bucket_sparse(Bucket& bucket) {
 }
 
 void Reducer::finalize_backward() {
-  auto rpc_context_clear_guard = rpc_context_.getClearGuard();
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
@@ -789,24 +788,13 @@ void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
     // Not under distributed autograd
     return;
   }
-  if (context_ptr.exchange(new_context_ptr.get()) == nullptr) {
+  const auto new_context_raw_ptr = new_context_ptr.get();
+  if (context_ptr.exchange(new_context_raw_ptr) != new_context_raw_ptr) {
     // Set the shared ptr to the context only if it's set first time.
     // All call sites should use the same context ptr.
     // Use an atomic to avoid data race from multiple threads.
     context_ptr_holder = std::move(new_context_ptr);
   }
-}
-
-void Reducer::RpcContext::clear() {
-  if (context_ptr.exchange(nullptr) != nullptr) {
-    context_ptr_holder.reset();
-  }
-}
-
-Reducer::RpcContext::ClearGuard::ClearGuard(RpcContext& context)
-    : context_(context) {}
-Reducer::RpcContext::ClearGuard::~ClearGuard() {
-  context_.clear();
 }
 
 void Reducer::sync_bucket_indices(
