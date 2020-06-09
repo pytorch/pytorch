@@ -13,7 +13,11 @@ enum ncclDataType_t : unsigned int;
 enum ncclResult_t : unsigned int;
 enum ncclRedOp_t : unsigned int;
 typedef struct ncclComm* ncclComm_t;
-struct ncclUniqueId;
+
+#define TORCH_CUDA_NCCL_UNIQUE_ID_BYTES 128
+typedef struct {
+  char internal[TORCH_CUDA_NCCL_UNIQUE_ID_BYTES];
+} ncclUniqueId;
 
 
 
