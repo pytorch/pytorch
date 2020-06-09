@@ -7087,6 +7087,8 @@ class TestTorchDeviceType(TestCase):
         L = torch.cholesky(A, upper=upper)
         return b, A, L
 
+    # Assert for illegal type would not be raised on XLA
+    @onlyOnCPUAndCUDA
     def test_minmax_illegal_dtype(self, device):
         x = torch.randn(5, 5, dtype=torch.float32, device=device)
         valid_values = torch.empty(5, dtype=torch.float32, device=device)
