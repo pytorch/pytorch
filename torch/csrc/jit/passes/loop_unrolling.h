@@ -9,7 +9,7 @@ TORCH_API void UnrollLoops(std::shared_ptr<Graph>& graph);
 
 TORCH_API Node* PeelLoop(Node* n, size_t times);
 
-TORCH_API void PeelProfilingLoops(std::shared_ptr<Graph> graph);
+TORCH_API void PeelProfilingLoops(const std::shared_ptr<Graph>& graph);
 
 struct TORCH_API LoopsPeeler {
   LoopsPeeler(std::function<bool(Node* n)> callback, size_t num_iterations = 1)
