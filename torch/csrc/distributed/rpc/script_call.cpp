@@ -12,12 +12,15 @@ const std::string ScriptCall::ATEN_PREFIX_("aten::");
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op,
     std::vector<at::IValue>&& stack)
-    : op_(std::move(op)), stack_(stack) {}
+    : op_(std::move(op)), stack_(stack), isAsyncExecution_(false) {}
 
 ScriptCall::ScriptCall(
     const c10::QualifiedName& qualifiedName,
-    std::vector<at::IValue>&& stack)
-    : qualifiedName_(qualifiedName), stack_(stack) {}
+    std::vector<at::IValue>&& stack,
+    const bool isAsyncExecution)
+    : qualifiedName_(qualifiedName),
+      stack_(stack),
+      isAsyncExecution_(isAsyncExecution) {}
 
 bool ScriptCall::hasOp() const {
   return op_ ? true : false;
@@ -66,6 +69,7 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
     opName.replace(0, ATEN_PREFIX_.length(), BUILTIN_OP_NAMESPACE_);
     ivalues.emplace_back(std::move(opName));
   } else if (hasQualifiedName()) {
+    ivalues.emplace_back(isAsyncExecution());
     TORCH_CHECK(
         !hasOp(),
         "It is TorchScript function call, operator should not be set.");
@@ -95,8 +99,12 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
     return std::make_unique<ScriptCall>(op, std::move(ivalues));
   } else {
     ivalues.pop_back();
+    bool isAsyncExecution = ivalues.back().toBool();
+    ivalues.pop_back();
     return std::make_unique<ScriptCall>(
-        c10::QualifiedName(qualifiedName), std::move(ivalues));
+        c10::QualifiedName(qualifiedName),
+        std::move(ivalues),
+        isAsyncExecution);
   }
 }
 
