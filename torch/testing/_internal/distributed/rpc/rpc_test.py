@@ -1104,8 +1104,8 @@ class RpcTest(RpcAgentTestFixture):
         } - {rpc_mul_event}
 
         for remote_event in remote_events:
-            print(remote_event.name, remote_event.node_id)
-            # self.assertEqual(dst, remote_event.node_id)
+            self.assertEqual(remote_event.node_id, dst)
+
         self.check_profiling_info(
             worker_name(self.rank),
             worker_name(dst),
@@ -1116,8 +1116,7 @@ class RpcTest(RpcAgentTestFixture):
         # Validate that the invocations of the RPC events themselves have
         # the current rank as the node id.
         for evt in [rpc_mul_event]:
-            print("Event has node id {}".format(evt.node_id))
-            print(evt.name)
+            self.assertEqual(evt.node_id, self.rank)
 
     @dist_init
     def test_profiler_with_autograd_context(self):
