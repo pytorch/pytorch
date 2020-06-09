@@ -13,6 +13,7 @@ from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
 from torch.quantization import get_default_qconfig
+from torch.quantization import default_qat_qconfig
 
 # torch.quantization.quantize_script
 from torch.quantization.quantize_script import script_qconfig
@@ -2569,3 +2570,9 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(m1.graph)
+
+class TestQATScript(QuantizationTestCase):
+
+    def fake_quant_scriptable(self):
+        qconfig = script_qconfig(default_qat_qconfig)
+        print(qconfig)
