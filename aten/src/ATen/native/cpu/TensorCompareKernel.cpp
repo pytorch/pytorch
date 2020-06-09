@@ -16,7 +16,7 @@
 namespace at { namespace native { namespace {
 
 template <typename scalar_t, typename func_t>
-static inline void compare_base_kernel(Tensor& result, Tensor& indice,
+static inline void compare_base_kernel(Tensor& result, Tensor& indices,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
@@ -27,19 +27,16 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
 
   // result and indice may be a empty tensor, if not,
   // reshape them as self dims
-  if (0 == result.numel()) {
-    result.resize_(self_sizes);
-  } else {
-    //error out if result cannot be viewed as desired size
-    auto result_view = result.view(self_sizes);
-    result.set_(result_view);
+  if (!keepdim) {
+    if (result.ndimension() >= dim) {
+      result.unsqueeze_(dim);
+    }
+    if (indices.ndimension() >= dim) {
+      indices.unsqueeze_(dim);
+    }
   }
-  if (0 == indice.numel()) {
-    indice.resize_(self_sizes);
-  } else {
-    auto indices_view = indice.view(self_sizes);
-    indice.set_(indices_view);
-  }
+  result.resize_(self_sizes);
+  indices.resize_(self_sizes);
 
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
@@ -48,7 +45,7 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
   iter.dont_resize_outputs();
   iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
   iter.add_output(result);
-  iter.add_output(indice);
+  iter.add_output(indices);
   iter.add_input(self);
   iter.build();
 
@@ -70,7 +67,7 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
 
   if (!keepdim) {
     result.squeeze_(dim);
-    indice.squeeze_(dim);
+    indices.squeeze_(dim);
   }
 }
 
