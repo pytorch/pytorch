@@ -337,6 +337,33 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
   return self;
 }
 
+// ==================================================== Bernoulli =====================================================
+
+template<template<typename> class bernoulli_tensor_kernel, typename RNG>
+Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  NoNamesGuard guard;
+  bernoulli_tensor_kernel<RNG>()(self, p_, gen);
+  return self;
+}
+
+template<template<typename> class bernoulli_scalar_kernel, typename RNG>
+Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
+  TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
+  bernoulli_scalar_kernel<RNG>()(self, p, gen);
+  return self;
+}
+
+template<template<typename> class bernoulli_tensor_kernel, typename RNG>
+Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
+  // result.resize_as_(self) requires self to have same dtype as result, so we
+  // use resize_ instead.
+  // TODO: Fix resize_as_. See pytorch/pytorch#11665.
+  result.resize_(self.sizes());
+  bernoulli_impl_<bernoulli_tensor_kernel, RNG>(result, self, gen);
+  namedinference::propagate_names(result, self);
+  return result;
+}
+
 #undef CHECK_OUT_OF_BOUNDS
 #undef WARN_OUT_OF_BOUNDS
 

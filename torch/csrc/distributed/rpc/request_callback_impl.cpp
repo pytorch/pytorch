@@ -482,7 +482,7 @@ void RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       // Making this lambda mutable to allow move-capture it in callbacks
       auto postProcessing = [responseFuture](
-                                c10::intrusive_ptr<OwnerRRef> rref,
+                                const c10::intrusive_ptr<OwnerRRef>& rref,
                                 int64_t messageId) mutable {
         auto whenValueSet = rref->getFuture();
         if (whenValueSet->hasError()) {
