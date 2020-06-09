@@ -28,9 +28,7 @@ struct is_specialization_of<T, T<Us...>>: std::true_type {};
 //
 template<class T, bool = is_specialization_of<std::tuple, T>::value>
 struct is_tuple_of_lvalue_refs :
-  guts::typelist::all<
-    std::is_lvalue_reference, guts::typelist::from_tuple_t<T>
-  >
+  guts::typelist::all<std::is_lvalue_reference, guts::typelist::from_tuple_t<T>>
 {};
 
 template<class T>
@@ -66,10 +64,7 @@ using can_box =
   >;
 
 template <typename... Ts>
-using can_box_all =
-  guts::conjunction<
-    can_box<std::decay_t<Ts>>...
-  >;
+using can_box_all = guts::conjunction<can_box<std::decay_t<Ts>>...>;
 
 // an unboxable result is one that can be extracted from an IValue
 template <typename T>
@@ -81,7 +76,6 @@ using can_unbox =
       // void returns are ok
       std::is_same<void, T>
     >,
-    guts::negation<std::is_same<IntArrayRef, T>>,
     guts::negation<std::is_lvalue_reference<T>>
   >;
 
@@ -110,9 +104,10 @@ struct BoxedKernelWrapper {};
 
 // 1. Unsupported type traps.
 //
-// The remaining unsupported types found in signatures will trigger one of
-// these specializations, which raise a runtime error if called. As support
-// for these types is added, the specializations can be removed.
+// These specializations capture the remaining gaps in boxing support.
+// Rather than triggering compile errors, we generate boxed kernels that
+// raise runtime errors. As support for these types is added, the
+// specializations can be removed.
 //
 
 // at::Dimname
