@@ -684,39 +684,16 @@ def _qualified_name(obj):
     if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name
 
-    name = obj.__name__
-    if name == '<lambda>':
-        name = '_lambda'  # make name a valid identifier
-
     module_name = obj.__module__
 
     # If the module is actually a torchbind module, then we should short circuit
     if module_name == "torch._classes":
         return obj.qualified_name
 
-    # The Python docs are very clear that `__module__` can be None, but I can't
-    # figure out when it actually would be.
-    if module_name is None:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "__module__ can't be None.".format(name))
+    qual_name = obj.__qualname__
+    qual_name = qual_name.replace("<", "").replace(">", "")
 
-    # if getattr(sys.modules[module_name], name) is not obj:
-    #     raise RuntimeError("Could not get qualified name for class '{}': "
-    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
-
-    # __main__ is a builtin module, so rewrite it to "__torch__".
-    if module_name == "__main__":
-        module_name = "__torch__"
-    else:
-        # Everything else gets a "__torch__" prefix to avoid name collisions
-        # with the names of user values.
-        module_name = "__torch__." + module_name
-
-    if "." in name:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "'{}' is not a valid identifier".format(name, name))
-
-    return module_name + "." + name
+    return qual_name
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
