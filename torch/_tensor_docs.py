@@ -3182,7 +3182,7 @@ In-place version of :meth:`~Tensor.tanh`
 
 add_docstr_all('tolist',
                r""""
-tolist() -> list or number
+tolist() -> Tensor
 
 Returns the tensor as a (nested) list. For scalars, a standard
 Python number is returned, just like with :meth:`~Tensor.item`.
