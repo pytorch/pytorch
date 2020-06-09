@@ -10,7 +10,7 @@
 #include <vector>
 
 typedef enum ncclDataType_t ncclDataType_t;
-enum ncclResult_t : unsigned int;
+typedef enum ncclResult_t;
 typedef enum ncclRedOp_t ncclRedOp_t;
 typedef struct ncclComm* ncclComm_t;
 typedef struct ncclUniqueId ncclUniqueId;
