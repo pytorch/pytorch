@@ -36,7 +36,10 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
   std::string conv1d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv1d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %zero: int = prim::Constant[value=0]()
+        %output_padding : int[] = prim::ListConstruct(%zero)
+        %transpose: bool = prim::Constant[value=0]()
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv1d_prepack(%w_quant, %b, %stride, %padding, %output_padding, %dilation, %groups, %transpose)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv1d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv1d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
@@ -50,7 +53,10 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
   std::string conv2d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %zero: int = prim::Constant[value=0]()
+        %output_padding : int[] = prim::ListConstruct(%zero, %zero)
+        %transpose: bool = prim::Constant[value=0]()
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %output_padding, %dilation, %groups, %transpose)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
@@ -64,7 +70,10 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
   std::string conv3d_with_quant_prepack = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
-        %packed_params : __torch__.torch.classes.quantized.Conv3dPackedParamsBase = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %zero: int = prim::Constant[value=0]()
+        %output_padding : int[] = prim::ListConstruct(%zero, %zero, %zero)
+        %transpose: bool = prim::Constant[value=0]()
+        %packed_params : __torch__.torch.classes.quantized.Conv3dPackedParamsBase = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %output_padding, %dilation, %groups, %transpose)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv3d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv3d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)

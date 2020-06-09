@@ -150,7 +150,7 @@ def conv1d(input, weight, bias,
     dilation = _pair_from_first(dilation)
 
     packed_params = torch.ops.quantized.conv1d_prepack(
-        weight, bias, stride, padding, dilation, groups)
+        weight, bias, stride, padding, (0,), dilation, groups, transpose=False)
     return torch.ops.quantized.conv1d(input, packed_params, scale, zero_point)
 
 def conv2d(input, weight, bias,
@@ -209,7 +209,8 @@ def conv2d(input, weight, bias,
     dilation = _pair(dilation)
 
     packed_params = torch.ops.quantized.conv2d_prepack(
-        weight, bias, stride, padding, dilation, groups)
+        weight, bias, stride, padding, (0, 0), dilation, groups,
+        transpose=False)
     return torch.ops.quantized.conv2d(input, packed_params, scale, zero_point)
 
 def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
@@ -269,7 +270,8 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
     dilation = _triple(dilation)
 
     packed_params = torch.ops.quantized.conv3d_prepack(
-        weight, bias, stride, padding, dilation, groups)
+        weight, bias, stride, padding, (0, 0, 0), dilation, groups,
+        transpose=False)
     return torch.ops.quantized.conv3d(input, packed_params, scale, zero_point)
 
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
