@@ -16,9 +16,50 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#include <fmt/format.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+const std::string kRPCErrorPrefix = std::string("RPCErr");
+
+RPCErrorType getRPCErrorType(const FutureMessage& fm) {
+  TORCH_INTERNAL_ASSERT(
+      fm.hasError(),
+      "FutureMessage passed to getRPCErrorType does not have an error.");
+
+  // Attempt to parse for error string given by makeRPCError, otherwise return
+  // unknown error.
+  // Note that this function expects errors formatted with makeRPCError().
+  auto err = std::string(fm.error()->what());
+  size_t pos = err.find(kRPCErrorPrefix);
+  if (pos != std::string::npos) {
+    // Parse the RPCErrorType.
+    auto errStartIdx =
+        pos + torch::distributed::rpc::kRPCErrorPrefix.size() + 1;
+    auto errEndIdx = err.find(':', errStartIdx);
+    if (errEndIdx == std::string::npos) {
+      // Indicates error was not formatted correctly.
+      return RPCErrorType::UNKNOWN_ERROR;
+    }
+    auto errStr = err.substr(errStartIdx, errEndIdx - errStartIdx);
+    auto errType = static_cast<RPCErrorType>(std::stoi(errStr));
+    return errType;
+  } else {
+    return RPCErrorType::UNKNOWN_ERROR;
+  }
+}
+
+std::string makeRPCError(
+    const std::string& rpcErrorStr,
+    RPCErrorType errorType) {
+  return fmt::format(
+      "{}:{}:{}",
+      torch::distributed::rpc::kRPCErrorPrefix,
+      errorType,
+      rpcErrorStr);
+}
 
 std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
   switch (request.type()) {
@@ -257,7 +298,7 @@ std::string wireSerialize(
   };
   std::vector<Ent> entries;
   std::string metaEntry;
-  std::vector<jit::WriteableTensorData> tensorData;
+  std::vector<at::Tensor> tensorData;
 
   if (!payload.empty()) {
     entries.push_back({kPayload, payload.data(), payload.size()});
@@ -271,13 +312,20 @@ std::string wireSerialize(
     pickler.protocol();
     pickler.pushIValue(cloneSparseTensors(tensors));
     pickler.stop();
-    // tensorData is in function scope so that the data() pointers stay valid.
     tensorData = pickler.tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
     for (size_t i = 0; i < tensorData.size(); i++) {
+      // Construct WritableTensorData for each tensor in the pickler tensorData
+      // Since tensorData is in function scope, and getWritableTensorData just
+      // record the tensors, the data() pointers stay valid for CPU tensors
+      // Note that RPC serde doesn't support CUDA tensors yet, if we should
+      // support CUDA tensor, we need to be careful since getWritableTensorData
+      // converts CUDA tensor to cpu and data() might get destructed as we go
+      // out of scope of this loop.
+      auto writeableTensorData = jit::getWriteableTensorData(tensorData[i]);
       entries.push_back({c10::to_string(i),
-                         tensorData[i].data(),
-                         tensorData[i].sizeInBytes()});
+                         writeableTensorData.data(),
+                         writeableTensorData.sizeInBytes()});
     }
   }
 
@@ -407,7 +455,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   pickler.stop();
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
-  for (const auto& tensorData : pickler.tensorData()) {
+  for (const auto& tensor : pickler.tensorData()) {
+    const auto& tensorData = jit::getWriteableTensorData(tensor);
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
     if (!tensorData.storageHasDeleter()) {
