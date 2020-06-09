@@ -10,7 +10,6 @@
 #include <c10/util/Optional.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/cpu/zmath.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at { namespace native { namespace {
@@ -21,7 +20,6 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indices,
     int64_t dim,
     bool keepdim,
     const func_t& f) {
-  const int64_t input_ndim = self.dim();
   auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
   self_sizes[dim] = 1;
 
