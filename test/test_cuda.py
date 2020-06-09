@@ -1705,7 +1705,7 @@ class TestCuda(TestCase):
         with ctx.Pool(1, initializer=self.mute) as pool:
             errors = pool.map(method, [arg])
             for e in errors:
-                if 'device-side assert triggered' not in str(e):
+                if 'self contains either `inf`, `nan` or element < 0' not in str(e):
                     self.fail(e)
 
     @staticmethod
@@ -1728,7 +1728,6 @@ class TestCuda(TestCase):
         self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
-        self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")

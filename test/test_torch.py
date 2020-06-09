@@ -1355,7 +1355,8 @@ class AbstractTestCases:
             except RuntimeError:
                 pass
             with mp.Pool(1) as pool:
-                self.assertTrue(pool.map(method, [arg]))
+                out: list = pool.map(method, [arg])
+                self.assertTrue(out[0])
 
         @staticmethod
         def _test_multinomial_invalid_probs(probs):
@@ -1364,7 +1365,7 @@ class AbstractTestCases:
                 torch.multinomial(probs.to('cpu'), 2)
                 return False  # Should not be reached
             except RuntimeError as e:
-                return 'invalid multinomial distribution' in str(e)
+                return 'self contains either `inf`, `nan` or element < 0' in str(e)
 
         @slowTest
         @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
@@ -1376,7 +1377,6 @@ class AbstractTestCases:
             self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
             self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
             self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
-            self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
         @suppress_warnings
         def test_range(self):
@@ -17407,6 +17407,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             t = torch.tensor(val, dtype=dtype, device=device)
             a = np.array(val, dtype=torch_to_numpy_dtype_dict[dtype])
             self.assertEqual(t, torch.from_numpy(a))
+
+    def test_multinomial_invalid(self, device):
+        def test(probs):
+            with self.assertRaisesRegex(RuntimeError,
+                                        'self contains either `inf`, `nan` or element < 0'):
+                torch.multinomial(probs.to(device), 2)
+        test(torch.Tensor([1, -1, 1]))
+        test(torch.Tensor([1, inf, 1]))
+        test(torch.Tensor([1, -inf, 1]))
+        test(torch.Tensor([1, 1, nan]))
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
