@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -2691,6 +2691,20 @@ class AbstractTestCases:
                             else:
                                 expected[tuple(ii)] = src
                 self.assertEqual(actual, expected, atol=0, rtol=0)
+
+                # should throw an error when self.dtype != src.dtype.
+                # we ignore the case when src is Scalar, as it gets
+                # cast via src.to<scalar_t>.
+                if not is_scalar:
+                    with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                        getattr(base.clone().type(torch.int), method)(dim, idx, src)
+
+                    with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                        getattr(base.clone(), method)(dim, idx, src.type(torch.int))
+
+                # should throw an error when index dtype is not long
+                with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                    getattr(base.clone(), method)(dim, idx.type(torch.int), src)
 
                 if test_bounds:
                     idx[0][0][0] = 34
@@ -9140,6 +9154,8 @@ class TestTorchDeviceType(TestCase):
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
+    # Assert for illegal dtype would not be raised on XLA
+    @onlyOnCPUAndCUDA
     def test_minmax_illegal_dtype(self, device):
         x = torch.randn(5, 5, dtype=torch.float32, device=device)
         valid_values = torch.empty(5, dtype=torch.float32, device=device)
@@ -13554,6 +13570,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
         def _test(amplitude, L, n):
@@ -13588,6 +13605,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
         num_trials = 100
@@ -13652,6 +13670,7 @@ class TestTorchDeviceType(TestCase):
             _test(data_size, kwargs)
 
     @onlyOnCPUAndCUDA
+    @skipCPUIfNoMkl
     @skipIfRocm
     def test_batch_istft(self, device):
         original = torch.tensor([
@@ -17147,6 +17166,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # NumPy has the same behavior.
     @onlyOnCPUAndCUDA
     @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
+    @unittest.skipIf(IS_PPC, "Test is borken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
