@@ -191,10 +191,13 @@ class AttributePropagator {
             insertMutableAttr(name, attr, mptr);
           }
         } else if (n->kind() == prim::fork) {
-          auto func = [this](std::shared_ptr<Graph>& subgraph) {
-            recordMutableAttrs(subgraph);
-          };
-          applyToSubGraph(n, graph, func);
+          applyToForkSubgraph(
+              n,
+              graph,
+              std::bind(
+                  &AttributePropagator::recordMutableAttrs,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
@@ -321,22 +324,27 @@ class AttributePropagator {
           n->outputs().at(0)->replaceAllUsesWith(paramConst);
           n->removeAllInputs();
         } else if (n->kind() == prim::fork) {
-          auto func = [this](std::shared_ptr<Graph>& subgraph) {
-            propagateAttributes(subgraph);
-          };
-          applyToSubGraph(n, graph, func);
+          applyToForkSubgraph(
+              n,
+              graph,
+              std::bind(
+                  &AttributePropagator::propagateAttributes,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
   }
 
-  void applyToSubGraph(
+  void applyToForkSubgraph(
       Node* n,
       std::shared_ptr<Graph>& graph,
       const std::function<void(std::shared_ptr<Graph>&)>& func) {
     TORCH_CHECK(n->kind() == prim::fork);
     auto attrModule = module_;
     auto node = n->inputs()[0]->node();
+    // Check if first parameter of fork is a module. This module is used
+    // as the base module (similar to 'self' in forward) to resolve GetAttrs.
     if (node->kind() != prim::GetAttr)
       return;
     auto name = node->s(attr::name);
@@ -399,10 +407,13 @@ class AttributePropagator {
             }
           }
         } else if (n->kind() == prim::fork) {
-          auto func = [this](std::shared_ptr<Graph>& subgraph) {
-            recordReferencedAttrs(subgraph);
-          };
-          applyToSubGraph(n, graph, func);
+          applyToForkSubgraph(
+              n,
+              graph,
+              std::bind(
+                  &AttributePropagator::recordReferencedAttrs,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
