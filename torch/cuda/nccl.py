@@ -2,11 +2,12 @@ import warnings
 
 import torch._six
 import torch.cuda
+from torch._C import ReduceOp
 
 
-__all__ = ['all_reduce', 'reduce', 'broadcast', 'all_gather', 'reduce_scatter']
+__all__ = ['ReduceOp', 'all_reduce', 'reduce', 'broadcast', 'all_gather', 'reduce_scatter']
 
-SUM = 0  # ncclRedOp_t
+SUM = ReduceOp.SUM  # BC
 
 
 def is_available(tensors):

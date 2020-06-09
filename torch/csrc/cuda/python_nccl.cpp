@@ -1,13 +1,13 @@
 #include <torch/csrc/cuda/python_nccl.h>
 
 #include <pybind11/pybind11.h>
-#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/utils/comm.h>
 #include <ATen/core/functional.h>
 
 #include <c10/cuda/CUDAGuard.h>
@@ -21,6 +21,7 @@ using namespace at;
 using namespace torch;
 using namespace torch::cuda::nccl;
 using namespace torch::cuda::nccl::detail;
+namespace py = pybind11;
 
 static const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
 
@@ -66,6 +67,7 @@ static std::vector<c10::optional<at::cuda::CUDAStream>> unpack_streams(PyObject*
   return streams;
 }
 
+static inline torch::utils::comm::ReduceOp extract_reduce_op(PyObject* obj);
 static inline at::Tensor extract_tensor(PyObject* obj);
 static inline std::vector<at::Tensor> extract_tensors(PyObject* obj);
 
@@ -123,16 +125,16 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs, *_output, *_streams, *_comms;
-  int root, op;
+  PyObject *_inputs, *_output, *_op, *_streams, *_comms;
+  int root;
 
   if (!PyArg_ParseTuple(
           args,
-          "OOiiOO",
+          "OOiOOO",
           &_inputs,
           &_output,
           &root,
-          &op,
+          &_op,
           &_streams,
           &_comms)) {
     THPUtils_invalidArguments(
@@ -140,13 +142,14 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_reduce",
         1,
-        "(sequence[Tensor] inputs, Tensor output, int root,"
-        " int op, sequence[torch.cuda.Stream or None]");
+        "(Sequence[Tensor] inputs, Tensor output, int root,"
+        " ReduceOp op, sequence[torch.cuda.Stream or None]");
     return nullptr;
   }
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
   auto output = extract_tensor(_output);
+  auto op = extract_reduce_op(_op);
   std::vector<c10::optional<at::cuda::CUDAStream>> streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
@@ -161,17 +164,16 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs, *_outputs, *_streams, *_comms;
-  int op;
+  PyObject *_inputs, *_outputs, *_op, *_streams, *_comms;
 
   if (!PyArg_ParseTuple(
-          args, "OOiOO", &_inputs, &_outputs, &op, &_streams, &_comms)) {
+          args, "OOOOO", &_inputs, &_outputs, &_op, &_streams, &_comms)) {
     THPUtils_invalidArguments(
         args,
         nullptr,
         "nccl_all_reduce",
         1,
-        "(sequence[Tensor] inputs, sequence[Tensor] outputs, int op,"
+        "(Sequence[Tensor] inputs, Sequence[Tensor] outputs, ReduceOp op,"
         " sequence[torch.cuda.Stream] streams,"
         " sequence[torch.cuda.nccl.Communicator] comms)");
     return nullptr;
@@ -179,6 +181,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
   std::vector<at::Tensor> outputs = extract_tensors(_outputs);
+  auto op = extract_reduce_op(_op);
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
@@ -202,7 +205,7 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_broadcast",
         1,
-        "(sequence[Tensor] inputs, int root)");
+        "(Sequence[Tensor] inputs, int root)");
     return nullptr;
   }
 
@@ -231,7 +234,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_all_gather",
         1,
-        "(sequence[Tensor] inputs, sequence[Tensor] outputs");
+        "(Sequence[Tensor] inputs, Sequence[Tensor] outputs");
     return nullptr;
   }
 
@@ -251,22 +254,22 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs, *_outputs, *_streams, *_comms;
-  int op;
+  PyObject *_inputs, *_outputs, *_op, *_streams, *_comms;
 
   if (!PyArg_ParseTuple(
-          args, "OOiOO", &_inputs, &_outputs, &op, &_streams, &_comms)) {
+          args, "OOOOO", &_inputs, &_outputs, &_op, &_streams, &_comms)) {
     THPUtils_invalidArguments(
         args,
         nullptr,
         "nccl_reduce_scatter",
         1,
-        "(sequence[Tensor] inputs, sequence[Tensor] outputs, int op");
+        "(Sequence[Tensor] inputs, Sequence[Tensor] outputs, ReduceOp op");
     return nullptr;
   }
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
   std::vector<at::Tensor> outputs = extract_tensors(_outputs);
+  auto op = extract_reduce_op(_op);
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
@@ -277,6 +280,11 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+static inline
+torch::utils::comm::ReduceOp extract_reduce_op(PyObject* obj) {
+  return py::reinterpret_borrow<py::object>(obj).cast<torch::utils::comm::ReduceOp>();
 }
 
 static inline

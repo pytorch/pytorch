@@ -1,6 +1,7 @@
 import torch
 import warnings
 from torch._six import string_classes
+from torch._C import ReduceOp
 from datetime import timedelta
 
 # This module is wildcard imported from torch.distributed.
@@ -18,7 +19,6 @@ from . import (
     ReduceScatterOptions,
     ScatterOptions,
 )
-from . import ReduceOp
 from . import PrefixStore
 
 
@@ -97,7 +97,7 @@ class Backend(object):
 
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
-        """ 
+        """
         setattr(Backend, name.upper(), func)
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
@@ -1603,7 +1603,7 @@ def all_to_all(output_tensor_list,
     return gathered list of tensors in output list.
 
     Arguments:
-        output_tensor_list (list[Tensor]): List of tensors to be gathered one 
+        output_tensor_list (list[Tensor]): List of tensors to be gathered one
             per rank.
         input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
         group (ProcessGroup, optional): The process group to work on.

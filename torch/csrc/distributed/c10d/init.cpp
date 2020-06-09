@@ -24,6 +24,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/utils/comm.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -142,21 +143,6 @@ PyObject* c10d_init(PyObject* _unused) {
               -> void { reducer.prepare_for_backward({output}); },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
-
-  py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
-An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
-``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
-
-The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
-They are used in specifying strategies for reduction collectives, e.g.,
-:func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
-      .value("SUM", ::c10d::ReduceOp::SUM)
-      .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
-      .value("MIN", ::c10d::ReduceOp::MIN)
-      .value("MAX", ::c10d::ReduceOp::MAX)
-      .value("BAND", ::c10d::ReduceOp::BAND)
-      .value("BOR", ::c10d::ReduceOp::BOR)
-      .value("BXOR", ::c10d::ReduceOp::BXOR);
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -322,7 +308,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 return pg.allreduce(xs, opts);
               },
               py::arg("tensors"),
-              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::arg("op") = torch::utils::comm::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -334,7 +320,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 return pg.allreduce(xs, opts);
               },
               py::arg("tensor"),
-              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::arg("op") = torch::utils::comm::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -369,7 +355,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               },
               py::arg("tensor"),
               py::arg("root"),
-              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::arg("op") = torch::utils::comm::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
 
           .def(

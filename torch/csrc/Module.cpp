@@ -34,6 +34,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/comm.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_layouts.h>
@@ -746,6 +747,22 @@ Initializes the number of parallel threads used on the current thread.
 Call this whenever a new thread is created in order to propagate values from
 :func:`torch.set_num_threads` onto the new thread.
 )");
+
+  py::enum_<torch::utils::comm::ReduceOp>(py_module, "ReduceOp", R"(
+An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
+``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+
+The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
+They are used in specifying strategies for inter- and intra- process reduction
+collectives, e.g., :func:`torch.cuda.comm.reduce`,
+:func:`torch.distributed.all_reduce_multigpu`, etc.)")
+      .value("SUM", torch::utils::comm::ReduceOp::SUM)
+      .value("PRODUCT", torch::utils::comm::ReduceOp::PRODUCT)
+      .value("MIN", torch::utils::comm::ReduceOp::MIN)
+      .value("MAX", torch::utils::comm::ReduceOp::MAX)
+      .value("BAND", torch::utils::comm::ReduceOp::BAND)
+      .value("BOR", torch::utils::comm::ReduceOp::BOR)
+      .value("BXOR", torch::utils::comm::ReduceOp::BXOR);
 
   ASSERT_TRUE(set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
