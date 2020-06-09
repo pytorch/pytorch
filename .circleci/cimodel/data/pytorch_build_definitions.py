@@ -4,7 +4,7 @@ from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-from cimodel.data.simple.util.branch_filters import gen_branches_only_filter_dict
+from cimodel.data.simple.util.branch_filters import gen_filter_dict
 from cimodel.data.simple.util.docker_constants import gen_docker_image_path
 
 from dataclasses import dataclass, field
@@ -104,7 +104,7 @@ class Conf:
             job_name = "pytorch_linux_build"
 
         if not self.is_important:
-            job_def["filters"] = gen_branches_only_filter_dict()
+            job_def["filters"] = gen_filter_dict()
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}
