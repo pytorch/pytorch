@@ -2621,6 +2621,14 @@ class AbstractTestCases:
             bad_src = torch.randn(*[i - 1 for i in idx_size])
             self.assertRaises(RuntimeError, lambda: torch.gather(bad_src, dim, idx))
 
+            # should throw an error when index dtype is not long
+            with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                torch.gather(src, dim, idx.to(torch.int))
+
+            # should throw an error when out.dtype != src.dtype.
+            with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                torch.gather(src, dim, idx, out=expected.to(torch.int))
+
             if test_bounds:
                 idx[0][0][0] = 23
                 self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
