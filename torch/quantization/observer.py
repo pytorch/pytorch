@@ -274,6 +274,7 @@ class MinMaxObserver(_ObserverBase):
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""
         x = x_orig.detach()  # avoid keeping autograd tape
+        print("Called forward with tensor ", x)
         x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
