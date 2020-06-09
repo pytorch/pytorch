@@ -128,6 +128,8 @@ def load_aten_declarations(path):
 
         declaration['formals'] = [arg['type'] + ' ' + arg['name']
                                   for arg in declaration['arguments']]
+        declaration['schema_order_formals'] = [arg['type'] + ' ' + arg['name']
+                                               for arg in declaration['schema_order_arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['schema_order_args'] = [arg['name'] for arg in declaration['schema_order_arguments']]
         if has_tensoroptions_argument(declaration):
