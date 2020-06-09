@@ -30,7 +30,8 @@ from jit.test_module_interface import TestModuleInterface  # noqa: F401
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
-from torch._six import PY37, StringIO
+from io import StringIO
+from torch._six import PY37
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.onnx import OperatorExportTypes

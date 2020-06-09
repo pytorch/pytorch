@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
-from torch._six import StringIO
+from io import StringIO
 
 import inspect
 import io
