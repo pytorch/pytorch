@@ -15,6 +15,11 @@ GENERATED_CPP = [
     "autograd/generated/ProfiledType_2.cpp",
     "autograd/generated/ProfiledType_3.cpp",
     "autograd/generated/ProfiledType_4.cpp",
+    "autograd/generated/TraceType_0.cpp",
+    "autograd/generated/TraceType_1.cpp",
+    "autograd/generated/TraceType_2.cpp",
+    "autograd/generated/TraceType_3.cpp",
+    "autograd/generated/TraceType_4.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_torch_functions.cpp",
@@ -36,6 +41,11 @@ libtorch_generated_sources = [
     ":generate-code=autograd/generated/ProfiledType_2.cpp",
     ":generate-code=autograd/generated/ProfiledType_3.cpp",
     ":generate-code=autograd/generated/ProfiledType_4.cpp",
+    ":generate-code=autograd/generated/TraceType_0.cpp",
+    ":generate-code=autograd/generated/TraceType_1.cpp",
+    ":generate-code=autograd/generated/TraceType_2.cpp",
+    ":generate-code=autograd/generated/TraceType_3.cpp",
+    ":generate-code=autograd/generated/TraceType_4.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
 ]
 
@@ -224,6 +234,7 @@ libtorch_core_sources = [
 ]
 
 libtorch_distributed_sources = [
+    "torch/csrc/distributed/autograd/autograd.cpp",
     "torch/csrc/distributed/autograd/utils.cpp",
     "torch/csrc/distributed/autograd/context/container.cpp",
     "torch/csrc/distributed/autograd/context/context.cpp",
