@@ -2448,6 +2448,7 @@ void testGPU_FusionReduction2() {
   }
 }
 
+//TODO: Fix and reenable this test.
 void testGPU_FusionReduction3() {
   {
     torch::jit::fuser::cuda::CudaKernel prog;
