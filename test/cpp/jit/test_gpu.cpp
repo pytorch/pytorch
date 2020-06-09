@@ -2879,23 +2879,44 @@ void testGPU_FusionSimpleGemm() {
     fusion.addInput(tv1);
 
     TensorView* tv2 = broadcast(tv0, {false, false, true});
-    TensorView* tv3 = broadcast(tv1, {true, false, false});
+    // tv2[I0, I1, B] = tv0[I0, I1]
 
+    TensorView* tv3 = broadcast(tv1, {true, false, false});
+    // tv3[B, I1, I2] = tv1[I1, I2]
+
+    // tv4[I0, I1, I2] = tv2[I0, I1, B] * tv3[B, I1, I2]
     TensorView* tv4 = mul(tv2, tv3);
+    // tv5[I0, R1, I2] = tv4[I0, I1, I2]
     TensorView* tv5 = sum(tv4, {1});
     fusion.addOutput(tv5);
 
     tv5->split(1, 32);
+    // tv5[I0, R1o, R1i{32}, I2]
+
     auto tv6 = tv5->rFactor({1});
+    // tv6[I0, R1o, I1i{32}, I2] = tv4[I0, I1, I2]
+    // tv5[I0,    , R1i{32}, I2] = tv6[I0, R1o, I1i{32}, I2]
 
     tv5->split(0, 4);
     tv5->split(-1, 4);
+    // tv5[I0o, I0i{4}, R1i{32}, I2o, I2i{4}]
+    // tv5[I0o, I0i{4}, R1i{32}, I2o, I2i{4}]
 
     tv0->computeAt(tv5, -1);
     tv1->computeAt(tv5, -1);
 
+    // tv6[I0o, I0i{4}, R1o, I1i{32}, I2o, I2i{4}]
+    // tv5[I0o, I0i{4},    , R1i{32}, I2o, I2i{4}]
+    //--> (line symbolizes compute at location)
+    // tv4[I0o, I0i{4}, I1i{32}, I2o, I2i{4}|, I1o]
+    // tv6[I0o, I0i{4}, I1i{32}, I2o, I2i{4}|, R1o]
+    // tv5[I0o, I0i{4}, R1i{32}, I2o, I2i{4}|]
+
     tv0->computeAt(tv6, -1);
     tv1->computeAt(tv6, -1);
+    // tv4[I0o, I0i{4}, I1i{32}, I2o, I2i{4}, I1o |]
+    // tv6[I0o, I0i{4}, I1i{32}, I2o, I2i{4}, R1o |]
+    // tv5[I0o, I0i{4}, R1i{32}, I2o, I2i{4}|]
 
     tv5->axis(0)->parallelize(ParallelType::BIDz);
     tv5->axis(1)->parallelize(ParallelType::TIDz);
