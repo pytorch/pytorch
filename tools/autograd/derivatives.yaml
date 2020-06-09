@@ -169,7 +169,7 @@
 - name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: grad
   other: maybe_multiply(grad, alpha)
-  result: linear
+  result: "self_fw_grad.defined()? (other_fw_grad.defined()? maybe_multiply(self_fw_grad, alpha) + other_fw_grad : maybe_multiply(self_fw_grad, alpha)) : (other_fw_grad.defined()? other_fw_grad : Tensor())"
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: grad
@@ -406,7 +406,7 @@
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad / other
   other: -grad * self / (other * other)
-  result: self_fw_grad / other - other_fw_grad * self / (other * other)
+  result: "self_fw_grad.defined() ? (other_fw_grad.defined() ? self_fw_grad / other - other_fw_grad * self / (other * other) : self_fw_grad / other) : (other_fw_grad.defined() ? -1 * other_fw_grad * self / (other * other) : Tensor())"
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad / other
@@ -739,7 +739,7 @@
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad * other
   other: grad * self
-  result: self_fw_grad * other + other_fw_grad * self
+  result: "self_fw_grad.defined()? (other_fw_grad.defined()? other_fw_grad * self + self_fw_grad * other : self_fw_grad * other) : (other_fw_grad.defined()? other_fw_grad * self : Tensor())"
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad * other
