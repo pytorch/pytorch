@@ -784,10 +784,8 @@ void Reducer::runGradCallbackForVariable(
 }
 
 void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
-  if (!new_context_ptr) {
-    // Not under distributed autograd
-    return;
-  }
+  // We should set 'new_context_ptr' even if it's nullptr. That means the
+  // reducer is under a local backward run.
   const auto new_context_raw_ptr = new_context_ptr.get();
   if (context_ptr.exchange(new_context_raw_ptr) != new_context_raw_ptr) {
     // Set the shared ptr to the context only if it's set first time.

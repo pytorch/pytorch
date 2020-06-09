@@ -435,16 +435,17 @@ class TestDdpComparison(MultiProcessTestCase):
     @dist_init
     def test_ddp_comparison(self):
         gLogger.info(f"Running trainer rank: {self.rank}")
+        # Each trainer uses a different random seed. Otherwise, they are going
+        # to have exactly the same initial model parameters, input, and
+        # therefore grads. That means the grads will be the same before and
+        # after DDP's all-reduce.
+        torch.manual_seed(self.rank)
         process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
         net = nn.Linear(2, 3)
         ddp_net = DistributedDataParallel(
             net, process_group=process_group_for_ddp
         )
         inputs = torch.rand((3, 2))
-
-        # Use local autograd. The gradients will be in each variable's '.grad'.
-        loss = ddp_net(inputs).norm()
-        loss.backward()
 
         # Use distributed autograd. The gradients will be in RPC context map.
         grads_dict = {}
@@ -453,6 +454,11 @@ class TestDdpComparison(MultiProcessTestCase):
             dist_autograd.backward(context_id, [loss])
             grads_dict = dist_autograd.get_gradients(context_id)
         gLogger.info(f"Trainer #{self.rank} got grad dict: {grads_dict}")
+
+        # Use local autograd. The gradients will be in each variable's '.grad'.
+        loss = ddp_net(inputs).norm()
+        loss.backward()
+
         # The gradients should be the same
         for param in net.parameters():
             self.assertTrue(
