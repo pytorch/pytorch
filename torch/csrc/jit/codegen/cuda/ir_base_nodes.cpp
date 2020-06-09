@@ -69,10 +69,6 @@ struct ConstCheck : OptOutConstDispatch {
     is_const_ = is_const_ && false;
   }
 
-  void handle(const NamedScalar* const ns) override {
-    is_const_ = is_const_ && false;
-  }
-
   void handle(const Expr* const expr) override {
     for (auto inp : expr->inputs()) {
       OptOutConstDispatch::handle(inp);

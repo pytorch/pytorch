@@ -56,7 +56,8 @@ void IterVisitor::traverseFrom(
   FusionGuard fg(fusion);
   std::unordered_set<Statement*> visited;
   stmt_stack.clear();
-  stmt_stack.emplace_back(from.rbegin(), from.rend());
+  if(!from.empty())
+    stmt_stack.emplace_back(from.rbegin(), from.rend());
 
   while (!stmt_stack.empty()) {
     auto next_stmts = next(stmt_stack.back().back());
@@ -186,10 +187,12 @@ std::unordered_set<Val*> IterVisitor::getTerminatingOutputs(
   FusionGuard fg(fusion);
 
   std::unordered_set<Val*> used_vals;
-  for (auto expr : Exprs::getExprs(
-           fusion,
-           std::vector<Val*>(
-               fusion->outputs().begin(), fusion->outputs().end()))) {
+
+  auto exprs = Exprs::getExprs(
+      fusion,
+      std::vector<Val*>(fusion->outputs().begin(), fusion->outputs().end()));
+      
+  for (auto expr : exprs) {
     for (auto inp : expr->inputs())
       used_vals.emplace(inp);
   }
