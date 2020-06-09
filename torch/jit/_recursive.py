@@ -9,7 +9,6 @@ import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args
 from torch.jit._builtins import _find_builtin
 from torch.nn import Module
-from torch._six import get_function_from_type
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -35,7 +34,7 @@ def make_stub(func, name):
     return ScriptMethodStub(rcb, ast, func)
 
 def make_stub_from_method(nn_module, method_name):
-    func = get_function_from_type(type(nn_module), method_name)
+    func = getattr(type(nn_module), method_name, None)
     if isinstance(func, ScriptMethodStub):
         return func
     # Make sure the name present in the resulting AST will match the name
@@ -414,7 +413,7 @@ def script_model_defines_attr(script_model, attr):
     script_attr = getattr(script_model, attr, None)
     if script_attr is None:
         return False
-    default_attr = get_function_from_type(torch.jit.RecursiveScriptModule, attr)
+    default_attr = getattr(torch.jit.RecursiveScriptModule, attr, None)
     if default_attr is None:
         return False
     return script_attr != default_attr
@@ -490,7 +489,7 @@ def infer_methods_to_compile(nn_module):
     methods = []
     if hasattr(nn_module, 'forward') and not _jit_internal.is_ignored_fn(nn_module.forward):
         forward_func = getattr(nn_module.forward, "__func__", None)
-        module_forward = get_function_from_type(torch.nn.Module, "forward")
+        module_forward = getattr(torch.nn.Module, "forward", None)
         if forward_func != module_forward:
             methods = ['forward']
 

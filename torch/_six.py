@@ -54,8 +54,3 @@ elif sys.version_info[:2] > (3, 2):
 else:
     def raise_from(value, from_value):
         raise value
-
-
-# Gets a function from the name of a method on a type
-def get_function_from_type(cls, name):
-    return getattr(cls, name, None)

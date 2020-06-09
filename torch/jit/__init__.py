@@ -11,7 +11,7 @@ from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
-from torch._six import with_metaclass, string_classes, get_function_from_type
+from torch._six import with_metaclass, string_classes
 from torch.utils import set_module
 from torch.autograd.grad_mode import _DecoratorContextManager
 
@@ -1914,7 +1914,7 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__dir__"):
+            if self_method.__func__ == getattr(RecursiveScriptModule, "__dir__", None):
                 return super(RecursiveScriptModule, self).__dir__()
             return self_method()
 
@@ -1923,7 +1923,7 @@ if _enabled:
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__bool__"):
+            if self_method.__func__ == getattr(RecursiveScriptModule, "__bool__", None):
                 return True
             return self_method()
 
