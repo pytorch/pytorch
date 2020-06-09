@@ -1329,12 +1329,14 @@ except RuntimeError as e:
 
         for fn in (
             lambda: RandomSampler(self.dataset, num_samples=5, replacement=True, generator=generator),
-            lambda: RandomSampler(self.dataset, num_samples=5, replacement=False, generator=generator),
+            lambda: RandomSampler(self.dataset, replacement=False, generator=generator),
             lambda: WeightedRandomSampler(self.dataset, num_samples=5, replacement=True, generator=generator),
-            lambda: WeightedRandomSampler(self.dataset, num_samples=5, replacement=False, generator=generator),
+            lambda: WeightedRandomSampler(self.dataset, replacement=False, generator=generator),
             lambda: SubsetRandomSampler(range(10), generator=generator),
         ):
-            self.assertEqual(list(fn()), list(fn()))
+            print(fn)
+            print(list(fn()))
+            assert(list(fn()) == list(fn()))
 
 
     def _test_sampler(self, **kwargs):
