@@ -37,13 +37,8 @@ def with_metaclass(meta, *bases):
     return type.__new__(metaclass, 'temporary_class', (), {})
 
 
-import builtins
-# See https://github.com/PyCQA/flake8-bugbear/issues/64
-exec_ = getattr(builtins, "exec")  # noqa: B009
-
-
 if sys.version_info[:2] == (3, 2):
-    exec_("""def raise_from(value, from_value):
+    exec("""def raise_from(value, from_value):
     try:
         if from_value is None:
             raise value
@@ -52,7 +47,7 @@ if sys.version_info[:2] == (3, 2):
         value = None
 """)
 elif sys.version_info[:2] > (3, 2):
-    exec_("""def raise_from(value, from_value):
+    exec("""def raise_from(value, from_value):
     try:
         raise value from from_value
     finally:
