@@ -8,6 +8,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/core/TensorLayoutPermutation.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/CopyBytes.h>
@@ -1706,6 +1707,11 @@ protected:
   // which fields are copied by value.
   bool allow_tensor_metadata_change_ = true;
 
+  // Tensor layout permutation which stores the physical dimension
+  // layout of each logical dimension in this tensor. See comments
+  // in TensorLayoutPermutation.h for details.
+  TensorLayoutPermutation layout_permutation;
+
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
@@ -1770,7 +1776,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 31,
+              sizeof(TensorImpl) == sizeof(int64_t) * 32,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10
