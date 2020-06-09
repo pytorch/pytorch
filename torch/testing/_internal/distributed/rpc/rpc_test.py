@@ -2879,7 +2879,6 @@ class RpcTest(RpcAgentTestFixture):
                 return_future,
             )
 
-    @_skip_if_tensorpipe_agent
     @dist_init
     def test_rref_timeout(self):
         # This test is similar to ones in FaultyProcessGroupTest, but is meant to be
