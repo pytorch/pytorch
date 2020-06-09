@@ -1,7 +1,7 @@
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/cuda/device_set.h>
-#include <ATen/core/functional.h>
 #include <torch/csrc/utils/hash.h>
+#include <ATen/core/functional.h>
 
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -9,6 +9,7 @@
 
 #include <THC/THC.h>
 
+#include <map>
 #include <limits>
 #include <sstream>
 #include <type_traits>
@@ -71,29 +72,40 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
+// NCCL op mapping
+// TODO: fix duplication with lib/c10d/ProcessGroupNCCL.cpp
+static const std::map<torch::utils::comm::ReduceOp, ncclRedOp_t> ncclOp = {
+    {torch::utils::comm::ReduceOp::MIN, ncclMin},
+    {torch::utils::comm::ReduceOp::MAX, ncclMax},
+    {torch::utils::comm::ReduceOp::SUM, ncclSum},
+    {torch::utils::comm::ReduceOp::PRODUCT, ncclProd},
+};
+
+inline
+ncclRedOp_t get_reduce_op(torch::utils::comm::ReduceOp op) {
+  auto it = ncclOp.find(op);
+  TORCH_CHECK(it != ncclOp.end(), "Unsupported NCCL ReduceOp '", op, "'");
+  return it->second;
+}
+
+// NCCL type typing
+// TODO: fix duplication with lib/c10d/ProcessGroupNCCL.cpp
+static const std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
+    {at::kChar, ncclInt8},
+    {at::kByte, ncclUint8},
+    {at::kFloat, ncclFloat},
+    {at::kDouble, ncclDouble},
+    {at::kInt, ncclInt32},
+    {at::kLong, ncclInt64},
+    {at::kHalf, ncclHalf},
+};
+
 inline
 ncclDataType_t get_data_type(const Tensor& t) {
-  if (!t.is_cuda()) {
-    throw std::runtime_error("Unconvertible NCCL type");
-  }
-  switch (t.scalar_type()) {
-    case at::kFloat:
-      return ncclFloat;
-    case at::kHalf:
-      return ncclHalf;
-    case at::kDouble:
-      return ncclDouble;
-    case at::kLong:
-      return ncclInt64;
-    case at::kInt:
-      return ncclInt;
-    case at::kChar:
-      return ncclChar;
-    case at::kByte:
-      return ncclChar;
-    default:
-      throw std::runtime_error("Unconvertible NCCL type");
-  }
+  TORCH_CHECK(t.is_cuda(), "Expected CUDA device for NCCL type, but got ", t.device());
+  auto it = ncclDataType.find(t.scalar_type());
+  TORCH_CHECK(it != ncclDataType.end(), "Unsupported NCCL dtype ", t.scalar_type());
+  return it->second;
 }
 
 static inline
@@ -350,7 +362,7 @@ void reduce(
     const std::vector<at::Tensor>& inputs,
     at::Tensor& output,
     int32_t root,
-    int32_t op,
+    torch::utils::comm::ReduceOp op,
     const stream_list& streams,
     const comm_list& user_comms) {
 #ifdef USE_NCCL
@@ -382,7 +394,7 @@ void reduce(
         root == i ? output.data_ptr() : nullptr,
         count,
         data_type,
-        (ncclRedOp_t)op,
+        get_reduce_op(op),
         root,
         comms_ref[i],
         stream));
@@ -395,7 +407,7 @@ void reduce(
 void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root,
-    int32_t op,
+    torch::utils::comm::ReduceOp op,
     const stream_list& streams,
     const comm_list& user_comms) {
   reduce(inputs, /*output=*/inputs[root], root, op, streams, user_comms);
@@ -404,7 +416,7 @@ void reduce(
 void all_reduce(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
-    int32_t op,
+    torch::utils::comm::ReduceOp op,
     const stream_list& streams,
     const comm_list& user_comms) {
 #ifdef USE_NCCL
@@ -433,7 +445,7 @@ void all_reduce(
         outputs[i].data_ptr(),
         count,
         data_type,
-        (ncclRedOp_t)op,
+        get_reduce_op(op),
         comms_ref[i],
         stream));
   }
@@ -445,7 +457,7 @@ void all_reduce(
 void reduce_scatter(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
-    int32_t op,
+    torch::utils::comm::ReduceOp op,
     const stream_list& streams,
     const comm_list& user_comms) {
 #ifdef USE_NCCL
@@ -474,7 +486,7 @@ void reduce_scatter(
         outputs[i].data_ptr(),
         count,
         data_type,
-        (ncclRedOp_t)op,
+        get_reduce_op(op),
         comms_ref[i],
         stream));
   }

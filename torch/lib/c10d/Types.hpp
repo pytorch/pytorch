@@ -3,18 +3,11 @@
 #include <chrono>
 #include <cstdint>
 
+#include <torch/csrc/utils/comm.h>
+
 namespace c10d {
 
-enum class ReduceOp : std::uint8_t {
-  SUM = 0,
-  PRODUCT,
-  MIN,
-  MAX,
-  BAND, // Bitwise AND
-  BOR, // Bitwise OR
-  BXOR, // Bitwise XOR
-  UNUSED,
-};
+using ReduceOp = torch::utils::comm::ReduceOp;
 
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
