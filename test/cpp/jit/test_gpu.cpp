@@ -2576,6 +2576,74 @@ void testGPU_FusionReductionTFT() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
+void testGPU_FusionReductionJ() {
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(3);
+  TensorView* tv1 = makeDummyTensor(3);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = add(tv0, tv1);
+  TensorView* tv3 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv2);
+  fusion.addOutput(tv3);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+
+  //tv1->split(1, 128);
+  // tv1[I0, R1o, R1i{128}] = tv0[I0, I1]
+  //tv1->split(1, 4);
+  // tv1[I0, R1oo, R1oi{4}, R1i{128}] = tv0[I0, I1]
+
+  //TensorView* tv2 = tv1->rFactor({1});
+  // tv2[I0, R1oo, Ir1oi{4}, Ir1i{128}] = tv0[I0, I1]
+  // tv1[I0,        R1oi{4},  R1i{128}] = tv2[I0, R1oo, Ir1oi{4}, Ir1i{128}]
+
+  //TensorView* tv3 = tv1->rFactor({1});
+  // tv2[I0, R1oo, Ir1oi{4}, Ir1i{128}] = tv0[I0, I1]
+  // tv3[I0,        R1oi{4}, Ir1i{128}] = tv2[I0, R1oo, Ir1oi{4}, Ir1i{128}]
+  // tv1[I0,                  R1i{128}] = tv3[I0,        R1oi{4}, Ir1i{128}]
+
+  // Incrementally, can print in between for debugging
+  //tv0->computeAt(tv2, 1);
+  //tv2->computeAt(tv3, 1);
+  //tv3->computeAt(tv1, 1);
+
+  // Re do it all at once, because why not.
+  //tv0->computeAt(tv1, 1);
+
+  //tv2->axis(2)->parallelize(ParallelType::Unroll);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  tv2->computeAt(tv3, 1);
+  //tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  //tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // for(auto expr : fusion.exprs(true))
+  //   std::cout<<expr<<std::endl;
+  // GPULower lower(&fusion);
+  // lower.printKernel(std::cout);
+
+  int numel_x = 128;
+  int numel_y = 128;
+  int numel_z = 128;
+
+  prog.device_ = 0;
+  prog.grid(numel_x);
+  prog.block(numel_z);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input0 = at::rand({numel_x, numel_y, numel_z}, options);
+  at::Tensor input1 = at::rand({numel_x, numel_y, numel_z}, options);
+  at::Tensor cg_output = at::empty({numel_x, numel_z}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input0, input1}, {cg_output});
+
+  auto aten_output = input0.add(input1).sum({1});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
 void testGPU_FusionSimpleBCast() {
   {
     torch::jit::fuser::cuda::CudaKernel prog;

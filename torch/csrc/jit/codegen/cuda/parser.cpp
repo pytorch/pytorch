@@ -161,7 +161,7 @@ class IrParser {
         std::cout << "checkout output" << std::endl;
         TensorView* out_tv = static_cast<TensorView*>(output);
         for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
-          //std::cout << *inp->as<TensorView>() << std::endl;
+          std::cout << inp->as<TensorView>() << std::endl;
           if (inp->getOrigin() == nullptr) {
             std::cout << "is input!" << std::endl;
           } else {
@@ -178,10 +178,12 @@ class IrParser {
       for (auto val : cuda_kernel_->fusion_->vals()) {
         if (val->getValType().value() != ValType::TensorView)
           continue;
+        std::cout << "check intermediates" << std::endl;
+        std::cout << val->as<TensorView>() << std::endl;
         TensorView* tv = static_cast<TensorView*>(val);
-
         tv->axis(-1)->parallelize(ParallelType::TIDx);
       }
+      std::cout << "finished scheduling!" << std::endl;
     } else {
       // Run through outputs, grab all inputs of outputs
       // squeeze with computeAt to set overall structure.
