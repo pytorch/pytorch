@@ -77,6 +77,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
       returns.size());
   auto returnType = returns.at(0).type();
 
+  at::ThreadLocalState tls_state;
   if (ctx.getWorkerId() != dstWorkerInfo.id_) {
     auto userRRefPtr = ctx.createUserRRef(dstWorkerInfo.id_, returnType);
 
@@ -96,7 +97,6 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     userRRefPtr->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    at::ThreadLocalState tls_state;
     fm->addCallback(
         [forkId{userRRefPtr->forkId()},
          tls_state = std::move(tls_state)](const FutureMessage& fm) {
@@ -124,7 +124,6 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         rpcTimeoutSeconds /* timeout */);
 
     ownerRRefPtr->registerOwnerCreationFuture(fm);
-    at::ThreadLocalState tls_state;
     fm->addCallback(
         [tls_state = std::move(tls_state),
          ownerRRefId = ownerRRefPtr->rrefId()](const FutureMessage& fm) {

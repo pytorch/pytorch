@@ -52,7 +52,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("cuda_memory_usage", &Event::cuda_memory_usage)
       .def("handle", &Event::handle)
       .def("node_id", &Event::node_id)
-      .def("get_elapsed_cpu_ns", &Event::getElapsedCpuNs);
+      .def("get_cpu_ns", &Event::getCPUns)
+      .def("get_precomputed_cuda_elapsed_us", &Event::getCudaElapsedUs)
+      .def("is_remote", &Event::isRemote);
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);

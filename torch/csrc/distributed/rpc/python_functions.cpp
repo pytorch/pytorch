@@ -96,9 +96,10 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
     const IValue& forkId,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const bool isAsyncExecution) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
-      std::move(serializedPyObj), rrefId, forkId);
+      std::move(serializedPyObj), rrefId, forkId, isAsyncExecution);
 
   // set forceGradRecording to true as even if the args does not contain any
   // tensor, the return value might still contain tensors.
@@ -118,11 +119,12 @@ using namespace torch::distributed::autograd;
 c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
     const std::shared_ptr<FutureMessage>& futureResponseMessage,
     bool hasValue) {
+  // Save and pass thread local state into the callback. The thread local state
+  // is a lightweight structure when the profiler is disabled.
+  at::ThreadLocalState tls_state;
   if (hasValue) {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(PyObjectType::get());
-    // Save and pass thread local state into the callback
-    at::ThreadLocalState tls_state;
     futureResponseMessage->addCallback(
         [jitFuture, tls_state = std::move(tls_state)](
             const FutureMessage& futureResponseMessage) {
@@ -139,8 +141,6 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
   } else {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(NoneType::get());
-    // Save and pass thread local state into the callback
-    at::ThreadLocalState tls_state;
     futureResponseMessage->addCallback(
         [jitFuture, tls_state = std::move(tls_state)](
             const FutureMessage& futureResponseMessage) {
@@ -252,6 +252,7 @@ PyRRef pyRemoteBuiltin(
   auto& ctx = RRefContext::getInstance();
   auto agent = RpcAgent::getCurrentRpcAgent();
 
+  at::ThreadLocalState tls_state;
   if (ctx.getWorkerId() != dst.id_) {
     auto userRRef = ctx.createUserRRef(dst.id_, returnType);
 
@@ -267,7 +268,6 @@ PyRRef pyRemoteBuiltin(
 
     userRRef->registerOwnerCreationFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    at::ThreadLocalState tls_state;
     fm->addCallback(
         [forkId{userRRef->forkId()},
          tls_state = std::move(tls_state)](const FutureMessage& fm) {
@@ -293,7 +293,6 @@ PyRRef pyRemoteBuiltin(
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    at::ThreadLocalState tls_state;
     fm->addCallback(
         [ownerRRefId = ownerRRef->rrefId(),
          tls_state = std::move(tls_state)](const FutureMessage& fm) {
@@ -308,11 +307,14 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const bool isAsyncExecution) {
   DCHECK(!PyGILState_Check());
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
+
+  at::ThreadLocalState tls_state;
   if (ctx.getWorkerId() != dst.id_) {
     auto userRRef = ctx.createUserRRef(dst.id_, PyObjectType::get());
     auto fm = sendPythonRemoteCall(
@@ -320,12 +322,12 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         userRRef->rrefId().toIValue(),
         userRRef->forkId().toIValue(),
-        rpcTimeoutSeconds);
+        rpcTimeoutSeconds,
+        isAsyncExecution);
 
     userRRef->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    at::ThreadLocalState tls_state;
     fm->addCallback(
         [forkId{userRRef->forkId()},
          tls_state = std::move(tls_state)](const FutureMessage& fm) {
@@ -343,11 +345,11 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         ownerRRef->rrefId().toIValue(),
         ownerRRef->rrefId().toIValue(),
-        rpcTimeoutSeconds);
+        rpcTimeoutSeconds,
+        isAsyncExecution);
 
     ownerRRef->registerOwnerCreationFuture(fm);
 
-    at::ThreadLocalState tls_state;
     fm->addCallback(
         [ownerRRefId = ownerRRef->rrefId(),
          tls_state = std::move(tls_state)](const FutureMessage& fm) {

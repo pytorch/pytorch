@@ -1,4 +1,5 @@
 import concurrent.futures
+import json
 import sys
 import time
 import unittest
@@ -373,7 +374,7 @@ def async_add_with_future_ctor(to, x, y, z):
     fut = torch.futures.Future()
     rpc.rpc_async(to, torch.add, args=(x, y)).then(
         lambda fut1: fut.set_result(fut1.wait() + z)
-    ).wait()
+    )
     return fut
 
 
@@ -964,6 +965,67 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(rpc_exec_mode.value in rpc_event.name)
         self.assertEqual(rpc_event.count, 1)
 
+    @skip_if_lt_x_gpu(2)
+    @dist_init
+    def test_profiler_cuda(self):
+        if self.rank != 1:
+            return
+
+        dst = 2
+        dst_worker = worker_name(dst)
+        with torch.autograd.profiler.profile(use_cuda=True) as p:
+            fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+            res = fut.wait()
+            # udf_with_torch_ops()
+
+        function_events = p.function_events
+        for event in function_events:
+            if event.is_async:
+                self.assertEqual(0, event.cuda_time_total)
+                self.assertEqual([], event.kernels)
+                self.assertEqual(0, event.cuda_time)
+            else:
+                self.assertGreater(event.cuda_time_total, 0)
+                self.assertEqual(1, len(event.kernels))
+                kernel = event.kernels[0]
+                self.assertEqual(kernel.device, 0)
+                self.assertGreater(event.cuda_time, 0)
+
+        print(p.key_averages().table())
+
+
+    @dist_init
+    def test_profiler_export_trace(self):
+        if self.rank != 1:
+            return
+        dst = 2
+        dst_worker = worker_name(dst)
+        with torch.autograd.profiler.profile() as p:
+            fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+            res = fut.wait()
+            udf_with_torch_ops()
+
+        expected_remote_events = [
+            "ones",
+            "ones",
+            "add",
+            "mul",
+            "relu",
+            "threshold",
+            "sigmoid"
+        ]
+
+        events = p.function_events
+        print(p.key_averages().table())
+        with TemporaryFileName() as fname:
+            path = fname
+            p.export_chrome_trace(path)
+            with open(path) as f:
+                trace = json.load(f)
+                event_names = [event['name'] for event in trace]
+                for expected_event_name in expected_remote_events + [RPCExecMode.ASYNC.value]:
+                    event_exists = any([expected_event_name in event_name for event_name in event_names])
+                    self.assertTrue(event_exists)
 
     @dist_init
     def test_profiler_remote_events_profiled(self):
@@ -1111,9 +1173,9 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(rpc_event.node_id, self.rank)
             # Ensure recording of remote events.
             remote_events = {event for event in events if event.node_id == dst} - {rpc_event}
-            # print("-- prof table --")
-            # print(prof.key_averages().table())
-            # print("-- end prof table --")
+            print("-- prof table --")
+            print(prof.key_averages().table())
+            print("-- end prof table --")
             self.assertGreaterEqual(len(remote_events), 1)
             for remote_event in remote_events:
                 self.assertEqual(remote_event.node_id, dst)
@@ -2907,25 +2969,57 @@ class RpcTest(RpcAgentTestFixture):
     def test_future_nested_callback(self):
         self._test_future_cb(add_use_future_nested_cb)
 
-    @dist_init
-    def test_async_function_raise(self):
+    def _run_func_in_mode(self, to, fn, mode, args=None, kwargs=None):
+        if mode == RPCExecMode.SYNC:
+            return rpc.rpc_sync(to, fn, args=args, kwargs=kwargs)
+        elif mode == RPCExecMode.ASYNC:
+            return rpc.rpc_async(to, fn, args=args, kwargs=kwargs).wait()
+        elif mode == RPCExecMode.REMOTE:
+            return rpc.remote(to, fn, args=args, kwargs=kwargs).to_here()
+
+    def _test_async_function_raise(self, mode):
         with self.assertRaisesRegex(RuntimeError, "Expected error"):
-            rpc.rpc_sync(
+            self._run_func_in_mode(
                 worker_name((self.rank + 1) % self.world_size),
-                async_raise_func
+                async_raise_func,
+                mode
             )
 
     @dist_init
-    def test_async_function_wrong_return_type(self):
+    def test_async_function_raise(self):
+        self._test_async_function_raise(RPCExecMode.SYNC)
+
+    @dist_init
+    def test_async_function_raise_async(self):
+        self._test_async_function_raise(RPCExecMode.ASYNC)
+
+    @dist_init
+    def test_async_function_raise_remote(self):
+        self._test_async_function_raise(RPCExecMode.REMOTE)
+
+    def _test_async_function_wrong_return_type(self, mode):
         errMsg = (
             "Functions decorated with @rpc\\.async_function must return a "
             "torch\\.futures\\.Future object,"
         )
         with self.assertRaisesRegex(RuntimeError, errMsg):
-            rpc.rpc_sync(
+            self._run_func_in_mode(
                 worker_name((self.rank + 1) % self.world_size),
-                async_wrong_type
+                async_wrong_type,
+                mode
             )
+
+    @dist_init
+    def test_async_function_wrong_return_type(self):
+        self._test_async_function_wrong_return_type(RPCExecMode.SYNC)
+
+    @dist_init
+    def test_async_function_wrong_return_type_async(self):
+        self._test_async_function_wrong_return_type(RPCExecMode.ASYNC)
+
+    @dist_init
+    def test_async_function_wrong_return_type_remote(self):
+        self._test_async_function_wrong_return_type(RPCExecMode.REMOTE)
 
     @dist_init
     def test_async_function_simple(self):
@@ -2935,39 +3029,49 @@ class RpcTest(RpcAgentTestFixture):
         ret = rpc.rpc_sync(dst1, async_add, args=(dst2, torch.ones(2, 2), 1))
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
-    def _test_async_function(self, fn):
-        if self.rank == 0:
-            dst1 = worker_name((self.rank + 1) % self.world_size)
-            dst2 = worker_name((self.rank + 2) % self.world_size)
+    def _test_async_function(self, fn, mode=RPCExecMode.SYNC):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
 
-            ret = rpc.rpc_sync(dst1, fn, args=(dst2, torch.ones(2, 2), 1, 2))
-
-            self.assertEqual(ret, torch.ones(2, 2) + 3)
+        args = (dst2, torch.ones(2, 2), 1, 2)
+        ret = self._run_func_in_mode(dst1, fn, mode, args=args)
+        self.assertEqual(ret, torch.ones(2, 2) + 3)
 
     @dist_init
     def test_async_function_with_future_ctor(self):
         self._test_async_function(async_add_with_future_ctor)
 
     @dist_init
+    def test_async_function_with_future_ctor_remote(self):
+        self._test_async_function(
+            async_add_with_future_ctor,
+            RPCExecMode.REMOTE
+        )
+
+    @dist_init
     def test_async_function_chained(self):
         self._test_async_function(async_add_chained)
+
+    @dist_init
+    def test_async_function_chained_remote(self):
+        self._test_async_function(async_add_chained, RPCExecMode.REMOTE)
 
     @dist_init
     def test_async_function_nested(self):
         self._test_async_function(async_add_nested)
 
-    def _test_async_function_multi(self, fn):
+    @dist_init
+    def test_async_function_nested_remote(self):
+        self._test_async_function(async_add_nested, RPCExecMode.REMOTE)
+
+    def _test_async_function_multi(self, fn, mode=RPCExecMode.SYNC):
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
 
         num = 20
         step = 3
-        ret = rpc.rpc_sync(
-            dst1,
-            fn,
-            args=(dst2, torch.ones(2, 2), num, step)
-        )
-
+        args = (dst2, torch.ones(2, 2), num, step)
+        ret = self._run_func_in_mode(dst1, fn, mode, args=args)
         self.assertEqual(ret, torch.ones(2, 2) + num * step)
 
     @dist_init
@@ -2975,19 +3079,59 @@ class RpcTest(RpcAgentTestFixture):
         self._test_async_function_multi(async_add_chained_multi)
 
     @dist_init
+    def test_async_function_multi_chained_async(self):
+        self._test_async_function_multi(
+            async_add_chained_multi,
+            RPCExecMode.ASYNC
+        )
+
+    @dist_init
+    def test_async_function_multi_chained_remote(self):
+        self._test_async_function_multi(
+            async_add_chained_multi,
+            RPCExecMode.REMOTE
+        )
+
+    @dist_init
     def test_async_function_multi_fanout(self):
         self._test_async_function_multi(async_add_multi_fanout)
 
     @dist_init
-    def test_return_future(self):
+    def test_async_function_multi_fanout_async(self):
+        self._test_async_function_multi(
+            async_add_multi_fanout,
+            RPCExecMode.ASYNC
+        )
+
+    @dist_init
+    def test_async_function_multi_fanout_remote(self):
+        self._test_async_function_multi(
+            async_add_multi_fanout,
+            RPCExecMode.REMOTE
+        )
+
+    def _test_return_future(self, mode):
         with self.assertRaisesRegex(
             RuntimeError,
             "Can not pickle torch.futures.Future"
         ):
-            rpc.rpc_sync(
+            self._run_func_in_mode(
                 worker_name((self.rank + 1) % self.world_size),
                 return_future,
+                mode
             )
+
+    @dist_init
+    def test_return_future(self):
+        self._test_return_future(RPCExecMode.SYNC)
+
+    @dist_init
+    def test_return_future_async(self):
+        self._test_return_future(RPCExecMode.ASYNC)
+
+    @dist_init
+    def test_return_future_remote(self):
+        self._test_return_future(RPCExecMode.REMOTE)
 
     @_skip_if_tensorpipe_agent
     @dist_init

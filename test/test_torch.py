@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -239,6 +239,14 @@ class AbstractTestCases:
         def test_msnpu_error(self):
             with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
                 torch.zeros(1, device=torch.device('msnpu'))
+
+        def test_as_strided_neg(self):
+            error = r'as_strided: Negative strides are not supported at the ' \
+                    r'moment, got strides: \[-?[0-9]+(, -?[0-9]+)*\]'
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.as_strided(torch.ones(3, 3), (1, 1), (2, -1))
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.as_strided(torch.ones(14), (2,), (-11,))
 
         def test_polygamma_neg(self):
             with self.assertRaisesRegex(RuntimeError, r'polygamma\(n, x\) does not support negative n\.'):
@@ -2684,6 +2692,20 @@ class AbstractTestCases:
                                 expected[tuple(ii)] = src
                 self.assertEqual(actual, expected, atol=0, rtol=0)
 
+                # should throw an error when self.dtype != src.dtype.
+                # we ignore the case when src is Scalar, as it gets
+                # cast via src.to<scalar_t>.
+                if not is_scalar:
+                    with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                        getattr(base.clone().type(torch.int), method)(dim, idx, src)
+
+                    with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                        getattr(base.clone(), method)(dim, idx, src.type(torch.int))
+
+                # should throw an error when index dtype is not long
+                with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                    getattr(base.clone(), method)(dim, idx.type(torch.int), src)
+
                 if test_bounds:
                     idx[0][0][0] = 34
                     with self.assertRaises(RuntimeError):
@@ -3438,66 +3460,6 @@ class AbstractTestCases:
             result = torch.norm(x, 3, 1)
             expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
             self.assertEqual(result, expected)
-
-        @staticmethod
-        def _test_bernoulli(self, t_dtype, p_dtype, device):
-            for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
-                x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
-                self.assertEqual(x.bernoulli().tolist(), trivial_p)
-
-            def isBinary(t):
-                return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
-
-            p = torch.rand(5, 5, dtype=p_dtype, device=device)
-            self.assertTrue(isBinary(p.bernoulli()))
-
-            p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
-            self.assertTrue(isBinary(p.bernoulli()))
-
-            p = torch.rand(5, 5, dtype=p_dtype, device=device)
-            torch.bernoulli(torch.rand_like(p), out=p)
-            self.assertTrue(isBinary(p))
-
-            p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
-            torch.bernoulli(torch.rand_like(p), out=p)
-            self.assertTrue(isBinary(p))
-
-            t = torch.empty(10, 10, dtype=t_dtype, device=device)
-
-            t.fill_(2)
-            t.bernoulli_(0.5)
-            self.assertTrue(isBinary(t))
-
-            p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
-            t.fill_(2)
-            t.bernoulli_(p)
-            self.assertTrue(isBinary(t))
-
-            t.fill_(2)
-            torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
-            self.assertTrue(isBinary(t))
-
-            t.fill_(2)
-            t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
-            self.assertTrue(isBinary(t))
-
-        def test_bernoulli(self):
-            self._test_bernoulli(self, torch.float32, torch.float64, 'cpu')
-            # test that it works with integral tensors
-            self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
-            # test that it works with bool tensors
-            self._test_bernoulli(self, torch.bool, torch.float32, 'cpu')
-
-        @slowTest
-        def test_bernoulli_edge_cases(self):
-            # Need to draw a lot of samples to cover every random floating point number.
-            a = torch.zeros(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 0
-            num_ones = (torch.bernoulli(a) == 1).sum()
-            self.assertEqual(num_ones, 0)
-
-            b = torch.ones(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 1
-            num_zeros = (torch.bernoulli(b) == 0).sum()
-            self.assertEqual(num_zeros, 0)
 
         def test_generator_cpu(self):
             # test default generators are equal
@@ -9192,6 +9154,8 @@ class TestTorchDeviceType(TestCase):
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
+    # Assert for illegal dtype would not be raised on XLA
+    @onlyOnCPUAndCUDA
     def test_minmax_illegal_dtype(self, device):
         x = torch.randn(5, 5, dtype=torch.float32, device=device)
         valid_values = torch.empty(5, dtype=torch.float32, device=device)
@@ -9538,6 +9502,22 @@ class TestTorchDeviceType(TestCase):
             if 'memory' in str(e):
                 raise unittest.SkipTest('Insufficient memory')
             raise
+
+    def test_argminmax_axis_with_dim_one(self, device):
+        # See: https://github.com/pytorch/pytorch/issues/38922
+        n = 32768
+        x = torch.zeros(1, n)
+        self.assertEqual(x.argmax(dim=0), torch.zeros(n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=0), torch.zeros(n, dtype=torch.int64))
+
+        self.assertEqual(x.argmax(dim=-2), torch.zeros(n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=-2), torch.zeros(n, dtype=torch.int64))
+
+        self.assertEqual(x.argmax(dim=0, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=0, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
+
+        self.assertEqual(x.argmax(dim=-2, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=-2, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
 
     def test_remainder_overflow(self, device):
         # Check Integer Overflows
@@ -10855,6 +10835,71 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor([10], dtype=dtype, device=device).geometric_(0.5)
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
+
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_bernoulli_p(self, device, dtype):
+        for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
+            x = torch.tensor(trivial_p, dtype=dtype, device=device)
+            self.assertEqual(x.bernoulli().tolist(), trivial_p)
+
+        def isBinary(t):
+            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
+
+        p = torch.rand(5, 5, dtype=dtype, device=device)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, dtype=dtype, device=device).expand(5, 5)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, 5, dtype=dtype, device=device)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+        p = torch.rand(5, dtype=dtype, device=device).expand(5, 5)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+    # RngUniform not implemented for Integral type in XLA test
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCPU(*(torch.testing.get_all_dtypes(include_half=False, include_bfloat16=False, include_complex=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False)))
+    def test_bernoulli_self(self, device, dtype):
+
+        def isBinary(t):
+            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
+
+        t = torch.empty(10, 10, dtype=dtype, device=device)
+
+        t.fill_(2)
+        t.bernoulli_(0.5)
+        self.assertTrue(isBinary(t))
+
+        p = torch.rand(10, dtype=torch.float32, device=device).expand(10, 10)
+        t.fill_(2)
+        t.bernoulli_(p)
+        self.assertTrue(isBinary(t))
+
+        t.fill_(2)
+        torch.bernoulli(torch.rand_like(t, dtype=torch.float32), out=t)
+        self.assertTrue(isBinary(t))
+
+        t.fill_(2)
+        t.bernoulli_(torch.rand_like(t, dtype=torch.float32))
+        self.assertTrue(isBinary(t))
+
+    @slowTest
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_bernoulli_edge_cases(self, device, dtype):
+        # Need to draw a lot of samples to cover every random floating point number.
+        a = torch.zeros(10000, 10000, dtype=dtype, device=device)  # probability of drawing "1" is 0
+        num_ones = (torch.bernoulli(a) == 1).sum()
+        self.assertEqual(num_ones, 0)
+
+        b = torch.ones(10000, 10000, dtype=dtype, device=device)  # probability of drawing "1" is 1
+        num_zeros = (torch.bernoulli(b) == 0).sum()
+        self.assertEqual(num_zeros, 0)
 
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_exponential(self, device, dtype):
@@ -13525,6 +13570,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
         def _test(amplitude, L, n):
@@ -13559,6 +13605,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
         num_trials = 100
@@ -13623,6 +13670,7 @@ class TestTorchDeviceType(TestCase):
             _test(data_size, kwargs)
 
     @onlyOnCPUAndCUDA
+    @skipCPUIfNoMkl
     @skipIfRocm
     def test_batch_istft(self, device):
         original = torch.tensor([
@@ -17118,6 +17166,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # NumPy has the same behavior.
     @onlyOnCPUAndCUDA
     @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
+    @unittest.skipIf(IS_PPC, "Test is borken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):

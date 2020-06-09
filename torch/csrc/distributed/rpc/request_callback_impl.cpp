@@ -50,7 +50,10 @@ std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
       return std::make_unique<UnpickledPythonRemoteCall>(
-          prc.serializedPyObj(), prc.retRRefId(), prc.retForkId());
+          prc.serializedPyObj(),
+          prc.retRRefId(),
+          prc.retForkId(),
+          prc.isAsyncExecution());
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       // Deserialize the wrapped RPC if it contains Python UDF
@@ -103,6 +106,58 @@ struct DistAutogradContextGuard {
 
   int64_t prevCtxId_;
 };
+
+void processAsyncExecution(
+    const py::object& pyFn,
+    const int64_t messageId,
+    const std::shared_ptr<FutureMessage>& responseFuture,
+    std::function<void(
+        const py::object&,
+        int64_t,
+        PythonRpcHandler&,
+        const std::shared_ptr<FutureMessage>&)> postProcessing) {
+  std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  {
+    py::gil_scoped_acquire acquire;
+    auto result = pythonRpcHandler.runPythonUdf(pyFn);
+
+    if (pythonRpcHandler.isRemoteException(result)) {
+      // Hit exception when running the user function.
+      // Not releasing GIL before serialize to avoid an additional
+      // context switch.
+      postProcessing(result, messageId, pythonRpcHandler, responseFuture);
+      return;
+    }
+
+    try {
+      pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
+    } catch (const py::cast_error& e) {
+      auto type = result.get_type();
+      auto errMsg = c10::str(
+          e.what(),
+          ". Functions decorated with @rpc.async_function must return a "
+          "torch.futures.Future object, but got ",
+          type.attr("__module__").cast<std::string>(),
+          ".",
+          type.attr("__qualname__").cast<std::string>());
+      throw std::runtime_error(errMsg);
+    }
+  }
+
+  pyFuture->fut->addCallback([messageId,
+                              responseFuture,
+                              postProcessing{std::move(postProcessing)},
+                              jitFuture = pyFuture->fut,
+                              &pythonRpcHandler]() {
+    py::gil_scoped_acquire acquire;
+    postProcessing(
+        jit::toPyObject(jitFuture->value()),
+        messageId,
+        pythonRpcHandler,
+        responseFuture);
+  });
+}
 
 } // anonymous namespace
 
@@ -205,68 +260,35 @@ void RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_CALL: {
       auto& upc = static_cast<UnpickledPythonCall&>(rpc);
-      auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       if (upc.isAsyncExecution()) {
-        std::shared_ptr<jit::PythonFutureWrapper> pyFuture;
-        {
-          py::gil_scoped_acquire acquire;
-          auto result =
-              pythonRpcHandler.runPythonUdf(std::move(upc).movePythonUdf());
-
-          if (pythonRpcHandler.isRemoteException(result)) {
-            // Hit exception when running the user function.
-            // Not releasing GIL before serialize to avoid an additional
-            // context switch.
-            auto serializedPyObj = pythonRpcHandler.serialize(result);
-            py::gil_scoped_release release;
-            markComplete(
-                std::move(PythonResp(std::move(serializedPyObj))).toMessage());
-            return;
-          }
-
-          try {
-            pyFuture = result.cast<std::shared_ptr<jit::PythonFutureWrapper>>();
-          } catch (const py::cast_error& e) {
-            auto type = result.get_type();
-            auto errMsg = c10::str(
-                e.what(),
-                ". Functions decorated with @rpc.async_function must return a "
-                "torch.futures.Future object, but got ",
-                type.attr("__module__").cast<std::string>(),
-                ".",
-                type.attr("__qualname__").cast<std::string>());
-
-            {
-              py::gil_scoped_release release;
-              responseFuture->markCompleted(
-                  createExceptionResponse(errMsg, messageId));
-            }
-            return;
-          }
+        try {
+          processAsyncExecution(
+              upc.pythonUdf(),
+              messageId,
+              responseFuture,
+              [](const py::object& result,
+                 const int64_t messageId,
+                 PythonRpcHandler& pythonRpcHandler,
+                 const std::shared_ptr<FutureMessage>& responseFuture) {
+                auto serializedPyObj = pythonRpcHandler.serialize(result);
+                py::gil_scoped_release release;
+                auto m = std::move(PythonResp(std::move(serializedPyObj)))
+                             .toMessage();
+                m.setId(messageId);
+                responseFuture->markCompleted(std::move(m));
+              });
+        } catch (std::exception& e) {
+          responseFuture->markCompleted(
+              createExceptionResponse(e.what(), messageId));
         }
-        pyFuture->fut->addCallback([msgId = messageId,
-                                    responseFuture = responseFuture,
-                                    jitFuture = pyFuture->fut,
-                                    &pythonRpcHandler]() {
-          std::shared_ptr<SerializedPyObj> serializedPyObj;
-          {
-            py::gil_scoped_acquire acquire;
-            serializedPyObj =
-                std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
-                    jit::toPyObject(jitFuture->value())));
-          }
-          auto m =
-              std::move(PythonResp(std::move(*serializedPyObj))).toMessage();
-          m.setId(msgId);
-          responseFuture->markCompleted(std::move(m));
-        });
       } else {
+        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
         std::shared_ptr<SerializedPyObj> serializedPyObj;
         {
           py::gil_scoped_acquire acquire;
-          serializedPyObj = std::make_shared<SerializedPyObj>(
-              pythonRpcHandler.serialize(pythonRpcHandler.runPythonUdf(
-                  std::move(upc).movePythonUdf())));
+          serializedPyObj =
+              std::make_shared<SerializedPyObj>(pythonRpcHandler.serialize(
+                  pythonRpcHandler.runPythonUdf(upc.pythonUdf())));
         }
         markComplete(
             std::move(PythonResp(std::move(*serializedPyObj))).toMessage());
@@ -371,26 +393,7 @@ void RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
-
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-      IValue py_ivalue;
-      try {
-        {
-          py::gil_scoped_acquire acquire;
-          py_ivalue = jit::toIValue(
-              pythonRpcHandler.runPythonUdf(std::move(uprc).movePythonUdf()),
-              PyObjectType::get());
-        }
-        ownerRRef->setValue(std::move(py_ivalue));
-      } catch (py::error_already_set& e) {
-        // py::error_already_set requires GIL to destruct, take special care.
-        ownerRRef->setError(e.what());
-        py::gil_scoped_acquire acquire;
-        e.restore();
-        PyErr_Clear();
-      } catch (std::exception& e) {
-        ownerRRef->setError(e.what());
-      }
 
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
@@ -403,7 +406,53 @@ void RequestCallbackImpl::processRpc(
         // rrefId (OwnerRRef does not have a forkId anyway).
         ctx.addForkOfOwner(rrefId, forkId);
       }
-      markComplete(RemoteRet(rrefId, forkId).toMessage());
+
+      if (uprc.isAsyncExecution()) {
+        try {
+          processAsyncExecution(
+              uprc.pythonUdf(),
+              messageId,
+              responseFuture,
+              [ownerRRef, rrefId, forkId](
+                  const py::object& result,
+                  const int64_t messageId,
+                  PythonRpcHandler& /* unused */,
+                  const std::shared_ptr<FutureMessage>& responseFuture) {
+                IValue py_ivalue = jit::toIValue(result, PyObjectType::get());
+
+                py::gil_scoped_release release;
+                ownerRRef->setValue(std::move(py_ivalue));
+                auto m = RemoteRet(rrefId, forkId).toMessage();
+                m.setId(messageId);
+                responseFuture->markCompleted(std::move(m));
+              });
+        } catch (std::exception& e) {
+          ownerRRef->setError(e.what());
+          auto m = RemoteRet(rrefId, forkId).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(std::move(m));
+        }
+      } else {
+        IValue py_ivalue;
+        try {
+          {
+            py::gil_scoped_acquire acquire;
+            py_ivalue = jit::toIValue(
+                pythonRpcHandler.runPythonUdf(uprc.pythonUdf()),
+                PyObjectType::get());
+          }
+          ownerRRef->setValue(std::move(py_ivalue));
+        } catch (py::error_already_set& e) {
+          // py::error_already_set requires GIL to destruct, take special care.
+          ownerRRef->setError(e.what());
+          py::gil_scoped_acquire acquire;
+          e.restore();
+          PyErr_Clear();
+        } catch (std::exception& e) {
+          ownerRRef->setError(e.what());
+        }
+        markComplete(RemoteRet(rrefId, forkId).toMessage());
+      }
       return;
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
@@ -447,58 +496,65 @@ void RequestCallbackImpl::processRpc(
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       // Making this lambda mutable to allow move-capture it in callbacks
-      auto serialize = [](IValue value) mutable -> SerializedPyObj {
-        auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-        // Need this GIL to guard jit::toPyObj and destruct its returned
-        // py::object
-        py::gil_scoped_acquire acquire;
-        return pythonRpcHandler.serialize(jit::toPyObject(std::move(value)));
+      auto postProcessing = [responseFuture](
+                                const c10::intrusive_ptr<OwnerRRef>& rref,
+                                int64_t messageId) mutable {
+        auto whenValueSet = rref->getFuture();
+        if (whenValueSet->hasError()) {
+          responseFuture->setError(whenValueSet->error()->what());
+          return;
+        }
+        try {
+          auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+          std::shared_ptr<SerializedPyObj> result;
+          {
+            // Need this GIL to guard jit::toPyObj and destruct its returned
+            // py::object
+            py::gil_scoped_acquire acquire;
+            result = std::make_shared<SerializedPyObj>(
+                pythonRpcHandler.serialize(jit::toPyObject(rref->getValue())));
+          }
+          Message m =
+              PythonRRefFetchRet(std::move(*result).toIValues()).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(std::move(m));
+        } catch (py::error_already_set& e) {
+          // py::error_already_set requires GIL to destruct, take special care.
+          responseFuture->setError(e.what());
+          py::gil_scoped_acquire acquire;
+          e.restore();
+          PyErr_Clear();
+        } catch (const std::exception& e) {
+          responseFuture->setError(e.what());
+        }
       };
+
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
 
       auto futureOwner = ctx.getOwnerRRef(prf.rrefId());
 
-      if (futureOwner->completed()) { // optional fast-path
-        // the OwnerRRef has been created
-        const auto& rref = futureOwner->constValue();
-        if (rref->hasValue()) {
-          SerializedPyObj result = serialize(rref->getValue());
-          markComplete(
-              PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
-          return;
-        }
+      if (futureOwner->completed() && futureOwner->constValue()->hasValue()) {
+        // optional fast-path, the OwnerRRef has been created
+        postProcessing(futureOwner->constValue(), messageId);
+        return;
       }
 
-      futureOwner->addCallback([responseFuture,
-                                messageId,
-                                futureOwner,
-                                serialize{std::move(serialize)}]() mutable {
-        const auto& rref = futureOwner->constValue();
-        auto whenValueSet = rref->getFuture();
+      futureOwner->addCallback(
+          [messageId,
+           futureOwner,
+           postProcessing{std::move(postProcessing)}]() mutable {
+            const auto& rref = futureOwner->constValue();
 
-        // Our response is satisfied when the the rpc.remote() request
-        // finishes executing on the owner.
-        whenValueSet->addCallback([responseFuture,
-                                   messageId,
-                                   rref,
-                                   whenValueSet,
-                                   serialize{std::move(serialize)}]() mutable {
-          if (whenValueSet->hasError()) {
-            responseFuture->setError(whenValueSet->error()->what());
-            return;
-          }
-          try {
-            SerializedPyObj result = serialize(rref->getValue());
-            Message m =
-                PythonRRefFetchRet(std::move(result).toIValues()).toMessage();
-            m.setId(messageId);
-            responseFuture->markCompleted(std::move(m));
-          } catch (const std::exception& e) {
-            responseFuture->setError(e.what());
-          }
-        });
-      });
+            // Our response is satisfied when the the rpc.remote() request
+            // finishes executing on the owner.
+            rref->getFuture()->addCallback(
+                [messageId,
+                 rref,
+                 postProcessing{std::move(postProcessing)}]() mutable {
+                  postProcessing(rref, messageId);
+                });
+          });
 
       return;
     }
@@ -655,30 +711,80 @@ void RequestCallbackImpl::processRpc(
       {
         torch::autograd::profiler::TLSProfilerGuard g(
             profilingConfig,
-            [&profiledEvents](const std::vector<
-                              std::vector<torch::autograd::profiler::Event>>&
-                                  event_lists) {
+            [&profiledEvents, profilingConfig](
+                const std::vector<std::vector<
+                    torch::autograd::profiler::Event>>& event_lists) {
               // Gather all events into a vector
               for (auto& l : event_lists) {
                 for (auto& e : l) {
                   profiledEvents.push_back(e);
                 }
               }
-              // find __start_profile event.
+              // find __start_profile event and __cuda_start_event.
+              // TODO: only find __cuda_start_event if record_cuda = true.
+              bool cuda_profiling_enabled = profilingConfig.state ==
+                  torch::autograd::profiler::ProfilerState::CUDA;
+              bool found_cpu_start = false;
               const torch::autograd::profiler::Event* profilerStart = nullptr;
+              // Each device has its own cudaProfilerStart, so we must take
+              // care to use the correct one depending on the device the
+              // operation ran on.
+              std::unordered_map<int, const torch::autograd::profiler::Event*>
+                  cudaProfilerStarts;
               for (const auto& e : profiledEvents) {
-                if (0 == strcmp(e.name(), "__start_profile")) {
+                if (!found_cpu_start &&
+                    0 == strcmp(e.name(), "__start_profile")) {
                   profilerStart = &e;
+                  found_cpu_start = true;
+                }
+                if (cuda_profiling_enabled &&
+                    0 == strcmp(e.name(), "__cuda_start_event")) {
+                  auto device = e.device();
+                  TORCH_CHECK(
+                      device != -1,
+                      "CUDA profiling was enabled but could not find CUDA device.");
+                  TORCH_CHECK(
+                      cudaProfilerStarts.find(device) ==
+                          cudaProfilerStarts.end(),
+                      c10::str(
+                          "Duplicate __cuda_start_event found for ", device));
+                  cudaProfilerStarts[device] = &e;
+                }
+                // TODO: determine no. of CUDA devices and break here if we have
+                // a cudaProfilerStart for all of them, in the case of cuda
+                // profiling.
+                if (found_cpu_start && !cuda_profiling_enabled) {
                   break;
                 }
               }
               // We should always find __start_profile.
-              TORCH_CHECK(profilerStart != nullptr);
-              // For every event, precompute the relative CPU time before
-              // serialization.
-              for (const auto& e : profiledEvents) {
-                double cpu_elapsed_us = profilerStart->cpu_elapsed_us(e);
-                e.setRelativeElapsedCpuUs(cpu_elapsed_us);
+              TORCH_CHECK(
+                  profilerStart != nullptr,
+                  "Expected to find __start_profile event.");
+              // Should have >= 1 CUDA start event.
+              // TODO: we can enhance this assert by ensuring we have found a
+              // start for every available CUDA device.
+              TORCH_CHECK(
+                  !cuda_profiling_enabled || cudaProfilerStarts.size() > 0,
+                  "Profiler was enabled with CUDA recording, but did not find __cuda_start_event.");
+              // precompute the relative CUDA time before serialization.
+              for (auto& e : profiledEvents) {
+                if (cuda_profiling_enabled && e.has_cuda()) {
+                  auto cuda_device = e.device();
+                  TORCH_CHECK(
+                      cuda_device != -1,
+                      "CUDA profiling was enabled but could not find CUDA device.");
+                  auto it = cudaProfilerStarts.find(cuda_device);
+                  TORCH_CHECK(
+                      it != cudaProfilerStarts.end(),
+                      c10::str(
+                          "Failed to find __cuda_start-event for device ",
+                          cuda_device));
+                  auto cudaProfilerStartEvent = it->second;
+                  double cuda_elapsed_us =
+                      cudaProfilerStartEvent->cuda_elapsed_us(e);
+                  e.setCudaElapsedUs(cuda_elapsed_us);
+                }
               }
             });
         TORCH_INTERNAL_ASSERT(
@@ -729,6 +835,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
   auto& rrefContext = RRefContext::getInstance();
   try {
     rrefContext.recordThreadLocalPendingRRefs();
+    // Deserialize PythonUDF here to trigger RRef unpickling
     std::unique_ptr<RpcCommandBase> rpc = deserializePythonRpcCommand(
         deserializeRequest(request), request.type());
     auto rrefsReadyFuture = rrefContext.waitForThreadLocalPendingRRefs();

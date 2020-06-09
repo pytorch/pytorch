@@ -7,6 +7,7 @@ namespace distributed {
 namespace autograd {
 using rpc::RpcCommandBase;
 
+constexpr auto kProfileEventsStartIdx = 3;
 // This constructor is called when creating the RpcProfilingResp before sending
 // it as a message over the wire.
 RpcWithProfilingResp::RpcWithProfilingResp(
@@ -108,12 +109,11 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   auto payload = message.payload();
   auto tupleElements = rpc::readWrappedPayload(payload, message);
   // Ensure that we have the expected number of elements
-  auto profileEventsStartIdx = 3;
   TORCH_INTERNAL_ASSERT(
-      tupleElements.size() >= profileEventsStartIdx,
+      tupleElements.size() >= kProfileEventsStartIdx,
       c10::str(
           "Expected payload size of at least ",
-          profileEventsStartIdx,
+          kProfileEventsStartIdx,
           " but got size ",
           tupleElements.size()));
   rpc::MessageType wrappedMsgType =
@@ -122,8 +122,8 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   int profiledEventsSize = tupleElements[2].toInt();
   std::vector<torch::autograd::profiler::Event> remoteEvents;
   remoteEvents.reserve(profiledEventsSize);
-  for (int i = profileEventsStartIdx;
-       i < profileEventsStartIdx + profiledEventsSize;
+  for (int i = kProfileEventsStartIdx;
+       i < kProfileEventsStartIdx + profiledEventsSize;
        ++i) {
     TORCH_CHECK(i < tupleElements.size());
     // Reconstruct remote event from the ivalues.

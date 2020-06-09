@@ -18,8 +18,8 @@ void confirmPendingUser(
     const ForkId& expectedForkId) {
   if (!futureMessage.hasError()) {
     auto msgType = futureMessage.constValue().type();
-    auto rr = dynamic_cast<RemoteRet*>(
-        deserializeResponse(futureMessage.constValue(), msgType).get());
+    auto rpc = deserializeResponse(futureMessage.constValue(), msgType);
+    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
     TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
   } else {
     // Handle errors, such as timeouts, by invoking the error handler on the
@@ -57,8 +57,8 @@ c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
     return deletedRRef;
   } else {
     auto msgType = futureMessage.constValue().type();
-    auto rr = dynamic_cast<RemoteRet*>(
-        deserializeResponse(futureMessage.constValue(), msgType).get());
+    auto rpc = deserializeResponse(futureMessage.constValue(), msgType);
+    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
     TORCH_INTERNAL_ASSERT(
         rr->rrefId() == rr->forkId(),
         "Expecting an OwnerRRef as RemoteRet but got a fork.");

@@ -233,6 +233,7 @@ libtorch_core_sources = [
 ]
 
 libtorch_distributed_sources = [
+    "torch/csrc/distributed/autograd/autograd.cpp",
     "torch/csrc/distributed/autograd/utils.cpp",
     "torch/csrc/distributed/autograd/context/container.cpp",
     "torch/csrc/distributed/autograd/context/context.cpp",
@@ -244,9 +245,9 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp",
+    "torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.cpp",
-    "torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/profiler/server_process_global_profiler.cpp",
     "torch/csrc/distributed/rpc/python_call.cpp",

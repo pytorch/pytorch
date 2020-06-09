@@ -7,7 +7,7 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-constexpr auto profilingResponseElementExpectedSize = 3;
+constexpr auto kProfilingResponseElementExpectedSize = 3;
 
 using rpc::RpcCommandBase;
 
@@ -111,10 +111,10 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
   auto tupleElements = rpc::readWrappedPayload(payload, message);
   // Ensure that we have the expected number of elements
   TORCH_INTERNAL_ASSERT(
-      tupleElements.size() == profilingResponseElementExpectedSize,
+      tupleElements.size() == kProfilingResponseElementExpectedSize,
       c10::str(
           "Expected payload of size ",
-          profilingResponseElementExpectedSize,
+          kProfilingResponseElementExpectedSize,
           " but got ",
           tupleElements.size()));
   rpc::MessageType wrappedMsgType =
@@ -144,6 +144,5 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
 }
 
 } // namespace autograd
-
 } // namespace distributed
 } // namespace torch

@@ -115,27 +115,10 @@ struct TORCH_API ProfilerConfig {
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.
-  at::IValue toIValues() const {
-    c10::impl::GenericList eventIValueList(at::AnyType::get());
-    eventIValueList.push_back(at::IValue(static_cast<int64_t>(state)));
-    eventIValueList.push_back(at::IValue(report_input_shapes));
-    eventIValueList.push_back(at::IValue(profile_memory));
-    return eventIValueList;
-  }
+  at::IValue toIValues() const;
 
   // Reconstructs a ProfilerConfig from IValues given by toIValues.
-  static ProfilerConfig fromIValue(at::IValue profilerConfigIValue) {
-    TORCH_INTERNAL_ASSERT(
-      profilerConfigIValue.isList(),
-      "Expected IValue to containt ype c10::impl::GenericList");
-    auto ivalues = profilerConfigIValue.toList();
-    ProfilerConfig cfg(
-      static_cast<ProfilerState>(ivalues.get(0).toInt()),
-      ivalues.get(1).toBool(),
-      ivalues.get(2).toBool()
-    );
-    return cfg;
-  }
+  static ProfilerConfig fromIValue(at::IValue profilerConfigIValue);
 
 };
 
@@ -156,50 +139,23 @@ struct TORCH_API Event final {
       uint16_t thread_id,
       bool record_cuda,
       at::RecordFunctionHandle handle = 0,
-      std::vector<std::vector<int64_t>>&& shapes = {}, int node_id = -1, double relative_elapsed_cpu_us = -1)
+      std::vector<std::vector<int64_t>>&& shapes = {},
+      int node_id = -1,
+      bool record_cpu_ns = true, bool is_remote = false)
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes), node_id_(node_id), relative_elapsed_cpu_us_(relative_elapsed_cpu_us) {
-    record(record_cuda);
+        shapes_(shapes), node_id_(node_id), record_cpu_ns_(record_cpu_ns), is_remote_(is_remote) {
+          record(record_cuda);
   }
 
   // Returns IValues corresponding to event structure, to be used for
   // serialization.
-  at::IValue toIValues() const {
-    c10::impl::GenericList eventIValueList(at::AnyType::get());
-    eventIValueList.push_back(at::IValue(static_cast<int64_t>(kind_)));
-    eventIValueList.push_back(at::IValue(std::string(name_.str())));
-    eventIValueList.push_back(at::IValue(thread_id_));
-    eventIValueList.push_back(at::IValue(static_cast<double>(handle_)));
-    eventIValueList.push_back(at::IValue(node_id_));
-    eventIValueList.push_back(at::IValue(relative_elapsed_cpu_us_));
-    // CPU memory usage
-    eventIValueList.push_back(at::IValue(cpu_memory_usage_));
-    return at::IValue(eventIValueList);
-  }
+  at::IValue toIValues() const;
 
   // Reconstructs an event from IValues given by toIValues.
-  static Event fromIValue(at::IValue eventIValue) {
-    TORCH_INTERNAL_ASSERT(
-        eventIValue.isList(),
-        "Expected IValue to contain type c10::impl::GenericList");
-    auto ivalues = eventIValue.toList();
-
-    Event evt(
-      static_cast<EventKind>(ivalues.get(0).toInt()),
-      at::StringView(ivalues.get(1).toStringRef()),
-      ivalues.get(2).toInt(),
-      false, // TODO: record_cuda
-      static_cast<at::RecordFunctionHandle>(ivalues.get(3).toDouble()),
-      {}, // TODO: record shapes
-      ivalues.get(4).toInt(),
-      ivalues.get(5).toDouble() // relative time difference computed by remote end.
-    );
-    evt = evt.setCPUMemoryUsage(ivalues.get(6).toInt());
-    return evt;
-  }
+  static Event fromIValue(at::IValue eventIValue);
 
   void record(bool record_cuda);
   std::string kind() const {
@@ -229,18 +185,16 @@ struct TORCH_API Event final {
   double cpu_elapsed_us(const Event & e) const {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
-  double getElapsedCpuNs() const {
-    // returns a pre-computed difference in cpu_ns with another event,
-    // generally the __start_profile event. This is expected to be set for
-    // remote events.
-    return relative_elapsed_cpu_us_;
-  }
-  double cuda_elapsed_us(const Event & e);
+  double cuda_elapsed_us(const Event & e) const;
   bool has_cuda() const {
-    return cuda_event != nullptr;
+    return (isRemote() && device_ != -1) || cuda_event != nullptr;
   }
   int device() const {
     return device_;
+  }
+
+  void setDevice(int device) {
+    device_ = device;
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
@@ -284,9 +238,33 @@ struct TORCH_API Event final {
     return *this;
   }
 
-  // Set relative_elapsed_cpu_ns
-  void setRelativeElapsedCpuUs(double relative_elapsed_cpu_us) const {
-    relative_elapsed_cpu_us_ = relative_elapsed_cpu_us;
+  // Set cpu_ns_
+  void setCPUns(int64_t cpu_ns) {
+    cpu_ns_ = cpu_ns;
+  }
+
+  // Set cuda_memory_usage_
+  void setCudaMemoryUsage(int64_t cuda_memory_usage) {
+    cuda_memory_usage_ = cuda_memory_usage;
+  }
+
+  // Set cuda_elapsed_us_.
+  void setCudaElapsedUs(double cuda_elapsed_us) {
+    cuda_elapsed_us_ = cuda_elapsed_us;
+  }
+
+  // Get precomputed cuda_elapsed_us_
+  double getCudaElapsedUs() const {
+    TORCH_CHECK(!has_cuda() || cuda_elapsed_us_ != -1);
+    return cuda_elapsed_us_;
+  }
+
+  int64_t getCPUns() {
+    return cpu_ns_;
+  }
+
+  bool isRemote() const {
+    return is_remote_;
   }
 
 private:
@@ -302,7 +280,9 @@ private:
   int device_ = -1;
   struct CUevent_st* cuda_event = nullptr;
   int node_id_ = 0;
-  mutable double relative_elapsed_cpu_us_ = -1;
+  bool record_cpu_ns_ = true;
+  double cuda_elapsed_us_ = -1;
+  bool is_remote_ = false;
 };
 
 // a linked-list of fixed sized vectors, to avoid
