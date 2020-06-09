@@ -150,13 +150,8 @@ class WeightedRandomSampler(Sampler):
         [0, 1, 4, 3, 2]
     """
 
-<<<<<<< Updated upstream
-    def __init__(self, weights, num_samples, replacement=True):
-        if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
-=======
     def __init__(self, weights, num_samples, replacement=True, generator=None):
-        if not isinstance(num_samples, int) or isinstance(num_samples, bool) or \
->>>>>>> Stashed changes
+        if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
             raise ValueError("num_samples should be a positive integer "
                              "value, but got num_samples={}".format(num_samples))
