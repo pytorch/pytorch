@@ -9,9 +9,9 @@
 #include <cstddef>
 #include <vector>
 
-typedef enum ncclDataType_t ncclDataType_t;
-typedef enum ncclResult_t;
-typedef enum ncclRedOp_t ncclRedOp_t;
+typedef enum ncclDataType_t;
+typedef enum ncclResult_t ncclResult_t;
+typedef enum ncclRedOp_t;
 typedef struct ncclComm* ncclComm_t;
 typedef struct ncclUniqueId ncclUniqueId;
 int32_t ncclSum;
