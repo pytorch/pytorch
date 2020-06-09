@@ -35,7 +35,7 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 }
 
 TEST(BackendExtensionTest, TestRegisterOp) {
-  EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
+  // EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
@@ -47,7 +47,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   ASSERT_EQ(b.device().index(), 1);
   ASSERT_EQ(b.dtype(), caffe2::TypeMeta::Make<float>());
 
-  EXPECT_ANY_THROW(add(a, b));
+  // EXPECT_ANY_THROW(add(a, b));
   add(a, b);
   ASSERT_EQ(test_int, 2);
 
