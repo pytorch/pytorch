@@ -63,6 +63,24 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::to_here(RRef(t) self, double timeout) -> t",
+         [](Stack& stack) {
+           auto timeout = pop(stack).toDouble();
+           auto rref = pop(stack).toRRef();
+           IValue res;
+           if (rref->isOwner()) {
+             res =
+                 c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
+                     ->getValue();
+           } else {
+             res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
+                       ->toHere(timeout);
+           }
+           push(stack, std::move(res));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::local_value(RRef(t) self) -> t",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();

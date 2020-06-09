@@ -569,7 +569,7 @@ Module freeze_module(
         "attempted to freeze a module that return itself");
   }
 
-  auto moduleClone = module.clone();
+  auto moduleClone = module.clone(true);
   AttributePropagator attrPropagator(moduleClone, preservedAttrs);
   attrPropagator.run();
   return moduleClone;
