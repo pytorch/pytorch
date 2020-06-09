@@ -1,5 +1,4 @@
 import torch
-from torch._six import int_classes as _int_classes
 
 
 class Sampler(object):
@@ -145,7 +144,7 @@ class WeightedRandomSampler(Sampler):
     """
 
     def __init__(self, weights, num_samples, replacement=True):
-        if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
+        if not isinstance(num_samples, int) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
             raise ValueError("num_samples should be a positive integer "
                              "value, but got num_samples={}".format(num_samples))
@@ -184,7 +183,7 @@ class BatchSampler(Sampler):
         # Since collections.abc.Iterable does not check for `__getitem__`, which
         # is one way for an object to be an iterable, we don't do an `isinstance`
         # check here.
-        if not isinstance(batch_size, _int_classes) or isinstance(batch_size, bool) or \
+        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
             raise ValueError("batch_size should be a positive integer value, "
                              "but got batch_size={}".format(batch_size))

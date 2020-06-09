@@ -44,12 +44,6 @@ else:
 
 
 if PY2:
-    int_classes = (int, long)
-else:
-    int_classes = int
-
-
-if PY2:
     FileNotFoundError = IOError
 else:
     FileNotFoundError = builtins.FileNotFoundError

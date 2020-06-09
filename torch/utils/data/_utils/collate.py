@@ -7,7 +7,7 @@ static methods.
 
 import torch
 import re
-from torch._six import container_abcs, string_classes, int_classes
+from torch._six import container_abcs, string_classes
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
@@ -66,7 +66,7 @@ def default_collate(batch):
             return torch.as_tensor(batch)
     elif isinstance(elem, float):
         return torch.tensor(batch, dtype=torch.float64)
-    elif isinstance(elem, int_classes):
+    elif isinstance(elem, int):
         return torch.tensor(batch)
     elif isinstance(elem, string_classes):
         return batch
