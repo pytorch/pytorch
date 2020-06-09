@@ -8020,6 +8020,41 @@ class TestTorchDeviceType(TestCase):
                 np_fn = partial(np.flip, axis=flip_dim)
                 self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
 
+    def _test_fliplr_flipud(self, funcs, min_dim, max_dim, device, dtype):
+        for dim in range(min_dim, max_dim + 1):
+            shape = self._rand_shape(dim, 5, 10)
+            # Randomly scale the input
+            data = (torch.randn(*shape).to(dtype) * random.randint(50, 100)).tolist()
+            # Use _np_compare_func as it copies the output of np_func,
+            # which takes care of negative strides if present.
+            torch_fn, np_fn = funcs
+            self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_fliplr(self, device, dtype):
+        funcs = (torch.fliplr, np.fliplr)
+        self._test_fliplr_flipud(funcs, 2, 4, device, dtype)
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    def test_fliplr_invalid(self, device, dtype):
+        x = torch.randn(42).to(dtype)
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
+            torch.fliplr(x)
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
+            torch.fliplr(torch.tensor(42, dtype=dtype))
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_flipud(self, device, dtype):
+        funcs = (torch.flipud, np.flipud)
+        self._test_fliplr_flipud(funcs, 1, 4, device, dtype)
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    def test_flipud_invalid(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 1-d."):
+            torch.flipud(torch.tensor(42, dtype=dtype))
+
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
         self.assertEqual(torch.tensor([1, 2, 3, 4]).view(2, 2), data.rot90(0, [0, 1]))
