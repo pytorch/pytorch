@@ -976,7 +976,7 @@ class TestFreezing(JitTestCase):
             @torch.jit.export
             def modify_a(self, x):
                 self.a[0] += 10
-                return self. b
+                return self.b
 
             @torch.jit.export
             def modify_b(self, x):
@@ -989,3 +989,25 @@ class TestFreezing(JitTestCase):
         # Both attribute "a" and method "modify_a" are preserved
         self.assertTrue(fm.hasattr("a"))
         self.assertFalse(fm.hasattr("b"))
+
+    def test_freeze_module_with_user_preserved_method2(self):
+        class Module(nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = torch.tensor([2.2])
+
+            def forward(self, x):
+                self.b += 10
+                return self.a + self.b
+
+            @torch.jit.export
+            def modify_a(self, x):
+                self.a[0] += 10
+                return self.b + self.a
+
+        m = torch.jit.script(Module())
+        m.eval()
+        fm = torch._C._freeze_module(m._c, ["modify_a"])
+        FileCheck().check('prim::GetAttr[name="a"]').run(fm.forward.graph)
+        FileCheck().check('prim::GetAttr[name="a"]').run(fm.modify_a.graph)

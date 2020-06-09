@@ -70,16 +70,22 @@ class AttributePropagator {
       runOptimization(subgraph, /* unroll? */ false);
     };
     for (auto function : preservedMethods_) {
+      GRAPH_DEBUG("Analyzing function: " + function->name());
       auto graph = function->graph();
       optimizeSubGraphs(graph, applyInline);
-      propagateAttributes(graph);
+      // Record Attributes that are explicitly set in the module.
+      // They cannot be folded.
+      recordMutableAttrs(graph);
     }
 
     for (auto function : preservedMethods_) {
+      GRAPH_DEBUG("Propagating function: " + function->name());
       auto graph = function->graph();
+      propagateAttributes(graph);
       optimizeSubGraphs(graph, applyOptimizations);
-      cleanupFrozenModule(graph);
     }
+    GRAPH_DEBUG("Cleaning up module");
+    cleanupFrozenModule();
   }
 
  private:
@@ -224,10 +230,13 @@ class AttributePropagator {
             insertMutableAttr(name, attr, mptr);
           }
         } else if (n->kind() == prim::fork) {
-          auto func = [this](std::shared_ptr<Graph>& subgraph) {
-            recordMutableAttrs(subgraph);
-          };
-          applyToSubGraph(n, graph, func);
+          applyToForkSubgraph(
+              n,
+              graph,
+              std::bind(
+                  &AttributePropagator::recordMutableAttrs,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
@@ -290,10 +299,6 @@ class AttributePropagator {
     auto block = graph->block();
     std::stack<Block*> blocks({block});
 
-    // Record Attributes that are explicitly set in the module. They cannot be
-    // folded.
-    recordMutableAttrs(graph);
-
     Node* m = *block->nodes().begin();
     WithInsertPoint guard(m);
     while (!blocks.empty()) {
@@ -354,22 +359,27 @@ class AttributePropagator {
           n->outputs().at(0)->replaceAllUsesWith(paramConst);
           n->removeAllInputs();
         } else if (n->kind() == prim::fork) {
-          auto func = [this](std::shared_ptr<Graph>& subgraph) {
-            propagateAttributes(subgraph);
-          };
-          applyToSubGraph(n, graph, func);
+          applyToForkSubgraph(
+              n,
+              graph,
+              std::bind(
+                  &AttributePropagator::propagateAttributes,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
   }
 
-  void applyToSubGraph(
+  void applyToForkSubgraph(
       Node* n,
       std::shared_ptr<Graph>& graph,
       const std::function<void(std::shared_ptr<Graph>&)>& func) {
     TORCH_CHECK(n->kind() == prim::fork);
     auto attrModule = module_;
     auto node = n->inputs()[0]->node();
+    // Check if first parameter of fork is a module. This module is used
+    // as the base module (similar to 'self' in forward) to resolve GetAttrs.
     if (node->kind() != prim::GetAttr)
       return;
     auto name = node->s(attr::name);
@@ -399,9 +409,12 @@ class AttributePropagator {
   // 1) Remove unused attributes.
   // 2) Remove unreferenced submodules
   // 3) Remove non public unreferenced methods.
-  void cleanupFrozenModule(std::shared_ptr<Graph>& graph) {
-    recordReferencedAttrs(graph);
-    handleSharedClassType(module_, graph);
+  void cleanupFrozenModule() {
+    for (auto function : preservedMethods_) {
+      auto graph = function->graph();
+      recordReferencedAttrs(graph);
+      handleSharedClassType(module_, graph);
+    }
     removeUnusedAttrs();
   }
 
@@ -432,10 +445,13 @@ class AttributePropagator {
             }
           }
         } else if (n->kind() == prim::fork) {
-          auto func = [this](std::shared_ptr<Graph>& subgraph) {
-            recordReferencedAttrs(subgraph);
-          };
-          applyToSubGraph(n, graph, func);
+          applyToForkSubgraph(
+              n,
+              graph,
+              std::bind(
+                  &AttributePropagator::recordReferencedAttrs,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
