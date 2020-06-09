@@ -2566,9 +2566,10 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         # Check to make sure weight observers run correctly
         ref_qparams = []
         qconfig = script_qconfig(default_dynamic_qconfig)
+        wt_module = wrap_cpp_module(qconfig.weight)
         for wt in [model.res1.weight, model.res2.weight]:
-            get_forward(qconfig.weight)(wt)
-            qparams = qconfig.weight._get_method('calculate_qparams')()
+            wt_module(wt)
+            qparams = wt_module.calculate_qparams()
             ref_qparams.append((qparams[0].item(), qparams[1].item()))
 
         m2 = prepare_dynamic_script(model, qconfig_dict)
@@ -2596,14 +2597,14 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         model = torch.jit.script(M()).eval()
         qconfig = script_qconfig(default_dynamic_qconfig)
         ref_qparams = []
+        wt_module = wrap_cpp_module(qconfig.weight)
         for wt in [model.fc.weight, model.fc2.weight]:
-            get_forward(qconfig.weight)(wt)
-            qparams = qconfig.weight._get_method('calculate_qparams')()
+            wt_module(wt)
+            qparams = wt_module.calculate_qparams()
             ref_qparams.append((qparams[0].item(), qparams[1].item()))
         model = prepare_dynamic_script(model, qconfig_dict)
         model = convert_dynamic_script(model, debug=True)
         graph_params = []
         for x, obs in model._modules._c.items():
             graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
-
         self.assertEqual(ref_qparams, graph_params)
