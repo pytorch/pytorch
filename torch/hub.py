@@ -423,7 +423,7 @@ def _download_url_to_file(url, dst, hash_prefix=None, progress=True):
             _download_url_to_file will be removed in after 1.3 release')
     download_url_to_file(url, dst, hash_prefix, progress)
 
-def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False):
+def load_state_dict_from_url(url, model_dir=None, file_name=None, map_location=None, progress=True, check_hash=False):
     r"""Loads the Torch serialized object at the given URL.
 
     If downloaded file is a zip file, it will be automatically
@@ -437,6 +437,7 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
     Args:
         url (string): URL of the object to download
         model_dir (string, optional): directory in which to save the object
+        file_name (string, optional): name for the downloaded file (default: from url) 
         map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)
         progress (bool, optional): whether or not to display a progress bar to stderr.
             Default: True
@@ -470,6 +471,8 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
 
     parts = urlparse(url)
     filename = os.path.basename(parts.path)
+    if file_name is not None:
+        filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
