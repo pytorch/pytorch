@@ -215,7 +215,7 @@ void vulkanInsertPrePackedOps(script::Module& module) {
       "Vulkan is not enabled. Please build with USE_VULKAN=1");
 }
 
-void vulkanFusePrePackedLinearConvWithClamp(script::Module& module) {
+void vulkanFusePrePackedConvWithClamp(script::Module& module) {
   TORCH_INTERNAL_ASSERT(
       "Vulkan is not enabled. Please build with USE_VULKAN=1");
 }

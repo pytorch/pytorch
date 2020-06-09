@@ -145,7 +145,11 @@ endif()
 # ---[ Extract versions
 if(CAFFE2_USE_CUDNN)
   # Get cuDNN version
-  file(READ ${CUDNN_INCLUDE_PATH}/cudnn.h CUDNN_HEADER_CONTENTS)
+  if(EXISTS ${CUDNN_INCLUDE_PATH}/cudnn_version.h)
+    file(READ ${CUDNN_INCLUDE_PATH}/cudnn_version.h CUDNN_HEADER_CONTENTS)
+  else()
+    file(READ ${CUDNN_INCLUDE_PATH}/cudnn.h CUDNN_HEADER_CONTENTS)
+  endif()
   string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
                CUDNN_VERSION_MAJOR "${CUDNN_HEADER_CONTENTS}")
   string(REGEX REPLACE "define CUDNN_MAJOR * +([0-9]+)" "\\1"

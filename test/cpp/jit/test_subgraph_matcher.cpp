@@ -467,6 +467,16 @@ graph(%0):
     // Lists are not supported yet, thus we shouldn't match for now.
     AT_ASSERT(findPatternMatches(pattern, graph).empty());
   }
+  {
+    Graph pattern;
+    parseIR(
+        R"IR(
+graph(%a, %b):
+  %c = a::c[myattr="q.*"](%a, %b)
+  return (%c))IR",
+        &pattern);
+    AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+  }
 }
 
 void testBadPattern() {
