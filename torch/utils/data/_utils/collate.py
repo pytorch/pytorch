@@ -7,7 +7,8 @@ static methods.
 
 import torch
 import re
-from torch._six import container_abcs, string_classes
+import collections.abc as container_abcs
+from torch._six import string_classes
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 

@@ -1,5 +1,5 @@
 import torch
-from torch._six import container_abcs
+import collections.abc as container_abcs
 from itertools import repeat
 
 def _quantize_weight(float_wt, observer):

@@ -1,6 +1,6 @@
 import torch
 from collections import defaultdict
-from torch._six import container_abcs
+import collections.abc as container_abcs
 import warnings
 from enum import Enum
 

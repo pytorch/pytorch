@@ -1,6 +1,6 @@
 import torch
 from torch.types import _TensorOrTensors
-from torch._six import container_abcs
+import collections.abc as container_abcs
 import torch.testing
 from itertools import product
 import warnings

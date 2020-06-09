@@ -16,8 +16,7 @@ import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from math import inf, nan
-from torch._six import container_abcs
-
+import collections.abc as container_abcs
 from test_torch import AbstractTestCases
 
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \

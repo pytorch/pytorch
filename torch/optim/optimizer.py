@@ -1,6 +1,5 @@
 from collections import defaultdict
-from torch._six import container_abcs
-
+import collections.abc as container_abcs
 import torch
 from copy import deepcopy
 from itertools import chain

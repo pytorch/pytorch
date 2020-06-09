@@ -2,7 +2,8 @@ import torch
 import functools
 import warnings
 import numpy as np
-from torch._six import container_abcs, string_classes
+import collections.abc as container_abcs
+from torch._six import string_classes
 
 
 class autocast(object):

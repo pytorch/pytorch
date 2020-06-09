@@ -11,7 +11,7 @@ import torch.jit
 import torch.autograd
 import torch.serialization
 import re
-from torch._six import container_abcs
+import collections.abc as container_abcs
 import contextlib
 import numbers
 import warnings
