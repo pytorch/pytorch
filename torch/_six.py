@@ -22,12 +22,6 @@ import sys
 import types
 
 PY37 = sys.version_info[0] == 3 and sys.version_info[1] == 7
-
-
-import math
-inf = math.inf
-nan = math.nan
-
 string_classes = (str, bytes)
 
 

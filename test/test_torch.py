@@ -16,7 +16,8 @@ import pickle
 import textwrap
 import operator
 from torch.utils.dlpack import from_dlpack, to_dlpack
-from torch._six import inf, nan, string_classes
+from math import inf, nan
+from torch._six import string_classes
 from itertools import product, combinations, combinations_with_replacement, permutations
 from functools import reduce
 from functools import partial

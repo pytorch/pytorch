@@ -1,5 +1,5 @@
 import torch
-from torch._six import inf
+from math import inf
 from functools import reduce
 from operator import mul, itemgetter
 import collections

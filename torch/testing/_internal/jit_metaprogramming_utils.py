@@ -13,7 +13,7 @@ from copy import deepcopy
 import math  # noqa: F401
 
 # Testing utils
-from torch._six import inf
+from math import inf
 torch.set_default_dtype(torch.double)
 
 L = 20

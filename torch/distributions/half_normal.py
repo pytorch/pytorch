@@ -1,6 +1,6 @@
 import math
 
-from torch._six import inf
+from math import inf
 from torch.distributions import constraints
 from torch.distributions.transforms import AbsTransform
 from torch.distributions.normal import Normal

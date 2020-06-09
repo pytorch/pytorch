@@ -1,5 +1,5 @@
 import torch
-from torch._six import inf
+from math import inf
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
 from numbers import Number

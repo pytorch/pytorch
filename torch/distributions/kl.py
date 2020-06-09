@@ -3,7 +3,7 @@ import warnings
 from functools import total_ordering
 
 import torch
-from torch._six import inf
+from math import inf
 
 from .bernoulli import Bernoulli
 from .beta import Beta

@@ -4,7 +4,7 @@ import unittest
 import functools
 from copy import deepcopy
 import torch
-from torch._six import inf
+from math import inf
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.optim import SGD

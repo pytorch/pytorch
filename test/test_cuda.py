@@ -15,7 +15,8 @@ import torch
 import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
-from torch._six import inf, nan, container_abcs
+from math import inf, nan
+from torch._six import container_abcs
 
 from test_torch import AbstractTestCases
 

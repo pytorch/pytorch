@@ -1,6 +1,6 @@
 import warnings
 import torch
-from torch._six import inf
+from math import inf
 
 
 def clip_grad_norm_(parameters, max_norm, norm_type=2):

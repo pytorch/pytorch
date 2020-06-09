@@ -20,7 +20,7 @@ import json
 torch.set_default_dtype(torch.double)
 
 from torch import nn
-from torch._six import inf, nan
+from math import inf, nan
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
