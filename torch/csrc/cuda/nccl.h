@@ -14,7 +14,6 @@ enum ncclResult_t : unsigned int;
 enum ncclRedOp_t : unsigned int;
 typedef struct ncclComm* ncclComm_t;
 struct ncclUniqueId;
-int32_t ncclSum;
 
 
 
@@ -77,28 +76,28 @@ TORCH_CUDA_API void reduce(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     int32_t root = 0,
-    int32_t op = ncclSum,
+    int32_t op = 0,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 TORCH_CUDA_API void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root = 0,
-    int32_t op = ncclSum,
+    int32_t op = 0,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 TORCH_CUDA_API void all_reduce(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
-    int32_t op = ncclSum,
+    int32_t op = 0,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 TORCH_CUDA_API void reduce_scatter(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
-    int32_t op = ncclSum,
+    int32_t op = 0,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
