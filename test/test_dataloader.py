@@ -1227,6 +1227,12 @@ except RuntimeError as e:
     def test_shuffle_batch(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True))
 
+    def test_shuffle_reproducibility(self):
+        self.assertEqual(
+            list(DataLoader(self.dataset, shuffle=True, generator=torch.Generator().manual_seed(42))),
+            list(DataLoader(self.dataset, shuffle=True, generator=torch.Generator().manual_seed(42)))
+        )
+
     def test_sequential_workers(self):
         self._test_sequential(DataLoader(self.dataset, num_workers=4))
 
@@ -1239,7 +1245,7 @@ except RuntimeError as e:
     def test_shuffle_batch_workers(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
 
-    def test_RandomSampler(self):
+    def test_random_sampler(self):
 
         from collections import Counter
         from torch.utils.data import RandomSampler
@@ -1315,6 +1321,21 @@ except RuntimeError as e:
                 scanned_data = torch.cat((scanned_data, data), 0)
 
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
+
+    def test_sampler_reproducibility(self):
+        from torch.utils.data import RandomSampler, WeightedRandomSampler, SubsetRandomSampler
+
+        generator = torch.Generator().manual_seed(42)
+
+        for fn in (
+            lambda: RandomSampler(self.dataset, num_samples=5, replacement=True, generator=generator),
+            lambda: RandomSampler(self.dataset, num_samples=5, replacement=False, generator=generator),
+            lambda: WeightedRandomSampler(self.dataset, num_samples=5, replacement=True, generator=generator),
+            lambda: WeightedRandomSampler(self.dataset, num_samples=5, replacement=False, generator=generator),
+            lambda: SubsetRandomSampler(range(10), generator=generator),
+        ):
+            self.assertEqual(list(fn()), list(fn()))
+
 
     def _test_sampler(self, **kwargs):
         indices = range(2, 12)  # using a regular iterable
