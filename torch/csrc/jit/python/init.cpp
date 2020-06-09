@@ -226,7 +226,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def(
           "_freeze_module",
-          [](Module& module, std::vector<std::string> preservedAttrs) {
+          [](Module& module, std::vector<std::string>& preservedAttrs) {
             return freeze_module(module, preservedAttrs);
           },
           py::arg("module"),
