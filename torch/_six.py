@@ -22,9 +22,6 @@ import sys
 import types
 import inspect
 
-
-PY2 = sys.version_info[0] == 2
-PY3 = sys.version_info[0] == 3
 PY37 = sys.version_info[0] == 3 and sys.version_info[1] == 7
 
 
@@ -97,9 +94,4 @@ def istuple(obj):
 
 
 def bind_method(fn, obj, obj_type):
-    if PY2:
-        if inspect.ismethod(fn):
-            fn = fn.__func__
-        return types.MethodType(fn, obj, obj_type)
-    else:
-        return types.MethodType(fn, obj)
+    return types.MethodType(fn, obj)
