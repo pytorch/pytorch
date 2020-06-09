@@ -106,6 +106,9 @@ class DispatchTable final {
     }
     kernels_.setKernel(dispatchKey, std::move(kernel));
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
+    if (kernel.isFallthrough()) {
+      dispatchKeyExtractor_.setOperatorHasFallthroughForBackend(dispatchKey, true);
+    }
   }
 
   /**
@@ -116,6 +119,7 @@ class DispatchTable final {
   void removeKernelIfExists(DispatchKey dispatchKey) {
     kernels_.removeKernelIfExists(dispatchKey);
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, false);
+    dispatchKeyExtractor_.setOperatorHasFallthroughForBackend(dispatchKey, false); // may be no op
   }
 
   /**
