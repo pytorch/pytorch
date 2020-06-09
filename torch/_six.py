@@ -19,7 +19,6 @@
 # SOFTWARE.
 
 import sys
-import types
 
 string_classes = (str, bytes)
 
