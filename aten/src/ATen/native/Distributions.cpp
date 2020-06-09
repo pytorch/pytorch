@@ -495,7 +495,7 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   if (!with_replacement &&
       !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half)) {
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).all().item();
-    TORCH_CHECK(is_valid.to<bool>() == true, "self contains either `inf`, `nan` or element < 0");
+    TORCH_CHECK(is_valid.to<bool>(), "self contains either `inf`, `nan` or element < 0");
     auto rand = at::empty_like(self).uniform_(0, 1, gen);
     rand.log_().div_(self); //save memory with inplace operations
     Tensor vals = at::empty_like(self);
