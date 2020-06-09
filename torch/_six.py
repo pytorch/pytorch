@@ -109,13 +109,6 @@ elif PY3:
     def get_function_from_type(cls, name):
         return getattr(cls, name, None)
 
-if PY2:
-    import StringIO
-    StringIO = StringIO.StringIO
-elif PY3:
-    import io
-    StringIO = io.StringIO
-
 
 # The codes below is not copied from the six package, so the copyright
 # declaration at the beginning does not apply.
