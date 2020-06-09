@@ -4427,7 +4427,7 @@ def foo(x):
         for i in range(100):
             g = {'torch': torch}
             code = gen_code()
-            torch._six.exec_(code, g, None)
+            exec(code, g, None)
             cu = torch.jit.CompilationUnit(code)
             with freeze_rng_state():
                 o1 = g['f']()
