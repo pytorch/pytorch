@@ -6,7 +6,8 @@ static methods.
 """
 
 import torch
-from torch._six import queue, container_abcs, string_classes
+import queue
+from torch._six import container_abcs, string_classes
 from . import MP_STATUS_CHECK_INTERVAL
 from torch._utils import ExceptionWrapper
 

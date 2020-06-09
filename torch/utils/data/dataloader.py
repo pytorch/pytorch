@@ -13,7 +13,8 @@ import multiprocessing as python_multiprocessing
 import torch
 import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
-from torch._six import queue, string_classes
+import queue
+from torch._six import string_classes
 
 from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler
 from . import _utils

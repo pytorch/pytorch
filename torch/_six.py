@@ -43,12 +43,6 @@ else:
     string_classes = (str, bytes)
 
 
-if PY2:
-    import Queue as queue  # noqa: F401
-else:
-    import queue  # noqa: F401
-
-
 def with_metaclass(meta, *bases):
     """Create a base class with a metaclass."""
     # This requires a bit of explanation: the basic idea is to make a dummy
