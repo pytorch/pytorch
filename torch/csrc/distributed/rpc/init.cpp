@@ -406,7 +406,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>>     world_size=2,
               >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
               >>>         num_send_recv_threads=16,
-              >>>         20 # 20 second timeout
+              >>>         rpc_timeout=20 # 20 second timeout
               >>>     )
               >>> )
               >>>
