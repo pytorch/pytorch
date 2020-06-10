@@ -27,7 +27,7 @@ GENERATED_COMMENT = CodeTemplate(
 FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<decltype(${function_name}), &${function_name}>(DispatchKey::BackendSelect)
+  .impl_unboxedOnlyKernel(DispatchKey::BackendSelect, TORCH_FN(${function_name}))
   .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
 """)
 

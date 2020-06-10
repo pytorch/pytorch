@@ -71,7 +71,7 @@ Tensor & detach_(Tensor & self) {
 }
 
 TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl("detach", detach);
+  m.impl("detach", TORCH_FN(detach));
   m.impl_UNBOXED("detach_", detach_);
 }
 
