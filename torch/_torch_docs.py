@@ -4817,7 +4817,7 @@ Example::
 
 add_docstr(torch.rand,
            r"""
-rand(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+rand(*size, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
@@ -4827,6 +4827,9 @@ The shape of the tensor is defined by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
+        
+Keyword arguments:
+    {generator}
     {out}
     {dtype}
     {layout}
@@ -4844,7 +4847,7 @@ Example::
 
 add_docstr(torch.rand_like,
            r"""
-rand_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+rand_like(input, generator=None, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a uniform distribution on the interval :math:`[0, 1)`.
@@ -4853,6 +4856,9 @@ random numbers from a uniform distribution on the interval :math:`[0, 1)`.
 
 Args:
     {input}
+
+Keyword arguments:
+    {generator}
     {dtype}
     {layout}
     {device}
@@ -4879,6 +4885,8 @@ Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
     size (tuple): a tuple defining the shape of the output tensor.
+    
+Keyword arguments:
     {generator}
     {out}
     {dtype}
@@ -4906,7 +4914,7 @@ Example::
 
 add_docstr(torch.randint_like,
            """
-randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+randint_like(input, low=0, high, generator=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
@@ -4921,6 +4929,9 @@ Args:
     {input}
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
+    
+Keyword arguments:
+    {generator}
     {dtype}
     {layout}
     {device}
@@ -4931,7 +4942,7 @@ Args:
 
 add_docstr(torch.randn,
            r"""
-randn(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randn(*size, out=None, generator=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
@@ -4945,6 +4956,9 @@ The shape of the tensor is defined by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
+
+Keyword arguments:
+    {generator}
     {out}
     {dtype}
     {layout}
@@ -4961,9 +4975,10 @@ Example::
 """.format(**factory_common_args))
 
 add_docstr(torch.randn_like,
-           r"""
-randn_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
-
+           """
+randn_like(input, generator=None, dtype=None, layout=None, device=None, \
+requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+""" + r"""
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a normal distribution with mean 0 and variance 1.
 ``torch.randn_like(input)`` is equivalent to
@@ -4971,6 +4986,9 @@ random numbers from a normal distribution with mean 0 and variance 1.
 
 Args:
     {input}
+    
+Keyword arguments:
+    {generator}
     {dtype}
     {layout}
     {device}
@@ -4980,13 +4998,17 @@ Args:
 """.format(**factory_like_common_args))
 
 add_docstr(torch.randperm,
-           r"""
-randperm(n, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False) -> LongTensor
-
+           """
+randperm(n, generator=None, out=None, dtype=torch.int64, layout=torch.strided, \
+device=None, requires_grad=False) -> LongTensor
+""" + r"""
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
     n (int): the upper bound (exclusive)
+    
+Keyword arguments:
+    {generator}
     {out}
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: ``torch.int64``.
