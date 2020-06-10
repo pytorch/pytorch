@@ -965,18 +965,42 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(rpc_exec_mode.value in rpc_event.name)
         self.assertEqual(rpc_event.count, 1)
 
+    @dist_init
+    def test_profiler_rpc_memory(self):
+        if self.rank != 1:
+            return
+        dst = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(dst)
+        with torch.autograd.profiler.profile(profile_memory=True) as p:
+            fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+            res = fut.wait()
+
+        print(p.key_averages().table())
+        function_events = p.function_events
+        event_cpu_mem_usages = set(event.cpu_memory_usage for event in function_events)
+        # if cpu_memory_usage was not propagated over the wire, this set would
+        # only contain 0 (indicates no memory being profiled)
+        self.assertNotEqual({0}, event_cpu_mem_usages)
+        # No memory profiled if profile_memory=False
+        with torch.autograd.profiler.profile(profile_memory=False) as p:
+            fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+            res = fut.wait()
+
+        function_events = p.function_events
+        event_cpu_mem_usages = set(event.cpu_memory_usage for event in function_events)
+        self.assertEqual({0}, event_cpu_mem_usages)
+
     @skip_if_lt_x_gpu(2)
     @dist_init
     def test_profiler_cuda(self):
         if self.rank != 1:
             return
 
-        dst = 2
+        dst = (self.rank + 1) % self.world_size
         dst_worker = worker_name(dst)
         with torch.autograd.profiler.profile(use_cuda=True) as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
-            # udf_with_torch_ops()
 
         function_events = p.function_events
         for event in function_events:
@@ -991,19 +1015,15 @@ class RpcTest(RpcAgentTestFixture):
                 self.assertEqual(kernel.device, 0)
                 self.assertGreater(event.cuda_time, 0)
 
-        print(p.key_averages().table())
-
-
     @dist_init
     def test_profiler_export_trace(self):
         if self.rank != 1:
             return
-        dst = 2
+        dst = (self.rank + 1) % self.world_size
         dst_worker = worker_name(dst)
         with torch.autograd.profiler.profile() as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
-            udf_with_torch_ops()
 
         expected_remote_events = [
             "ones",

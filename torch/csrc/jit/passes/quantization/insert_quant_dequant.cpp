@@ -939,9 +939,7 @@ void InsertQuantDeQuantHelper::propagateQParams(
   }
 }
 
-void propagateDequantize(Value* output, const std::vector<Value*> inputs) {
-  Node* n = output->node();
-  Graph* graph = n->owningGraph();
+void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
   // Delete dequantize node, we have one dequantize
   // for each use of the value
   for (auto* dequantized_val : inputs) {
@@ -955,7 +953,26 @@ void propagateDequantize(Value* output, const std::vector<Value*> inputs) {
     dequantize_node->removeAllInputs();
     dequantize_node->destroy();
   }
-  insertDeQuantForAllUse(graph, output, output);
+}
+
+// Check if we need to propagate the quantization ops from input to
+// output
+c10::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
+  auto inputs = getPassThroughInputs(output);
+  if (inputs.size() > 0) {
+    // note that we don't need to recursively check for prim::If
+    // here because if all inputs of a prim::If is dequantized
+    // the dequantize will be factored out before we get to this
+    // point
+    bool is_dequantized = true;
+    for (auto* input : inputs) {
+      is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
+    }
+    if (is_dequantized) {
+      return inputs;
+    }
+  }
+  return c10::nullopt;
 }
 
 void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
@@ -973,38 +990,63 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
         continue;
       }
     }
-    for (auto* output : n->outputs()) {
-      if (isQuantized(output)) {
-        continue;
-      }
-      auto inputs = getPassThroughInputs(output);
-      if (inputs.size() > 0) {
-        // note that we don't need to recursively check for prim::If
-        // here because if all inputs of a prim::If is dequantized
-        // the dequantize will be factored out before we get to this
-        // point
-        bool is_dequantized = true;
-        for (auto* input : inputs) {
-          is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
-        }
-        if (!is_dequantized) {
+    if (isSingleInputGeneralValueAtenFunction(n)) {
+      for (auto* output : n->outputs()) {
+        if (isQuantized(output)) {
           continue;
         }
-        if (isSingleInputGeneralValueAtenFunction(n)) {
-          propagateQParams(output, inputs);
+        if (auto inputs = getDequantizedInputs(output)) {
+          propagateQParams(output, *inputs);
           if (isClamp(n)) {
             for (size_t i = 1; i <= 2; ++i) {
               // propagate qparams for min and max scalar arguments
               // for aten::clamp/aten::hardtanh
-              propagateQParams(n->input(i), inputs, true);
+              propagateQParams(n->input(i), *inputs, /* is_scalar */ true);
             }
           }
-        } else if (auto qparams_opt = getFixedQParams(n)) {
-          propagateQParams(
-              output, inputs, /* is_scalar = */ false, qparams_opt);
-        } else {
-          propagateDequantize(output, inputs);
         }
+      }
+    } else if (auto qparams_opt = getFixedQParams(n)) {
+      for (auto* output : n->outputs()) {
+        if (isQuantized(output)) {
+          continue;
+        }
+        if (auto inputs = getDequantizedInputs(output)) {
+          propagateQParams(output, *inputs, /* is_scalar */ false, qparams_opt);
+        }
+      }
+    } else {
+      // For this category of ops, we need to
+      // 1. check if we need to propagate dequantize op
+      // 2. remove the dequantize ops from inputs
+      // 3. insert dequantize for all outputs
+      // to make sure it works for ops with multiple outputs
+      // since removing dequantize from inputs is mutating the graph
+      // and it will affect future checks for whether all the inputs
+      // has been quantized or not(since currently we just check if
+      // the value is produced by dequantize op to decide if the value
+      // is quantized or not
+      // list of dequantized input values
+      std::unordered_set<Value*> dequantized_inputs;
+      std::vector<Value*> outputs_to_dequantize;
+      // 1. collect dequantized inputs and outputs we need to dequantize
+      for (auto* output : n->outputs()) {
+        if (isQuantized(output)) {
+          continue;
+        }
+        if (auto inputs = getDequantizedInputs(output)) {
+          std::copy(
+              inputs->begin(),
+              inputs->end(),
+              std::inserter(dequantized_inputs, dequantized_inputs.end()));
+          outputs_to_dequantize.push_back(output);
+        }
+      }
+      // 2. remove the dequantize ops from inputs
+      removeDequantizeFromInputs(dequantized_inputs);
+      // 3. insert dequantize op for outpus
+      for (auto* output : outputs_to_dequantize) {
+        insertDeQuantForAllUse(output->owningGraph(), output, output);
       }
     }
   }

@@ -118,7 +118,7 @@ struct TORCH_API ProfilerConfig {
   at::IValue toIValues() const;
 
   // Reconstructs a ProfilerConfig from IValues given by toIValues.
-  static ProfilerConfig fromIValue(at::IValue profilerConfigIValue);
+  static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
 
 };
 
@@ -155,7 +155,7 @@ struct TORCH_API Event final {
   at::IValue toIValues() const;
 
   // Reconstructs an event from IValues given by toIValues.
-  static Event fromIValue(at::IValue eventIValue);
+  static Event fromIValue(const at::IValue& eventIValue);
 
   void record(bool record_cuda);
   std::string kind() const {

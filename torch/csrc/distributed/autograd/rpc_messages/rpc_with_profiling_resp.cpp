@@ -148,8 +148,6 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
       wrappedMessage.tensors(),
       std::move(remoteEvents));
 }
-
 } // namespace autograd
-
 } // namespace distributed
 } // namespace torch

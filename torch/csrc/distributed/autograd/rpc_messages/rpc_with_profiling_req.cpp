@@ -142,7 +142,6 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
       wrappedMessage.tensors(),
       cfg);
 }
-
 } // namespace autograd
 } // namespace distributed
 } // namespace torch

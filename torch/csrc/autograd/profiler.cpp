@@ -387,7 +387,8 @@ at::IValue ProfilerConfig::toIValues() const {
   return eventIValueList;
 }
 
-ProfilerConfig ProfilerConfig::fromIValue(at::IValue profilerConfigIValue) {
+ProfilerConfig ProfilerConfig::fromIValue(
+    const at::IValue& profilerConfigIValue) {
   TORCH_INTERNAL_ASSERT(
       profilerConfigIValue.isList(),
       "Expected IValue to contain type c10::impl::GenericList");
@@ -404,6 +405,7 @@ ProfilerConfig ProfilerConfig::fromIValue(at::IValue profilerConfigIValue) {
       ivalues.get(2).toBool());
   return cfg;
 }
+
 
 ProfilerConfig getProfilerConfig() {
   auto state_ptr = getProfilerTLSState();
@@ -483,7 +485,7 @@ void Event::record(bool record_cuda) {
   }
 }
 
-/* static */ Event Event::fromIValue(at::IValue eventIValue) {
+/* static */ Event Event::fromIValue(const at::IValue& eventIValue) {
   TORCH_INTERNAL_ASSERT(
       eventIValue.isList(),
       "Expected IValue to contain type c10::impl::GenericList");
@@ -509,7 +511,8 @@ void Event::record(bool record_cuda) {
   TORCH_INTERNAL_ASSERT(
       evt.getCPUns() == 0,
       "Did not expect to record cpu_ns for Event created via Event::fromIValue.");
-  evt = evt.setCPUMemoryUsage(ivalues.get(5).toInt());
+  auto cpuMemUsage = ivalues.get(5).toInt();
+  evt = evt.setCPUMemoryUsage(cpuMemUsage);
   auto cpu_ns = ivalues.get(6).toInt();
   evt.setCPUns(cpu_ns);
   bool cuda_recorded = ivalues.get(7).toBool();
