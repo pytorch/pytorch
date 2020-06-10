@@ -346,8 +346,11 @@ void TensorIterator::compute_names() {
 
   for (auto& op : operands_) {
     if (!op.tensor.defined()) continue;
-    // don't include output tensors that are not also input tensors.
-    if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
+    // Don't include output tensors if we are resizing, since we will
+    // clobber their names in any case.  (If the output tensor was
+    // also an input tensor, we'll pick it up when it shows up again
+    // in operands).
+    if (resize_outputs_ && op.is_output) continue;
     // perform name inference
     if (names_.empty()) {
       names_ = op.tensor.names();
@@ -794,10 +797,12 @@ void TensorIterator::compute_shape() {
   for (auto& op : operands_) {
     if (!op.tensor.defined()) continue;
 
-    // For now, don't include output tensors that are not also input tensors.
+    // For now, don't include output tensors when we're resizing outputs.
+    // These shapes don't participate in shape computation.
     // This preserves the legacy behavior where torch.add(..., out=dst) resizes
-    // the destination tensor.
-    if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
+    // the destination tensor.  If the output tensor is also an input, we'll
+    // pick it up later in the operands.
+    if (resize_outputs_ && op.is_output) continue;
     auto shape = op.tensor.sizes();
     if (shape.size() == 0) {
       has_scalars = true;
