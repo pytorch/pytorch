@@ -22,15 +22,23 @@ Random Number Generator
 Communication collectives
 -------------------------
 
+.. autofunction:: torch.cuda.comm.scatter
+
+.. autofunction:: torch.cuda.comm.gather
+
 .. autofunction:: torch.cuda.comm.broadcast
 
 .. autofunction:: torch.cuda.comm.broadcast_coalesced
 
+.. autoclass:: torch.cuda.comm.ReduceOp
+
+.. autofunction:: torch.cuda.comm.reduce
+
+.. autofunction:: torch.cuda.comm.reduce_coalesced
+
 .. autofunction:: torch.cuda.comm.reduce_add
 
-.. autofunction:: torch.cuda.comm.scatter
-
-.. autofunction:: torch.cuda.comm.gather
+.. autofunction:: torch.cuda.comm.reduce_add_coalesced
 
 Streams and events
 ------------------

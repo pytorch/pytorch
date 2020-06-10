@@ -58,6 +58,28 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
 
 
 def reduce(inputs, op=ReduceOp.SUM, destination=None, *, out=None):
+    r"""Reduces tensors from multiple CUDA devices.
+
+    Arguments:
+        tensors (Iterable[Tensor]): an iterable of tensors to reduce.
+          Tensor sizes have to match.
+        op (ReduceOp, optional): reduce operator. Default: ``ReduceOp.SUM``.
+        destination (torch.device, str, or int, optional): the output device.
+          Can be CPU or CUDA. Default: the current CUDA device.
+        out (Tensor, optional, keyword-only): the tensor to store reduce result.
+          Its sizes must match those of :attr:`tensors`. Can be on CPU or CUDA.
+
+    .. note::
+        :attr:`destination` must not be specified when :attr:`out` is specified.
+
+    Returns:
+        - If :attr:`destination` is specified,
+            a tensor located on :attr:`destination` device, that is a result of
+            reducing :attr:`tensors` along :attr:`dim`.
+        - If :attr:`out` is specified,
+            the :attr:`out` tensor, now containing results of reducing
+            :attr:`tensors` along :attr:`dim`.
+    """
     if out is None:
         destination = torch.cuda._utils._get_device_index(destination, optional=True)
         return torch._C._reduce(inputs, op, destination)
