@@ -345,7 +345,8 @@ void RequestCallbackImpl::processRpc(
       }
 
       auto setRRefValue = [ownerRRef, postProcessing](
-          const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) mutable {
+                              const c10::intrusive_ptr<c10::ivalue::Future>&
+                                  jitFuture) mutable {
         try {
           ownerRRef->setValue(jitFuture->value());
         } catch (const std::exception& e) {
@@ -355,11 +356,12 @@ void RequestCallbackImpl::processRpc(
       };
 
       auto isAsyncExecution = scriptRemoteCall.isAsyncExecution();
-      auto asyncPostProcessing = [ownerRRef,
-                                  postProcessing,
-                                  setRRefValue{std::move(setRRefValue)},
-                                  isAsyncExecution](
-          const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) mutable {
+      auto asyncPostProcessing =
+          [ownerRRef,
+           postProcessing,
+           setRRefValue{std::move(setRRefValue)},
+           isAsyncExecution](const c10::intrusive_ptr<c10::ivalue::Future>&
+                                 jitFuture) mutable {
             if (isAsyncExecution) {
               // The user function will return a JIT future, install
               // setRRefValue and postProcessing to that valueFuture
@@ -367,7 +369,7 @@ void RequestCallbackImpl::processRpc(
                 auto valueJitFuture = jitFuture->value().toFuture();
                 valueJitFuture->addCallback(
                     [valueJitFuture,
-                  setRRefValue{std::move(setRRefValue)}]() mutable {
+                     setRRefValue{std::move(setRRefValue)}]() mutable {
                       setRRefValue(valueJitFuture);
                     });
               } catch (const std::exception& e) {
