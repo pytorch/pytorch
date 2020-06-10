@@ -17939,7 +17939,7 @@ class TestViewOps(TestCase):
             if (input.size()[-1] != 2 or
                     input.stride()[-1] > 2):
                 self.assertRaisesRegex(
-                    RuntimeError, "INTERNAL ASSERT FAILED",
+                    RuntimeError, "Tensor must have a last dimension of size 2",
                     lambda: torch.view_as_complex(input))
 
             res = torch.view_as_complex(input)
