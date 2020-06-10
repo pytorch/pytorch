@@ -67,37 +67,14 @@ void Context::setDeterministic(bool b) {
   _deterministic = b;
 }
 
-Context::ErrorLevel Context::deterministicErrorLevel() const {
-  return deterministic_error_level;
-}
-
-void Context::setDeterministicErrorLevel(Context::ErrorLevel e) {
-  deterministic_error_level = e;
-}
-
-Context::ErrorLevel Context::longToErrorLevel(long e) {
-  switch (e) {
-    case static_cast<int>(Context::ErrorLevel::None):
-    case static_cast<int>(Context::ErrorLevel::Warn):
-    case static_cast<int>(Context::ErrorLevel::Error):
-      return static_cast<Context::ErrorLevel>(e);
-    default:
-      TORCH_CHECK(false, "error level ", e, " is invalid, must be one of 0: None, 1: Warn, or 2: Error");
-  }
-}
-
-void Context::alertNotDeterministic(std::string const& caller) {
+void Context::alertNotDeterministic(c10::string_view const& caller) {
   if (globalContext().deterministic()) {
-    auto error_level = globalContext().deterministicErrorLevel();
-    switch (error_level) {
-      case Context::ErrorLevel::Warn:
-        TORCH_WARN(caller, " is not deterministic");
-        break;
-      case Context::ErrorLevel::Error:
-        TORCH_CHECK(false, caller, " is not deterministic");
-        break;
-      case Context::ErrorLevel::None:;
-    }
+    TORCH_CHECK(false,
+      caller, " does not have a deterministic implementation, but you set "
+      "'torch.set_deterministic(True)'. You can turn off determinism just "
+      "for this operation if that's acceptable for your application. You "
+      "can also file an issue at https://github.com/pytorch/pytorch/issues "
+      "to help us prioritize adding deterministic support for this operation.");
   }
 }
 

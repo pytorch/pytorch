@@ -34,7 +34,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg',
+    'lobpcg', 'set_deterministic', 'is_deterministic'
 ]
 
 ################################################################################
@@ -281,6 +281,15 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
+def set_deterministic(d):
+    r"""
+    """
+    _C._set_deterministic(d)
+
+
+def is_deterministic():
+    return _C._get_deterministic()
+
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
@@ -441,7 +450,6 @@ import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
-import torch.experimental
 import torch.quantization
 import torch.utils.data
 import torch.__config__
