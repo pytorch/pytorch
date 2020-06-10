@@ -42,8 +42,11 @@ VIEW_FUNCTIONS = {
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
+    'expand_as': 'self',
     'narrow': 'self',
     'permute': 'self',
+    'reshape': 'self',
+    'reshape_as': 'self',
     'select': 'self',
     'slice': 'self',
     'squeeze': 'self',
@@ -51,12 +54,16 @@ VIEW_FUNCTIONS = {
     'transpose': 'self',
     'unfold': 'self',
     'unsqueeze': 'self',
+    'flatten': 'flatten',
     'view': 'self',
+    'view_as': 'self',
     'unbind': 'self',
     '_indices': 'self',
     '_values': 'self',
     'indices': 'self',
     'values': 'self',
+    'contiguous': 'self',
+    'pin_memory': 'pin_memory',
     # sparse_coo ctor output should really be views of both indices and values,
     # but we only supports making as view of a single variable, and indices is
     # discrete anyways.
@@ -68,7 +75,7 @@ VIEW_FUNCTIONS = {
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split', 'detach'})
 
 def format_return_type(returns):
     if len(returns) == 0:
