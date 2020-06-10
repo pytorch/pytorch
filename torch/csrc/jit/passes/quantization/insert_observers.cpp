@@ -421,8 +421,8 @@ class InsertObserversHelper {
   //   return %y2
   //
   // boundary_value_map = {
-  //   // current module's output values to corresponding return values from subgraph
-  //   %x2: %y2,
+  //   // current module's output values to corresponding return values from
+  //   subgraph %x2: %y2,
   //   // current module's input values to corresponding input value to subgraph
   //   %x1: %y1,
   // }
