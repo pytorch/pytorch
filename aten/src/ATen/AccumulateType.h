@@ -21,10 +21,9 @@ template <typename T, bool is_cuda>
 struct AccumulateType { };
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-template <> struct AccumulateType<half, true> { using type = float; };
+template <> struct AccumulateType<Half, true> { using type = float; };
 template <> struct AccumulateType<BFloat16, true> {using type = float; };
 #endif
-template <> struct AccumulateType<Half, true> { using type = float; };
 template <> struct AccumulateType<float, true> { using type = float; };
 template <> struct AccumulateType<double, true> { using type = double; };
 template <> struct AccumulateType<int8_t, true> { using type = int64_t; };
@@ -34,6 +33,8 @@ template <> struct AccumulateType<int16_t, true> { using type = int64_t; };
 template <> struct AccumulateType<int32_t, true> { using type = int64_t; };
 template <> struct AccumulateType<int64_t, true> { using type = int64_t; };
 template <> struct AccumulateType<bool, true> {using type = bool; };
+
+template <> struct AccumulateType<Half, false> { using type = float; };
 template <> struct AccumulateType<BFloat16, false> { using type = float; };
 template <> struct AccumulateType<std::complex<float>, false> { using type = std::complex<double>; };
 template <> struct AccumulateType<std::complex<double>, false> { using type = std::complex<double>; };

@@ -163,7 +163,7 @@ static void sign_kernel(TensorIterator& iter){
   if(iter.dtype() == ScalarType::Bool){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sign_cpu", [&]() {
         auto zero_vec = Vec256<scalar_t>(static_cast<scalar_t>(0));
         auto one_vec = Vec256<scalar_t>(static_cast<scalar_t>(1));
 
@@ -249,7 +249,7 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
 }
 
 static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "clamp_cpu", [&]() {
     c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto max = max_scalar.to<scalar_t>();
@@ -262,7 +262,7 @@ static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_sca
 }
 
 static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "clamp_max_cpu", [&]() {
     c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
     auto max = max_scalar.to<scalar_t>();
     auto max_vec = Vec256<scalar_t>(max);
@@ -273,7 +273,7 @@ static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
 }
 
 static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "clamp_min_cpu", [&]() {
     c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);

@@ -224,25 +224,26 @@ struct vec_host_softmax_backward_lastdim {
 };
 
 static void softmax_lastdim_kernel_impl(Tensor& result, const Tensor& self) {
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "softmax_lastdim_kernel_impl", [&] {
-    vec_host_softmax_lastdim<scalar_t, false>::apply(result, self);
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16,
+    self.scalar_type(), "softmax_lastdim_kernel_impl",
+    [&] { vec_host_softmax_lastdim<scalar_t, false>::apply(result, self);
   });
 }
 
 static void log_softmax_lastdim_kernel_impl(
     Tensor& result,
     const Tensor& self) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, self.scalar_type(),
-      "log_softmax_lastdim_kernel_impl",
-      [&] { vec_host_softmax_lastdim<scalar_t, true>::apply(result, self); });
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16,
+      self.scalar_type(), "log_softmax_lastdim_kernel_impl",
+      [&] { vec_host_softmax_lastdim<scalar_t, true>::apply(result, self);
+  });
 }
 
 static void softmax_backward_lastdim_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16,
       grad.scalar_type(), "softmax_backward_lastdim_kernel_impl", [&] {
         vec_host_softmax_backward_lastdim<scalar_t, false>::apply(
             grad_input, grad, output);
@@ -253,9 +254,8 @@ static void log_softmax_backward_lastdim_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, grad.scalar_type(),
-      "log_softmax_backward_lastdim_kernel_impl", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16,
+      grad.scalar_type(), "log_softmax_backward_lastdim_kernel_impl", [&] {
         vec_host_softmax_backward_lastdim<scalar_t, true>::apply(
             grad_input, grad, output);
       });

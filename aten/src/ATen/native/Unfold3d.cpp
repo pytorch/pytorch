@@ -448,7 +448,8 @@ void Unfold3dCopyCPU(
     int64_t pad_h,
     int64_t pad_w,
     Tensor* dst) {
-  AT_DISPATCH_ALL_TYPES_AND(
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half,
       at::ScalarType::BFloat16,
       src.scalar_type(),
       "Unfold3dCopyCPU",
@@ -494,7 +495,8 @@ void Unfold3dAccCPU(
     int64_t pad_h,
     int64_t pad_w,
     Tensor* dst) {
-  AT_DISPATCH_ALL_TYPES_AND(
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half,
       at::ScalarType::BFloat16,
       src.scalar_type(),
       "Unfold3dAccCPU",
