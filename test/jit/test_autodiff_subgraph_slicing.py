@@ -8,19 +8,13 @@ import torch
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
+from torch.testing import FileCheck
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
-# NB: torch.jit.script, when used as a function, uses the current scope
-# to resolve variable names. This function cannot be made local to
-# TestAutodiffSubgraphSlicing because those tests call torch.jit.script on functions
-# in a different scope than they are defined in.
-@torch.jit.ignore
-def pyfn(a, b):
-    return a * b
 
 @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't support gradients")
 class TestAutodiffSubgraphSlicing(JitTestCase):
@@ -67,12 +61,12 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         # o --> x
         def fn(x, y, z):
             a = x * y
-            b = pyfn(a, z)
-            return b
+            b = torch.zeros([abs(int(y))])
+            return a, b
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
-
-        self.assertGraphSize(graph, 2)
+        g_str = str(graph)
+        FileCheck().check("aten::Int").check("aten::zeros").check_not("aten::mul").run(g_str[0:g_str.find("return")])
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_does_not_merge_unrelated(self):
@@ -125,13 +119,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         #  \_________/
         def fn(w, x, y):
             a = w * x
-            b = pyfn(a, y)
+            b = torch.zeros(abs(int(a)))
             c = a * b
             return c
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
-
-        self.assertGraphSize(graph, 3)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
     def test_merges_up(self):
@@ -140,13 +132,13 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         #  \_________/
         def fn(w, x, y, z):
             a = w * x
-            b = pyfn(a, y)
+            b = torch.zeros(abs(int(y)))
             c = a * z
             return b, c
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
-
-        self.assertGraphSize(graph, 3)
+        g_str = str(graph)
+        FileCheck().check_not("aten::add").run(g_str[0:g_str.find("return")])
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_merges_down(self):
@@ -155,17 +147,16 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         #  \_________/
         def fn(v, w, x, y):
             a = v * w
-            b = pyfn(x, y)
+            b = torch.ones(int(y))
             c = b * a
             return a, c
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
-        # GuardElimination can't get rid of a prim::BailOut on ^pyfn
-        # which makes us create two `prim::DifferentiableGraph`s
-        # instead of just one
         num_nodes = 4 if GRAPH_EXECUTOR == ProfilingMode.PROFILING else 3
-        self.assertGraphSize(graph, num_nodes)
+        # add moved down
+        g_str = str(graph)
+        FileCheck().check_not("aten::add").run(g_str[0:g_str.find("return")])
         num_diff_nodes = 2 if GRAPH_EXECUTOR == ProfilingMode.PROFILING else 1
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', num_diff_nodes)
 
