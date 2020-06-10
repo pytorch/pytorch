@@ -176,6 +176,34 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
 
     return jacobian, reentrant, correct_grad_sizes
 
+def get_analytical_jacobian_fw(fn, input):
+    output = fn(input)
+    # it is easier to call to_dense() on the sparse output than
+    # to modify analytical jacobian
+    if output.is_sparse:
+        raise ValueError('Sparse output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+    if output.layout == torch._mkldnn:
+        raise ValueError('MKLDNN output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+    jacobian = make_jacobian(input, output.numel())
+
+    diff_input = _differentiable_outputs(input)
+    for i, inp in enumerate(diff_input):
+        fw_grad = torch.zeros_like(inp)
+        try:
+            inp.fw_grad = fw_grad
+            for lin_idx, inp_idx in enumerate(product(*[range(m) for m in inp.size()])):
+                fw_grad[inp_idx] = 1
+                grad = fn(input).fw_grad
+                fw_grad[inp_idx] = 0
+                if grad is None:
+                    jacobian[i][lin_idx].zero_()
+                else:
+                    jacobian[i][lin_idx].copy_(grad.contiguous().view(-1))
+        finally:
+            inp.fw_grad = None
+    return jacobian
 
 def _as_tuple(x):
     if istuple(x):
@@ -208,7 +236,8 @@ def gradcheck(
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
     nondet_tol: float = 0.0,
-    check_undefined_grad: bool = True
+    check_undefined_grad: bool = True,
+    mode: str = "all"
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -243,8 +272,13 @@ def gradcheck(
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
+<<<<<<< HEAD
         check_undefined_grad (bool, options): if True, check if undefined output grads
             are supported and treated as zeros
+=======
+        mode (str, optional): which mode of computation should be used. Can be "backward" to test
+            backward mode AD, "forward" to test forward mode AD or "all" to test all of them.
+>>>>>>> gradcheck update
 
     Returns:
         True if all differences satisfy allclose condition
@@ -315,13 +349,30 @@ def gradcheck(
             if a.numel() != 0 or n.numel() != 0:
                 if not torch.allclose(a, n, rtol, atol):
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
-                                     'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
+                                     'numerical:%s\nbackward analytical:%s\n' % (i, j, n, a))
 
         if not reentrant:
             return fail_test('Backward is not reentrant, i.e., running backward with same '
                              'input and grad_output multiple times gives different values, '
                              'although analytical gradient matches numerical gradient. '
                              'The tolerance for nondeterminism was {}.'.format(nondet_tol))
+
+        if mode in ["all", "forward"]:
+            try:
+                fw_analytical = get_analytical_jacobian_fw(fn, tupled_inputs)
+            except RuntimeError as e:
+                msg = str(e)
+                if not "Trying to use forward prop with" in msg:
+                    raise e
+                else:
+                    warnings.warn("Failed to compute gradcheck using fw mode: {}".format(msg))
+                    continue
+
+            for j, (a, n) in enumerate(zip(fw_analytical, numerical)):
+                if a.numel() != 0 or n.numel() != 0:
+                    if not torch.allclose(a, n, rtol, atol):
+                        return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
+                                         'numerical:%s\nforward analytical:%s\n' % (i, j, n, a))
 
     # check if the backward multiplies by grad_output
     output = _differentiable_outputs(func(*tupled_inputs))
