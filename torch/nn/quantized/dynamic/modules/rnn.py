@@ -581,9 +581,9 @@ class RNNCellBase(torch.nn.Module):
             #
             #   packed_ih, packed_hh, b_ih, b_hh
             packed_weight_ih = torch.ops.quantized.linear_prepack_fp16(
-                weight_ih)
+                weight_ih, self.bias_ih)
             packed_weight_hh = torch.ops.quantized.linear_prepack_fp16(
-                weight_hh)
+                weight_hh, self.bias_hh)
 
         self._packed_weight_ih = packed_weight_ih
         self._packed_weight_hh = packed_weight_hh
@@ -675,8 +675,8 @@ class RNNCellBase(torch.nn.Module):
                 # weights and pack parameters in this order:
                 #
                 #   packed_ih, packed_hh, b_ih, b_hh
-                packed_weight = torch.fbgemm_pack_gemm_matrix_fp16(
-                    weight.float())
+                packed_weight = torch.ops.quantized.linear_prepack_fp16(
+                    weight.float(), bias)
 
                 return packed_weight
 

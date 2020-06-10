@@ -16,7 +16,6 @@ from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
     override_quantized_engine,
     override_qengines,
-    supported_qengines,
 )
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -628,8 +627,80 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                          msg="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
 
+    def test_group_norm(self):
+        """Tests the correctness of the groupnorm module.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+
+        dims = (1, 4, 8)
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = torch.nn.GroupNorm(2, 4).float()
+        float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
+        float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
+
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = nnq.GroupNorm(
+            2, 2, float_mod.weight, float_mod.bias, y_scale, y_zero_point)
+        qY = quant_mod(qX)
+
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         msg="GroupNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
+
+    def test_instance_norm(self):
+        """Tests the correctness of the instancenorm{n}d modules.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+
+        dims_to_modules = [
+            ((1, 4, 8), torch.nn.InstanceNorm1d, nnq.InstanceNorm1d),
+            ((1, 4, 8, 1), torch.nn.InstanceNorm2d, nnq.InstanceNorm2d),
+            ((1, 4, 8, 1, 1), torch.nn.InstanceNorm3d, nnq.InstanceNorm3d),
+        ]
+
+        for dim_to_modules in dims_to_modules:
+            dims, float_cls, q_cls = dim_to_modules
+
+            X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+            qX = torch.quantize_per_tensor(
+                X, x_scale, x_zero_point, dtype=torch.quint8)
+            dqX = qX.dequantize()
+
+            float_mod = float_cls(dims[1], affine=True).float()
+            float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
+            float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
+
+            dqY_ref = float_mod(dqX)
+            qY_ref = torch.quantize_per_tensor(
+                dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+            quant_mod = q_cls(
+                dims[1], float_mod.weight, float_mod.bias, y_scale,
+                y_zero_point)
+            qY = quant_mod(qX)
+
+            self.assertEqual(
+                qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                msg="InstanceNorm module API failed, qY_ref\n{} vs qY\n{}"
+                .format(qY_ref, qY))
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
+    @skipIfNoFBGEMM
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -728,47 +799,3 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Smoke test extra_repr
         self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
-
-    @override_qengines
-    def test_lstm_api(self):
-        r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
-        """
-        # Check that module matches the numerics of the op and ensure that module can be
-        # instantiated for all engines and dtypes
-
-        for dtype in [torch.qint8, torch.float16]:
-            if dtype == torch.float16 and qengine == "qnnpack":
-                # fp16 dynamic quant is not supported for qnnpack
-                continue
-                # Test default instantiation
-            seq_len = 128
-            batch = 16
-            input_size = 3
-            hidden_size = 7
-            num_layers = 2
-            bias = True
-            bidirectional = False
-
-            x = torch.rand(seq_len, batch, input_size)
-            h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
-            c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
-
-
-            cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
-                                                        hidden_size=hidden_size,
-                                                        num_layers=num_layers,
-                                                        bias=bias,
-                                                        batch_first=False,
-                                                        dropout=0.0,
-                                                        bidirectional=bidirectional,
-                                                        dtype=dtype)
-            _all_params = ([m.param for m in cell_dq._all_weight_values])
-            result = torch.quantized_lstm(x, (h, c), _all_params, cell_dq.bias, cell_dq.num_layers,
-                                            float(cell_dq.dropout), False, bidirectional,
-                                            False, dtype=dtype, use_dynamic=True)
-
-
-            y, (h, c) = cell_dq(x, (h, c))
-            self.assertEqual(result[0], y, message="LSTM module API failed")
-            self.assertEqual(result[1], h, message="LSTM module API failed")
-            self.assertEqual(result[2], c, message="LSTM module API failed")
