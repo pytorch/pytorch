@@ -64,7 +64,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
   } else if (node->matches(
                  "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
     return setRequiresGrad(node->output(), node->input(0)->requires_grad());
-  } else if (node->matches("aten::detach(Tensor self) -> Tensor")) {
+  } else if (node->matches("aten::detach(Tensor(a) self) -> Tensor(a)")) {
     return setRequiresGrad(node->output(), false);
   } else if (node->kind() == aten::tensor) {
     if (auto grad_index =
