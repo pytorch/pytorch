@@ -34,24 +34,18 @@
 //     return a + b;
 //   });
 //
-// Note [Result type computation]
+// Note [Common Dtype Computation]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// TensorIterator handles limited mixed-type operations. The result type is
-// computed using promoteTypes on the scalar types of the input operands with the
-// following precedence:
+// Some operations have a natural notion of a "common dtype" or
+//   "computation dtype" where all inputs are cast to one dtype, the
+//   operation is performed, and then the results are cast to all outputs.
 //
-// 1) Tensors with dim 1 or higher
-// 2) Tensors with dim 0 that aren't wrapped numbers (e.g. `tensor(5)`)
-// 3) Tensors with dim 0 that are wrapped numbers (e.g. `5`)
+// TensorIterator infers a common dtype if all inputs have the same dtype,
+//   and it computes one using type promotion rules on its inputs if
+//   promote_inputs_to_common_dtype_ is true. Attempting to query
+//   a common dtype otherwise will throw an exception.
 //
-// So if there are any tensors of dim 1 or higher, then 0-dim tensors do not
-// affect the result type. This behavior was chosen to preserve backwards
-// compatibility and is *likely to change* in the near future.
-// (See https://github.com/pytorch/pytorch/issues/9515)
-//
-// Note that TensorIterator currently supports type conversions on 0-dim
-// tensors and arithmetic operators. Other type conversions will raise an
-// exception.
+// Note that the outputs are not considered when computing a common dtype.
 
 namespace at {
 
@@ -95,10 +89,6 @@ struct CAFFE2_API OperandInfo {
   // Save the original tensor operand in cases when an output is modified
   // (e.g. if dtype is changed)
   Tensor original_tensor;
-
-  // If a tensor is both an input and an output, this lets the input
-  //   operand point to the output operand for a quick lookup
-  OperandInfo* corresponding_output = nullptr;
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
@@ -201,7 +191,10 @@ struct CAFFE2_API TensorIterator {
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].current_dtype; }
-  ScalarType common_dtype() const { return common_dtype_; }
+  ScalarType common_dtype() const {
+    TORCH_INTERNAL_ASSERT(common_dtype_ != ScalarType::Undefined, "Queried for invalid common dtype!");
+    return common_dtype_;
+  }
   ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].current_dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
@@ -217,6 +210,8 @@ struct CAFFE2_API TensorIterator {
     return operands_[arg].tensor;
   }
 
+  // Copies from temporary outputs back to the original outputs
+  // NOTE: only used on CPU
   void cast_outputs();
 
   Tensor input(int arg=0) const {
@@ -327,26 +322,56 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input, device, dtype);
   }
 
+  // Sets the check_all_same_dtype_ flag, which is true by default
+  // If true, checks that all inputs and defined outputs have the same dtype
+  // Setting either of promote_inputs_to_common_dtype_
+  //   or cast_common_dtype_to_outputs_ to true will set
+  //   check_all_same_dtype_ to false.
   void check_all_same_dtype(const bool _check_all_same_dtype) {
     check_all_same_dtype_ = _check_all_same_dtype;
   }
 
+  // Sets the check_all_same_device_ flag, which is true by default
+  // If true, all operands must be on the same device, with the possible
+  //   exception of CPU scalars, which can be passed to some CUDA kernels
+  //   as kernel arguments.
   void check_all_same_device(const bool _check_all_same_device) {
     check_all_same_device_ = _check_all_same_device;
   }
 
-  void promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
-    promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
-    check_all_same_dtype_ = false;
-  }
-
-  void cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
-    cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
-    check_all_same_dtype_ = false;
-  }
-
+  // Sets the enforce_safe_casting_to_output_ flag, which is false by default
+  // If true, the iterator's "common dtype" must be computable
+  //   (see the [Common Dtype Computation] note) and
+  //   canCast(common dtype, output dtype) must be true for all outputs.
   void enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
     enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
+  }
+
+  // Sets the promote_inputs_to_common_dtype_ flag, which is false by default
+  // If true, the iterator's "common dtype" is always computed (see the
+  //   [Common Dtype Computation] note) and, on the CPU, temporary copies of
+  //   the inputs in the common dtype are passed as the actual inputs to
+  //   the operation.
+  // Setting this flag to true sets check_all_same_dtype_ to false.
+  void promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
+    promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
+    if (_promote_inputs_to_common_dtype) {
+      check_all_same_dtype_ = false;
+    }
+  }
+
+  // Sets the cast_common_dtype_to_outputs_ flag, which is false by default
+  // If true, the iterator's "common dtype" must be computatable
+  //   (see the [Common Dtype Computation] note) and, on the CPU, temporary
+  //   copies of the outputs are passed as the actual output to the operation.
+  //   These temporaries are then copied to the original outputs after
+  //   the operation is performed (see cast_outputs()).
+  // Setting this flag to true sets check_all_same_dtype_ to false.
+  void cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
+    cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
+    if (_cast_common_dtype_to_outputs) {
+      check_all_same_dtype_ = false;
+    }
   }
 
   void dont_resize_outputs() {
@@ -411,9 +436,9 @@ protected:
   bool static_shape_ = false;
   bool check_all_same_dtype_ = true;
   bool check_all_same_device_ = true;
+  bool enforce_safe_casting_to_output_ = false;
   bool promote_inputs_to_common_dtype_ = false;
   bool cast_common_dtype_to_outputs_ = false;
-  bool enforce_safe_casting_to_output_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
