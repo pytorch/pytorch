@@ -185,7 +185,7 @@ AtenFuncArgs _observe_inputs_aten_func = {};
 CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
 
 // Aten functions for getting tensor information
-std::vector<std::string> _tensor_info_funcs = {"size"};
+std::vector<std::string> _tensor_info_funcs = {"size", "len", "dim"};
 
 // Aten functions whose output will be quantized or not quantized depending
 // on input tensor
@@ -302,6 +302,9 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
       inputs.push_back(v);
     }
     return inputs;
+  } else if (n->kind() == Symbol::aten("append")) {
+    // notice that append is an op that changes input inplace
+    return {n->input(0), n->input(1)};
   }
   return {};
 }
