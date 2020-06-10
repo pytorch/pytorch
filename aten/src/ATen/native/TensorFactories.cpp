@@ -494,9 +494,10 @@ Tensor& rand_out(Tensor& result, IntArrayRef size, c10::optional<Generator> gene
 Tensor rand_like(
     const Tensor& self,
     const TensorOptions& options,
+    c10::optional<Generator> generator,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.uniform_(0, 1, c10::nullopt);
+  return result.uniform_(0, 1, generator);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
