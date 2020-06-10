@@ -41,22 +41,22 @@ void expm1_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-// We manually overload rsqrt because std::rsqrt does not work with thrust::complex types.
+// We manually overload rsqrt because std::rsqrt does not work with complex types.
 template<typename scalar_t>
 __host__ __device__ static inline scalar_t rsqrt_wrapper(scalar_t v) {
   return ::rsqrt(v);
 }
 
 template<typename T>
-__host__ __device__ static inline thrust::complex<T> rsqrt_wrapper(thrust::complex<T> v) {
-  const thrust::complex<T> one = thrust::complex<T>(1.0, 0);
-  return one/thrust::sqrt(v);
+__host__ __device__ static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> v) {
+  const c10::complex<T> one = c10::complex<T>(1.0, 0);
+  // std::sqrt for c10::complex is overloaded in c10/util/complex_math.h
+  return one / std::sqrt(v);
 }
 
 void rsqrt_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "rsqrt_cuda", [&]() {
-    using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-    gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
       return rsqrt_wrapper(a);
     });

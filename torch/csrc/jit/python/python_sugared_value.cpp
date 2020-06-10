@@ -671,7 +671,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
     TORCH_CHECK(
         type->isSubtypeOf(tt),
         "Can't to redefine NamedTuple: ",
-        tt->python_str());
+        tt->repr_str());
     return type;
   }
   get_python_cu()->register_type(tt);

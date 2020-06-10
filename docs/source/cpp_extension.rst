@@ -10,3 +10,4 @@ torch.utils.cpp_extension
 .. autofunction:: include_paths
 .. autofunction:: check_compiler_abi_compatibility
 .. autofunction:: verify_ninja_availability
+.. autofunction:: is_ninja_available
