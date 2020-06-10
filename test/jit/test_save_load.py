@@ -3,6 +3,7 @@ import io
 import sys
 import random
 import torch
+import unittest
 from itertools import product as product
 from torch import Tensor
 from typing import NamedTuple
@@ -12,6 +13,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import (JitTestCase,
                                                clear_class_registry)
+from torch.testing._internal.common_utils import IS_SANDCASTLE
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -103,6 +105,7 @@ class TestSaveLoad(JitTestCase):
       div behavior has not yet been updated.
     """
 
+    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_tensor(self):
         def historic_div(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -148,6 +151,7 @@ class TestSaveLoad(JitTestCase):
             _helper(v3_module, historic_div)
             _helper(current_module, torch.div)
 
+    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_tensor_inplace(self):
         def historic_div_(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -191,6 +195,7 @@ class TestSaveLoad(JitTestCase):
             a = torch.tensor((val_a,))
             _helper(current_module, torch.Tensor.div_)
 
+    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_tensor_out(self):
         def historic_div_out(self, other, out):
             if self.is_floating_point() or other.is_floating_point() or out.is_floating_point():
@@ -236,6 +241,7 @@ class TestSaveLoad(JitTestCase):
                 _helper(v3_module, historic_div_out)
                 _helper(current_module, torch.div)
 
+    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_scalar(self):
         def historic_div_scalar_float(self, other: float):
             return torch.true_divide(self, other)
@@ -294,6 +300,7 @@ class TestSaveLoad(JitTestCase):
                 _helper(v3_module_int, historic_div_scalar_int)
                 _helper(current_module_int, torch.div)
 
+    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_scalar_reciprocal(self):
         def historic_div_scalar_float_reciprocal(self, other: float):
             return other / self
@@ -363,6 +370,7 @@ class TestSaveLoad(JitTestCase):
                 _helper(v3_module_int, historic_div_scalar_int_reciprocal)
                 _helper(current_module_int, torch.div)
 
+    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_scalar_inplace(self):
         def historic_div_scalar_float_inplace(self, other: float):
             return self.true_divide_(other)
@@ -429,6 +437,7 @@ class TestSaveLoad(JitTestCase):
 
     # NOTE: Scalar division was already true division in op version 3,
     #   so this test verifies the behavior is unchanged.
+    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_scalar_scalar(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
