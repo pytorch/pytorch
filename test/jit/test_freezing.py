@@ -945,3 +945,73 @@ class TestFreezing(JitTestCase):
         out3 = smod(inp)
         self.assertNotEqual(out1, out2)
         self.assertEqual(out2, out3)
+
+    def test_freeze_module_with_user_preserved_attr(self):
+        class Module(nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = torch.tensor([2.2])
+
+            def forward(self, x):
+                return self.a + self.b
+
+        m = torch.jit.script(Module())
+        m.eval()
+        fm = torch._C._freeze_module(m._c, ["a"])
+        # Attribute "a" is preserved
+        self.assertTrue(fm.hasattr("a"))
+        self.assertFalse(fm.hasattr("b"))
+
+    def test_freeze_module_with_user_preserved_method(self):
+        class Module(nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = torch.tensor([2.2])
+
+            def forward(self, x):
+                return self.a + self.b
+
+            @torch.jit.export
+            def modify_a(self, x):
+                self.a[0] += 10
+                return self.b
+
+            @torch.jit.export
+            def modify_b(self, x):
+                self.b[0] += 20
+                return self.a
+
+        m = torch.jit.script(Module())
+        m.eval()
+        fm = torch._C._freeze_module(m._c, ["modify_a"])
+        # Both attribute "a" and method "modify_a" are preserved
+        self.assertTrue(fm.hasattr("a"))
+        self.assertFalse(fm.hasattr("b"))
+        input = torch.randn(2, 2)
+        expected = m.forward(input)
+        out = fm.forward(input)
+        self.assertEqual(out, expected)
+
+    def test_freeze_module_with_user_preserved_method2(self):
+        class Module(nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = torch.tensor([2.2])
+
+            def forward(self, x):
+                self.b += 10
+                return self.a + self.b
+
+            @torch.jit.export
+            def modify_a(self, x):
+                self.a[0] += 10
+                return self.b + self.a
+
+        m = torch.jit.script(Module())
+        m.eval()
+        fm = torch._C._freeze_module(m._c, ["modify_a"])
+        FileCheck().check('prim::GetAttr[name="a"]').run(fm.forward.graph)
+        FileCheck().check('prim::GetAttr[name="b"]').run(fm.modify_a.graph)
