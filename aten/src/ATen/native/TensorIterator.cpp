@@ -111,6 +111,8 @@ void TensorIterator::compute_types() {
   //       to quickly acquire a common dtype
   Device common_device = kCPU;
   common_dtype_ = ScalarType::Undefined;
+  // NB: despite output_dtype's generic sounding name, it only is
+  // used in a nontrivial way if check_all_same_dtype is true
   ScalarType output_dtype = ScalarType::Undefined;
   bool has_different_input_dtypes = false;
   bool has_different_output_dtypes = false;
@@ -200,7 +202,12 @@ void TensorIterator::compute_types() {
   int current_cpu_scalars_on_cuda = 0;
   for (auto& op : operands_) {
     if (!op.is_type_defined()) {
-      op.target_dtype = common_dtype_;
+      if (config_static_dtype_.has_value() && op.is_output) {
+        op.target_dtype = *config_static_dtype_;
+      } else {
+        TORCH_INTERNAL_ASSERT(common_dtype_ != ScalarType::Undefined);
+        op.target_dtype = common_dtype_;
+      }
       op.device = common_device;
       continue;
     }

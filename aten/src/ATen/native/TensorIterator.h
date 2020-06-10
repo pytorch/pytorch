@@ -303,11 +303,6 @@ struct CAFFE2_API TensorIterator {
     num_outputs_++;
   }
 
-  void add_output(const Tensor& input, Device device, ScalarType dtype) {
-    operands_.emplace_back(input, device, dtype);
-    num_outputs_++;
-  }
-
   void add_input(const Tensor& input) {
     operands_.emplace_back(input);
   }
@@ -370,6 +365,12 @@ struct CAFFE2_API TensorIterator {
 
   void dont_resize_outputs() {
     config_resize_outputs_ = false;
+  }
+
+  // Bypass output dtype computation and fix the dtype as specified here.
+  void declare_static_dtype(ScalarType dtype) {
+    TORCH_CHECK(!check_all_same_dtype(), "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
+    config_static_dtype_ = dtype;
   }
 
   void declare_static_shape(IntArrayRef shape) {
@@ -507,6 +508,7 @@ protected:
   // Configuration properties are set by the user and then never mutated
   // by TensorIterator::build (in contrast, the properties above are computed
   // properties that TensorIterator works out as it initializes itself.)
+  c10::optional<ScalarType> config_static_dtype_ = c10::nullopt;
   bool config_check_mem_overlap_ = false;
   bool config_allow_cpu_scalars_ = false;
   bool config_is_reduction_ = false;
