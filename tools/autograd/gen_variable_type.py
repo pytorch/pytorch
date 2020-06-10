@@ -190,7 +190,7 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${unqual_operator_name_with_overload}", ${class_type}::${type_wrapper_name});
+m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_wrapper_name});
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\

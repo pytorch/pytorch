@@ -416,7 +416,7 @@ class QMaxPool2D_arr_args final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("max_pool2d", QMaxPool2D_arr_args::run);
+  m.impl("max_pool2d", TORCH_FN(QMaxPool2D_arr_args::run));
 }
 
 } // namespace

@@ -45,10 +45,7 @@ static auto registry =
             "-> __torch__.torch.classes.vulkan.Conv2dOpContext",
             torch::RegisterOperators::options()
                 .aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION)
-                .kernel<
-                    decltype(createConv2dClampPrePackOpContext),
-                    createConv2dClampPrePackOpContext>(
-                    DispatchKey::CPUTensorId))
+                .kernel(DispatchKey::CPUTensorId, TORCH_FN(createConv2dClampPrePackOpContext)))
         .op("vulkan::conv2d_clamp_run(Tensor X, "
             "__torch__.torch.classes.vulkan.Conv2dOpContext W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
