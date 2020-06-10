@@ -3,7 +3,6 @@ import io
 import sys
 import random
 import torch
-import unittest
 from itertools import product as product
 from torch import Tensor
 from typing import NamedTuple
