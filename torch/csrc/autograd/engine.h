@@ -179,6 +179,18 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   void exec_post_processing();
 };
 
+// The guard that sets and restores current_graph_task.
+class GraphTaskGuard {
+ public:
+  explicit GraphTaskGuard(std::shared_ptr<GraphTask> graph_task);
+  ~GraphTaskGuard();
+
+  void restore_current_graph_task();
+
+ private:
+  std::shared_ptr<GraphTask> last_graph_task_;
+};
+
 struct NodeTask {
   std::weak_ptr<GraphTask> base_;
   std::shared_ptr<Node> fn_;
