@@ -281,6 +281,8 @@ def try_ann_to_type(ann, loc):
         return InterfaceType(_qualified_name(ann))
     if ann is torch.device:
         return DeviceObjType.get()
+    if ann is torch.dtype:
+        return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))

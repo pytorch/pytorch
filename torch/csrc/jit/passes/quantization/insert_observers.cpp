@@ -1140,20 +1140,20 @@ InsertObserversHelper::insertObserversFor(
           for (auto idx : subblock_observed_outputs) {
             block_observed_values.insert(subblock->outputs()[idx]);
           }
-          std::vector<bool> subblock_output_quant_state;
+          std::vector<bool> subblock_output_observe_state;
           for (size_t i = 0; i < subblock->outputs().size(); ++i) {
             Value* output = subblock->outputs()[i];
-            subblock_output_quant_state.push_back(
+            subblock_output_observe_state.push_back(
                 isObserved(output, block_observed_values));
           }
-          if (aggregated_output_quant_state.size() > 0) {
+          if (aggregated_output_observe_state.size() > 0) {
             TORCH_CHECK(
-                aggregated_output_quant_state == subblock_output_quant_state,
+                aggregated_output_observe_state == subblock_output_observe_state,
                 "quantization doesn't work for the case where branches "
                 "of `if` doesn't both return quantized/non-quantized "
                 "values");
           } else {
-            aggregated_output_quant_state == subblock_output_quant_state;
+            aggregated_output_observe_state == subblock_output_observe_state;
           }
         }
       }
