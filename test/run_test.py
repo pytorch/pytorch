@@ -208,6 +208,8 @@ def print_to_stderr(message):
 
 
 def run_test(executable, test_module, test_directory, options, *extra_unittest_args):
+    if options.rebuild:
+        os.environ['TORCH_EXTENSIONS_REBUILD'] = "True"
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
@@ -418,6 +420,11 @@ def parse_args():
     parser.add_argument(
         '--determine-from',
         help='File of affected source filenames to determine which tests to run.')
+    parser.add_argument(
+        '-r',
+        '--rebuild',
+        action='store_true',
+        help='Always rebuild extensions before related tests run')
     parser.add_argument(
         'additional_unittest_args',
         nargs='*',
