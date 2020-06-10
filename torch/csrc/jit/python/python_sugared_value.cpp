@@ -394,9 +394,9 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
     std::vector<SugaredValuePtr> keys;
     std::vector<SugaredValuePtr> values;
     auto lambda = [&keys, &values](
-                      std::shared_ptr<ModuleValue> module,
-                      SugaredValuePtr value,
-                      SugaredValuePtr key) -> void {
+                      const std::shared_ptr<ModuleValue>& module,
+                      const SugaredValuePtr& value,
+                      const SugaredValuePtr& key) -> void {
       keys.emplace_back(key);
       values.emplace_back(value);
     };
