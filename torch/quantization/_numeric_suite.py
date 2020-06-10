@@ -3,9 +3,29 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import prepare
 
-from .default_mappings import DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST
+from .default_mappings import (
+    _EXCLUDE_QCONFIG_PROPAGATE_LIST,
+    _INCLUDE_QCONFIG_PROPAGATE_LIST,
+    DEFAULT_DYNAMIC_MODULE_MAPPING,
+    DEFAULT_MODULE_MAPPING,
+    DEFAULT_QAT_MODULE_MAPPING,
+)
+
+
+DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
+    set(DEFAULT_MODULE_MAPPING.values())
+    | set(DEFAULT_QAT_MODULE_MAPPING.values())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
+    | set(DEFAULT_MODULE_MAPPING.keys())
+    | set(DEFAULT_QAT_MODULE_MAPPING.keys())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
+    | _INCLUDE_QCONFIG_PROPAGATE_LIST
+) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
+
+NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {nnqd.Linear, nnq.Linear}
 
 
 def _find_match(str_list, key_str, postfix):
@@ -366,7 +386,12 @@ def prepare_model_outputs(
     float_module.qconfig = qconfig_debug
     prepare(float_module, inplace=True, white_list=white_list)
     q_module.qconfig = qconfig_debug
-    prepare(q_module, inplace=True, white_list=white_list)
+    prepare(
+        q_module,
+        inplace=True,
+        white_list=white_list,
+        observer_white_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST,
+    )
 
 
 def compare_model_outputs(

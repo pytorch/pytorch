@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
 
 from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_MODULE_MAPPING,
@@ -74,7 +73,7 @@ def _observer_forward_hook(self, input, output):
     """
     return self.activation_post_process(output)
 
-def add_observer_(module, device=None):
+def add_observer_(module, white_list=None, device=None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -83,6 +82,7 @@ def add_observer_(module, device=None):
     Args:
         module: input module with qconfig attributes for all the leaf modules that we want to quantize
         device: parent device, if any
+        white_list: list of non-leaf modules we want to add observer
 
     Return:
         None, module is modified inplace with added observer modules and forward_hooks
@@ -103,12 +103,12 @@ def add_observer_(module, device=None):
                 if device is not None:
                     activation.to(device)
                 child.activation_post_process = activation
-        elif type(child) == nnqd.Linear or type(child) == nnq.Linear:
+        elif white_list is not None and type(child) in white_list:
             if hasattr(child, 'qconfig') and child.qconfig is not None:
                 child.add_module('activation_post_process', child.qconfig.activation())
                 child.register_forward_hook(_observer_forward_hook)
         else:
-            add_observer_(child, device)
+            add_observer_(child, white_list, device)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
@@ -147,7 +147,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST):
+def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST, observer_white_list=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -168,7 +168,7 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
         warnings.warn("None of the submodule got qconfig applied. Make sure you "
                       "passed correct configuration through `qconfig_dict` or "
                       "by assigning the `.qconfig` attribute directly on submodules")
-    add_observer_(model)
+    add_observer_(model, observer_white_list)
     return model
 
 def _remove_qconfig(module):
