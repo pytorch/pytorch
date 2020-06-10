@@ -424,8 +424,8 @@ protected:
   /// Records the "computation" shape of the output tensor.  The computation
   /// shape is different from the regular shape in a few ways:
   ///
-  ///   - The shape may be (via permute_dimensions) so that we process
-  ///     the dimensions in the most computationally efficient order
+  ///   - The shape may be permuted (via permute_dimensions) so that we
+  ///     process the dimensions in the most computationally efficient order
   ///     (rather than the logical order given to us by the users.)
   ///   - The shape may have adjacent dimensions collapsed (via
   ///     coalesce_dimensions) so that we minimize the number of
@@ -453,7 +453,7 @@ protected:
   /// Temporarily records the permutation computed by reorder_dimensions.
   /// This permutation maps the computation output dimension (dim) to
   /// the original true output dimension (perm_[dim]).  It is used by
-  /// invert_perm, to undo the permutation.  After coalesce_dimensions is
+  /// invert_perm to undo the permutation.  After coalesce_dimensions is
   /// called, the permutation is no longer valid (as, in general, there
   /// is no permutation that will make computation dimensions to
   /// output dimensions); methods that manipulate perm_ are obligated
