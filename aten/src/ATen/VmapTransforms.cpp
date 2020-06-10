@@ -47,7 +47,7 @@ static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
   return physical_tensor.permute(permutation);
 }
 
-PhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logical_tensor) {
+VmapPhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logical_tensor) {
   auto* batched = maybeGetBatched(logical_tensor);
   TORCH_INTERNAL_ASSERT(
       batched,
@@ -55,20 +55,20 @@ PhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logical_te
   return { permuteBatchDimsToFront(batched), createLevelsBitset(batched->bdims()) };
 }
 
-std::vector<PhysicalView>
+std::vector<VmapPhysicalView>
 MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   TORCH_INTERNAL_ASSERT(false, "NYI");
 }
 
-int64_t PhysicalView::numBatchDims() {
+int64_t VmapPhysicalView::numBatchDims() {
   return levels_.count();
 }
 
-int64_t PhysicalView::numLogicalDims() {
+int64_t VmapPhysicalView::numLogicalDims() {
   return /*physical*/tensor_.dim() - numBatchDims();
 }
 
-std::vector<int64_t> PhysicalView::getPhysicalDims(IntArrayRef logical_dims) {
+std::vector<int64_t> VmapPhysicalView::getPhysicalDims(IntArrayRef logical_dims) {
   auto logical_ndim = numLogicalDims();
   return fmap(
       logical_dims,
@@ -77,7 +77,7 @@ std::vector<int64_t> PhysicalView::getPhysicalDims(IntArrayRef logical_dims) {
       });
 }
 
-int64_t PhysicalView::getPhysicalDim(int64_t logical_dim) {
+int64_t VmapPhysicalView::getPhysicalDim(int64_t logical_dim) {
   auto logical_ndim = numLogicalDims();
   return maybe_wrap_dim(logical_dim, logical_ndim) + numBatchDims();
 }
@@ -114,11 +114,11 @@ static bool batchDimsAreSameSize(
   return true;
 }
 
-Tensor PhysicalView::newLogicalFromPhysical(const Tensor& physical) {
+Tensor VmapPhysicalView::newLogicalFromPhysical(const Tensor& physical) {
   TORCH_INTERNAL_ASSERT(
       batchDimsAreSameSize(physical, tensor_, numBatchDims()),
-      "PhysicalView::newLogicalFromPhysical(physical): expected batch dims ",
-      "of `physical` to be the same size as the batch dims from this PhysicalView.");
+      "VmapPhysicalView::newLogicalFromPhysical(physical): expected batch dims ",
+      "of `physical` to be the same size as the batch dims from this VmapPhysicalView.");
   return makeBatched(physical, computeFrontBatchDimsFromLevels(levels_));
 }
 

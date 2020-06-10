@@ -257,8 +257,8 @@ TEST(VmapTest, TestMultiBatchVmapTransform) {
     ASSERT_EQ(result.tensor().sizes(), expected_result_sizes);
   }
 }
-TEST(VmapTest, TestPhysicalViewGetPhysicalDim) {
-  PhysicalView physical_view(ones({2, 3, 4, 5, 6}), 1 | 4);
+TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDim) {
+  VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 1 | 4);
 
   // Positive dims
   ASSERT_EQ(physical_view.getPhysicalDim(0), 2);
@@ -272,8 +272,8 @@ TEST(VmapTest, TestPhysicalViewGetPhysicalDim) {
   ASSERT_EQ(physical_view.getPhysicalDim(-3), 2);
   ASSERT_THROW(physical_view.getPhysicalDim(-4), c10::Error);
 }
-TEST(VmapTest, TestPhysicalViewGetPhysicalDims) {
-  PhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2 | 8 | 16);
+TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDims) {
+  VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2 | 8 | 16);
 
   ASSERT_EQ(
       physical_view.getPhysicalDims({0, 1, -1, -2}),
@@ -291,10 +291,10 @@ static void checkBatchDimsEqual(BatchDimsRef bdims, BatchDimsRef expected_bdims)
   }
 }
 
-TEST(VmapTest, TestPhysicalViewNewLogicalFromPhysical) {
+TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
   {
     // Simple case: single level
-    PhysicalView physical_view(ones({2, 3, 4}), /*levels = {2}*/4);
+    VmapPhysicalView physical_view(ones({2, 3, 4}), /*levels = {2}*/4);
     Tensor physical = ones({2, 6, 7});
 
     auto result = physical_view.newLogicalFromPhysical(physical);
@@ -305,7 +305,7 @@ TEST(VmapTest, TestPhysicalViewNewLogicalFromPhysical) {
   }
   {
     // Multiple levels
-    PhysicalView physical_view(ones({2, 3, 4, 5, 6}), /*levels = {1, 3, 4}*/2 | 8 | 16);
+    VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), /*levels = {1, 3, 4}*/2 | 8 | 16);
     Tensor physical = ones({2, 3, 4, 7});
 
     auto result = physical_view.newLogicalFromPhysical(physical);
@@ -316,7 +316,7 @@ TEST(VmapTest, TestPhysicalViewNewLogicalFromPhysical) {
   }
   {
     // Logical dimensions is [].
-    PhysicalView physical_view(ones({2}), /*levels = {2}*/4);
+    VmapPhysicalView physical_view(ones({2}), /*levels = {2}*/4);
     Tensor physical = ones({2});
 
     auto result = physical_view.newLogicalFromPhysical(physical);
@@ -327,7 +327,7 @@ TEST(VmapTest, TestPhysicalViewNewLogicalFromPhysical) {
   }
   {
     // Failure case: incompatible batch sizes
-    PhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2 | 8 | 16);
+    VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2 | 8 | 16);
     ASSERT_THROW(physical_view.newLogicalFromPhysical(ones({2, 2, 4, 7})), c10::Error);
     ASSERT_THROW(physical_view.newLogicalFromPhysical(ones({2, 3})), c10::Error);
     ASSERT_THROW(physical_view.newLogicalFromPhysical(ones({2, 1, 1})), c10::Error);

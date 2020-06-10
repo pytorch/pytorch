@@ -25,8 +25,8 @@ namespace at {
 // dimension they are reducing over is dim 0 but the physical dim is dim 1
 // (the first non-batch dimension)
 
-// Forward declared; see NOTE: [What is a PhysicalView?]
-struct PhysicalView;
+// Forward declared; see NOTE: [What is a VmapPhysicalView?]
+struct VmapPhysicalView;
 
 // NOTE: [What is an VmapTransform?]
 // An *VmapTransform* converts logical views of tensors to physical views.
@@ -40,20 +40,20 @@ struct PhysicalView;
 // Given one or more logical views on Tensors, `logicalToPhysical` 
 // permutes all of the batch dims to the front of the tensor, aligns
 // and expands the batch dims to match each other (according to their `level`),
-// and returns a PhysicalView on the tensor(s).
+// and returns a VmapPhysicalView on the tensor(s).
 struct TORCH_API MultiBatchVmapTransform {
-  static PhysicalView logicalToPhysical(const Tensor& logical_tensor);
-  static std::vector<PhysicalView> logicalToPhysical(TensorList logical_tensors);
+  static VmapPhysicalView logicalToPhysical(const Tensor& logical_tensor);
+  static std::vector<VmapPhysicalView> logicalToPhysical(TensorList logical_tensors);
 };
 
-// NOTE: [What is a PhysicalView?]
-// PhysicalView represents a physical view on a Tensor.
+// NOTE: [What is a VmapPhysicalView?]
+// VmapPhysicalView represents a physical view on a Tensor.
 //
 // One can use it to further convert logical dimension indices, logical shapes,
 // and more to their physical variants, or convert a new (physical) tensor into
 // a logical BatchedTensor. (TODO(rzou): some of these are not yet implemented).
 //
-// PhysicalView stores a physical tensor with all of its batch dimensions at
+// VmapPhysicalView stores a physical tensor with all of its batch dimensions at
 // the front and some levels that correspond to said batch dimensions.
 //
 // The levels bitset specifies which vmap levels correspond to the batch
@@ -61,8 +61,8 @@ struct TORCH_API MultiBatchVmapTransform {
 // corresponds to the number of batch dimensions on `tensor` and the rightmost
 // bit of `levels` specifies the minimum number of nested vmaps we are in at
 // this point in time.
-struct TORCH_API PhysicalView {
-  PhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
+struct TORCH_API VmapPhysicalView {
+  VmapPhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
       : levels_(levels), tensor_(tensor) {
     TORCH_INTERNAL_ASSERT(!isBatched(tensor));
   }
@@ -72,7 +72,7 @@ struct TORCH_API PhysicalView {
   // Maps logical dim indices to physical dim indices. Also does dim wrapping.
   //
   // For example, given:
-  //   physical_view = PhysicalView(tensor=ones(2, 3, 4, 5), levels={1, 3})
+  //   physical_view = VmapPhysicalView(tensor=ones(2, 3, 4, 5), levels={1, 3})
   //
   // Then physical_view.getPhysicalDims({0, 1}) returns {2, 3}.
   // This is because the size of levels tell us that the first two dimensions
@@ -82,7 +82,7 @@ struct TORCH_API PhysicalView {
   int64_t getPhysicalDim(int64_t logical_dim);
 
   // Maps a physical tensor to a new logical tensor (BatchedTensor),
-  // using the mapping info stored in this PhysicalView.
+  // using the mapping info stored in this VmapPhysicalView.
   // Assumes that all of the "batch dimensions" are at the front
   // of the physical tensor.
   Tensor newLogicalFromPhysical(const Tensor& physical);
