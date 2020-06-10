@@ -34,24 +34,18 @@
 //     return a + b;
 //   });
 //
-// Note [Result type computation]
+// Note [Common Dtype Computation]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// TensorIterator handles limited mixed-type operations. The result type is
-// computed using promoteTypes on the scalar types of the operands with the
-// following precedence:
+// Some operations have a natural notion of a "common dtype" or
+//   "computation dtype" where all inputs are cast to one dtype, the
+//   operation is performed, and then the results are cast to all outputs.
 //
-// 1) Tensors with dim 1 or higher
-// 2) Tensors with dim 0 that aren't wrapped numbers (e.g. `tensor(5)`)
-// 3) Tensors with dim 0 that are wrapped numbers (e.g. `5`)
+// TensorIterator infers a common dtype if all inputs have the same dtype,
+//   and it computes one using type promotion rules on its inputs if
+//   promote_inputs_to_common_dtype_ is true. Attempting to query
+//   a common dtype otherwise will throw an exception.
 //
-// So if there are any tensors of dim 1 or higher, then 0-dim tensors do not
-// affect the result type. This behavior was chosen to preserve backwards
-// compatibility and is *likely to change* in the near future.
-// (See https://github.com/pytorch/pytorch/issues/9515)
-//
-// Note that TensorIterator currently supports type conversions on 0-dim
-// tensors and arithmetic operators. Other type conversions will raise an
-// exception.
+// Note that the outputs are not considered when computing a common dtype.
 
 namespace at {
 
@@ -138,13 +132,6 @@ enum class FastSetupType : uint8_t {
   NON_OVERLAPPING_DENSE
 };
 
-enum class CommonDTypeStrategy : uint8_t {
-  NONE, // Do not compute a common dtype
-  CHECK, // Compute and validate a common dtype but don't promote.
-  PROMOTE_INPUTS, // Promote common dtype but only validate inputs (comparison ops have boolean output)
-  PROMOTE // Promote to common dtype.
-};
-
 struct CAFFE2_API TensorIterator {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
@@ -177,7 +164,7 @@ struct CAFFE2_API TensorIterator {
     bool check_mem_overlap = false);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
-  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a, bool promote=true);
+  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }
@@ -204,7 +191,10 @@ struct CAFFE2_API TensorIterator {
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].current_dtype; }
-  ScalarType common_dtype() const { return common_dtype_; }
+  ScalarType common_dtype() const {
+    TORCH_INTERNAL_ASSERT(common_dtype_ != ScalarType::Undefined, "Queried for invalid common dtype!");
+    return common_dtype_;
+  }
   ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].current_dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
@@ -220,16 +210,9 @@ struct CAFFE2_API TensorIterator {
     return operands_[arg].tensor;
   }
 
-  void cast_outputs() {
-    if (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE) {
-      for(int i=0; i < noutputs(); i++) {
-        if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
-          operands_[i].original_tensor.copy_(operands_[i].tensor);
-          operands_[i].tensor = operands_[i].original_tensor;
-        }
-      }
-    }
-  }
+  // Copies from temporary outputs back to the original outputs
+  // NOTE: only used on CPU
+  void cast_outputs();
 
   Tensor input(int arg=0) const {
     AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
@@ -339,16 +322,56 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input, device, dtype);
   }
 
-  void promote_common_dtype() {
-    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE;
+  // Sets the check_all_same_dtype_ flag, which is true by default
+  // If true, checks that all inputs and defined outputs have the same dtype
+  // Setting either of promote_inputs_to_common_dtype_
+  //   or cast_common_dtype_to_outputs_ to true will set
+  //   check_all_same_dtype_ to false.
+  void check_all_same_dtype(const bool _check_all_same_dtype) {
+    check_all_same_dtype_ = _check_all_same_dtype;
   }
 
-  void dont_compute_common_dtype() {
-    common_dtype_strategy_ = CommonDTypeStrategy::NONE;
+  // Sets the check_all_same_device_ flag, which is true by default
+  // If true, all operands must be on the same device, with the possible
+  //   exception of CPU scalars, which can be passed to some CUDA kernels
+  //   as kernel arguments.
+  void check_all_same_device(const bool _check_all_same_device) {
+    check_all_same_device_ = _check_all_same_device;
   }
 
-  void compute_common_dtype_only_for_inputs() {
-    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE_INPUTS;
+  // Sets the enforce_safe_casting_to_output_ flag, which is false by default
+  // If true, the iterator's "common dtype" must be computable
+  //   (see the [Common Dtype Computation] note) and
+  //   canCast(common dtype, output dtype) must be true for all outputs.
+  void enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
+    enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
+  }
+
+  // Sets the promote_inputs_to_common_dtype_ flag, which is false by default
+  // If true, the iterator's "common dtype" is always computed (see the
+  //   [Common Dtype Computation] note) and, on the CPU, temporary copies of
+  //   the inputs in the common dtype are passed as the actual inputs to
+  //   the operation.
+  // Setting this flag to true sets check_all_same_dtype_ to false.
+  void promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
+    promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
+    if (_promote_inputs_to_common_dtype) {
+      check_all_same_dtype_ = false;
+    }
+  }
+
+  // Sets the cast_common_dtype_to_outputs_ flag, which is false by default
+  // If true, the iterator's "common dtype" must be computatable
+  //   (see the [Common Dtype Computation] note) and, on the CPU, temporary
+  //   copies of the outputs are passed as the actual output to the operation.
+  //   These temporaries are then copied to the original outputs after
+  //   the operation is performed (see cast_outputs()).
+  // Setting this flag to true sets check_all_same_dtype_ to false.
+  void cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
+    cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
+    if (_cast_common_dtype_to_outputs) {
+      check_all_same_dtype_ = false;
+    }
   }
 
   void dont_resize_outputs() {
@@ -382,7 +405,7 @@ protected:
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
   void compute_types();
-  std::tuple<Device, ScalarType, bool> compute_common_type();
+  ScalarType compute_common_dtype();
   void allocate_outputs();
   bool fast_set_up();
   FastSetupType compute_fast_setup_type();
@@ -399,20 +422,23 @@ protected:
   NameVector names_;
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
-  CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
   ScalarType common_dtype_ = ScalarType::Undefined;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
   bool resize_outputs_ = true;
   bool is_reduction_ = false;
   bool allow_cpu_scalars_ = false;
-  bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
   bool requires_channels_last_3d_output_ = false;
   bool static_shape_ = false;
+  bool check_all_same_dtype_ = true;
+  bool check_all_same_device_ = true;
+  bool enforce_safe_casting_to_output_ = false;
+  bool promote_inputs_to_common_dtype_ = false;
+  bool cast_common_dtype_to_outputs_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

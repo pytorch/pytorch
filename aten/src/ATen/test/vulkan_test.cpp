@@ -496,7 +496,7 @@ TEST(VulkanTest, conv2dPrepack) {
   ASSERT_TRUE(no_prepack_check);
 
   auto prepack = callOpByName(
-      "vulkan::conv2d_clamp_prepack",
+      "vulkan_prepack::conv2d_clamp_prepack",
       "",
       t_w,
       t_b,
@@ -507,7 +507,7 @@ TEST(VulkanTest, conv2dPrepack) {
       output_min,
       output_max);
   auto tv_out_prepack_ivalues =
-      callOpByName("vulkan::conv2d_clamp_run", "", tv_in, prepack[0]);
+      callOpByName("vulkan_prepack::conv2d_clamp_run", "", tv_in, prepack[0]);
   auto tv_out_prepack = tv_out_prepack_ivalues[0].toTensor();
   auto t_out_prepack = tv_out_prepack.cpu();
   const auto prepack_check = almostEqual(t_out_prepack, t_out_expected);
