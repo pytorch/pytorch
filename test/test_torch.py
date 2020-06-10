@@ -2877,6 +2877,22 @@ class _TestTorchMixin(object):
                         expected[tuple(ii)] = src
         self.assertEqual(actual, expected, 0)
 
+        # should throw an error when self.dtype != src.dtype.
+        # we ignore the case when src is Scalar, as it gets
+        # cast via src.to<scalar_t>.
+        if not is_scalar:
+            err_pattern = 'Expected (self.dtype to be equal to src.dtype|object of scalar type Int but got scalar type \\w+)'
+            with self.assertRaisesRegex(RuntimeError, err_pattern):
+                getattr(base.clone().type(torch.int), method)(dim, idx, src)
+
+            err_pattern = 'Expected (self.dtype to be equal to src.dtype|object of scalar type \\w+ but got scalar type Int)'
+            with self.assertRaisesRegex(RuntimeError, err_pattern):
+                getattr(base.clone(), method)(dim, idx, src.type(torch.int))
+
+        # should throw an error when index dtype is not long
+        with self.assertRaisesRegex(RuntimeError, 'Expected (dtype int64|object of scalar type Long)'):
+            getattr(base.clone(), method)(dim, idx.type(torch.int), src)
+
         if test_bounds:
             idx[0][0][0] = 34
             with self.assertRaises(RuntimeError):
