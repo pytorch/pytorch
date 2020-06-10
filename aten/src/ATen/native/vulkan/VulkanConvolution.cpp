@@ -68,12 +68,11 @@ ContextConv2D create(
       expand_param_if_needed(dilation, "dilation", 2);
   Tensor weight_nchw = weight.contiguous();
   auto ws = weight_nchw.sizes();
-  std::array<int64_t, 4> weight_sizes = {ws[0], ws[1], ws[2], ws[3]};
   return ContextConv2D{
       groups == 1 ? at::native::vulkan_convolution_prepack_weights(weight_nchw)
                   : std::move(weight_nchw.vulkan()),
       bias.has_value() ? c10::make_optional((*bias).vulkan()) : c10::nullopt,
-      weight_sizes,
+      {{ws[0], ws[1], ws[2], ws[3]}},
       {padding_expanded[0], padding_expanded[1]},
       {stride_expanded[0], stride_expanded[1]},
       {dilation_expanded[0], dilation_expanded[1]},
