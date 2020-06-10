@@ -208,8 +208,13 @@ struct alignas(sizeof(T) * 2) complex {
     return *this;
   }
 
+#ifdef __APPLE__
+#define FORCE_INLINE_APPLE __attribute__((always_inline))
+#else
+#define FORCE_INLINE_APPLE
+#endif
   template<typename U>
-  constexpr complex<T> &operator /=(const complex<U> &rhs) {
+  constexpr FORCE_INLINE_APPLE complex<T> &operator /=(const complex<U> &rhs) __ubsan_ignore_float_divide_by_zero__ {
     // (a + bi) / (c + di) = (ac + bd)/(c^2 + d^2) + (bc - ad)/(c^2 + d^2) i
     T a = real_;
     T b = imag_;
@@ -220,6 +225,7 @@ struct alignas(sizeof(T) * 2) complex {
     imag_ = (b * c - a * d) / denominator;
     return *this;
   }
+#undef FORCE_INLINE_APPLE
 
   template<typename U>
   constexpr complex<T> &operator =(const std::complex<U> &rhs) {
@@ -464,18 +470,6 @@ std::basic_istream<CharT, Traits>& operator>>(std::basic_istream<CharT, Traits>&
 //
 // The implementation of these functions also follow the design of C++20
 
-namespace std {
-
-template<typename T>
-constexpr T real(const c10::complex<T>& z) {
-  return z.real();
-}
-
-template<typename T>
-constexpr T imag(const c10::complex<T>& z) {
-  return z.imag();
-}
-
 #if defined(__CUDACC__) || defined(__HIPCC__)
 namespace c10_internal {
   template<typename T>
@@ -490,6 +484,18 @@ namespace c10_internal {
   }
 } // namespace c10_internal
 #endif
+
+namespace std {
+
+template<typename T>
+constexpr T real(const c10::complex<T>& z) {
+  return z.real();
+}
+
+template<typename T>
+constexpr T imag(const c10::complex<T>& z) {
+  return z.imag();
+}
 
 template<typename T>
 C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
