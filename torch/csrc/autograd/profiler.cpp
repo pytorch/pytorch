@@ -511,20 +511,20 @@ void Event::record(bool record_cuda) {
   TORCH_INTERNAL_ASSERT(
       evt.getCPUns() == 0,
       "Did not expect to record cpu_ns for Event created via Event::fromIValue.");
-  auto cpuMemUsage = ivalues.get(5).toInt();
-  evt = evt.setCPUMemoryUsage(cpuMemUsage);
-  auto cpu_ns = ivalues.get(6).toInt();
+  auto currentIdx = 5;
+  evt = evt.setCPUMemoryUsage(ivalues.get(currentIdx++).toInt());
+  auto cpu_ns = ivalues.get(currentIdx++).toInt();
   evt.setCPUns(cpu_ns);
-  bool cuda_recorded = ivalues.get(7).toBool();
+  bool cuda_recorded = ivalues.get(currentIdx++).toBool();
   if (cuda_recorded) {
-    int64_t cuda_mem_usage = ivalues.get(8).toInt();
+    int64_t cuda_mem_usage = ivalues.get(currentIdx++).toInt();
     evt.setCudaMemoryUsage(cuda_mem_usage);
-    double cuda_elapsed_us = ivalues.get(9).toDouble();
+    double cuda_elapsed_us = ivalues.get(currentIdx++).toDouble();
     TORCH_INTERNAL_ASSERT(
         cuda_elapsed_us != -1,
         "Failed to record cuda_elapsed_us when profiler was enabled with record_cuda=True.");
     evt.setCudaElapsedUs(cuda_elapsed_us);
-    auto remoteCudaDevice = ivalues.get(10).toInt();
+    auto remoteCudaDevice = ivalues.get(currentIdx).toInt();
     evt.setDevice(remoteCudaDevice);
   }
   return evt;
