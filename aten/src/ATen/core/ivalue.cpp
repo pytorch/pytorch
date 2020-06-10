@@ -18,7 +18,7 @@ bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
 
 namespace ivalue {
 
-// This is in ivalue.cpp because we need to access Type::python_str, which
+// This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
 void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
   // NB: doing pointer comparison here
@@ -26,9 +26,9 @@ void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
   // Type's, this needs to be changed!
   TORCH_CHECK(actual_type == expected_type,
               "Tried to convert an IValue of type ",
-              actual_type->python_str(),
+              actual_type->repr_str(),
               " to custom class type ",
-              expected_type->python_str());
+              expected_type->repr_str());
 }
 
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
@@ -291,7 +291,7 @@ std::ostream& printMaybeAnnotatedList(
   auto list_elem_type = the_list.type()->expect<ListType>()->getElementType();
   if (the_list.toListRef().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
-    out << "annotate(" << the_list.type()->python_str() << ", ";
+    out << "annotate(" << the_list.type()->annotation_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";
     return out;
@@ -332,7 +332,7 @@ std::ostream& printMaybeAnnotatedDict(
   auto value_type = the_dict.type()->cast<DictType>()->getValueType();
   if (the_dict.toGenericDict().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
-    out << "annotate(" << the_dict.type()->python_str() << ",";
+    out << "annotate(" << the_dict.type()->annotation_str() << ",";
     printDict(out, the_dict.toGenericDict(), formatter) << ")";
   } else {
     return printDict(out, the_dict.toGenericDict(), formatter);
