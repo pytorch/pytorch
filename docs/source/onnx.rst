@@ -846,14 +846,21 @@ Use external data format
 data format. With this option enabled, the exporter stores some model parameters in external
 binary files, rather than the ONNX file itself. These external binary files are stored in the
 same location as the ONNX file. A string specifying where to store the files should
-be provided as to the export API as argument 'f'.
+be provided to the export API as argument 'f'. ::
+
+    model = torchvision.models.mobilenet_v2(pretrained=True)
+    input = torch.randn(2, 3, 224, 224, requires_grad=True)
+    torch.onnx.export(model, (input, ), './large_model.onnx', use_external_data_format=True)
 
 Training
 --------
-``training`` enables users to export their models in a training-friendly mode. Exporting a model
-in this training-friendly mode avoids certain model optimizations that might interfere with model
-parameter training.
-
+``Training`` argument in export API allows users to export models in a training-friendly mode.
+``TrainingMode.TRAINING`` exports model in a training-friendly mode that avoids certain model
+optimizations which might interfere with model parameter training. ``TrainingMode.PRESERVE``
+exports the model in inference mode if ``model.training`` is ``False``. Otherwise, it exports
+the model in a training-friendly mode.
+The default mode for this argument is ``TrainingMode.EVAL`` which exports the model in
+inference mode.
 
 Functions
 --------------------------
