@@ -67,9 +67,64 @@ def list_with_default(out_size: List[int], defaults: List[int]):
 
 // Implementations of historic symbol behaviors are defined here
 // See note [Versioned Symbols]
+
+// This builtin is for testing
 auto _test_serialization_subcmul = R"SCRIPT(
 def _test_serialization_subcmul_0_2(self: Tensor, other:Tensor, alpha: number=2) -> Tensor:
   return other - (self * alpha)
+)SCRIPT";
+
+// Division versioned symbols, for Torchscript programs serialized when
+// division on integer tensors was floor division, not true division.
+
+// Tensor x Tensor
+// NOTE: testing for the tensors being float tensors is sufficient here,
+// because the Torchscript versions this fix applies to (0 through 3)
+// did not support complex tensors.
+auto div_tensor = R"SCRIPT(
+def div_0_3(self: Tensor, other: Tensor) -> Tensor:
+  if (self.is_floating_point() or other.is_floating_point()):
+    return self.true_divide(other)
+  return self.floor_divide(other)
+)SCRIPT";
+
+// Tensor x Scalar
+auto div_tensor_scalar = R"SCRIPT(
+def div_0_3(self: Tensor, other: number) -> Tensor:
+  if (self.is_floating_point() or isinstance(other, float)):
+    return self.true_divide(other)
+  return self.floor_divide(other)
+)SCRIPT";
+
+// Scalar x Scalar
+auto div_scalar_scalar = R"SCRIPT(
+def div_0_3(self: number, other: number) -> number:
+  return self / other
+)SCRIPT";
+
+// Tensor x Tensor with out kwarg
+// NOTE: the JIT doesn't support Tensor x Scalar with the out kwarg
+auto div_tensor_out = R"SCRIPT(
+def div_0_3(self: Tensor, other: Tensor, *, out: Tensor) -> Tensor:
+  if (self.is_floating_point() or other.is_floating_point() or out.is_floating_point()):
+    return self.true_divide(other, out=out)
+  return self.floor_divide(other, out=out)
+)SCRIPT";
+
+// Tensor x Tensor inplace
+auto div__tensor = R"SCRIPT(
+def div__0_3(self: Tensor, other: Tensor) -> Tensor:
+  if (self.is_floating_point() or other.is_floating_point()):
+    return self.true_divide_(other)
+  return self.floor_divide_(other)
+)SCRIPT";
+
+// Tensor x Scalar inplace
+auto div__scalar = R"SCRIPT(
+def div__0_3(self: Tensor, other: number) -> Tensor:
+  if (self.is_floating_point() or isinstance(other, float)):
+    return self.true_divide_(other)
+  return self.floor_divide_(other)
 )SCRIPT";
 
 struct BuiltinFunctionRegistry {
@@ -143,6 +198,12 @@ struct BuiltinFunctionRegistry {
     // Symbols]
     // Note: these functions go into the "upgraders" namespace
     loadSource(_test_serialization_subcmul, "upgraders");
+    loadSource(div_tensor, "upgraders");
+    loadSource(div_tensor_scalar, "upgraders");
+    loadSource(div_scalar_scalar, "upgraders");
+    loadSource(div__tensor, "upgraders");
+    loadSource(div_tensor_out, "upgraders");
+    loadSource(div__scalar, "upgraders");
 
     // These are under `prim` instead of `aten` since they exist to bind certain
     // tensor property getters to correpsonding methods
