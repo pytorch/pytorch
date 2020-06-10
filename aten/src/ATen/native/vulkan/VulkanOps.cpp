@@ -221,14 +221,15 @@ void conv2d_depthwise(
     float outputMin;
     float outputMax;
   };
-  ConstBlock cb{{params.PX, params.PY},
-                {params.KW, params.KH},
-                {params.SX, params.SY},
-                {params.DX, params.DY},
-                {params.OW, params.OH, params.OC_4, 0},
-                {params.W, params.H, params.C_4, 0},
-                output_min ? *output_min : std::numeric_limits<float>::min(),
-                output_max ? *output_max : std::numeric_limits<float>::max()};
+  ConstBlock cb{
+      {params.PX, params.PY},
+      {params.KW, params.KH},
+      {params.SX, params.SY},
+      {params.DX, params.DY},
+      {params.OW, params.OH, params.OC_4, 0},
+      {params.W, params.H, params.C_4, 0},
+      output_min ? *output_min : -std::numeric_limits<float>::infinity(),
+      output_max ? *output_max : std::numeric_limits<float>::infinity()};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -435,9 +436,9 @@ void conv2d(
     float outputMax;
   };
   float outputMin =
-      output_min ? *output_min : std::numeric_limits<float>::min();
+      output_min ? *output_min : -std::numeric_limits<float>::infinity();
   float outputMax =
-      output_max ? *output_max : std::numeric_limits<float>::max();
+      output_max ? *output_max : std::numeric_limits<float>::infinity();
   ConstBlock cb{{params.PX, params.PY},
                 {params.KW, params.KH},
                 {params.SX, params.SY},
