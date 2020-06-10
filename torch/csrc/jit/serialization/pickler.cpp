@@ -296,7 +296,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
 
   // TODO: Skip this if not writing tensors
   memoized_storage_map_[addr] = pushNextBinPut();
-  tensor_data_.push_back(getWriteableTensorData(tensor));
+  tensor_data_.push_back(tensor);
 }
 
 void Pickler::pushBytes(const std::string& string) {

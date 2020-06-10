@@ -41,6 +41,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
+    override_qengines,
 )
 
 # Reference method for fake quantize
@@ -810,3 +811,39 @@ class TestDistributed(QuantizationTestCase):
             self.assertTrue(
                 isinstance(fused_model.conv.bn, nn.SyncBatchNorm),
                 "Expected BN to be converted to SyncBN")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @override_qengines
+    def test_device_affinity(self):
+        """
+        Tests that converting a model to QAT respects device affinity
+        """
+        class Model(nn.Module):
+
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.bn = nn.BatchNorm2d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        model = Model()
+        model.qconfig = torch.quantization.get_default_qat_qconfig(torch.backends.quantized.engine)
+        device = torch.device('cuda:0')
+        model.to(device)
+        torch.quantization.prepare_qat(model, inplace=True)
+        model_devices = {p.device for p in model.parameters()} | \
+            {p.device for p in model.buffers()}
+        self.assertEqual(len(model_devices), 1)
+        model_device = next(iter(model_devices))
+        self.assertEqual(model_device, device)
+
+        # ensure that running an input on CUDA works without any needed changes
+        input = torch.randn(4, 1, 4, 4, device=device)
+        model(input)

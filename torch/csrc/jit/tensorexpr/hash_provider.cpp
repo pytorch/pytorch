@@ -205,6 +205,7 @@ void HashProvider::visit(const For* v) {
 
   SimplifierHashType hash = hash_combine(
       "for", hashOf(v->var()), hashOf(v->start()), hashOf(v->stop()));
+  hash = hash_combine(hash, v->loop_options().ToString());
   if (v->body()) {
     v->body()->accept(this);
     hash = hash_combine(hash, hashOf(v->body()));

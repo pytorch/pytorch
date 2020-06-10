@@ -156,7 +156,7 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
 
 void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
   if (isComplexType(iter.dtype()) || exp_scalar.isComplex()) {
-    _AT_DISPATCH_C10_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
         return complex_pow_(base, exp);

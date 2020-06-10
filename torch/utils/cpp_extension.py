@@ -330,7 +330,7 @@ class BuildExtension(build_ext, object):
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
-            if not _is_ninja_available():
+            if not is_ninja_available():
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
 
@@ -1273,7 +1273,11 @@ def _write_ninja_file_and_build_library(
         error_prefix="Error building extension '{}'".format(name))
 
 
-def _is_ninja_available():
+def is_ninja_available():
+    r'''
+    Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
+    available on the system, ``False`` otherwise.
+    '''
     with open(os.devnull, 'wb') as devnull:
         try:
             subprocess.check_call('ninja --version'.split(), stdout=devnull)
@@ -1285,10 +1289,10 @@ def _is_ninja_available():
 
 def verify_ninja_availability():
     r'''
-    Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
-    available on the system.
+    Raises ``RuntimeError`` if `ninja <https://ninja-build.org/>`_ build system is not
+    available on the system, does nothing otherwise.
     '''
-    if not _is_ninja_available():
+    if not is_ninja_available():
         raise RuntimeError("Ninja is required to load C++ extensions")
 
 
@@ -1372,10 +1376,11 @@ def _get_cuda_arch_flags(cflags=None):
         ('Pascal', '6.0;6.1+PTX'),
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
+        ('Ampere', '8.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5']
+                        '7.0', '7.2', '7.5', '8.0']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
