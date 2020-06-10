@@ -6299,28 +6299,35 @@ class TestAutogradDeviceType(TestCase):
 
     def test_strided_leaf_grad_layout(self, device):
         # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.
-        a = torch.rand(2, 3, 4, 5, device=device, dtype=torch.double, requires_grad=True)
-        b = torch.rand(2, 3, 4, 5, device=device, dtype=torch.double, requires_grad=True)
-        b.data = b.data.to(memory_format=torch.channels_last)
-        # checks (1) for broadcasted gradients
-        a.sum().backward()
-        self.assertEqual(a.grad.stride(), a.stride())
-        b.sum().backward()
-        self.assertEqual(b.grad.stride(), b.stride())
-        # checks (1) for non-broadcasted gradients
-        a.grad = None
-        b.grad = None
-        (a * b).sum().backward()
-        self.assertEqual(a.grad.stride(), a.stride())
-        self.assertEqual(b.grad.stride(), b.stride())
+        for fmt_a in (torch.contiguous_format, torch.channels_last):
+            for fmt_b in (torch.contiguous_format, torch.channels_last):
+                a = torch.rand((2, 3, 4, 5), device=device).to(memory_format=fmt_a)
+                b = torch.rand((2, 3, 4, 5), device=device).to(memory_format=fmt_b)
+                a.requires_grad_()
+                b.requires_grad_()
+                # checks (1) for broadcasted gradients
+                a.sum().backward()
+                self.assertEqual(a.grad.stride(), a.stride())
+                b.sum().backward()
+                self.assertEqual(b.grad.stride(), b.stride())
+                # checks (1) for non-broadcasted gradients
+                a.grad = None
+                b.grad = None
+                (a * b).sum().backward()
+                self.assertEqual(a.grad.stride(), a.stride())
+                self.assertEqual(b.grad.stride(), b.stride())
 
         # (2) If leaf isn't dense, checks that grads are rowmajor contiguous.
-        c = torch.rand(2, 2, device=device, dtype=torch.double, requires_grad=True)
-        c_storage = torch.zeros((2, 4), device=device, dtype=torch.double)
-        c.data = c_storage.data[:, :2]
-        d = torch.rand(2, 2, device=device, dtype=torch.double)
+        c = torch.empty_strided((2, 2), (4, 2), device=device).copy_(torch.rand((2, 2), device=device))
+        c.requires_grad_()
+        d = torch.rand((2, 2), device=device)
+        # checks (2) for broadcasted gradients
+        c.sum().backward()
+        self.assertEqual(c.grad.stride(), (2, 1))
+        # checks (2) for non-broadcasted gradients
+        c.grad = None
         (c * d).sum().backward()
-        self.assertTrue(c.grad.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertEqual(c.grad.stride(), (2, 1))
 
 
 class TestMultithreadAutograd(TestCase):
