@@ -62,7 +62,6 @@ def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=Fa
     # copied in prepare_script when inplace is False
     if is_dynamic:
         model = prepare_dynamic_script(model, qconfig_dict, inplace)
-        model(*run_args)
         # TODO: change inplace to True
         model = convert_dynamic_script(model, False, debug)
     else:
@@ -78,5 +77,5 @@ def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=Fa
 def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
     return _quantize_script(model, qconfig_dict, run_fn, run_args, inplace, debug, False)
 
-def quantize_dynamic_script(model, qconfig_dict, sample_model_inputs, inplace=False, debug=False):
-    return _quantize_script(model, qconfig_dict, run_args=sample_model_inputs, inplace=inplace, debug=debug, is_dynamic=True)
+def quantize_dynamic_script(model, qconfig_dict, inplace=False, debug=False):
+    return _quantize_script(model, qconfig_dict, inplace=inplace, debug=debug, is_dynamic=True)

@@ -336,7 +336,7 @@ Tensor& logical_not_(Tensor& self) {
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   TensorIterator iter;
-  iter.dont_compute_common_dtype();
+  iter.check_all_same_dtype(false);
   iter.set_check_mem_overlap(true);
   iter.add_output(result);
   iter.add_input(self);

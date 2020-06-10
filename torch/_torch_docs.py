@@ -5688,6 +5688,10 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
 
+.. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)` 
+          will also remove the batch dimension, which can lead to unexpected 
+          errors.
+
 Args:
     {input}
     dim (int, optional): if given, the input will be squeezed only in
@@ -6068,6 +6072,58 @@ Example::
 
             [[ 2,  3],
              [ 0,  1]]])
+""".format(**common_args))
+
+add_docstr(torch.fliplr,
+           r"""
+fliplr(input) -> Tensor
+
+Flip array in the left/right direction, returning a new tensor.
+
+Flip the entries in each row in the left/right direction. 
+Columns are preserved, but appear in a different order than before.
+
+Note:
+    Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
+
+Args:
+    input (Tensor): Must be at least 2-dimensional.
+
+Example::
+
+    >>> x = torch.arange(4).view(2, 2)
+    >>> x
+    tensor([[0, 1],
+            [2, 3]])
+    >>> torch.fliplr(x)
+    tensor([[1, 0],
+            [3, 2]])
+""".format(**common_args))
+
+add_docstr(torch.flipud,
+           r"""
+flipud(input) -> Tensor
+
+Flip array in the up/down direction, returning a new tensor.
+
+Flip the entries in each column in the up/down direction.
+Rows are preserved, but appear in a different order than before.
+
+Note:
+    Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
+
+Args:
+    input (Tensor): Must be at least 1-dimensional.
+
+Example::
+
+    >>> x = torch.arange(4).view(2, 2)
+    >>> x
+    tensor([[0, 1],
+            [2, 3]])
+    >>> torch.flipud(x)
+    tensor([[2, 3],
+            [0, 1]])
 """.format(**common_args))
 
 add_docstr(torch.roll,

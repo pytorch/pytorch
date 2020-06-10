@@ -526,15 +526,9 @@
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: bernoulli_tensor_cpu_
-    CUDA: bernoulli_tensor_cuda_
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: bernoulli_scalar_cpu_
-    CUDA: bernoulli_scalar_cuda_
 
 # This out-of-place version isn't used explicitly, but needed by jit.
 # There is no default valid on `p` here because it would introduce ambiguity
@@ -2715,6 +2709,7 @@
   dispatch:
     CPU: threshold
     CUDA: threshold_cuda
+    QuantizedCPU: quantized_threshold
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   variants: function
@@ -2771,6 +2766,14 @@
   dispatch:
     CPU: flip_cpu
     CUDA: flip_cuda
+
+- func: fliplr(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: flipud(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
 
 - func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
   use_c10_dispatcher: full
@@ -4351,15 +4354,12 @@
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: diag_out
-    CUDA: legacy::cuda::_th_diag_out
+    CPU: diag_cpu_out
+    CUDA: diag_cuda_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: diag
-    CUDA: legacy::cuda::_th_diag
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -4400,7 +4400,7 @@
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_trace
-    CUDA: legacy::cuda::_th_trace
+    CUDA: trace_cuda
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

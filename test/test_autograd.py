@@ -1518,7 +1518,7 @@ class TestAutograd(TestCase):
             return z_select_real.sum()
 
         z = torch.randn(10, 2, 2, dtype=torch.double, requires_grad=True)
-        # gradcheck(func, [z])
+        gradcheck(func, [z])
 
         z1 = z.clone().detach().requires_grad_(True)
         torch.select(z1, z1.dim() - 2, 0).sum().backward()
@@ -4350,7 +4350,8 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
                 '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
-                '__radd__', 'repeat', 'expand', 'mul', 'tanh', 'flip', 'rot90'] + separate_complex_tests
+                '__radd__', 'repeat', 'expand', 'mul', 'tanh', 'flip', 'fliplr', 'flipud',
+                'rot90'] + separate_complex_tests
 
 def add_test(
         name,
