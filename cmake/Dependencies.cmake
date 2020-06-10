@@ -41,18 +41,25 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND (NOT INTERN_BUILD_MOBILE OR BUILD_CA
 endif()
 
 # For MSVC,
-# 1. Replace /Zi and /ZI with /Z7
+# 1. Remove /Zi, /ZI and /Z7 for Release, MinSizeRel and Default builds
 # 2. Switch off incremental linking in debug builds
+# 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
+#    for Debug and RelWithDebInfo builds
 if(MSVC)
+  foreach(flag_var 
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
+    if(${flag_var} MATCHES "/Z[iI7]")
+      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
-        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
-        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+        CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO
+        CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELWITHDEBINFO)
       if(${flag_var} MATCHES "/Z[iI]")
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-      endif(${flag_var} MATCHES "/Z[iI]")
+      endif()
     endforeach(flag_var)
   endif(MSVC_Z7_OVERRIDE)
   foreach(flag_var
@@ -474,6 +481,15 @@ elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
   list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
 endif()
 
+# ---[ Vulkan deps
+if(USE_VULKAN)
+  set(Vulkan_LIBS)
+  set(Vulkan_INCLUDES)
+  include(${CMAKE_CURRENT_LIST_DIR}/VulkanDependencies.cmake)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${Vulkan_LIBS})
+  include_directories(SYSTEM ${Vulkan_INCLUDES})
+endif()
+
 # ---[ gflags
 if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
@@ -596,6 +612,13 @@ if(USE_FBGEMM)
   if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
     message(WARNING
       "A compiler with AVX512 support is required for FBGEMM. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
+    set(USE_FBGEMM OFF)
+  endif()
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(WARNING
+      "x64 operating system is required for FBGEMM. "
       "Not compiling with FBGEMM. "
       "Turn this warning off by USE_FBGEMM=OFF.")
     set(USE_FBGEMM OFF)
@@ -1583,6 +1606,15 @@ if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKLDNN_ENABLED 0)
   set(CAFFE2_USE_MKLDNN OFF)
   if(USE_MKLDNN)
+    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+      message(WARNING
+        "x64 operating system is required for MKLDNN. "
+        "Not compiling with MKLDNN. "
+        "Turn this warning off by USE_MKLDNN=OFF.")
+      set(USE_MKLDNN OFF)
+    endif()
+  endif()
+  if(USE_MKLDNN)
     include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
     if(MKLDNN_FOUND)
       set(AT_MKLDNN_ENABLED 1)
@@ -1630,6 +1662,7 @@ if(NOT INTERN_BUILD_MOBILE)
     endif(HAVE_MALLOC_USABLE_SIZE)
   endif(UNIX)
 
+  add_definitions(-DUSE_EXTERNAL_MZCRC)
   add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
 
   # Is __thread supported?

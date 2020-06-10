@@ -11,7 +11,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 workspace.GlobalInit(
     [
@@ -24,7 +24,7 @@ workspace.GlobalInit(
 GLOW_MATMUL_ATOL = 1e-5
 GLOW_MATMUL_RTOL = 1e-3
 
-class SparseLengthsSum8BitFakeNNPIFp32Test(unittest.TestCase):
+class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
     @given(
         seed=st.integers(0, 65535),
         num_rows=st.integers(2, 20),
