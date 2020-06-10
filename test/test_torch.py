@@ -11462,7 +11462,7 @@ class TestTorchDeviceType(TestCase):
         # complex
         m1 = torch.tensor((4.0000 + 4.0000j), dtype=torch.complex64)
         m2 = torch.tensor(4., dtype=torch.float64)
-        self.assertRaisesRegex(RuntimeError, r"result type ComplexDouble can't be cast to the desired output type Double",
+        self.assertRaisesRegex(RuntimeError, r"result type ComplexFloat can't be cast to the desired output type Double",
                                lambda: torch.add(m1, m1, out=m2))
 
 
@@ -14111,7 +14111,7 @@ class TestTorchDeviceType(TestCase):
     @deviceCountAtLeast(2)
     @onlyCUDA
     def test_cross_device_binary_ops(self, devices):
-        vals = (1, (2,))
+        vals = (1., (2.,))
         cpu_tensor = torch.randn(2, 2)
         for op in (operator.add, torch.add,
                    operator.sub, torch.sub,
@@ -14122,13 +14122,13 @@ class TestTorchDeviceType(TestCase):
                 a = torch.tensor(a, device=devices[0])
                 b = torch.tensor(b, device=devices[1])
 
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(a, b)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(b, a)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(a, cpu_tensor)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(cpu_tensor, a)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
@@ -17780,7 +17780,7 @@ class TestDevicePrecision(TestCase):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
 
-        err_string = "output with device cpu doesn't match the desired device {0}".format(device)
+        err_string = "Expected all tensors to be on the same device, but found at least two devices, {0}".format(device)
 
         with self.assertRaisesRegex(RuntimeError, err_string):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)

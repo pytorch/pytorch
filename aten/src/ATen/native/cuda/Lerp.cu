@@ -7,12 +7,14 @@
 
 namespace {
 
-inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, const at::Tensor& weight) {
+inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, const at::Tensor& weights) {
+  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
+  TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", weights.dtype());
   at::TensorIterator iter;
   iter.add_output(ret);
   iter.add_input(self);
   iter.add_input(end);
-  iter.add_input(weight);
+  iter.add_input(weights);
   iter.build();
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "lerp_cuda", [&]{
     at::native::gpu_kernel(iter,
@@ -28,6 +30,7 @@ inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor&
 
 template <typename scalar_t>
 void lerp_scalar_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, scalar_t weight_val) {
+  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
   at::TensorIterator iter;
   iter.add_output(ret);
   iter.add_input(self);
