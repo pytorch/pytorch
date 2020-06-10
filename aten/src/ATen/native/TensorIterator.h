@@ -299,10 +299,6 @@ struct CAFFE2_API TensorIterator {
     return true;
   }
 
-  void set_check_mem_overlap(bool check_mem_overlap) {
-    check_mem_overlap_ = check_mem_overlap;
-  }
-
   /// Construction
   void add_output(const Tensor& output) {
     operands_.emplace_back(output);
@@ -322,13 +318,17 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input, device, dtype);
   }
 
+  void set_check_mem_overlap(bool check_mem_overlap) {
+    config_check_mem_overlap_ = check_mem_overlap;
+  }
+
   // Sets the check_all_same_dtype_ flag, which is true by default
   // If true, checks that all inputs and defined outputs have the same dtype
   // Setting either of promote_inputs_to_common_dtype_
   //   or cast_common_dtype_to_outputs_ to true will set
   //   check_all_same_dtype_ to false.
   void check_all_same_dtype(const bool _check_all_same_dtype) {
-    check_all_same_dtype_ = _check_all_same_dtype;
+    config_check_all_same_dtype_ = _check_all_same_dtype;
   }
 
   // Sets the check_all_same_device_ flag, which is true by default
@@ -336,7 +336,7 @@ struct CAFFE2_API TensorIterator {
   //   exception of CPU scalars, which can be passed to some CUDA kernels
   //   as kernel arguments.
   void check_all_same_device(const bool _check_all_same_device) {
-    check_all_same_device_ = _check_all_same_device;
+    config_check_all_same_device_ = _check_all_same_device;
   }
 
   // Sets the enforce_safe_casting_to_output_ flag, which is false by default
@@ -344,7 +344,7 @@ struct CAFFE2_API TensorIterator {
   //   (see the [Common Dtype Computation] note) and
   //   canCast(common dtype, output dtype) must be true for all outputs.
   void enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
-    enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
+    config_enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
   }
 
   // Sets the promote_inputs_to_common_dtype_ flag, which is false by default
@@ -354,9 +354,9 @@ struct CAFFE2_API TensorIterator {
   //   the operation.
   // Setting this flag to true sets check_all_same_dtype_ to false.
   void promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
-    promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
+    config_promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
     if (_promote_inputs_to_common_dtype) {
-      check_all_same_dtype_ = false;
+      config_check_all_same_dtype_ = false;
     }
   }
 
@@ -368,23 +368,23 @@ struct CAFFE2_API TensorIterator {
   //   the operation is performed (see cast_outputs()).
   // Setting this flag to true sets check_all_same_dtype_ to false.
   void cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
-    cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
+    config_cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
     if (_cast_common_dtype_to_outputs) {
-      check_all_same_dtype_ = false;
+      config_check_all_same_dtype_ = false;
     }
   }
 
   void dont_resize_outputs() {
-    resize_outputs_ = false;
+    config_resize_outputs_ = false;
   }
 
   void declare_static_shape(IntArrayRef shape) {
     // WARNING:
     //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
     //   are expected to check shapes before calling `add_input` or `add_output`.
-    TORCH_CHECK(!resize_outputs_, "dont_resize_outputs() must be called before declare_static_shape(...)")
+    TORCH_CHECK(!resize_outputs(), "dont_resize_outputs() must be called before declare_static_shape(...)")
     shape_ = shape;
-    static_shape_ = true;
+    config_static_shape_ = true;
   }
 
   void declare_static_shape(IntArrayRef shape, const int64_t squash_dim){
@@ -399,7 +399,7 @@ struct CAFFE2_API TensorIterator {
 
 protected:
   void mark_outputs();
-  void check_mem_overlaps();
+  void compute_mem_overlaps();
   void compute_shape();
   void compute_strides();
   void reorder_dimensions();
@@ -414,6 +414,17 @@ protected:
   void coalesce_dimensions();
   void analyze_memory_format();
 
+  bool check_mem_overlap() { return config_check_mem_overlap_; }
+  bool allow_cpu_scalars() { return config_allow_cpu_scalars_; }
+  bool is_reduction() { return config_is_reduction_; }
+  bool resize_outputs() { return config_resize_outputs_; }
+  bool static_shape() { return config_static_shape_; }
+  bool check_all_same_dtype() { return config_check_all_same_dtype_; }
+  bool check_all_same_device() { return config_check_all_same_device_; }
+  bool enforce_safe_casting_to_output() { return config_enforce_safe_casting_to_output_; }
+  bool promote_inputs_to_common_dtype() { return config_promote_inputs_to_common_dtype_; }
+  bool cast_common_dtype_to_outputs() { return config_cast_common_dtype_to_outputs_; }
+
 protected:
   DimVector shape_;
   DimVector perm_;
@@ -425,20 +436,24 @@ protected:
   ScalarType common_dtype_ = ScalarType::Undefined;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
-  bool resize_outputs_ = true;
-  bool is_reduction_ = false;
-  bool allow_cpu_scalars_ = false;
   bool final_output_ = true;
-  bool check_mem_overlap_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
   bool requires_channels_last_3d_output_ = false;
-  bool static_shape_ = false;
-  bool check_all_same_dtype_ = true;
-  bool check_all_same_device_ = true;
-  bool enforce_safe_casting_to_output_ = false;
-  bool promote_inputs_to_common_dtype_ = false;
-  bool cast_common_dtype_to_outputs_ = false;
+
+  // Configuration properties are set by the user and then never mutated
+  // by TensorIterator::build (in contrast, the properties above are computed
+  // properties that TensorIterator works out as it initializes itself.)
+  bool config_check_mem_overlap_ = false;
+  bool config_allow_cpu_scalars_ = false;
+  bool config_is_reduction_ = false;
+  bool config_resize_outputs_ = true;
+  bool config_static_shape_ = false;
+  bool config_check_all_same_dtype_ = true;
+  bool config_check_all_same_device_ = true;
+  bool config_enforce_safe_casting_to_output_ = false;
+  bool config_promote_inputs_to_common_dtype_ = false;
+  bool config_cast_common_dtype_to_outputs_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
