@@ -40,8 +40,8 @@ class TestInstantiator(unittest.TestCase):
         generated_module = instantiator.instantiate_scriptable_remote_module_template(
             MyModuleInterface
         )
-        self.assertTrue(hasattr(generated_module, "_RemoteModule"))
         self.assertTrue(hasattr(generated_module, "_remote_forward"))
+        self.assertTrue(hasattr(generated_module, "_generated_methods"))
 
         dir_path = pathlib.Path(instantiator.INSTANTIATED_TEMPLATE_DIR_PATH)
         num_files_before_cleanup = len(list(dir_path.iterdir()))
@@ -52,8 +52,8 @@ class TestInstantiator(unittest.TestCase):
 
     def test_instantiate_non_scripted_remote_module_template(self):
         generated_module = instantiator.instantiate_non_scriptable_remote_module_template()
-        self.assertTrue(hasattr(generated_module, "_RemoteModule"))
         self.assertTrue(hasattr(generated_module, "_remote_forward"))
+        self.assertTrue(hasattr(generated_module, "_generated_methods"))
 
         dir_path = pathlib.Path(instantiator.INSTANTIATED_TEMPLATE_DIR_PATH)
         num_files_before_cleanup = len(list(dir_path.iterdir()))

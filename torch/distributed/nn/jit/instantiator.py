@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import atexit
 import importlib
 import logging
 import os
@@ -23,7 +24,7 @@ _FILE_PREFIX = "_remote_module_"
 def get_arg_return_types_from_interface(module_interface):
     assert getattr(
         module_interface, "__torch_script_interface__", False
-    ), "Expect a class decorated by @torch.jit.interface."
+    ), "Expect a TorchScript class interface decorated by @torch.jit.interface."
     qualified_name = torch.jit._qualified_name(module_interface)
     cu = torch.jit._python_cu
     module_interface_c = cu.get_interface(qualified_name)
@@ -61,6 +62,7 @@ def get_arg_return_types_from_interface(module_interface):
     return args_str, arg_types_str, return_type_str
 
 
+@atexit.register
 def cleanup_generated_modules():
     generated_module_paths = pathlib.Path(INSTANTIATED_TEMPLATE_DIR_PATH).glob(
         f"{_FILE_PREFIX}*.py"
@@ -68,7 +70,7 @@ def cleanup_generated_modules():
     for file_path in generated_module_paths:
         try:
             print(f"Removing {file_path}")
-            assert file_path.is_file(), f"Epect {file_path} to be a file"
+            assert file_path.is_file(), f"Expect {file_path} to be a file"
             file_path.unlink()
         except Exception as exc:
             logger.warning(f"Failed to remove {file_path}:\n{traceback.format_exc()}")
@@ -121,7 +123,7 @@ def instantiate_scriptable_remote_module_template(module_interface_cls):
     generated_module_name = f"{_FILE_PREFIX}{module_interface_cls_name}"
 
     # Generate type annotation strs.
-    module_interface_cls_str = (
+    assign_module_interface_cls_str = (
         f"from {module_interface_cls.__module__} import "
         f"{module_interface_cls.__name__} as module_interface_cls"
     )
@@ -133,15 +135,13 @@ def instantiate_scriptable_remote_module_template(module_interface_cls):
     arrow_and_future_return_type_str = f" -> Future[{return_type_str}]"
 
     str_dict = dict(
-        module_interface_cls=module_interface_cls_str,
+        assign_module_interface_cls=assign_module_interface_cls_str,
         arg_types=arg_types_str,
         arrow_and_return_type=arrow_and_return_type_str,
         arrow_and_future_return_type=arrow_and_future_return_type_str,
         args=args_str,
         kwargs=kwargs_str,
         jit_script_decorator="@torch.jit.script",
-        jit_export_decorator="@torch.jit.export",
-        jit_interface_decorator="@torch.jit.interface",
     )
     return _do_instantiate_remote_module_template(generated_module_name, str_dict)
 
@@ -149,14 +149,12 @@ def instantiate_scriptable_remote_module_template(module_interface_cls):
 def instantiate_non_scriptable_remote_module_template():
     generated_module_name = f"{_FILE_PREFIX}non_sriptable"
     str_dict = dict(
-        module_interface_cls="module_interface_cls = None",
+        assign_module_interface_cls="module_interface_cls = None",
         args="*args",
         kwargs="**kwargs",
         arg_types="*args, **kwargs",
         arrow_and_return_type="",
         arrow_and_future_return_type="",
         jit_script_decorator="",
-        jit_export_decorator="",
-        jit_interface_decorator="",
     )
     return _do_instantiate_remote_module_template(generated_module_name, str_dict)

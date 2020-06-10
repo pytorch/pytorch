@@ -195,6 +195,16 @@ Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, co
   return legacy::cpu::_th_addmm_out(result, b_self, mat1, mat2, beta, alpha);
 }
 
+Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
+  Tensor result = at::empty({0}, self.options());
+  return mm_cpu_out(result, self, mat2);
+}
+
+Tensor& mm_cpu_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
+  result.resize_({ self.size(0), mat2.size(1) });
+  return legacy::cpu::_th_addmm_out(result, result, self, mat2, 0, 1);
+}
+
 template <typename scalar_t, bool is_bmm>
 inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
   int64_t bs = result.size(0);
@@ -557,7 +567,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
     return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt(at::sum((self.conj() * self).copy_real(), dim, keepdim));
+    return at::sqrt(at::sum(at::real(self.conj() * self), dim, keepdim));
   } else {
     return at::sqrt(at::sum((self * self), dim, keepdim));
   }
@@ -577,7 +587,7 @@ Tensor &frobenius_norm_out(
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
-    return at::sqrt_out(result, at::sum((self.conj() * self).copy_real(), dim, keepdim));
+    return at::sqrt_out(result, at::sum(at::real(self.conj() * self), dim, keepdim));
   } else {
     return at::sqrt_out(result, at::sum((self * self), dim, keepdim));
   }

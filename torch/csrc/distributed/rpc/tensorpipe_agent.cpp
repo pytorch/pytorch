@@ -1,11 +1,14 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 
+#include <fmt/format.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+namespace {
 
 // An environment variable along the lines of GLOO_ and NCCL_SOCKET_IFNAME that
 // allows the user to specify a device to bind to, instead of binding to the
@@ -21,6 +24,33 @@ const std::string kNumIdleThreads = "agent.num_idle_threads";
 const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
+const std::string kRpcTimeoutErrorStr =
+    "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
+
+std::string guessAddress(tensorpipe::transport::uv::Context& uvContext) {
+  tensorpipe::Error error;
+  std::string uvAddress;
+  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
+  if (ifnameEnv != nullptr) {
+    std::tie(error, uvAddress) = uvContext.lookupAddrForIface(ifnameEnv);
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for interface "
+                   << ifnameEnv << " (" << error.what() << "), defaulting to "
+                   << kDefaultUvAddress;
+      uvAddress = kDefaultUvAddress;
+    }
+  } else {
+    std::tie(error, uvAddress) = uvContext.lookupAddrForHostname();
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
+                   << error.what() << "), defaulting to " << kDefaultUvAddress;
+      uvAddress = kDefaultUvAddress;
+    }
+  }
+  return uvAddress;
+}
+
+} // namespace
 
 //////////////////////////  MetricsTracker  /////////////////////////////////
 
@@ -103,25 +133,7 @@ TensorPipeAgent::~TensorPipeAgent() {
 void TensorPipeAgent::startImpl() {
   auto uvContext = std::make_shared<tensorpipe::transport::uv::Context>();
 
-  tensorpipe::Error error;
-  std::string uvAddress;
-  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
-  if (ifnameEnv != nullptr) {
-    std::tie(error, uvAddress) = uvContext->lookupAddrForIface(ifnameEnv);
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for interface "
-                   << ifnameEnv << " (" << error.what() << "), defaulting to "
-                   << kDefaultUvAddress;
-      uvAddress = kDefaultUvAddress;
-    }
-  } else {
-    std::tie(error, uvAddress) = uvContext->lookupAddrForHostname();
-    if (error) {
-      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
-                   << error.what() << "), defaulting to " << kDefaultUvAddress;
-      uvAddress = kDefaultUvAddress;
-    }
-  }
+  std::string uvAddress = guessAddress(*uvContext);
 
   context_->registerTransport(1, "tcp", std::move(uvContext));
 #ifdef TP_ENABLE_SHM
@@ -382,6 +394,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   requestMessage.setId(nextMessageID_++);
   pendingResponseMessage[requestMessage.id()] = futureResponseMessage;
 
+  lock.unlock();
+
   futureResponseMessage->futMsg.addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
         this->threadPool_.inThreadPool(),
@@ -404,13 +418,13 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
     auto expirationTime = computeRpcMessageExpiryTime(timeout);
 
     // Add the Future to the right vector in the timeoutMap_
-    auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-    timeoutFuturesVector.emplace_back(futureResponseMessage);
+    {
+      std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+      auto& timeoutFuturesVector = timeoutMap_[expirationTime];
+      timeoutFuturesVector.emplace_back(futureResponseMessage, timeout);
+    }
     timeoutThreadCV_.notify_one();
   }
-
-  // Don't need to hold lock while calling tensorpipe API.
-  lock.unlock();
 
   pipeWrite(
       clientPipe.pipe_,
@@ -522,8 +536,10 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
-    std::vector<std::shared_ptr<AtomicFutureMessage>> timedOutFutures =
-        std::move(timeoutMap_.begin()->second);
+    std::vector<std::pair<
+        std::shared_ptr<AtomicFutureMessage>,
+        std::chrono::milliseconds>>
+        timedOutFutures = std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
     timeoutMap_.erase(timeoutMap_.begin());
@@ -532,11 +548,12 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Set an error on futures added to the timedOutFutures vector. We do this
     // outside the lock to prevent potential lock-order-inversions by callbacks
-    // triggered by the serError call.
-    for (auto& future : timedOutFutures) {
-      std::string errorMsg = c10::str(
-          "RPC ran for more than set timeout and will now be marked with an error");
-      markFutureWithError(std::move(future), std::move(errorMsg));
+    // triggered by the setError call.
+    for (auto& futureTimeoutPair : timedOutFutures) {
+      std::string errorMsg =
+          fmt::format(kRpcTimeoutErrorStr, futureTimeoutPair.second.count());
+      auto err = makeRPCError(errorMsg, RPCErrorType::TIMEOUT);
+      markFutureWithError(std::move(futureTimeoutPair.first), std::move(err));
     }
   }
 }

@@ -34,7 +34,7 @@ class MobileJob:
         }
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branches_only_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
 
         return [{"pytorch_linux_build": props_dict}]
 

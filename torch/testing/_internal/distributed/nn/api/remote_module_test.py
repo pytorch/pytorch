@@ -53,10 +53,19 @@ class MyModule(nn.Module):
         return word, number, tensor
 
 
+class NonModule:
+    def __init__(self, first_arg, first_kwarg=-1):
+        pass
+
+
 def create_scripted_module(first_arg, first_kwarg=-1):
     module = MyModule(first_arg, first_kwarg=first_kwarg)
     scripted_module = torch.jit.script(module)
     return scripted_module
+
+
+def bad_module_creator(first_arg, first_kwarg=-1):
+    return NonModule(first_arg, first_kwarg=first_kwarg)
 
 
 class RemoteModuleTest(RpcAgentTestFixture):
@@ -78,25 +87,13 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
     @staticmethod
     def _create_remote_module_iter(
-        dst_worker_name, modes=None, global_unique_name=None
+        dst_worker_name, modes=None, global_unique_name=None,
     ):
         if modes is None:
             modes = ModuleCreationMode.__members__.values()
 
         args = (1,)
         kwargs = dict(first_kwarg=2)
-
-        if ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE in modes:
-            remote_module = _RemoteModule(
-                dst_worker_name,
-                create_scripted_module,
-                args,
-                kwargs,
-                module_interface_cls=MyModuleInterface,
-                global_unique_name=global_unique_name,
-            )
-            scripted_remote_module = torch.jit.script(remote_module)
-            yield scripted_remote_module
 
         if ModuleCreationMode.MODULE_CTOR in modes:
             remote_module = RemoteModule(
@@ -107,6 +104,48 @@ class RemoteModuleTest(RpcAgentTestFixture):
                 global_unique_name=global_unique_name,
             )
             yield remote_module
+
+        if ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE in modes:
+            remote_module = _RemoteModule(
+                dst_worker_name,
+                create_scripted_module,
+                args,
+                kwargs,
+                global_unique_name=global_unique_name,
+                _module_interface_cls=MyModuleInterface,
+            )
+            scripted_remote_module = torch.jit.script(remote_module)
+            yield scripted_remote_module
+
+    @dist_utils.dist_init
+    def test_bad_module_creator(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+        args = (1,)
+        kwargs = dict(first_kwarg=2)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Expect module_creator returns an instancee of <class nn.Module>,"
+        ):
+            RemoteModule(
+                dst_worker_name,
+                bad_module_creator,
+                args,
+                kwargs
+            )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Expect module_creator returns an instancee of <class nn.Module>,"
+        ):
+            RemoteModule(
+                dst_worker_name,
+                NonModule,
+                args,
+                kwargs
+            )
 
     @dist_utils.dist_init
     def test_forward_async(self):
