@@ -1348,8 +1348,28 @@ bool AliasDb::tryMove(
   }
 
   auto curNode = toMove->next_in_graph[direction];
+
+  bool toMoveIsOnMoveSide =
+      (moveSide == MoveSide::BEFORE && toMove->isBefore(movePoint)) ||
+      (moveSide == MoveSide::AFTER && toMove->isAfter(movePoint));
+
+  if (toMoveIsOnMoveSide && curNode == movePoint) {
+    return true;
+  }
+
+  // it is never valid to move reorder a node with side effects
+  if (toMove->hasSideEffects() ||
+      (!toMoveIsOnMoveSide && movePoint->hasSideEffects())) {
+    return false;
+  }
+
   // Move forward one node at a time
   while (curNode != movePoint) {
+    // never valid to reorder around a node with side effects
+    if (curNode->hasSideEffects()) {
+      return false;
+    }
+
     if (workingSet.dependsOn(curNode)) {
       // If we can't move past this node, add it to the working set
       workingSet.add(curNode);

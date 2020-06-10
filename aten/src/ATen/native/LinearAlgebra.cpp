@@ -199,7 +199,7 @@ Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, co
       && mat1.ndimension() == 2 && mat2.ndimension() <= 2 && self.ndimension() == 1
       && mat1.size(xnnpack::internal::Layout::Filter::output) == self.size(0)) {
     result.resize_({ mat1.size(0), mat2.size(1) });
-    result.copy_(xnnpack::linear(mat2, mat1, self));
+    result.copy_(xnnpack::linear(mat1, mat2.t(), self));
     return result;
   }
   #endif
@@ -218,7 +218,7 @@ Tensor& mm_cpu_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
   if (self.dtype() == at::kFloat && mat2.dtype() == at::kFloat
       && self.ndimension() == 2 && mat2.ndimension() <= 2) {
     result.resize_({ self.size(0), mat2.size(1) });
-    result.copy_(xnnpack::linear(mat2, self, {}));
+    result.copy_(xnnpack::linear(self, mat2.t(), {}));
     return result;
   }
   #endif
