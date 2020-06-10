@@ -991,8 +991,8 @@ def create_generic(top_env, declarations):
 
     def process_native(option):
         # type: (FunctionOption) -> Optional[OutputDeclaration]
-        assert option['python_module'] == '' or option['python_module'] == 'nn', \
-            "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
+        assert option['python_module'] == '' or option['python_module'] == 'nn' or option['python_module'] == 'fft', \
+            "Found python_module of {} for decl {}, but only \'\' string, \'nn\' and \'fft\' are supported".format(
                 option['python_module'], option['name'])
         formals = native_get_formals(option)
         option['formals_list'] = formals

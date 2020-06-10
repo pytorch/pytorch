@@ -5637,8 +5637,8 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
 
-.. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)` 
-          will also remove the batch dimension, which can lead to unexpected 
+.. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)`
+          will also remove the batch dimension, which can lead to unexpected
           errors.
 
 Args:
@@ -7108,7 +7108,7 @@ Example::
 .. _[2]: https://www.jstor.org/stable/2156365
 """)
 
-add_docstr(torch.fft,
+add_docstr(torch.fftfn,
            r"""
 fft(input, signal_ndim, normalized=False) -> Tensor
 
