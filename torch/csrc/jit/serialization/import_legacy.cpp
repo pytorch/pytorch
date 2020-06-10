@@ -356,7 +356,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
           module_type->getAttributeName(i),
           "' was left unitialized after __setstate__, but expected a ",
           "value of type '",
-          v.type()->python_str(),
+          v.type()->repr_str(),
           "'");
     }
   }

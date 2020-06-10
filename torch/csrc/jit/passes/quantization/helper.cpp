@@ -185,7 +185,7 @@ AtenFuncArgs _observe_inputs_aten_func = {};
 CallFuncArgs _observe_inputs_call_func = {{"batch_norm", 1}};
 
 // Aten functions for getting tensor information
-std::vector<std::string> _tensor_info_funcs = {"size"};
+std::vector<std::string> _tensor_info_funcs = {"size", "len", "dim"};
 
 // Aten functions whose output will be quantized or not quantized depending
 // on input tensor
@@ -302,6 +302,9 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
       inputs.push_back(v);
     }
     return inputs;
+  } else if (n->kind() == Symbol::aten("append")) {
+    // notice that append is an op that changes input inplace
+    return {n->input(0), n->input(1)};
   }
   return {};
 }
@@ -537,8 +540,7 @@ bool is_functional(
     const std::string& functional) {
   const auto& match_vmap = match.values_map;
   Value* v = match_vmap.at(vmap.at(vname));
-  return v->type()->cast<FunctionType>() &&
-    getFuncName(v) == functional;
+  return v->type()->cast<FunctionType>() && getFuncName(v) == functional;
 }
 
 bool is_module(
@@ -573,40 +575,30 @@ bool is_functional_relu(
 bool is_relu_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "relu",
-                   "__torch__.torch.nn.modules.activation.ReLU");
+  return is_module(
+      match, vmap, "relu", "__torch__.torch.nn.modules.activation.ReLU");
 }
 
 bool is_conv1d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "conv",
-                   "__torch__.torch.nn.modules.conv.Conv1d");
+  return is_module(
+      match, vmap, "conv", "__torch__.torch.nn.modules.conv.Conv1d");
 }
 
 bool is_conv2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "conv",
-                   "__torch__.torch.nn.modules.conv.Conv2d");
+  return is_module(
+      match, vmap, "conv", "__torch__.torch.nn.modules.conv.Conv2d");
 }
 
 bool is_conv3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "conv",
-                   "__torch__.torch.nn.modules.conv.Conv3d");
+  return is_module(
+      match, vmap, "conv", "__torch__.torch.nn.modules.conv.Conv3d");
 }
-
-
 
 } // namespace jit
 } // namespace torch

@@ -679,10 +679,10 @@ graph(%input, %weight):
             def forward(self, x):
                 if self.use_skip:
                     x = self.conv(x)
-                    return torch.flatten(x)
+                    return torch.reshape(x, x.shape)
                 else:
                     x = self.conv(x)
-                    return torch.flatten(x)
+                    return torch.reshape(x, x.shape)
 
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
@@ -700,21 +700,24 @@ graph(%input, %weight):
             def __init__(self):
                 super(M, self).__init__()
                 self.quant_prop = QuantProp(True)
-                self.res2 = Res(False)
+                self.res = Res(False)
 
             def forward(self, x):
                 x = self.quant_prop(x)
-                x = self.res2(x)
+                x = self.res(x)
                 return x
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig})
-        # one observer for input and one observer for output
-        # no observer for output of quant_prop
-        assert len(attrs_with_prefix(m, '_observer_',)) == 2
-        # one observer for output of conv for each branch
-        assert len(attrs_with_prefix(m.quant_prop, '_observer_',)) == 2
+        data = [torch.rand(1, 3, 10, 10, dtype=torch.float)]
+        result = {False : [1, 2, 2], True : [2, 1, 0]}
+        for tracing in [True, False]:
+            if tracing:
+                m = torch.jit.trace(M(), data).eval()
+            else:
+                m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_',)) == result[tracing][0]
+            assert len(attrs_with_prefix(m.quant_prop, '_observer_',)) == result[tracing][1]
+            assert len(attrs_with_prefix(m.res, '_observer_',)) == result[tracing][2]
 
     def test_insert_observers_for_nested_if(self):
         class Res(torch.nn.Module):
@@ -744,14 +747,69 @@ graph(%input, %weight):
                 x = self.res2(x)
                 return x
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = torch.rand((1, 3, 10, 10), dtype=torch.float)
+        result = {True : 3, False : 1}
         for tracing in [True, False]:
             if tracing:
-                m = torch.jit.trace(M(), data[0][0])
+                m = torch.jit.trace(M(), data).eval()
             else:
-                m = torch.jit.script(M())
-            m = prepare_script(m.eval(), {'': default_qconfig})
-            assert len(attrs_with_prefix(m, '_observer_',)) == 3
+                m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_')) == result[tracing]
+
+    def test_insert_observers_for_if_consistent_observation(self):
+        """ check quantization for if works as long as
+        output of all branches are quantized/observed consistently
+        """
+        class M(torch.nn.Module):
+            def __init__(self, cond):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.cond = cond
+
+            def forward(self, x):
+                x = self.conv(x)
+                # x is already observed
+                if self.cond:
+                    x = torch.flatten(x)
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self, cond):
+                super(M2, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.cond = cond
+
+            def forward(self, x):
+                x = self.conv1(x)
+                if self.cond:
+                    x = self.conv2(x)
+                    # x will be observed in the branch
+                else:
+                    x = torch.flatten(x)
+                # since output for both branch are quantized
+                # the if node is quantized consistently
+                return x
+
+        data = torch.rand((1, 3, 5, 5), dtype=torch.float)
+        options = list(itertools.product([True, False], [True, False]))
+        for cond, tracing in options:
+            if tracing:
+                m = torch.jit.trace(M(cond), data)
+            else:
+                m = torch.jit.script(M(cond))
+            m = prepare_script(m, {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_')) == 2
+
+        for cond, tracing in options:
+            if tracing:
+                m = torch.jit.trace(M2(cond), data)
+            else:
+                m = torch.jit.script(M2(cond))
+            m = prepare_script(m, {'': default_qconfig})
+            num_observers = 2 if tracing and not cond else 3
+            assert len(attrs_with_prefix(m, '_observer_')) == num_observers
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
@@ -2209,6 +2267,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
                 x = x.view(-1)
+                xs = [x, x]
+                y, x = xs
                 x = x.transpose(1, 2)
                 x = x.contiguous()
                 x, y = torch.chunk(x, 2)
@@ -2220,6 +2280,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.relu(x)
                 x = F.relu(x)
                 x.relu_()
+                y = []
+                y.append(x)
+                x, _ = y
                 x = self.conv(x)
                 return x
 
@@ -2564,13 +2627,52 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         qconfig_dict = {'': default_dynamic_qconfig}
         m1 = quantize_dynamic_script(model, qconfig_dict)
         out_graph = m1(data)
-
-        m2 = prepare_dynamic_script(model, qconfig_dict)
-        m2(data)
-        m2 = convert_dynamic_script(m2)
-        out_ref = m2(data)
-        self.assertEqual(out_graph, out_ref)
-
         FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(m1.graph)
+
+        # Check to make sure weight observers run correctly
+        ref_qparams = []
+        qconfig = script_qconfig(default_dynamic_qconfig)
+        wt_module = wrap_cpp_module(qconfig.weight)
+        for wt in [model.res1.weight, model.res2.weight]:
+            wt_module(wt)
+            qparams = wt_module.calculate_qparams()
+            ref_qparams.append((qparams[0].item(), qparams[1].item()))
+
+        m2 = prepare_dynamic_script(model, qconfig_dict)
+        m2 = convert_dynamic_script(m2, debug=True)
+        graph_params = []
+        for x, obs in m2._modules._c.items():
+            if x == 'res1':
+                graph_params.append((obs.getattr('6_scale_0'), obs.getattr('6_zero_point_0')))
+            elif x == 'res2':
+                graph_params.append((obs.getattr('10_scale_0'), obs.getattr('10_zero_point_0')))
+        self.assertEqual(ref_qparams, graph_params)
+
+    def test_dynamic_weight_observer(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+                self.fc2 = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                x = self.fc(x)
+                return self.fc2(x)
+
+        qconfig_dict = {'': default_dynamic_qconfig}
+        model = torch.jit.script(M()).eval()
+        qconfig = script_qconfig(default_dynamic_qconfig)
+        ref_qparams = []
+        wt_module = wrap_cpp_module(qconfig.weight)
+        for wt in [model.fc.weight, model.fc2.weight]:
+            wt_module(wt)
+            qparams = wt_module.calculate_qparams()
+            ref_qparams.append((qparams[0].item(), qparams[1].item()))
+        model = prepare_dynamic_script(model, qconfig_dict)
+        model = convert_dynamic_script(model, debug=True)
+        graph_params = []
+        for x, obs in model._modules._c.items():
+            graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
+        self.assertEqual(ref_qparams, graph_params)

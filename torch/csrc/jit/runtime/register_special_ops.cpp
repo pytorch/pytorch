@@ -31,7 +31,7 @@ void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
       elem_type != BoolType::get()) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
-          << "got " << elem_type->python_str();
+          << "got " << elem_type->repr_str();
     // special case empty list torch.tensor([])
     if (elem_type->isSubtypeOf(TensorType::get())) {
       if (empty_list) {
@@ -220,11 +220,11 @@ int createTensorFromList(Stack& stack) {
       tensor.numel() == 0) {
     TORCH_WARN(
         "Creating a tensor from an empty ",
-        elem_type->python_str(),
+        elem_type->repr_str(),
         "list will create a tensor of default floating point type  (currently ",
         default_type,
         ") in python but a tensor of type ",
-        elem_type->python_str(),
+        elem_type->repr_str(),
         " in torchscript.\n",
         "Pass in a dtype argument to ensure consistent behavior");
   }
