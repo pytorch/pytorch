@@ -679,10 +679,10 @@ graph(%input, %weight):
             def forward(self, x):
                 if self.use_skip:
                     x = self.conv(x)
-                    return torch.flatten(x)
+                    return torch.reshape(x, x.shape)
                 else:
                     x = self.conv(x)
-                    return torch.flatten(x)
+                    return torch.reshape(x, x.shape)
 
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
@@ -700,21 +700,24 @@ graph(%input, %weight):
             def __init__(self):
                 super(M, self).__init__()
                 self.quant_prop = QuantProp(True)
-                self.res2 = Res(False)
+                self.res = Res(False)
 
             def forward(self, x):
                 x = self.quant_prop(x)
-                x = self.res2(x)
+                x = self.res(x)
                 return x
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig})
-        # one observer for input and one observer for output
-        # no observer for output of quant_prop
-        assert len(attrs_with_prefix(m, '_observer_',)) == 2
-        # one observer for output of conv for each branch
-        assert len(attrs_with_prefix(m.quant_prop, '_observer_',)) == 2
+        data = [torch.rand(1, 3, 10, 10, dtype=torch.float)]
+        result = {False : [1, 2, 2], True : [2, 1, 0]}
+        for tracing in [True, False]:
+            if tracing:
+                m = torch.jit.trace(M(), data).eval()
+            else:
+                m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_',)) == result[tracing][0]
+            assert len(attrs_with_prefix(m.quant_prop, '_observer_',)) == result[tracing][1]
+            assert len(attrs_with_prefix(m.res, '_observer_',)) == result[tracing][2]
 
     def test_insert_observers_for_nested_if(self):
         class Res(torch.nn.Module):
@@ -744,14 +747,15 @@ graph(%input, %weight):
                 x = self.res2(x)
                 return x
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = torch.rand((1, 3, 10, 10), dtype=torch.float)
+        result = {True : 3, False : 1}
         for tracing in [True, False]:
             if tracing:
-                m = torch.jit.trace(M(), data[0][0])
+                m = torch.jit.trace(M(), data).eval()
             else:
-                m = torch.jit.script(M())
-            m = prepare_script(m.eval(), {'': default_qconfig})
-            assert len(attrs_with_prefix(m, '_observer_')) == 3
+                m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_')) == result[tracing]
 
     def test_insert_observers_for_if_consistent_observation(self):
         """ check quantization for if works as long as

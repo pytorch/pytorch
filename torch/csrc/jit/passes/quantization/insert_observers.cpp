@@ -1149,11 +1149,16 @@ InsertObserversHelper::insertObserversFor(
           if (aggregated_output_observe_state.size() > 0) {
             TORCH_CHECK(
                 aggregated_output_observe_state == subblock_output_observe_state,
-                "quantization doesn't work for the case where branches "
-                "of `if` doesn't both return quantized/non-quantized "
-                "values");
+                "branches for `if` should return values that are observed "
+                "consistently");
           } else {
-            aggregated_output_observe_state == subblock_output_observe_state;
+            aggregated_output_observe_state = subblock_output_observe_state;
+          }
+        }
+        // mark the output of if as observed
+        for (size_t i = 0; i < n->outputs().size(); ++i) {
+          if (aggregated_output_observe_state[i]) {
+            block_observed_values.insert(n->output(i));
           }
         }
       }
