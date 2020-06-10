@@ -140,12 +140,11 @@ std::vector<c10::IValue> create_inputs() {
           "Unsupported input memory format: ", input_memory_format_list[i]);
     }
 
-    auto input_tensor = torch::ones(
+    const auto input_tensor = torch::ones(
         input_dims,
         at::TensorOptions(input_type).memory_format(input_memory_format));
     if (FLAGS_vulkan) {
-      auto input_tensor_vulkan = input_tensor.vulkan();
-      inputs.push_back(input_tensor_vulkan);
+      inputs.push_back(input_tensor.vulkan());
     } else {
       inputs.push_back(input_tensor);
     }
