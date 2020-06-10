@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 
+#include <fmt/format.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -23,6 +24,8 @@ const std::string kNumIdleThreads = "agent.num_idle_threads";
 const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
+const std::string kRpcTimeoutErrorStr =
+    "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
 
 std::string guessAddress(tensorpipe::transport::uv::Context& uvContext) {
   tensorpipe::Error error;
@@ -418,7 +421,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
     {
       std::unique_lock<std::mutex> lock(timeoutMapMutex_);
       auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-      timeoutFuturesVector.emplace_back(futureResponseMessage);
+      timeoutFuturesVector.emplace_back(futureResponseMessage, timeout);
     }
     timeoutThreadCV_.notify_one();
   }
@@ -533,8 +536,10 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
-    std::vector<std::shared_ptr<AtomicFutureMessage>> timedOutFutures =
-        std::move(timeoutMap_.begin()->second);
+    std::vector<std::pair<
+        std::shared_ptr<AtomicFutureMessage>,
+        std::chrono::milliseconds>>
+        timedOutFutures = std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
     timeoutMap_.erase(timeoutMap_.begin());
@@ -543,11 +548,12 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Set an error on futures added to the timedOutFutures vector. We do this
     // outside the lock to prevent potential lock-order-inversions by callbacks
-    // triggered by the serError call.
-    for (auto& future : timedOutFutures) {
-      std::string errorMsg = c10::str(
-          "RPC ran for more than set timeout and will now be marked with an error");
-      markFutureWithError(std::move(future), std::move(errorMsg));
+    // triggered by the setError call.
+    for (auto& futureTimeoutPair : timedOutFutures) {
+      std::string errorMsg =
+          fmt::format(kRpcTimeoutErrorStr, futureTimeoutPair.second.count());
+      auto err = makeRPCError(errorMsg, RPCErrorType::TIMEOUT);
+      markFutureWithError(std::move(futureTimeoutPair.first), std::move(err));
     }
   }
 }

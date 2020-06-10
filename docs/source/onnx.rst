@@ -293,6 +293,7 @@ The following operators are supported:
 * bitshift
 * cat
 * ceil
+* celu
 * clamp
 * clamp_max
 * clamp_min
@@ -304,6 +305,7 @@ The following operators are supported:
 * dim_arange
 * div
 * dropout
+* einsum
 * elu
 * empty
 * empty_like
@@ -345,6 +347,8 @@ The following operators are supported:
 * logsumexp
 * lt
 * masked_fill
+* masked_scatter
+* masked_select
 * max
 * mean
 * min
@@ -354,6 +358,7 @@ The following operators are supported:
 * narrow
 * ne
 * neg
+* nll_loss
 * nonzero
 * norm
 * ones
@@ -603,6 +608,112 @@ You can also export it as a custom op in ONNX as well. In that case, you will ne
 with matching custom ops implementation, e.g. `Caffe2 custom ops <https://caffe2.ai/docs/custom-operators.html>`_,
 `ONNX Runtime custom ops <https://github.com/microsoft/onnxruntime/blob/master/docs/AddingCustomOp.md>`_.
 
+Operator Export Type
+------------------------------------------------
+Exporting models with unsupported ONNX operators can be achieved using the ``operator_export_type`` flag in export API.
+This flag is useful when users try to export ATen and non-ATen operators that are not registered and supported in ONNX.
+
+ONNX
+~~~~
+This mode is used to export all operators as regular ONNX operators. This is the default ``operator_export_type`` mode. ::
+
+  Example torch ir graph:
+
+    graph(%0 : Float(2:12, 3:4, 4:1)):
+      %3 : Float(2:12, 3:4, 4:1) = aten:exp(%0)
+      %4 : Float(2:12, 3:4, 4:1) = aten:div(%0, %3)
+      return (%4)
+
+  Is exported as:
+
+    graph(%0 : Float(2:12, 3:4, 4:1)):
+      %1 : Float(2:12, 3:4, 4:1) = onnx:Exp(%0)
+      %2 : Float(2:12, 3:4, 4:1) = onnx:Div(%0, %1)
+      return (%2)
+
+
+ONNX_ATEN
+~~~~~~~~~
+This mode is used to export all operators as ATen ops, and avoid conversion to ONNX. ::
+
+  Example torch ir graph:
+
+    graph(%0 : Float(2:12, 3:4, 4:1)):
+      %3 : Float(2:12, 3:4, 4:1) = aten::exp(%0)
+      %4 : Float(2:12, 3:4, 4:1) = aten::div(%0, %3)
+      return (%4)
+
+  Is exported as:
+
+    graph(%0 : Float(2:12, 3:4, 4:1)):
+      %1 : Float(2:12, 3:4, 4:1) = aten::ATen[operator="exp"](%0)
+      %2 : Float(2:12, 3:4, 4:1) = aten::ATen[operator="div"](%0, %1)
+      return (%2)
+
+ONNX_ATEN_FALLBACK
+~~~~~~~~~~~~~~~~~~
+To fallback on unsupported ATen operators in ONNX. Supported operators are exported to ONNX regularly.
+In the following example, aten::triu is not supported in ONNX. Exporter falls back on this operator. ::
+
+  Example torch ir graph:
+
+    graph(%0 : Float):
+      %3 : int = prim::Constant[value=0]()
+      %4 : Float = aten::triu(%0, %3) # unsupported op
+      %5 : Float = aten::mul(%4, %0) # registered op
+      return (%5)
+
+  is exported as:
+
+    graph(%0 : Float):
+      %1 : Long() = onnx::Constant[value={0}]()
+      %2 : Float = aten::ATen[operator="triu"](%0, %1) # unsupported op
+      %3 : Float = onnx::Mul(%2, %0) # registered op
+      return (%3)
+
+RAW
+~~~
+To export a raw ir. ::
+
+  Example torch ir graph:
+
+    graph(%x.1 : Float(1:1)):
+      %1 : Tensor = aten::exp(%x.1)
+      %2 : Tensor = aten::div(%x.1, %1)
+      %y.1 : Tensor[] = prim::ListConstruct(%2)
+      return (%y.1)
+
+  is exported as:
+
+    graph(%x.1 : Float(1:1)):
+      %1 : Tensor = aten::exp(%x.1)
+      %2 : Tensor = aten::div(%x.1, %1)
+      %y.1 : Tensor[] = prim::ListConstruct(%2)
+      return (%y.1)
+
+ONNX_FALLTHROUGH
+~~~~~~~~~~~~~~~~
+This mode can be used to export any operator (ATen or non-ATen) that is not registered and supported in ONNX.
+Exported falls through and exports the operator as is, as custom op. Exporting custom operators
+enables users to register and implement the operator as part of their runtime backend. ::
+
+  Example torch ir graph:
+
+    graph(%0 : Float(2:12, 3:4, 4:1),
+          %1 : Float(2:12, 3:4, 4:1)):
+      %6 : Float(2:12, 3:4, 4:1) = foo_namespace::bar(%0, %1) # custom op
+      %7 : Float(2:12, 3:4, 4:1) = aten::div(%6, %0) # registered op
+      return (%7))
+
+  is exported as:
+
+    graph(%0 : Float(2:12, 3:4, 4:1),
+          %1 : Float(2:12, 3:4, 4:1)):
+      %2 : Float(2:12, 3:4, 4:1) = foo_namespace::bar(%0, %1) # custom op
+      %3 : Float(2:12, 3:4, 4:1) = onnx::Div(%2, %0) # registered op
+      return (%3
+
+
 Frequently Asked Questions
 --------------------------
 Q: I have exported my lstm model, but its input size seems to be fixed?
@@ -729,6 +840,7 @@ Q: Is tensor list exportable to ONNX?
 Functions
 --------------------------
 .. autofunction:: export
+.. autofunction:: export_to_pretty_string
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: torch.onnx.operators.shape_as_tensor
 .. autofunction:: select_model_mode_for_export
