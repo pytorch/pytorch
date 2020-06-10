@@ -7,6 +7,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
+#include <c10/util/complex.h>
 
 namespace at { namespace native {
 
