@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <torch/csrc/utils/comm.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -42,5 +43,15 @@ TORCH_CUDA_API at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
     const c10::optional<at::Device>& destination);
+
+TORCH_CUDA_API at::Tensor reduce(
+    at::TensorList tensors,
+    torch::utils::comm::ReduceOp op,
+    const c10::optional<at::Device>& destination);
+
+TORCH_CUDA_API at::Tensor& reduce_out(
+    at::TensorList tensors,
+    at::Tensor& out_tensor,
+    torch::utils::comm::ReduceOp op);
 
 }}

@@ -65,6 +65,7 @@ using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
 TORCH_CUDA_API std::uint64_t version();
 
 bool is_available(at::TensorList tensors);
+bool is_available(torch::utils::comm::ReduceOp op);
 
 TORCH_CUDA_API void get_unique_id(ncclUniqueId& id);
 TORCH_CUDA_API ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank);

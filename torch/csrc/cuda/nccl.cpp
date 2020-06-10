@@ -249,6 +249,15 @@ bool is_available(TensorList tensors) {
 #endif
 }
 
+bool is_available(torch::utils::comm::ReduceOp op) {
+#ifdef USE_NCCL
+  using namespace torch::cuda::nccl::detail;
+  return ncclOp.find(op) != ncclOp.end();
+#else
+  return false;
+#endif
+}
+
 std::uint64_t version() {
 #if defined(NCCL_MAJOR)
   return NCCL_MAJOR * 1000 + NCCL_MINOR * 100 + NCCL_PATCH;

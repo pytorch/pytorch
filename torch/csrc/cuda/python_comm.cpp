@@ -89,6 +89,33 @@ void initCommMethods(PyObject *module) {
           py::arg("dim"),
           py::arg("streams"))
       .def(
+          "_reduce",
+          [](std::vector<at::Tensor>& tensors,
+             torch::utils::comm::ReduceOp op,
+             const c10::optional<py::object>& py_device) {
+            c10::optional<at::Device> device;
+            if (py_device) {
+              device = THPUtils_unpackDevice(py_device->ptr());
+            }
+            // Note: We're holding the GIL up to here.
+            pybind11::gil_scoped_release no_gil;
+            return reduce(tensors, op, device);
+          },
+          py::arg("tensors"),
+          py::arg("op"),
+          py::arg("destination"))
+      .def(
+          "_reduce_out",
+          [](std::vector<at::Tensor>& tensors,
+             at::Tensor& out_tensor,
+             torch::utils::comm::ReduceOp op) {
+            return reduce_out(tensors, out_tensor, op);
+          },
+          py::arg("tensors"),
+          py::arg("out"),
+          py::arg("op"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_gather",
           [](std::vector<at::Tensor>& tensors,
              int64_t dim,

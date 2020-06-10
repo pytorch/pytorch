@@ -10,6 +10,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/WrapDimUtils.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
@@ -219,13 +220,8 @@ std::vector<at::Tensor>& scatter_out(
   for (size_t i = 0; i < out_tensors.size(); i++) {
     TORCH_CHECK(
       out_tensors[i].is_cuda(),
-<<<<<<< HEAD
       "Expected all output tensors to be CUDA tensors, but output tensor at index ",
       i, " has device '", out_tensors[i].device(), "'");
-=======
-      "Output tensor at index ", i, " should be a CUDA tensor, but has device '",
-      out_tensors[i].device(), "'");
->>>>>>> use device objects rather than indices
     auto out_sizes = out_tensors[i].sizes().vec();
     bool same_ndim = out_sizes.size() == tensor.dim();
     if (same_ndim) {
@@ -412,6 +408,228 @@ at::Tensor gather(
     expected_size,
     first.options().device(destination ? *destination : at::Device(DeviceType::CUDA)).memory_format(memory_format));
   return _gather_out_impl(tensors, result, dim);
+}
+
+
+// ***************** Reduce *******************
+//
+// Reduce a list of CUDA tensors on one or more devices to a target tensor or
+// device, either CPU or CUDA.
+
+namespace {
+
+static inline
+at::Tensor _reduce_accumulate(
+  const at::Tensor& x, const at::Tensor& y, torch::utils::comm::ReduceOp op) {
+    using namespace torch::utils::comm;
+    switch (op) {
+      case ReduceOp::SUM:
+        return x + y;
+      case ReduceOp::PRODUCT:
+        return x * y;
+      case ReduceOp::MIN:
+        return x.min(y);
+      case ReduceOp::MAX:
+        return x.max(y);
+      case ReduceOp::BAND:
+        return at::bitwise_and(x, y);
+      case ReduceOp::BOR:
+        return at::bitwise_or(x, y);
+      case ReduceOp::BXOR:
+        return at::bitwise_xor(x, y);
+      default:
+        TORCH_CHECK(false, "Unsupported ReduceOp ", op);
+    }
+}
+
+static inline
+at::Tensor& _reduce_accumulate_out(
+  at::Tensor& out, const at::Tensor& x, const at::Tensor& y, torch::utils::comm::ReduceOp op) {
+    using namespace torch::utils::comm;
+    switch (op) {
+      case ReduceOp::SUM:
+        return at::add_out(out, x, y);
+      case ReduceOp::PRODUCT:
+        return at::mul_out(out, x, y);
+      case ReduceOp::MIN:
+        return at::min_out(out, x, y);
+      case ReduceOp::MAX:
+        return at::max_out(out, x, y);
+      case ReduceOp::BAND:
+        return at::bitwise_and_out(out, x, y);
+      case ReduceOp::BOR:
+        return at::bitwise_or_out(out, x, y);
+      case ReduceOp::BXOR:
+        return at::bitwise_xor_out(out, x, y);
+      default:
+        TORCH_CHECK(false, "Unsupported ReduceOp ", op);
+    }
+}
+
+static inline
+at::Tensor& _reduce_accumulate_inplace(
+  at::Tensor& x, const at::Tensor& y, torch::utils::comm::ReduceOp op) {
+    using namespace torch::utils::comm;
+    switch (op) {
+      case ReduceOp::SUM:
+        return x.add_(y);
+      case ReduceOp::PRODUCT:
+        return x.mul_(y);
+      case ReduceOp::MIN:
+        return at::min_out(x, x, y);
+      case ReduceOp::MAX:
+        return at::max_out(x, x, y);
+      case ReduceOp::BAND:
+        return x.bitwise_and_(y);
+      case ReduceOp::BOR:
+        return x.bitwise_or_(y);
+      case ReduceOp::BXOR:
+        return x.bitwise_xor_(y);
+      default:
+        TORCH_CHECK(false, "Unsupported ReduceOp ", op);
+    }
+}
+
+}
+
+at::Tensor reduce(
+    at::TensorList tensors,
+    torch::utils::comm::ReduceOp op,
+    const c10::optional<at::Device>& destination) {
+  TORCH_CHECK(!tensors.empty(), "Expected at least one tensor to reduce from");
+  at::Device out_device(DeviceType::CUDA);
+  if (destination) {
+    out_device = *destination;
+  }
+  if (out_device.is_cuda() && !out_device.has_index()) {
+    out_device.set_index(c10::cuda::current_device());
+  }
+  auto ref_size = tensors[0].sizes();
+  auto result_memory_format = tensors[0].suggest_memory_format();
+  ptrdiff_t root_index = -1;
+  for (size_t i = 0; i < tensors.size(); i++) {
+    if (i > 0) {
+      TORCH_CHECK(
+        tensors[i].sizes() == ref_size,
+        "Expected input tensors to have the same size, but got ",
+        "inputs[0] of size ", ref_size, " and inputs[", i, "] of size ",
+        tensors[i].sizes());
+      if (tensors[i].suggest_memory_format() != result_memory_format) {
+        result_memory_format = MemoryFormat::Contiguous;
+      }
+    }
+    TORCH_CHECK(
+      tensors[i].is_cuda(), "Expected all inputs to have CUDA type, but "
+      "got tensor with device ", tensors[i].device());
+    if (tensors[i].device() == out_device) {
+      root_index = i;
+    }
+  }
+
+  if (tensors.size() == 1 && root_index == 0) {
+    return tensors[0];
+  }
+
+  bool non_blocking = out_device.is_cuda();
+  if (tensors.size() == 1) {
+     // root_index = -1, i.e., need to move device
+    return tensors[0].to(out_device, /*non_blocking=*/non_blocking);
+  }
+
+#ifdef USE_NCCL
+  if (out_device.is_cuda() && root_index != -1) {
+    auto tensors_vec = tensors.vec();
+    if (nccl::is_available(tensors_vec) && nccl::is_available(op)) {
+      // If NCCL accepts, all inputs are contiguous, so we don't care about the
+      // memory_format.
+      TORCH_INTERNAL_ASSERT(result_memory_format == MemoryFormat::Contiguous);
+      at::Tensor result = at::empty_like(tensors[root_index]);
+      nccl::reduce(tensors_vec, result, root_index, op);
+      return result;
+    }
+  }
+#endif
+  at::Tensor result = _reduce_accumulate(
+    tensors[0].to(out_device, /*non_blocking=*/non_blocking),
+    tensors[1].to(out_device, /*non_blocking=*/non_blocking),
+    op);
+
+  for (size_t i = 2; i < tensors.size(); i++) {
+    _reduce_accumulate_inplace(
+      result, tensors[i].to(out_device, /*non_blocking=*/non_blocking), op);
+  }
+  return result;
+}
+
+
+at::Tensor& reduce_out(
+    at::TensorList tensors,
+    at::Tensor& out_tensor,
+    torch::utils::comm::ReduceOp op) {
+  TORCH_CHECK(!tensors.empty(), "Expected at least one tensor to reduce from");
+  auto ref_size = tensors[0].sizes();
+  ptrdiff_t root_index = -1;
+  for (size_t i = 0; i < tensors.size(); i++) {
+    if (i > 0) {
+      TORCH_CHECK(
+        tensors[i].sizes() == ref_size,
+        "Expected input tensors to have the same size, but got ",
+        "inputs[0] of size ", ref_size, " and inputs[", i, "] of size ",
+        tensors[i].sizes());
+    }
+    TORCH_CHECK(
+      tensors[i].is_cuda(), "Expected all inputs to have CUDA type, but "
+      "got tensor with device ", tensors[i].device());
+    if (tensors[i].get_device() == out_tensor.get_device()) {
+      root_index = i;
+    }
+  }
+
+  bool non_blocking = out_tensor.is_cuda();
+
+  if (tensors.size() == 1) {
+    return out_tensor.copy_(tensors[0], /*non_blocking=*/non_blocking);
+  }
+
+#ifdef USE_NCCL
+  if (root_index != -1) {
+    auto tensors_vec = tensors.vec();
+    if (nccl::is_available(tensors_vec) && nccl::is_available({out_tensor}) && nccl::is_available(op)) {
+      nccl::reduce(tensors_vec, out_tensor, root_index, op);
+      return out_tensor;
+    }
+  }
+#endif
+  auto out_device = out_tensor.device();
+  if (root_index != -1) {
+    // We must reduce `tensors[root_index]` first because it may be the same
+    // as (or overlap with) `out_tensor`, and reducing other pairs will
+    // overwrite it.
+    bool first_accumulate = true;
+    for (size_t i = 0; i < tensors.size(); i++) {
+      if (i == root_index) {
+        continue;
+      }
+      auto other = tensors[i].to(out_device, /*non_blocking=*/true);
+      if (first_accumulate) {
+        _reduce_accumulate_out(out_tensor, tensors[root_index], other, op);
+        first_accumulate = false;
+      } else {
+        _reduce_accumulate_inplace(out_tensor, other, op);
+      }
+    }
+  } else {
+    _reduce_accumulate_out(
+      out_tensor,
+      tensors[0].to(out_device, /*non_blocking=*/non_blocking),
+      tensors[1].to(out_device, /*non_blocking=*/non_blocking),
+      op);
+
+    for (size_t i = 2; i < tensors.size(); i++) {
+      _reduce_accumulate_inplace(out_tensor, tensors[i].to(out_device, /*non_blocking=*/non_blocking), op);
+    }
+  }
+  return out_tensor;
 }
 
 }} // namespace torch::cuda

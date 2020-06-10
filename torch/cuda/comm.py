@@ -2,9 +2,10 @@ import warnings
 
 import torch
 
-from . import nccl
 from torch._utils import _take_tensors, _flatten_dense_tensors, \
     _unflatten_dense_tensors, _reorder_tensors_as
+
+from torch._C import ReduceOp
 
 
 def broadcast(tensor, devices=None, *, out=None):
@@ -56,8 +57,20 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
     return torch._C._broadcast_coalesced(tensors, devices, buffer_size)
 
 
+def reduce(inputs, op=ReduceOp.SUM, destination=None, *, out=None):
+    if out is None:
+        destination = torch.cuda._utils._get_device_index(destination, optional=True)
+        return torch._C._reduce(inputs, op, destination)
+    else:
+        if destination is not None:
+            raise RuntimeError(
+                "'destination' must not be specified when 'out' is specified, but "
+                "got destination={}".format(destination))
+        return torch._C._reduce_out(inputs, out, op)
+
+
 def reduce_add(inputs, destination=None):
-    """Sums tensors from multiple GPUs.
+    r"""Sums tensors from multiple GPUs.
 
     All inputs should have matching shapes, dtype, and layout. The output tensor
     will be of the same shape, dtype, and layout.
@@ -71,37 +84,7 @@ def reduce_add(inputs, destination=None):
         A tensor containing an elementwise sum of all inputs, placed on the
         :attr:`destination` device.
     """
-    destination = torch.cuda._utils._get_device_index(destination, optional=True)
-    input_size = inputs[0].size()
-    root_index = None  # index of input tensor that already is on the correct device
-    for i, inp in enumerate(inputs):
-        assert inp.is_cuda, "reduce_add expects all inputs to be on GPUs"
-        if inp.get_device() == destination:
-            root_index = i
-        if inp.size() != input_size:
-            got = 'x'.join(str(x) for x in inp.size())
-            expected = 'x'.join(str(x) for x in input_size)
-            raise ValueError("input {} has invalid size: got {}, but expected "
-                             "{}".format(i, got, expected))
-    if root_index is None:
-        raise RuntimeError("reduce_add expects destination to be on the same GPU with one of the tensors")
-
-    if len(inputs) == 1:
-        return inputs[0]
-
-    if nccl.is_available(inputs):
-        result = torch.empty_like(inputs[root_index])
-        nccl.reduce(inputs, output=result, root=root_index)
-    else:
-        # clone inputs[root_index] and accuimulate into the copy
-        nonroot = [t for i, t in enumerate(inputs) if i != root_index]
-        result = inputs[root_index]
-        for i, other in enumerate(nonroot):
-            if i == 0:
-                result = result.add(other.cuda(destination, non_blocking=True))  # make a new tensor
-            else:
-                result.add_(other.cuda(destination, non_blocking=True))
-    return result
+    return reduce(inputs, destination=destination)
 
 
 def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
