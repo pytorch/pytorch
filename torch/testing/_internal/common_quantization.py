@@ -130,6 +130,11 @@ def skipIfNoFBGEMM(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def get_script_module(model, tracing, data):
+    if tracing:
+        return torch.jit.trace(model, data).eval()
+    else:
+        return torch.jit.script(model).eval()
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -137,10 +142,13 @@ class QuantizationTestCase(TestCase):
         super().setUp()
         self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
+        # TODO: reame to img_data2d
         self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
                          for _ in range(2)]
         self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
                             for _ in range(2)]
+        self.img_data_3d = [(torch.rand(1, 3, 5, 5, 5, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
+                         for _ in range(2)]
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
