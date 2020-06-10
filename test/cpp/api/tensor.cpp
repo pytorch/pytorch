@@ -167,12 +167,22 @@ TEST(TensorTest, AtTensorCtorScalar) {
   ASSERT_EQ(tensor.dtype(), at::kFloat);
   ASSERT_TRUE(almost_equal(tensor[0], 123.5));
 
+  tensor = at::tensor(c10::complex<float>(1.0, 2.0)) + 0.5;
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<float>(1.5, 2.0)));
+
   tensor = at::tensor(c10::complex<float>(1.0, 2.0), at::dtype(at::kComplexFloat)) + 0.5;
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
   ASSERT_TRUE(almost_equal(tensor[0], c10::complex<float>(1.5, 2.0)));
 
-  tensor = at::tensor(c10::complex<double>(1.0, 2.0), at::dtype(at::kComplexDouble)) + 0.5;
+  tensor = at::tensor(c10::complex<double>(1.0, 2.0)) + 0.5;
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5, 2.0)));
+
+  tensor = at::tensor(c10::complex<float>(1.0, 2.0), at::dtype(at::kComplexDouble)) + 0.5;
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
   ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5, 2.0)));
@@ -630,21 +640,21 @@ TEST(TensorTest, TorchTensorCastRealToComplex) {
   tensor = torch::tensor(1.5, torch::kComplexDouble);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), torch::kComplexDouble);
-  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5)));
+  ASSERT_TRUE(almost_equal(tensor, c10::complex<double>(1.5)));
 }
 
 TEST(TensorTest, TorchTensorCastComplexToRealErrorChecks) {
   {
     ASSERT_THROWS_WITH(torch::tensor(c10::complex<float>(0.1, 0.2), torch::kFloat),
-      "\"tensor_cpu\" not implemented for 'Float'");
+      "value cannot be converted to type float without overflow");
   }
   {
-    ASSERT_THROWS_WITH(torch::tensor({c10::complex<float>(0.1, 0.2)}, torch::kFloat),
-      "\"tensor_cpu\" not implemented for 'Float'");
+    ASSERT_THROWS_WITH(torch::tensor({c10::complex<float>(0.1, 0.2), c10::complex<float>(0.3, 0.4)}, torch::kFloat),
+      "value cannot be converted to type float without overflow");
   }
   {
-    ASSERT_THROWS_WITH(torch::tensor(std::vector<c10::complex<float>>{c10::complex<float>(0.1, 0.2)}, torch::kFloat),
-      "\"tensor_cpu\" not implemented for 'Float'");
+    ASSERT_THROWS_WITH(torch::tensor(std::vector<c10::complex<float>>{c10::complex<float>(0.1, 0.2), c10::complex<float>(0.3, 0.4)}, torch::kFloat),
+      "can not do torch::tensor(complex, dtype=non-complex) because complex can not be casted to real number without loss of information");
   }
 }
 

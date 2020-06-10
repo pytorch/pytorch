@@ -228,6 +228,11 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
       fill_tensor(tensor);
       return tensor.to(options.device());
     } else if (is_tensor()) {
+      bool from_complex = tensor_.scalar_type() == at::kComplexFloat || tensor_.scalar_type() == at::kComplexDouble;
+      bool to_complex = options.dtype() == at::kComplexFloat || options.dtype() == at::kComplexDouble;
+      if (from_complex && !to_complex) {
+        throw std::runtime_error("can not do torch::tensor(complex, dtype=non-complex) because complex can not be casted to real number without loss of information");
+      }
       return tensor_.to(options);
     } else {
       TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
