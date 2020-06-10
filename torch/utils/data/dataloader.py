@@ -225,6 +225,7 @@ class DataLoader(object):
         self.drop_last = drop_last
         self.sampler = sampler
         self.batch_sampler = batch_sampler
+        self.generator = generator
 
         if collate_fn is None:
             if self._auto_collation:
@@ -338,7 +339,7 @@ class _BaseDataLoaderIter(object):
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
-        self._base_seed = torch.empty((), dtype=torch.int64).random_().item()
+        self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._num_yielded = 0
 
     def __iter__(self):

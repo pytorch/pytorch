@@ -1228,10 +1228,11 @@ except RuntimeError as e:
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True))
 
     def test_shuffle_reproducibility(self):
-        self.assertEqual(
-            list(DataLoader(self.dataset, shuffle=True, generator=torch.Generator().manual_seed(42))),
-            list(DataLoader(self.dataset, shuffle=True, generator=torch.Generator().manual_seed(42)))
-        )
+        for fn in (
+            lambda: DataLoader(self.dataset, shuffle=True, num_workers=0, generator=torch.Generator().manual_seed(42)),
+            lambda: DataLoader(self.dataset, shuffle=True, num_workers=2, generator=torch.Generator().manual_seed(42)),
+        ):
+            self.assertEqual(list(fn()), list(fn()))
 
     def test_sequential_workers(self):
         self._test_sequential(DataLoader(self.dataset, num_workers=4))
