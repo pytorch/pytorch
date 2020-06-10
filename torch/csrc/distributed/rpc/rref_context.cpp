@@ -336,12 +336,12 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
       TORCH_INTERNAL_ASSERT(
           ownerRRef->type()->isSubtypeOf(TensorType::get()),
           "Expect OwnerRRef to be a sub-type of TensorType, but got ",
-          ownerRRef->type()->python_str());
+          ownerRRef->type()->repr_str());
     } else {
       TORCH_INTERNAL_ASSERT(
           ownerRRef->type() == type,
           "OwnerRRef type is ",
-          ownerRRef->type()->python_str(),
+          ownerRRef->type()->repr_str(),
           ", expected type is ",
           type);
     }

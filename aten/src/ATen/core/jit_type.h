@@ -68,8 +68,8 @@ struct Type;
 using TypePtr = std::shared_ptr<Type>;
 using ConstTypePtr = std::shared_ptr<const Type>;
 
-// Use this to customize how a Type is printed using `python_str()`. If
-// c10::nullopt is returned, `python_str()` falls through to its default
+// Use this to customize how a Type is printed using `annotation_str()`. If
+// c10::nullopt is returned, `annotation_str()` falls through to its default
 // implementation.
 using TypePrinter =
     std::function<c10::optional<std::string>(const ConstTypePtr&)>;
@@ -81,7 +81,7 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
  protected:
   Type(TypeKind kind) : kind_(kind) {}
 
-  virtual std::string python_str_impl(TypePrinter printer) const {
+  virtual std::string annotation_str_impl(TypePrinter printer) const {
     return str();
   }
 
@@ -94,7 +94,7 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   // if this returns false and the why_not stream is non-null, it contains
   // additional details that describe why this is not a subtype of 'rhs'.
   // This additional information should only contain details that are not obvious
-  // from the python_str() that describes the type. For instance it is clear that `int <: str` is false
+  // from the annotation_str() that describes the type. For instance it is clear that `int <: str` is false
   // but not clear why `Foo <: InterfaceBar` might be false.
   virtual bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const;
   virtual bool is_module() const;
@@ -111,19 +111,26 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   //
   // Takes a custom printer that users can pass in to customize the output of
   // this method.
-  std::string python_str(TypePrinter printer) const {
+  std::string annotation_str(TypePrinter printer) const {
     if (printer) {
       // the printer can return nullopt to fall through to the default impl
       if (auto renamed = printer(shared_from_this())) {
         return *renamed;
       }
     }
-    return python_str_impl(printer);
+    return annotation_str_impl(printer);
   }
-  std::string python_str() const {
+  std::string annotation_str() const {
     // Overload instead of define a default value for `printer` to help
     // debuggers out.
-    return python_str(nullptr);
+    return annotation_str(nullptr);
+  }
+
+  // Returns a human readable string that includes additional information like
+  // "type is inferred rather than explictly defined" to help construct more
+  // user-friendly messages.
+  virtual std::string repr_str() const {
+    return annotation_str();
   }
 
   TypeKind kind() const {
@@ -306,9 +313,9 @@ struct CAFFE2_API OptionalType
  private:
   OptionalType(TypePtr elem) : SingleElementType(elem) {}
 
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Optional[" << getElementType()->python_str(printer) << "]";
+    ss << "Optional[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -641,6 +648,10 @@ struct CAFFE2_API TensorType : public Type {
 
   std::string str() const override;
 
+  std::string repr_str() const override {
+    return str() + (isInferredType() ? " (inferred)" : "");
+  }
+
   c10::optional<size_t> numel() const {
     size_t prod = 1;
     const auto& shape = sizes();
@@ -852,9 +863,9 @@ struct CAFFE2_API ListType
  private:
   ListType(TypePtr elem) : SingleElementType(elem) {}
 
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "List[" << getElementType()->python_str(printer) << "]";
+    ss << "List[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -928,10 +939,10 @@ struct CAFFE2_API DictType : public Type {
         has_free_variables(
             key->hasFreeVariables() || value->hasFreeVariables()) {}
 
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Dict[" << getKeyType()->python_str(printer) << ", "
-       << getValueType()->python_str(printer) << "]";
+    ss << "Dict[" << getKeyType()->annotation_str(printer) << ", "
+       << getValueType()->annotation_str(printer) << "]";
     return ss.str();
   }
 
@@ -964,9 +975,9 @@ struct CAFFE2_API FutureType
  private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Future[" << getElementType()->python_str(printer) << "]";
+    ss << "Future[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -996,9 +1007,9 @@ struct CAFFE2_API RRefType
  private:
   RRefType(TypePtr elem) : SingleElementType(elem) {}
 
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     std::stringstream ss;
-    ss << "RRef[" << getElementType()->python_str(printer) << "]";
+    ss << "RRef[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -1105,7 +1116,7 @@ struct CAFFE2_API TupleType : public NamedType {
     return true;
   }
 
-  std::string python_str_impl(TypePrinter printer = nullptr) const override;
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
 
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
@@ -1135,7 +1146,7 @@ struct CAFFE2_API NumberType : public Type {
  protected:
   NumberType(TypeKind kind = TypeKind::NumberType) : Type(kind) {}
 
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return "number"; // technically not a valid python type, but
                      // we need to use it when parsing back in annotations
                      // for implicit conversions
@@ -1164,7 +1175,7 @@ struct CAFFE2_API FloatType : public NumberType {
 
  private:
   FloatType() : NumberType(TypeKind::FloatType) {}
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return "float";
   }
 };
@@ -1191,7 +1202,7 @@ struct CAFFE2_API IntType : public NumberType {
 
  private:
   IntType() : NumberType(TypeKind::IntType) {}
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return "int";
   }
 };
@@ -1229,9 +1240,9 @@ struct CAFFE2_API StringType : public Type {
   }
   std::string str() const override {
     // we only use "str" (not "string") in both FunctionSchema and script
-    return python_str();
+    return annotation_str();
   }
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return "str";
   }
   static const TypeKind Kind = TypeKind::StringType;
@@ -1266,7 +1277,7 @@ struct CAFFE2_API FunctionType : public NamedType {
 
  private:
   FunctionType(torch::jit::Function* function);
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }
@@ -1749,7 +1760,7 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   std::string str() const override {
-     return python_str();
+     return annotation_str();
    }
 
   const std::vector<torch::jit::Function*>& methods() const;
@@ -1773,7 +1784,7 @@ struct CAFFE2_API ClassType : public NamedType {
     auto type = findAttribute(name);
     TORCH_CHECK(
         type,
-        python_str(),
+        repr_str(),
         " does not have an attribute with name '",
         name,
         "'");
@@ -1815,7 +1826,7 @@ struct CAFFE2_API ClassType : public NamedType {
     }
     TORCH_CHECK(
         false,
-        python_str(),
+        repr_str(),
         " does not have an attribute with name '",
         name,
         "'");
@@ -1867,9 +1878,9 @@ struct CAFFE2_API ClassType : public NamedType {
     TypePtr atype = getAttribute(*slot_idx);
     TORCH_CHECK(
       ty->isSubtypeOf(atype),
-      ty->python_str(),
+      ty->repr_str(),
       " is not compatible with the type ",
-      atype->python_str(),
+      atype->repr_str(),
       " for the field '",
       name,
       "'");
@@ -1904,7 +1915,7 @@ struct CAFFE2_API ClassType : public NamedType {
     }
     TORCH_CHECK(
         false,
-        python_str(),
+        repr_str(),
         " does not have constant field with the name '",
         name,
         "'");
@@ -2014,7 +2025,7 @@ struct CAFFE2_API ClassType : public NamedType {
       std::weak_ptr<CompilationUnit> cu,
       bool is_module);
 
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }
@@ -2095,7 +2106,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
       const InterfaceType& rhs,
       std::ostream* why_not);
 
-  std::string python_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return name()->qualifiedName();
   }
 
