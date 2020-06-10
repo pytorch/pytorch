@@ -33,7 +33,6 @@ def broadcast(tensor, devices=None, *, out=None):
             "Exactly one of 'devices' and 'out' must be specified, but got "
             "devices={} and out={}".format(devices, out))
     if devices is not None:
-        devices = [torch.cuda._utils._get_device_index(d) for d in devices]
         return torch._C._broadcast(tensor, devices)
     else:
         return torch._C._broadcast_out(tensor, out)
@@ -54,7 +53,6 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
     Returns:
         A tuple containing copies of :attr:`tensor`, placed on :attr:`devices`.
     """
-    devices = [torch.cuda._utils._get_device_index(d) for d in devices]
     return torch._C._broadcast_coalesced(tensors, devices, buffer_size)
 
 
@@ -178,7 +176,9 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
             :attr:`tensor`.
     """
     if out is None:
-        devices = [torch.cuda._utils._get_device_index(d) for d in devices]
+        if devices is None:
+            raise RuntimeError(
+                "'devices' must be specified when 'out' is not specified")
         return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
     else:
         if devices is not None:
@@ -222,7 +222,7 @@ def gather(tensors, dim=0, destination=None, *, out=None):
             warnings.warn(
                 'Using -1 to represent CPU tensor is deprecated. Please use a '
                 'device object or string instead, e.g., "cpu".')
-        destination = torch.cuda._utils._get_device_index(destination, allow_cpu=True, optional=True)
+            destination = 'cpu'
         return torch._C._gather(tensors, dim, destination)
     else:
         if destination is not None:

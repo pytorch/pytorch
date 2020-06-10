@@ -2,15 +2,14 @@ import torch
 import torch._six
 
 
-def _get_device_index(device, optional=False, allow_cpu=False):
+def _get_device_index(device, optional=False):
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
 
     If :attr:`device` is a torch.device object, returns the device index if it
     is a CUDA device. Note that for a CUDA device without a specified index,
     i.e., ``torch.device('cuda')``, this will return the current default CUDA
-    device if :attr:`optional` is ``True``. If :attr:`allow_cpu` is ``True``,
-    CPU devices will be accepted and ``-1`` will be returned in this case.
+    device if :attr:`optional` is ``True``.
 
     If :attr:`device` is a Python integer, it is returned as is.
 
@@ -21,12 +20,9 @@ def _get_device_index(device, optional=False, allow_cpu=False):
         device = torch.device(device)
     if isinstance(device, torch.device):
         dev_type = device.type
-        if allow_cpu:
-            if device.type not in {'cuda', 'cpu'}:
-                raise ValueError('Expected a cuda or cpu device, but got: {}'.format(device))
-        elif device.type != 'cuda':
+        if device.type != 'cuda':
             raise ValueError('Expected a cuda device, but got: {}'.format(device))
-        device_idx = -1 if device.type == 'cpu' else device.index
+        device_idx = device.index
     else:
         if device is not None and not isinstance(device, torch._six.int_classes):
             raise ValueError('Cannot recognize device {}'.format(device))

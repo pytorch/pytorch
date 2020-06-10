@@ -42,6 +42,7 @@
 
 #include <torch/csrc/python_headers.h>
 
+#include <torch/csrc/utils.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -383,20 +384,7 @@ inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
 }
 
 inline at::Device PythonArgs::device(int i) {
-  if (!args[i]) {
-    return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
-  }
-  if (THPDevice_Check(args[i])) {
-    const auto device = reinterpret_cast<THPDevice*>(args[i]);
-    return device->device;
-  }
-  if (THPUtils_checkLong(args[i])) {
-    const auto device_index = THPUtils_unpackLong(args[i]);
-    TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(DeviceType::CUDA, device_index);
-  }
-  const std::string &device_str = THPUtils_unpackString(args[i]);
-  return at::Device(device_str);
+  return THPUtils_unpackDevice(args[i], /*replace_none_with_default_device=*/true);
 }
 
 inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default_device) {

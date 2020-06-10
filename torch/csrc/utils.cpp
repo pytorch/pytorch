@@ -5,7 +5,10 @@
 #include <sstream>
 #include <algorithm>
 #include <unordered_map>
+#include <ATen/ATen.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/autograd/variable.h>
@@ -252,3 +255,62 @@ void THPPointer<THPStorage>::free() {
 }
 
 template class THPPointer<THPStorage>;
+
+
+at::Device THPUtils_unpackDevice(PyObject *obj, bool replace_none_with_default_device) {
+  if (!obj) {
+    if (replace_none_with_default_device) {
+      return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
+    } else {
+      TORCH_CHECK(false, "Expected a valid device, but got None");
+    }
+  } else if (THPDevice_Check(obj)) {
+    const auto device = reinterpret_cast<THPDevice*>(obj);
+    return device->device;
+  } else if (THPUtils_checkLong(obj)) {
+    const auto device_index = THPUtils_unpackLong(obj);
+    TORCH_CHECK(device_index >= 0, "Device index must not be negative, but got ", device_index);
+    return at::Device(at::DeviceType::CUDA, device_index);
+  } else {
+    TORCH_CHECK(
+      THPUtils_checkString(obj),
+      "Expected a torch.device object, an integer, or a string to represent a device, but got ", THPUtils_typename(obj));
+    const std::string &device_str = THPUtils_unpackString(obj);
+    return at::Device(device_str);
+  }
+}
+
+std::vector<at::Device> THPUtils_unpackPySequence_to_DeviceList(PyObject *obj, bool replace_none_with_default_device) {
+  TORCH_CHECK(PySequence_Check(obj), "Expected a sequence of devices, but got ", THPUtils_typename(obj));
+  THPObjectPtr seq = THPObjectPtr(PySequence_Fast(obj, nullptr));
+  TORCH_CHECK(seq.get() != nullptr, "Expected a sequence of devices, but got ", THPUtils_typename(obj));
+
+  std::vector<at::Device> devices;
+  Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
+  devices.reserve(length);
+  for (Py_ssize_t i = 0; i < length; i++) {
+    PyObject *device = PySequence_Fast_GET_ITEM(seq.get(), i);
+
+    // A bit code duplication to get better error message (printing `i`) and construct devices inplace.
+    if (!device) {
+      if (replace_none_with_default_device) {
+        devices.emplace_back( backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())) );
+      } else {
+        TORCH_CHECK(false, "Expected a valid device, but got None at index ", i);
+      }
+    } else if (THPDevice_Check(device)) {
+      devices.push_back(reinterpret_cast<THPDevice*>(device)->device);
+    } else if (THPUtils_checkLong(device)) {
+      const auto device_index = THPUtils_unpackLong(device);
+      TORCH_CHECK(device_index >= 0, "Device index must not be negative, but got ", device_index, " at index ", i);
+      devices.emplace_back(at::DeviceType::CUDA, device_index);
+    } else {
+      TORCH_CHECK(
+        THPUtils_checkString(device),
+        "Expected a torch.device object, an integer, or a string to represent a device, but got ",
+        THPUtils_typename(device), " at index ", i);
+      devices.emplace_back(THPUtils_unpackString(device));
+    }
+  }
+  return devices;
+}

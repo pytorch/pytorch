@@ -14,8 +14,8 @@ namespace torch { namespace cuda {
 using tensor_list2d = std::vector<std::vector<at::Tensor>>;
 
 TORCH_CUDA_API std::vector<at::Tensor>& broadcast_out(const at::Tensor& tensor, std::vector<at::Tensor>& out_tensors);
-TORCH_CUDA_API std::vector<at::Tensor> broadcast(const at::Tensor& tensor, at::IntArrayRef devices);
-TORCH_CUDA_API tensor_list2d broadcast_coalesced(at::TensorList tensors, at::IntArrayRef devices,
+TORCH_CUDA_API std::vector<at::Tensor> broadcast(const at::Tensor& tensor, const std::vector<at::Device>& devices);
+TORCH_CUDA_API tensor_list2d broadcast_coalesced(const at::TensorList& tensors, const std::vector<at::Device>& devices,
                                   size_t buffer_size);
 
 TORCH_CUDA_API std::vector<at::Tensor>& scatter_out(
@@ -27,7 +27,7 @@ TORCH_CUDA_API std::vector<at::Tensor>& scatter_out(
 
 TORCH_CUDA_API std::vector<at::Tensor> scatter(
     const at::Tensor& tensor,
-    at::IntArrayRef devices,
+    const std::vector<at::Device>& devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes = c10::nullopt,
     int64_t dim = 0,
     const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams =
@@ -41,6 +41,6 @@ TORCH_CUDA_API at::Tensor& gather_out(
 TORCH_CUDA_API at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
-    c10::optional<int32_t> destination_index);
+    const c10::optional<at::Device>& destination);
 
 }}

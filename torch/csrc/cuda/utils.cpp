@@ -31,6 +31,7 @@ std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStre
 
   std::vector<c10::optional<at::cuda::CUDAStream>> streams;
   Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
+  streams.reserve(length);
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject *stream = PySequence_Fast_GET_ITEM(seq.get(), i);
 

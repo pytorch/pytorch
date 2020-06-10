@@ -5,6 +5,7 @@
 #include <string>
 #include <type_traits>
 #include <ATen/ATen.h>
+#include <torch/csrc/THP.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -186,6 +187,11 @@ bool getBackCompatBroadcastWarn();
 void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
+
+// Parses a device object from a torch.device, int, or str. If ``replace_none_with_default_device`` and
+// ``obj is None``, the current default device is returned.
+at::Device THPUtils_unpackDevice(PyObject *obj, bool replace_none_with_default_device = false);
+std::vector<at::Device> THPUtils_unpackPySequence_to_DeviceList(PyObject *objs, bool replace_none_with_default_device = false);
 
 // NB: This is in torch/csrc/cuda/utils.cpp, for whatever reason
 #ifdef USE_CUDA
