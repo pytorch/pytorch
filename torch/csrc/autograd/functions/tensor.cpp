@@ -15,23 +15,25 @@
 namespace torch { namespace autograd {
 
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
-  check_input_variables("CopyBackwards", grads, 1);
+  check_input_variables("CopyBackwards", grads, 1, -1, true);
   auto& grad = grads[0];
   variable_list grad_inputs(2);
-  if (should_compute_output(0)) {
-    grad_inputs[0] = at::zeros_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  if (should_compute_output(1)) {
-    at::DeviceGuard device_guard(src_device);
-    // TODO: What if !grad.is_cuda(), but src_device is CUDA?
-    // This code is kind of weirdly asymmetric.
-    if (grad.is_cuda() && grad.device() != src_device) {
-      grad_inputs[1] = grad.to(
-          src_options,
-          /*non_blocking=*/false,
-          /*copy=*/true);
-    } else {
-      grad_inputs[1] = grad.to(src_options);
+  if (grad.defined()) {
+    if (should_compute_output(0)) {
+      grad_inputs[0] = at::zeros_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (should_compute_output(1)) {
+      at::DeviceGuard device_guard(src_device);
+      // TODO: What if !grad.is_cuda(), but src_device is CUDA?
+      // This code is kind of weirdly asymmetric.
+      if (grad.is_cuda() && grad.device() != src_device) {
+        grad_inputs[1] = grad.to(
+            src_options,
+            /*non_blocking=*/false,
+            /*copy=*/true);
+      } else {
+        grad_inputs[1] = grad.to(src_options);
+      }
     }
   }
   return grad_inputs;
@@ -59,8 +61,11 @@ CopySlices::CopySlices(
 }
 
 auto CopySlices::apply(variable_list&& inputs) -> variable_list {
-  check_input_variables("CopySlices", inputs, 1);
+  check_input_variables("CopySlices", inputs, 1, -1, true);
   auto& grad = inputs[0];
+  if (!grad.defined()) {
+    return variable_list(num_outputs());
+  }
 
   // Acquire lock to here protect thread safety on fn
   // see Note [Thread Safety on Autograd Node]
