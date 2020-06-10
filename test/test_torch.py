@@ -17413,10 +17413,35 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             with self.assertRaisesRegex(RuntimeError,
                                         'probability tensor contains either `inf`, `nan` or element < 0'):
                 torch.multinomial(probs.to(device), 2)
+                torch.cuda.synchronize()
+
         test(torch.Tensor([1, -1, 1]))
         test(torch.Tensor([1, inf, 1]))
         test(torch.Tensor([1, -inf, 1]))
         test(torch.Tensor([1, 1, nan]))
+
+    def test_multinomial_invalid_distribution(self, device):
+        def test(probs, replacement):
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"invalid multinomial distribution \(sum of probabilities <= 0\)"):
+                torch.multinomial(probs, 2, replacement)
+                torch.cuda.synchronize()
+
+        x = torch.zeros(3, device=device)
+        y = torch.zeros(3, 3, device=device)
+        z = torch.zeros(3, 3, device=device)
+        z[1, :] = 1
+
+        test(x, False)
+        test(y, False)
+        test(z, False)
+
+        # Verify only for CPU as replacement=True
+        # throws device side assert triggered.
+        if self.device_type == 'cpu':
+            test(x, True)
+            test(y, True)
+            test(z, True)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
