@@ -1139,12 +1139,13 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
 
     @dist_init
     def test_async_function_wrong_return_type_remote(self):
+        rref = rpc.remote(
+            worker_name((self.rank + 1) % self.world_size),
+            async_wrong_type
+        )
+
         with self.assertRaisesRegex(
             RuntimeError,
             "Expected Future but got Tensor"
         ):
-            rref = rpc.remote(
-                worker_name((self.rank + 1) % self.world_size),
-                async_wrong_type
-            )
             rref.to_here()

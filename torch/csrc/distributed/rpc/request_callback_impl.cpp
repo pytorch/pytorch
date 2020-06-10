@@ -344,38 +344,42 @@ void RequestCallbackImpl::processRpc(
         return;
       }
 
-      std::function<void(const c10::intrusive_ptr<c10::ivalue::Future>&)>
-          scriptPostProcessing;
-      if (scriptRemoteCall.isAsyncExecution()) {
-        scriptPostProcessing = [ownerRRef, postProcessing](
-            const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) {
-          try {
-            auto valueJitFuture = jitFuture->value().toFuture();
-            valueJitFuture->addCallback(
-                [valueJitFuture, ownerRRef, postProcessing]() {
-                  try {
-                    ownerRRef->setValue(valueJitFuture->value());
-                  } catch (const std::exception& e) {
-                    ownerRRef->setError(e.what());
-                  }
-                  postProcessing();
-                });
-          } catch (const std::exception& e) {
-            ownerRRef->setError(e.what());
-            postProcessing();
-          }
-        };
-      } else {
-        scriptPostProcessing = [ownerRRef, postProcessing](
-            const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) {
-          try {
-            ownerRRef->setValue(jitFuture->value());
-          } catch (const std::exception& e) {
-            ownerRRef->setError(e.what());
-          }
-          postProcessing();
-        };
-      }
+      auto setRRefValue = [ownerRRef, postProcessing](
+          const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) mutable {
+        try {
+          ownerRRef->setValue(jitFuture->value());
+        } catch (const std::exception& e) {
+          ownerRRef->setError(e.what());
+        }
+        postProcessing();
+      };
+
+      auto isAsyncExecution = scriptRemoteCall.isAsyncExecution();
+      auto asyncPostProcessing = [ownerRRef,
+                                  postProcessing,
+                                  setRRefValue{std::move(setRRefValue)},
+                                  isAsyncExecution](
+          const c10::intrusive_ptr<c10::ivalue::Future>& jitFuture) mutable {
+            if (isAsyncExecution) {
+              // The user function will return a JIT future, install
+              // setRRefValue and postProcessing to that valueFuture
+              try {
+                auto valueJitFuture = jitFuture->value().toFuture();
+                valueJitFuture->addCallback(
+                    [valueJitFuture,
+                  setRRefValue{std::move(setRRefValue)}]() mutable {
+                      setRRefValue(valueJitFuture);
+                    });
+              } catch (const std::exception& e) {
+                ownerRRef->setError(e.what());
+                postProcessing();
+              }
+            } else {
+              // The user function will return a value. Set OwnerRRef when that
+              // value is ready.
+              setRRefValue(jitFuture);
+            }
+          };
 
       c10::intrusive_ptr<c10::ivalue::Future> jitFuture;
       try {
@@ -384,16 +388,18 @@ void RequestCallbackImpl::processRpc(
                         ->get_function(scriptRemoteCall.qualifiedName())
                         .runAsync(stack);
         if (jitFuture->completed()) { // short-cut.
-          scriptPostProcessing(jitFuture);
+          asyncPostProcessing(jitFuture);
           return;
         }
       } catch (const std::exception& e) {
-        scriptPostProcessing(jitFuture);
+        asyncPostProcessing(jitFuture);
         return;
       }
-      jitFuture->addCallback([scriptPostProcessing, jitFuture]() {
-        scriptPostProcessing(jitFuture);
-      });
+      jitFuture->addCallback(
+          [jitFuture,
+           asyncPostProcessing{std::move(asyncPostProcessing)}]() mutable {
+            asyncPostProcessing(jitFuture);
+          });
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
