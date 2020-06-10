@@ -59,6 +59,11 @@ public:
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
 
+  // returns the underlying IValue by reference.
+  const IValue& toIValueRef() {
+    return *iterator_;
+  }
+
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
 private:
