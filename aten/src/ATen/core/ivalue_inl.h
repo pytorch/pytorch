@@ -416,8 +416,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 // Output is a Future to the List of completed Futures.
 CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
     c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
-CAFFE2_API c10::intrusive_ptr<ivalue::Future> collectAll(
-    std::vector<c10::intrusive_ptr<ivalue::Future>> srcs);
+// Input is a List of Futures with the same target type.
+// Output is a Future that will be updated with a seen value.
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
