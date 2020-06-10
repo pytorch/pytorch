@@ -27,17 +27,14 @@ GENERATED_COMMENT = CodeTemplate(
 UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<decltype(${function_name}), &${function_name}>(DispatchKey::BackendSelect)
+  .impl_unboxedOnlyKernel(DispatchKey::BackendSelect, TORCH_FN(${function_name}))
   .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<std::remove_pointer_t<decltype(
-      c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${function_name}), &${function_name}>::func_ptr())>,
-      c10::impl::hacky_wrapper_for_legacy_signatures<decltype(${function_name}), &${function_name}>::func_ptr()>(
-        DispatchKey::BackendSelect)
+  .kernel(DispatchKey::BackendSelect, c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(${function_name})))
   .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
 """)
 

@@ -102,9 +102,7 @@ m.impl("${unqual_operator_name_with_overload}",
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       c10::impl::hacky_wrapper_for_legacy_signatures<
-            decltype(TypeDefault::${type_wrapper_name}),
-            &TypeDefault::${type_wrapper_name}>::func_ptr());
+       c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(TypeDefault::${type_wrapper_name})));
 """)
 
 # NB: In the ordinary, TypeDerived code generation work flow, specification
@@ -124,9 +122,7 @@ m.impl("${unqual_operator_name_with_overload}",
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       c10::impl::hacky_wrapper_for_legacy_signatures<
-                            decltype(${Type}::${type_wrapper_name}),
-                            &${Type}::${type_wrapper_name}>::func_ptr())
+                       c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(${Type}::${type_wrapper_name})))
 );
 """)
 

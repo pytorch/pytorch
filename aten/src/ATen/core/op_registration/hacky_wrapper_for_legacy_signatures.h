@@ -3,6 +3,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/core/CompileTimeFunctionPointer.h>
 
 namespace c10 {
 namespace impl {
@@ -48,26 +49,30 @@ static_assert(has_tensoroptions_arg<int (int64_t, const TensorOptions&)>(), "");
 static_assert(has_tensoroptions_arg<int (int64_t, TensorOptions)>(), "");
 static_assert(!has_tensoroptions_arg<int (int64_t, std::string)>(), "");
 
-template<class FuncType, FuncType* base_func_ptr, class ParametersBeforeTensorOptions, class ParametersAfterTensorOptions> struct scatter_tensor_options_;
+template<class FuncPtr, class ParametersBeforeTensorOptions, class ParametersAfterTensorOptions> struct scatter_tensor_options_;
 
-template<class FuncType, FuncType* base_func_ptr, class Enable = void>
+template<class FuncPtr, class Enable = void>
 struct scatter_tensor_options final {};
 
-template<class FuncType, FuncType* base_func_ptr>
-struct scatter_tensor_options<FuncType, base_func_ptr, std::enable_if_t<!has_tensoroptions_arg<FuncType>()>> final {
+template<class UnderlyingFuncPtr>
+struct scatter_tensor_options<UnderlyingFuncPtr, std::enable_if_t<!has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
+private:
     static constexpr auto* func_ptr() {
         // FuncType does not have TensorOptions arguments.
         // Don't wrap anything but just return the base pointer.
-        return base_func_ptr;
+        return UnderlyingFuncPtr::func_ptr();
     }
+public:
+    using FuncPtr = CompileTimeFunctionPointer<std::remove_pointer_t<decltype(func_ptr())>, func_ptr()>;
 };
 
-template<class FuncType, FuncType* base_func_ptr>
-struct scatter_tensor_options<FuncType, base_func_ptr, std::enable_if_t<has_tensoroptions_arg<FuncType>()>> final {
+template<class UnderlyingFuncPtr>
+struct scatter_tensor_options<UnderlyingFuncPtr, std::enable_if_t<has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
+private:
     static constexpr auto* func_ptr() {
         // FuncType has TensorOptions arguments.
         // Return a function pointer to a wrapper function that replaces those with expanded arguments.
-        using gathered_parameter_types = typename guts::infer_function_traits_t<FuncType>::parameter_types;
+        using gathered_parameter_types = typename guts::infer_function_traits_t<typename UnderlyingFuncPtr::FuncType>::parameter_types;
         constexpr size_t tensoroptions_arg_index =
             guts::typelist::find_if<
                 gathered_parameter_types,
@@ -79,13 +84,15 @@ struct scatter_tensor_options<FuncType, base_func_ptr, std::enable_if_t<has_tens
         using parameters_after_tensoroptions =
             guts::typelist::drop_t<gathered_parameter_types, tensoroptions_arg_index + 1>;
 
-        constexpr auto result = &scatter_tensor_options_<FuncType, base_func_ptr, parameters_before_tensoroptions, parameters_after_tensoroptions>::wrapper;
+        constexpr auto result = &scatter_tensor_options_<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>::wrapper;
         return result;
     }
+public:
+    using FuncPtr = CompileTimeFunctionPointer<std::remove_pointer_t<decltype(func_ptr())>, func_ptr()>;
 };
 
-template<class FuncType, FuncType* base_func_ptr, class... ParametersBeforeTensorOptions, class... ParametersAfterTensorOptions>
-struct scatter_tensor_options_<FuncType, base_func_ptr, guts::typelist::typelist<ParametersBeforeTensorOptions...>, guts::typelist::typelist<ParametersAfterTensorOptions...>> final {
+template<class FuncPtr, class... ParametersBeforeTensorOptions, class... ParametersAfterTensorOptions>
+struct scatter_tensor_options_<FuncPtr, guts::typelist::typelist<ParametersBeforeTensorOptions...>, guts::typelist::typelist<ParametersAfterTensorOptions...>> final {
     static decltype(auto) wrapper(
                 ParametersBeforeTensorOptions... parameters_before,
                 optional<ScalarType> scalar_type,
@@ -93,7 +100,7 @@ struct scatter_tensor_options_<FuncType, base_func_ptr, guts::typelist::typelist
                 optional<Device> device,
                 optional<bool> pin_memory,
                 ParametersAfterTensorOptions... parameters_after) {
-        return (*base_func_ptr)(
+        return (*FuncPtr::func_ptr())(
             std::forward<ParametersBeforeTensorOptions>(parameters_before)...,
             TensorOptions().dtype(scalar_type).device(device).layout(layout).pinned_memory(pin_memory),
             std::forward<ParametersAfterTensorOptions>(parameters_after)...
@@ -103,12 +110,9 @@ struct scatter_tensor_options_<FuncType, base_func_ptr, guts::typelist::typelist
 
 }
 
-template<class FuncType, FuncType* _func_ptr>
-struct hacky_wrapper_for_legacy_signatures final {
-    static constexpr auto* func_ptr() {
-        constexpr auto* result = detail::scatter_tensor_options<FuncType, _func_ptr>::func_ptr();
-        return result;
-    }
+template<class FuncPtr>
+constexpr auto hacky_wrapper_for_legacy_signatures(FuncPtr) {
+    return typename detail::scatter_tensor_options<FuncPtr>::FuncPtr();
 };
 
 }
