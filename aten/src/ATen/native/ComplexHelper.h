@@ -44,7 +44,7 @@ inline std::vector<int64_t> computeStrideForViewAsComplex(IntArrayRef oldstride)
 // expects as input a float or double tensor with last dimension of size 2
 // and returns back a tensor with corresponding complex dtype
 Tensor view_as_complex(const Tensor& self) {
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
     self.scalar_type() == kFloat || self.scalar_type() == kDouble,
     "view_as_complex is only supported for float and double tensors");
 

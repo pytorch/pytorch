@@ -1502,20 +1502,29 @@ class TestAutograd(TestCase):
         gradcheck(func, [x])
         gradgradcheck(func, [x])
 
-    def test_real_imag(self):
-        def real(x):
-            return x.real.sum()
-
-        def imag(x):
-            return x.imag.sum()
-
+    def test_complex_view_functions(self):
         x = torch.randn(10, dtype=torch.cdouble, requires_grad=True)
-        real(x).backward()
+        x.real.sum().backward()
         self.assertEqual(x.grad, torch.ones_like(x))
 
         y = torch.randn(10, dtype=torch.cdouble, requires_grad=True)
-        imag(y).backward()
-        self.assertEqual(y.grad, torch.ones_like(x)*(-1j))
+        y.imag.sum().backward()
+        self.assertEqual(y.grad, -1j * torch.ones_like(y))
+
+        def func(z):
+            z_ = torch.view_as_complex(z)
+            z_select = torch.select(z_, z_.dim()-1, 0)
+            z_select_real = torch.view_as_real(z_select)
+            return z_select_real.sum()
+
+        z = torch.randn(10, 2, 2, dtype=torch.double, requires_grad=True)
+        # gradcheck(func, [z])
+
+        z1 = z.clone().detach().requires_grad_(True)
+        torch.select(z1, z1.dim() - 2, 0).sum().backward()
+
+        func(z).backward()
+        self.assertEqual(z.grad, z1.grad)
 
     def test_stack(self):
         x = torch.randn(10, 10, requires_grad=True)
@@ -4453,7 +4462,10 @@ def add_test(
                         inplace_name = name + '_'
                         # can't broadcast inplace to left hand side
                         skip_inplace = ('broadcast_lhs' in test_name or
-                                        'broadcast_all' in test_name)
+                                        'broadcast_all' in test_name or
+                                        'atanh' in test_name or
+                                        'acosh' in test_name or
+                                        'asinh' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -6084,6 +6096,7 @@ class TestAutogradDeviceType(TestCase):
     def test_simple_reentrant_cross_device(self, device):
         class ReentrantFunc(Function):
             _cpu_mode = True
+
             @staticmethod
             def forward(ctx, x):
                 return x * (x + 2)

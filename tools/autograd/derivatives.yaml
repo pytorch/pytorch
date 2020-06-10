@@ -181,6 +181,24 @@
 - name: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   self: not_implemented("all")
 
+- name: acosh(Tensor self) -> Tensor
+  self: grad * (self.pow(2) - 1).rsqrt()
+
+- name: acosh_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("inplace version of acosh")
+
+- name: asinh(Tensor self) -> Tensor
+  self: grad * (self.pow(2) + 1).rsqrt()
+
+- name: asinh_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("inplace version of asinh")
+
+- name: atanh(Tensor self) -> Tensor
+  self: grad * 1 / (1 - self.pow(2))
+
+- name: atanh_(Tensor(a!) self) -> Tensor(a!)
+  self: not_implemented("inplace version of atanh")
+
 - name: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
@@ -981,10 +999,10 @@
   self: grad.reshape(self.sizes())
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_complex(grad.contiguous()).conj()
+  self: at::view_as_complex(grad.contiguous()).conj() # gx0 - i gx1
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad)
+  self: at::view_as_real(grad.contiguous().conj()) # [gx, -gy]
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable

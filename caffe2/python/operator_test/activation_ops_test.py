@@ -97,7 +97,7 @@ class TestActivations(serial.SerializedTestCase):
             output_to_grad="X" if in_place else "Y",
             grad_reference=relu_grad_ref)
 
-    @serial.given(X=hu.tensor(elements=st.floats(-3.0, 3.0)),
+    @serial.given(X=hu.tensor(elements=hu.floats(-3.0, 3.0)),
                   n=st.floats(min_value=0.5, max_value=2.0),
                   in_place=st.booleans(), **hu.gcs)
     def test_relu_n(self, X, n, in_place, gc, dc):
