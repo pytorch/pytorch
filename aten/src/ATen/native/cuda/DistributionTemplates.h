@@ -522,7 +522,7 @@ struct LogNormalKernel {
 template<typename RNG>
 void geometric_kernel(TensorIterator& iter, double p, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "geometric_cuda", [&] {
-    using accscalar_t = at::GeometricType<scalar_t>::type;
+    using accscalar_t = at::DiscreteDistributionType<scalar_t>::type;
     // define lambda for geometric transformation
     auto geometric_func = [p] __device__ (accscalar_t rand) {
       return static_cast<scalar_t>(transformation::geometric<accscalar_t>(rand, p));
@@ -658,7 +658,7 @@ template<typename RNG>
 void bernoulli_kernel(TensorIterator& iter, double p, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "bernoulli_scalar_cuda_", [&] {
-      using accscalar_t = at::BernoulliType<scalar_t>::type;
+      using accscalar_t = at::DiscreteDistributionType<scalar_t>::type;
       // define lambda for bernoulli transformation
       auto bernoulli_func = [p] __device__ (accscalar_t rand) {
         return static_cast<scalar_t>(transformation::bernoulli<accscalar_t>(rand, p));

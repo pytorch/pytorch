@@ -187,9 +187,9 @@ struct normal_distribution {
 };
 
 template <typename T>
-struct BernoulliType { using type = float; };
+struct DiscreteDistributionType { using type = float; };
 
-template <> struct BernoulliType<double> { using type = double; };
+template <> struct DiscreteDistributionType<double> { using type = double; };
 
 /**
  * Samples a bernoulli distribution given a probability input
@@ -211,11 +211,6 @@ struct bernoulli_distribution {
   private:
     T p;
 };
-
-template <typename T>
-struct GeometricType { using type = float; };
-
-template <> struct GeometricType<double> { using type = double; };
 
 /**
  * Samples a geometric distribution given a probability input
