@@ -140,6 +140,8 @@ def get_ignored_functions():
         torch.autocast_decrement_nesting,
         torch.nn.functional.hardswish,
         torch.is_vulkan_available,
+        torch.is_deterministic,
+        torch.set_deterministic
     )
 
 def get_testing_overrides():
