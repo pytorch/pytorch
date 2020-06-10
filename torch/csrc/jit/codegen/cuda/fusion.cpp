@@ -112,7 +112,7 @@ void Fusion::removeVal(Val* val) {
   if (orig != nullptr)
     removeExpr(origin(val));
 
-  for (Expr* use : uses(val))
+  for (Expr* use : unordered_uses(val))
     removeExpr(use);
 
   val_set_.erase(val);
@@ -130,7 +130,7 @@ void Fusion::addInput(Val* const input) {
   assertInFusion(input, "Cannot register input ");
 
   if (input->getValType().value() == ValType::TensorView) {
-    TensorView* tv = static_cast<TensorView* const>(input);
+    auto tv = input->as<TensorView>();
     if (tv->hasReduction())
       TORCH_WARN_ONCE(
           "Registered input ",
@@ -144,7 +144,7 @@ void Fusion::addInput(Val* const input) {
 void Fusion::addOutput(Val* const output) {
   assertInFusion(output, "Cannot register output ");
   if (output->getValType().value() == ValType::TensorView) {
-    TensorView* tv = static_cast<TensorView* const>(output);
+    auto tv = output->as<TensorView>();
     if (TensorDomain::hasBroadcast(tv->getRootDomain()))
       // Go to the root as we can merge bcast and
       // non-bcast dims, making a non-bcast dim.
@@ -311,7 +311,7 @@ const std::unordered_set<Expr*>& Fusion::unordered_exprs() const noexcept {
   return expr_set_;
 }
 
-std::unordered_set<Expr*> Fusion::uses(Val* val) const {
+std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
   assertInFusion(val, "Cannot detect where val was used, ");
   if (uses_.find(val) != uses_.end()) {
     auto ret = uses_.find(val)->second;
