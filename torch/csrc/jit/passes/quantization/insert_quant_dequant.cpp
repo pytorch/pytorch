@@ -939,7 +939,7 @@ void InsertQuantDeQuantHelper::propagateQParams(
   }
 }
 
-void removeDequantizeFromInputs(const std::vector<Value*>& inputs) {
+void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
   // Delete dequantize node, we have one dequantize
   // for each use of the value
   for (auto* dequantized_val : inputs) {
@@ -1016,14 +1016,37 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
         }
       }
     } else {
+      // For this category of ops, we need to
+      // 1. check if we need to propagate dequantize op
+      // 2. remove the dequantize ops from inputs
+      // 3. insert dequantize for all outputs
+      // to make sure it works for ops with multiple outputs
+      // since removing dequantize from inputs is mutating the graph
+      // and it will affect future checks for whether all the inputs
+      // has been quantized or not(since currently we just check if
+      // the value is produced by dequantize op to decide if the value
+      // is quantized or not
+      // list of dequantized input values
+      std::unordered_set<Value*> dequantized_inputs;
+      std::vector<Value*> outputs_to_dequantize;
+      // 1. collect dequantized inputs and outputs we need to dequantize
       for (auto* output : n->outputs()) {
         if (isQuantized(output)) {
           continue;
         }
         if (auto inputs = getDequantizedInputs(output)) {
-          removeDequantizeFromInputs(*inputs);
-          insertDeQuantForAllUse(output->owningGraph(), output, output);
+          std::copy(
+              inputs->begin(),
+              inputs->end(),
+              std::inserter(dequantized_inputs, dequantized_inputs.end()));
+          outputs_to_dequantize.push_back(output);
         }
+      }
+      // 2. remove the dequantize ops from inputs
+      removeDequantizeFromInputs(dequantized_inputs);
+      // 3. insert dequantize op for outpus
+      for (auto* output : outputs_to_dequantize) {
+        insertDeQuantForAllUse(output->owningGraph(), output, output);
       }
     }
   }
