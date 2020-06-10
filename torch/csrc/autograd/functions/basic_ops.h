@@ -48,6 +48,23 @@ struct TORCH_API DelayedError : public Node {
   std::string msg;
 };
 
+struct TORCH_API UndefinedGrad : public Node {
+  UndefinedGrad() {
+    add_input_metadata(Node::undefined_input());
+  }
+
+  variable_list apply(variable_list&& inputs) override;
+};
+
+struct TORCH_API UndefinedGradBackward : public Node {
+  UndefinedGradBackward(edge_list&& next_edges)
+    : Node(std::move(next_edges)) {}
+
+  UndefinedGradBackward() {}
+
+  variable_list apply(variable_list&& inputs) override;
+};
+
 struct TORCH_API GraphRoot : public Node {
   GraphRoot(edge_list functions, variable_list inputs)
       : Node(std::move(functions)),

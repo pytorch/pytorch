@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -239,6 +239,14 @@ class AbstractTestCases:
         def test_msnpu_error(self):
             with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
                 torch.zeros(1, device=torch.device('msnpu'))
+
+        def test_as_strided_neg(self):
+            error = r'as_strided: Negative strides are not supported at the ' \
+                    r'moment, got strides: \[-?[0-9]+(, -?[0-9]+)*\]'
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.as_strided(torch.ones(3, 3), (1, 1), (2, -1))
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.as_strided(torch.ones(14), (2,), (-11,))
 
         def test_polygamma_neg(self):
             with self.assertRaisesRegex(RuntimeError, r'polygamma\(n, x\) does not support negative n\.'):
@@ -2613,6 +2621,14 @@ class AbstractTestCases:
             bad_src = torch.randn(*[i - 1 for i in idx_size])
             self.assertRaises(RuntimeError, lambda: torch.gather(bad_src, dim, idx))
 
+            # should throw an error when index dtype is not long
+            with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                torch.gather(src, dim, idx.to(torch.int))
+
+            # should throw an error when out.dtype != src.dtype.
+            with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                torch.gather(src, dim, idx, out=expected.to(torch.int))
+
             if test_bounds:
                 idx[0][0][0] = 23
                 self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
@@ -2683,6 +2699,20 @@ class AbstractTestCases:
                             else:
                                 expected[tuple(ii)] = src
                 self.assertEqual(actual, expected, atol=0, rtol=0)
+
+                # should throw an error when self.dtype != src.dtype.
+                # we ignore the case when src is Scalar, as it gets
+                # cast via src.to<scalar_t>.
+                if not is_scalar:
+                    with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                        getattr(base.clone().type(torch.int), method)(dim, idx, src)
+
+                    with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                        getattr(base.clone(), method)(dim, idx, src.type(torch.int))
+
+                # should throw an error when index dtype is not long
+                with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                    getattr(base.clone(), method)(dim, idx.type(torch.int), src)
 
                 if test_bounds:
                     idx[0][0][0] = 34
@@ -7998,6 +8028,41 @@ class TestTorchDeviceType(TestCase):
                 np_fn = partial(np.flip, axis=flip_dim)
                 self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
 
+    def _test_fliplr_flipud(self, funcs, min_dim, max_dim, device, dtype):
+        for dim in range(min_dim, max_dim + 1):
+            shape = self._rand_shape(dim, 5, 10)
+            # Randomly scale the input
+            data = (torch.randn(*shape).to(dtype) * random.randint(50, 100)).tolist()
+            # Use _np_compare_func as it copies the output of np_func,
+            # which takes care of negative strides if present.
+            torch_fn, np_fn = funcs
+            self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_fliplr(self, device, dtype):
+        funcs = (torch.fliplr, np.fliplr)
+        self._test_fliplr_flipud(funcs, 2, 4, device, dtype)
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    def test_fliplr_invalid(self, device, dtype):
+        x = torch.randn(42).to(dtype)
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
+            torch.fliplr(x)
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
+            torch.fliplr(torch.tensor(42, dtype=dtype))
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_flipud(self, device, dtype):
+        funcs = (torch.flipud, np.flipud)
+        self._test_fliplr_flipud(funcs, 1, 4, device, dtype)
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    def test_flipud_invalid(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 1-d."):
+            torch.flipud(torch.tensor(42, dtype=dtype))
+
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
         self.assertEqual(torch.tensor([1, 2, 3, 4]).view(2, 2), data.rot90(0, [0, 1]))
@@ -9132,6 +9197,8 @@ class TestTorchDeviceType(TestCase):
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
+    # Assert for illegal dtype would not be raised on XLA
+    @onlyOnCPUAndCUDA
     def test_minmax_illegal_dtype(self, device):
         x = torch.randn(5, 5, dtype=torch.float32, device=device)
         valid_values = torch.empty(5, dtype=torch.float32, device=device)
@@ -13546,6 +13613,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
         def _test(amplitude, L, n):
@@ -13580,6 +13648,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
         num_trials = 100
@@ -13644,6 +13713,7 @@ class TestTorchDeviceType(TestCase):
             _test(data_size, kwargs)
 
     @onlyOnCPUAndCUDA
+    @skipCPUIfNoMkl
     @skipIfRocm
     def test_batch_istft(self, device):
         original = torch.tensor([
@@ -17139,6 +17209,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # NumPy has the same behavior.
     @onlyOnCPUAndCUDA
     @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
+    @unittest.skipIf(IS_PPC, "Test is borken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):

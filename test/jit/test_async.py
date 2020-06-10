@@ -536,6 +536,12 @@ class TestAsync(JitTestCase):
             extra_files['bar'] = ''
             torch.jit.load(buffer, _extra_files=extra_files)
 
+    def test_no_future_subtype_message(self):
+        with self.assertRaisesRegex(RuntimeError, 'Future without a contained type'):
+            @torch.jit.script
+            def forward(self, x):
+                futs = torch.jit.annotate(List[torch.jit.Future], [])
+
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
