@@ -13,68 +13,7 @@
 namespace torch {
 namespace jit {
 
-static bool texpr_fuser_enabled_ = false;
-void setTensorExprFuserEnabled(bool val) {
-  texpr_fuser_enabled_ = val;
-}
-
-bool tensorExprFuserEnabled() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
-  if (!enable_c_str) {
-    return texpr_fuser_enabled_;
-  }
-  if (std::string(enable_c_str) == "0") {
-    return false;
-  }
-  return true;
-}
-
-const Symbol& getTensorExprSymbol() {
-  static Symbol s = Symbol::fromQualString("tensorexpr::Group");
-  return s;
-}
-
-value_list sortReverseTopological(
-    ArrayRef<torch::jit::Value*> inputs,
-    torch::jit::Block* block) {
-  value_list result;
-  for (auto i : inputs) {
-    if (i->node()->owningBlock() == block) {
-      result.push_back(i);
-    }
-  }
-  // Sort in reverse topological order
-  std::sort(
-      result.begin(),
-      result.end(),
-      [&](torch::jit::Value* a, torch::jit::Value* b) {
-        return a->node()->isAfter(b->node());
-      });
-  return result;
-}
-
-bool allShapesAreKnown(Value* v) {
-  if (!v->type()->cast<TensorType>()) {
-    return true;
-  }
-  return v->isCompleteTensor();
-}
-
-bool allShapesAreKnown(Node* node) {
-  // TODO: Relax the checks to support dynamic shapes
-  for (torch::jit::Value* output : node->outputs()) {
-    if (!allShapesAreKnown(output)) {
-      return false;
-    }
-  }
-  for (torch::jit::Value* input : node->inputs()) {
-    if (!allShapesAreKnown(input)) {
-      return false;
-    }
-  }
-  return true;
-}
-
+namespace tensorexpr {
 bool isSupported(Node* node) {
   // TODO:
   switch (node->kind()) {
@@ -158,6 +97,69 @@ bool isSupported(Node* node) {
       return false;
   }
 }
+} // namespace tensorexpr
+
+static bool texpr_fuser_enabled_ = false;
+void setTensorExprFuserEnabled(bool val) {
+  texpr_fuser_enabled_ = val;
+}
+
+bool tensorExprFuserEnabled() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
+  if (!enable_c_str) {
+    return texpr_fuser_enabled_;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
+}
+
+const Symbol& getTensorExprSymbol() {
+  static Symbol s = Symbol::fromQualString("tensorexpr::Group");
+  return s;
+}
+
+value_list sortReverseTopological(
+    ArrayRef<torch::jit::Value*> inputs,
+    torch::jit::Block* block) {
+  value_list result;
+  for (auto i : inputs) {
+    if (i->node()->owningBlock() == block) {
+      result.push_back(i);
+    }
+  }
+  // Sort in reverse topological order
+  std::sort(
+      result.begin(),
+      result.end(),
+      [&](torch::jit::Value* a, torch::jit::Value* b) {
+        return a->node()->isAfter(b->node());
+      });
+  return result;
+}
+
+bool allShapesAreKnown(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return true;
+  }
+  return v->isCompleteTensor();
+}
+
+bool allShapesAreKnown(Node* node) {
+  // TODO: Relax the checks to support dynamic shapes
+  for (torch::jit::Value* output : node->outputs()) {
+    if (!allShapesAreKnown(output)) {
+      return false;
+    }
+  }
+  for (torch::jit::Value* input : node->inputs()) {
+    if (!allShapesAreKnown(input)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 bool canHandle(Node* node, AliasDb& aliasDb) {
   if (node->kind() == prim::Constant) {
@@ -183,7 +185,7 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
       return false;
     }
   }
-  return isSupported(node);
+  return tensorexpr::isSupported(node);
 }
 
 #define REQ(cond)                           \
