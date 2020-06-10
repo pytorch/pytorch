@@ -8,8 +8,7 @@ namespace at {
 // model on Vulkan backend. Strides are not supported on Vulkan side, plan to
 // support them.
 template <typename OpaqueHandle>
-struct CAFFE2_API VulkanOpaqueTensorImpl
-    : public OpaqueTensorImpl<OpaqueHandle> {
+struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   VulkanOpaqueTensorImpl(
       at::DispatchKeySet key_set,
       const caffe2::TypeMeta& data_type,
@@ -22,9 +21,8 @@ struct CAFFE2_API VulkanOpaqueTensorImpl
             data_type,
             device,
             opaque_handle,
-            sizes) {
-    strides_ = strides.vec();
-  }
+            sizes),
+        strides_(strides.vec()) {}
 
   IntArrayRef strides() const override {
     return strides_;
