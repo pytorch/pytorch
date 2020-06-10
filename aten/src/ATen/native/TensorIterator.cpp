@@ -125,8 +125,12 @@ void TensorIterator::compute_types() {
     if (!op.is_type_defined()) {
       TORCH_INTERNAL_ASSERT(op.is_output, "Found type undefined input tensor!");
       TORCH_INTERNAL_ASSERT(check_all_same_device());
-      has_undefined_outputs = true;
-      continue;
+      if (config_static_dtype_.has_value()) {
+        op.target_dtype = *config_static_dtype_;
+      } else {
+        has_undefined_outputs = true;
+        continue;
+      }
     }
 
     // Validates input tensors are defined
@@ -202,12 +206,7 @@ void TensorIterator::compute_types() {
   int current_cpu_scalars_on_cuda = 0;
   for (auto& op : operands_) {
     if (!op.is_type_defined()) {
-      if (config_static_dtype_.has_value() && op.is_output) {
-        op.target_dtype = *config_static_dtype_;
-      } else {
-        TORCH_INTERNAL_ASSERT(common_dtype_ != ScalarType::Undefined);
-        op.target_dtype = common_dtype_;
-      }
+      op.target_dtype = common_dtype_;
       op.device = common_device;
       continue;
     }

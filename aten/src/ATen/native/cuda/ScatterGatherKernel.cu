@@ -144,7 +144,7 @@ struct cuda_scatter_gather_base_kernel {
     iter.check_all_same_dtype(false);
     iter.dont_resize_outputs();
     iter.add_output(self_restrided);
-    iter.add_input(src_restrided, src.device(), src.scalar_type());
+    iter.add_input(src_restrided);
     iter.add_input(index);
     iter.build();
 
