@@ -189,6 +189,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     iter.dont_resize_outputs();
     iter.add_output(result_slice);
     iter.add_input(source_slice);
+    iter.enforce_safe_casting_to_output(true);
     iter.build();
 
     for (auto const &tensor : tensors) {
@@ -214,7 +215,9 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       iter.dont_resize_outputs();
       iter.add_output(result_slice);
       iter.add_input(tensor);
-      iter.promote_common_dtype();
+      iter.promote_inputs_to_common_dtype(true);
+      iter.cast_common_dtype_to_outputs(true);
+      iter.enforce_safe_casting_to_output(true);
       iter.build();
       copy_stub(iter.device_type(), iter, false);
       offset += slice_dim_size;
@@ -1633,7 +1636,7 @@ Tensor diag(const Tensor& self, int64_t dimension) {
   return result;
 }
 
-Tensor& diag_out(Tensor &result, const Tensor& self, int64_t dimension) {
+Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "diag", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });

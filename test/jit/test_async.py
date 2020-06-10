@@ -10,7 +10,8 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 from torch.testing._internal.common_utils import TemporaryFileName
-from typing import List
+from typing import List, Tuple
+from torch import Tensor
 
 class TestAsync(JitTestCase):
     def test_async_python(self):
@@ -534,6 +535,12 @@ class TestAsync(JitTestCase):
         with self.assertRaises(RuntimeError):
             extra_files['bar'] = ''
             torch.jit.load(buffer, _extra_files=extra_files)
+
+    def test_no_future_subtype_message(self):
+        with self.assertRaisesRegex(RuntimeError, 'Future without a contained type'):
+            @torch.jit.script
+            def forward(self, x):
+                futs = torch.jit.annotate(List[torch.jit.Future], [])
 
 
 if __name__ == '__main__':

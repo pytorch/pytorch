@@ -33,6 +33,10 @@ class TORCH_API CodeGen {
     return stmt_;
   }
 
+  void apply_mutator(IRMutator* mutator) {
+    stmt_ = stmt_->accept_mutator(mutator);
+  }
+
   std::vector<BufferArg>& buffer_args() {
     return buffer_args_;
   }
@@ -181,6 +185,11 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params,
     at::Device device = at::kCPU);
+
+class TORCH_API GenericIntrinsicsExpander : public IRMutator {
+ protected:
+  const Expr* mutate(const Intrinsics* v);
+};
 
 } // namespace tensorexpr
 } // namespace jit

@@ -7,7 +7,6 @@
               only:
                 - master
     jobs:
-      - docker_for_ecr_gc_build_job
       - docker_build_job:
           name: "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9"
           image_name: "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9"
@@ -62,3 +61,6 @@
       - docker_build_job:
           name: "pytorch-linux-xenial-pynightly"
           image_name: "pytorch-linux-xenial-pynightly"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-rocm3.3-py3.6"
+          image_name: "pytorch-linux-xenial-rocm3.3-py3.6"
