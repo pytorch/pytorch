@@ -272,22 +272,24 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
 }
 
 Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& result) {
+  input = at::where(at::isnan(input), at::ones_like(input), input);
   if (input.dim() == 0) {
-    return grad * input.isnan().logical_not();
+    return grad;
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
-    return (grad * result) / input * input.isnan().logical_not();
+    return (grad * result);
   } else if (zero_idx.size(0) > 1) {
-    return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT) * input.isnan().logical_not();
+    return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
-    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input) * input.isnan().logical_not();
+    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input);
   }
 }
 
 Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t dim, bool keepdim) {
+  input = at::where(at::isnan(input), at::ones_like(input), input);
   if (input.dim() == 0) {
-    return grad * input.isnan().logical_not();
+    return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
   if (!keepdim && input.dim() != 1) {
@@ -299,9 +301,9 @@ Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
-    return (grad * result) / input * input.isnan().logical_not();
+    return (grad * result) / input;
   } else {
-    return prod_safe_zeros_backward(grad, input, dim) * input.isnan().logical_not();
+    return prod_safe_zeros_backward(grad, input, dim);
   }
 }
 
