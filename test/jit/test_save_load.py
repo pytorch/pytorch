@@ -13,7 +13,6 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import (JitTestCase,
                                                clear_class_registry)
-from torch.testing._internal.common_utils import IS_SANDCASTLE
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -105,7 +104,6 @@ class TestSaveLoad(JitTestCase):
       div behavior has not yet been updated.
     """
 
-    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_tensor(self):
         def historic_div(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -125,7 +123,11 @@ class TestSaveLoad(JitTestCase):
                 return result_0, result_1, result_2
 
         # Loads historic module
-        v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_v3.pt")
+        try:
+            v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_v3.pt")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
+
         self._verify_no("aten::div", v3_module)
         self._verify_count("aten::true_divide", v3_module, 3)
         self._verify_count("aten::floor_divide", v3_module, 3)
@@ -151,7 +153,6 @@ class TestSaveLoad(JitTestCase):
             _helper(v3_module, historic_div)
             _helper(current_module, torch.div)
 
-    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_tensor_inplace(self):
         def historic_div_(self, other):
             if self.is_floating_point() or other.is_floating_point():
@@ -166,7 +167,11 @@ class TestSaveLoad(JitTestCase):
                 a /= b
                 return a
 
-        v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_inplace_v3.pt")
+        try:
+            v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_inplace_v3.pt")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
+
         self._verify_no("aten::div", v3_module)
         self._verify_count("aten::true_divide", v3_module, 1)
         self._verify_count("aten::floor_divide", v3_module, 1)
@@ -195,7 +200,6 @@ class TestSaveLoad(JitTestCase):
             a = torch.tensor((val_a,))
             _helper(current_module, torch.Tensor.div_)
 
-    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_tensor_out(self):
         def historic_div_out(self, other, out):
             if self.is_floating_point() or other.is_floating_point() or out.is_floating_point():
@@ -209,8 +213,11 @@ class TestSaveLoad(JitTestCase):
             def forward(self, a, b, out):
                 return a.div(b, out=out)
 
-        # scripted_module = self._save_load_module(MyModule)
-        v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_out_v3.pt")
+        try:
+            v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_out_v3.pt")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
+
         self._verify_no("aten::div", v3_module)
         self._verify_count("aten::true_divide", v3_module, 1)
         self._verify_count("aten::floor_divide", v3_module, 1)
@@ -241,7 +248,6 @@ class TestSaveLoad(JitTestCase):
                 _helper(v3_module, historic_div_out)
                 _helper(current_module, torch.div)
 
-    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_scalar(self):
         def historic_div_scalar_float(self, other: float):
             return torch.true_divide(self, other)
@@ -265,8 +271,11 @@ class TestSaveLoad(JitTestCase):
             def forward(self, a, b: int):
                 return a / b
 
-        v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v3.pt")
-        v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_int_v3.pt")
+        try:
+            v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v3.pt")
+            v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_int_v3.pt")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
 
         for m in (v3_module_float, v3_module_int):
             self._verify_no("aten::div", m)
@@ -300,7 +309,6 @@ class TestSaveLoad(JitTestCase):
                 _helper(v3_module_int, historic_div_scalar_int)
                 _helper(current_module_int, torch.div)
 
-    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_scalar_reciprocal(self):
         def historic_div_scalar_float_reciprocal(self, other: float):
             return other / self
@@ -324,8 +332,11 @@ class TestSaveLoad(JitTestCase):
             def forward(self, a, b: int):
                 return b / a
 
-        v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_reciprocal_float_v3.pt")
-        v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_reciprocal_int_v3.pt")
+        try:
+            v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_reciprocal_float_v3.pt")
+            v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_reciprocal_int_v3.pt")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
 
         # NOTE: number / tensor is rewritten to torch.reciprocal(a) * b
         #  so true_divide and floor_divide do not appear in their graphs
@@ -370,7 +381,6 @@ class TestSaveLoad(JitTestCase):
                 _helper(v3_module_int, historic_div_scalar_int_reciprocal)
                 _helper(current_module_int, torch.div)
 
-    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_scalar_inplace(self):
         def historic_div_scalar_float_inplace(self, other: float):
             return self.true_divide_(other)
@@ -397,8 +407,11 @@ class TestSaveLoad(JitTestCase):
                 a /= b
                 return a
 
-        v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_inplace_float_v3.pt")
-        v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_inplace_int_v3.pt")
+        try:
+            v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_inplace_float_v3.pt")
+            v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_inplace_int_v3.pt")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
 
         for m in (v3_module_float, v3_module_int):
             self._verify_no("aten::div", m)
@@ -437,7 +450,6 @@ class TestSaveLoad(JitTestCase):
 
     # NOTE: Scalar division was already true division in op version 3,
     #   so this test verifies the behavior is unchanged.
-    @unittest.skipIf(IS_SANDCASTLE, "Skipped in Sandcastle")
     def test_versioned_div_scalar_scalar(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -450,7 +462,11 @@ class TestSaveLoad(JitTestCase):
                 result_3 = b / d
                 return (result_0, result_1, result_2, result_3)
 
-        v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_scalar_v3.pt")
+        try:
+            v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_scalar_v3.pt")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
+
         self._verify_count("aten::div", v3_module, 4)
 
         current_module = self._save_load_module(MyModule)
