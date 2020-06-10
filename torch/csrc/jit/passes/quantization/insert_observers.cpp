@@ -305,10 +305,10 @@ class InsertObserversHelper {
       bool is_entry_point = false,
       bool is_user_defined_function = false);
 
-  // Record v as "ready for observation" by storing it in values_to_observe and
-  // block_observed_values. If v is a part of a delayed observation pattern,
-  // record v's descendant (per delay rules) instead. The observers are inserted
-  // at a later stage by reading the state created by this function.
+  // Record v as "ready for observation" by storing it in values_to_observe.
+  // If v is a part of a delayed observation pattern, record v's descendant
+  // (per delay rules) instead. The observers are inserted at a later stage
+  // by reading the state created by this function.
   void recordObserved(
       Value* v,
       const Module& observer_module,
@@ -346,7 +346,7 @@ class InsertObserversHelper {
       NameModuleVector& observer_name_and_modules);
 
   // Uses the state created by fillBoundaryValueMap and fillValueObserverMap
-  // to return an observer for a value, if it is needed.
+  // to return an observer configured for a value, if it is needed.
   c10::optional<Module> getObserverFor(Value* v);
 
   // Uses the state created by fillPassThroughValueMap to propage observed
@@ -400,13 +400,7 @@ class InsertObserversHelper {
 
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
 
-  // example:
-  //   %x1 = conv(%x0)
-  //
-  // observer_for_value_ = {
-  //   %x0: FooObserverModule,
-  //   %x1: BarObserverModule,
-  // }
+  // Map of value to observer module configured for that value.
   std::unordered_map<Value*, Module> observer_for_value_;
 
   // Map from values from callsite into the values in the CallMethod graph
@@ -447,7 +441,6 @@ class InsertObserversHelper {
   //
   // pass_through_value_map_ = {
   //   %x1: [%x0],
-  //   %x2: [],
   // }
   std::unordered_map<Value*, std::vector<Value*>> pass_through_value_map_;
 

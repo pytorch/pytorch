@@ -2570,9 +2570,3 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(m1.graph)
-
-class TestQATScript(QuantizationTestCase):
-
-    def fake_quant_scriptable(self):
-        qconfig = script_qconfig(default_qat_qconfig)
-        print(qconfig)
