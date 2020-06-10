@@ -165,7 +165,7 @@ void insertQuantizationOps(
     Node* observer,
     bool is_per_channel,
     const std::vector<std::string>& qparam_names,
-    bool is_dynamic = false) {
+    QuantType quant_type = QuantType::STATIC) {
   Graph* g = observer->owningGraph();
   // Observer output
   Value* observer_out = observer->output();
@@ -180,7 +180,7 @@ void insertQuantizationOps(
   }
   Value* original_val = observer->input(1);
   Node *quant, *choose_qparams, *dequant;
-  if (is_dynamic && !isWeight(module, observer_out)) {
+  if (quant_type == QuantType::DYNAMIC && !isWeight(module, observer_out)) {
     Value* dtype = g->insertGetAttr(self, qparam_names.back());
     std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
         g, observer_out, dtype, at::Symbol::aten(quantize_func));
@@ -332,7 +332,7 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
         dequant_out->uses().size() == 1,
         "Expect dequant output to have single use");
     Node* user = dequant_out->uses()[0].user;
-    return !nodeQuantizable(user, /* is_dynamic */ true);
+    return !nodeQuantizable(user, QuantType::DYNAMIC);
   };
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(dynamic_quant_ops, dynamic_quant_replacement);
@@ -387,8 +387,8 @@ class InsertQuantDeQuantHelper {
  public:
   void run(Module& module, const std::string& method_name);
 
-  void setDynamicFlag(bool is_dynamic) {
-    is_dynamic_ = is_dynamic;
+  void setQuantType(QuantType quant_type) {
+    quant_type_ = quant_type;
   }
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
@@ -465,7 +465,7 @@ class InsertQuantDeQuantHelper {
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
 
-  bool is_dynamic_ = false;
+  QuantType quant_type_ = QuantType::STATIC;
 
   // Map from original weight value to GraphFunction corresponding to the
   // subgraph that includes the weight observer and dependent nodes.
@@ -681,7 +681,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       qparam_names.push_back(qparam_name);
     }
     insertQuantizationOps(
-        module, self, n, isPerChannel(qscheme), qparam_names, is_dynamic_);
+        module, self, n, isPerChannel(qscheme), qparam_names, quant_type_);
   }
 }
 
@@ -1145,11 +1145,11 @@ Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
     bool inplace,
-    bool is_dynamic) {
+    QuantType quant_type) {
   Module module = input_module.clone(inplace);
   InsertQuantDeQuantHelper h;
-  h.setDynamicFlag(is_dynamic);
-  if (is_dynamic) {
+  h.setQuantType(quant_type);
+  if (quant_type == QuantType::DYNAMIC) {
     h.runWeightObserver(module, method_name);
   }
   h.run(module, method_name);
