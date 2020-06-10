@@ -1712,13 +1712,14 @@ void testFutures() {
     auto s3 = c10::make_intrusive<Future>(IntType::get());
 
     // Empty case
-    std::vector<intrusive_ptr<ivalue::Future>> futures;
+    c10::List<intrusive_ptr<ivalue::Future>> futures(
+        FutureType::create(IntType::get()));
     auto c1 = collectAll(futures);
     ASSERT_TRUE(c1->completed());
     ASSERT_EQ(c1->value().toList().size(), 0);
     ASSERT_TRUE(
         *(c1->value().toList().elementType()) ==
-        *FutureType::create(AnyType::get()));
+        *FutureType::create(IntType::get()));
 
     // 1-element, initially not completed.
     futures.push_back(s1);
@@ -1769,6 +1770,46 @@ void testFutures() {
     } catch (const std::exception& e) {
       ASSERT_EQ(std::string(e.what()), "Failed");
     }
+  }
+
+  // collectAny()
+  {
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+
+    // Empty case
+    c10::List<intrusive_ptr<ivalue::Future>> futures(
+        FutureType::create(IntType::get()));
+    auto c1 = collectAny(futures);
+    ASSERT_TRUE(c1->completed());
+
+    // 1 element, not yet satisfied
+    futures.push_back(s1);
+    auto c2 = collectAny(futures);
+    ASSERT_FALSE(c2->completed());
+    s1->markCompleted(5);
+    ASSERT_TRUE(c2->completed());
+    ASSERT_TRUE(c2->value().isInt());
+    ASSERT_EQ(c2->value().toInt(), 5);
+
+    // 1 element already satisfied.
+    auto c3 = collectAny(futures);
+    ASSERT_TRUE(c3->completed());
+    ASSERT_TRUE(c3->value().isInt());
+    ASSERT_EQ(c3->value().toInt(), 5);
+
+    // 2 elements
+    futures.clear();
+    auto s2 = c10::make_intrusive<Future>(IntType::get());
+    auto s3 = c10::make_intrusive<Future>(IntType::get());
+    futures.push_back(s2);
+    futures.push_back(s3);
+    auto c4 = collectAny(futures);
+    ASSERT_FALSE(c4->completed());
+    s3->markCompleted(7);
+    ASSERT_TRUE(c4->completed());
+    ASSERT_EQ(c4->value().toInt(), 7);
+    s2->markCompleted(1);
+    ASSERT_EQ(c4->value().toInt(), 7);
   }
 }
 
