@@ -506,6 +506,8 @@ torch._storage_classes.add(ComplexDoubleStorage)
 torch._storage_classes.add(ComplexFloatStorage)
 
 from . import sparse
+from . import comm
+from . import nccl
 from . import profiler
 from . import nvtx
 from .streams import Stream, Event
