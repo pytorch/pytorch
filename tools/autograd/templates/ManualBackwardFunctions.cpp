@@ -2756,7 +2756,31 @@ Tensor mkldnn_convolution_forward(const Tensor& self_fw_grad, const Tensor& weig
   }
 
   if (weight_fw_grad.defined()) {
+    TORCH_CHECK(bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
     auto val = at::mkldnn_convolution(self, weight_fw_grad, bias_fw_grad, padding, stride, dilation, groups);
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  } else {
+    TORCH_CHECK(!bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
+  }
+
+  return out_fw_grad;
+}
+
+Tensor thnn_conv2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, IntArrayRef kernel_size, const Tensor& bias_fw_grad,
+        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding) {
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = std::get<0>(at::thnn_conv2d_forward(self_fw_grad, weight, kernel_size, Tensor(), stride, padding));
+  }
+
+  if (weight_fw_grad.defined()) {
+    TORCH_CHECK(bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
+    auto val = std::get<0>(at::thnn_conv2d_forward(self, weight_fw_grad, kernel_size, bias_fw_grad, stride, padding));
     if (out_fw_grad.defined()) {
       out_fw_grad = out_fw_grad + val;
     } else {
