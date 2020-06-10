@@ -44,7 +44,7 @@ class _RemoteModule(nn.Module):
         module_creator: Callable,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
-        global_unique_name: str = None,
+        name: str = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -82,7 +82,7 @@ class _RemoteModule(nn.Module):
                     >>>     return scripted_module
             args (Sequence, optional): args to be passed to ``module_creator``.
             kwargs (Dict, optional): kwargs to be passed to ``module_creator``.
-            global_unique_name (str, optional): The unique name of the created RemoteModule,
+            name (str, optional): The unique name of the created RemoteModule,
                 useful for profiling purpose. If not provided, a UUID4 will
                 be generated as its name.
             _module_interface_cls (type, optional): The TorchScript interface type for the module
@@ -134,9 +134,9 @@ class _RemoteModule(nn.Module):
         # For example, a RemoteModule represents a shard of a EmbeddingBag.
         # In the case of re-sharding after resuming from a checkpoint.
         # The shard can be referenced using this unique name.
-        self.global_unique_name = (  # Assign a global name for the module to be created.
-            global_unique_name
-            if global_unique_name is not None
+        self._name = (  # Assign a global name for the module to be created.
+            name
+            if name is not None
             else _gen_global_unique_name()
         )
 
@@ -171,6 +171,10 @@ class _RemoteModule(nn.Module):
             method_name = method.__name__
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
+
+    @torch.jit.export
+    def name(self):
+        return self._name
 
 
 class RemoteModule(_RemoteModule):
@@ -209,7 +213,7 @@ class RemoteModule(_RemoteModule):
                 >>>     return scripted_module
         args (Sequence, optional): args to be passed to ``module_creator``.
         kwargs (Dict, optional): kwargs to be passed to ``module_creator``.
-        global_unique_name (str, optional): The unique name of the created RemoteModule,
+        name (str, optional): The unique name of the created RemoteModule,
             useful for profiling purpose. If not provided, a UUID4 will
             be generated as its name.
 
@@ -251,8 +255,8 @@ class RemoteModule(_RemoteModule):
         module_creator: Callable,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
-        global_unique_name: str = None,
+        name: str = None,
     ):
         super().__init__(
-            on, module_creator, args, kwargs, global_unique_name=global_unique_name
+            on, module_creator, args, kwargs, name=name
         )

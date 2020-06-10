@@ -87,7 +87,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
     @staticmethod
     def _create_remote_module_iter(
-        dst_worker_name, modes=None, global_unique_name=None,
+        dst_worker_name, modes=None, name=None,
     ):
         if modes is None:
             modes = ModuleCreationMode.__members__.values()
@@ -101,7 +101,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
                 MyModule,
                 args,
                 kwargs,
-                global_unique_name=global_unique_name,
+                name=name,
             )
             yield remote_module
 
@@ -111,7 +111,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
                 create_scripted_module,
                 args,
                 kwargs,
-                global_unique_name=global_unique_name,
+                name=name,
                 _module_interface_cls=MyModuleInterface,
             )
             scripted_remote_module = torch.jit.script(remote_module)
@@ -230,14 +230,14 @@ class RemoteModuleTest(RpcAgentTestFixture):
             self.assertEqual(ret, tuple(reversed(args + ("3",))))
 
     @dist_utils.dist_init
-    def test_user_provided_global_unique_name(self):
+    def test_user_provided_name(self):
         if self.rank != 0:
             return
-        global_unique_name = f"_remote_module_{uuid.uuid4().hex}"
+        name = f"_remote_module_{uuid.uuid4().hex}"
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
         args = (torch.ones(1), 2, "3")
         for remote_module in self._create_remote_module_iter(
-            dst_worker_name, global_unique_name=global_unique_name
+            dst_worker_name, name=name
         ):
             ret_fut = remote_module.forward_async(*args)
             ret = ret_fut.wait()

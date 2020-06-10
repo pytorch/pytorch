@@ -36,7 +36,6 @@ def make_stub(func, name):
 
 def make_stub_from_method(nn_module, method_name):
     func = getattr(nn_module, method_name)
-
     if isinstance(func, ScriptMethodStub):
         return func
     # Make sure the name present in the resulting AST will match the name
