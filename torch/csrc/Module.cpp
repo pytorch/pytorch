@@ -50,7 +50,7 @@
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
-#include <torch/csrc/distributed/autograd/autograd.h>
+#include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
