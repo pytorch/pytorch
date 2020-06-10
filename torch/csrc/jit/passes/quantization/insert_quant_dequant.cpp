@@ -1016,7 +1016,8 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
         }
       }
     } else {
-      // For this category of ops, we need to
+      // For ops that are quantized by propagating dequantize ops,
+      // e.g. flatten we need to
       // 1. check if we need to propagate dequantize op
       // 2. remove the dequantize ops from inputs
       // 3. insert dequantize for all outputs
