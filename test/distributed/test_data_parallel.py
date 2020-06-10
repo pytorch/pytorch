@@ -715,15 +715,15 @@ class TestDataParallel(TestCase):
         device_ids = list(range(ndevs))
 
         with torch.backends.cudnn.flags(deterministic=True, benchmark=False):
-            # Includes case-specific debugging info to narrow down failing case.
             for formats, dtypes in product(layer_formats, layer_dtypes):
-                model_msg = "formats = {}, dtypes = {}".format(formats, dtypes)
+                model_msg = "formats = {} dtypes = {}".format(formats, dtypes)
                 try:
                     m = ConvNet(formats, dtypes).cuda(device="cuda:0")
                     m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
                     has_half = any(p.dtype is torch.half for p in m.parameters())
                     tol = 1.e-3 if has_half else 1.e-5
                 except:
+                    # Prints case-specific debugging info to narrow down failing case.
                     print("Caught exception during model creation for " + model_msg)
                     raise
                 # 2 iters:  First iter creates grads, second iter tries zeroed grads.
@@ -734,7 +734,7 @@ class TestDataParallel(TestCase):
                         F.mse_loss(m_dp(input).float(), target).backward()
                         for i, ((layer_name, m_child), m_dp_child) in enumerate(zip(m.named_children(),
                                                                                     m_dp.module.children())):
-                            named_msg = layer_name + ".weight" + " " + iter_msg
+                            named_msg = layer_name + ".weight " + iter_msg
                             self.assertTrue(m_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
                             self.assertTrue(m_dp_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
                             for j, ((param_name, p), p_dp) in enumerate(zip(m_child.named_parameters(),
@@ -742,8 +742,8 @@ class TestDataParallel(TestCase):
                                 named_msg = layer_name + "." + param_name + " " + iter_msg
                                 self.assertEqual(p.grad, p_dp.grad, msg=named_msg, rtol=tol, atol=tol)
                     except:
-                        # Makes sure we still get info if the error occurred somewhere other than the asserts.
-                        print("Caught exception exception during iterations at " + iter_msg)
+                        # Makes sure we still get info if an error occurred somewhere other than the asserts.
+                        print("Caught exception during iterations at " + iter_msg)
                         raise
 
 

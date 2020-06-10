@@ -2796,37 +2796,52 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         input = torch.randn(global_batch_size, 2, 8, 8).to(layer_devs[0])
         target = torch.randn(global_batch_size, 2, 4, 4).to(layer_devs[-1])
+        local_batch_start = self.rank * local_batch_size
+        local_batch_end = (self.rank + 1) * local_batch_size
 
-        for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
-            m = ConvNet(layer_devs, formats, dtypes)
-            m_ddp = DistributedDataParallel(copy.deepcopy(m),
-                                            device_ids=replica_devices,
-                                            process_group=process_group,
-                                            bucket_cap_mb=bucketsize)
-            has_half = any(p.dtype is torch.half for p in m.parameters())
-            tol = 1.e-3 if has_half else 1.e-5
-            # 3 iters:  First iter creates grads, second iter retests after rebucketing, third iter tries zeroed grads.
-            for it in range(3):
-                # Debugging info to show which case went wrong.
-                msg = "iter = {}, formats = {}, dtypes = {}, bucketsize = {}".format(it, formats, dtypes, bucketsize)
-                F.mse_loss(m(input).float(), target).backward()
-                F.mse_loss(m_ddp(input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]).float(),
-                           target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]).backward()
-                for i, ((layer_name, m_child), (_, m_ddp_child)) in enumerate(zip(m.named_children(),
-                                                                                  m_ddp.module.named_children())):
-                    named_msg = layer_name + ".weight" + " " + msg
-                    self.assertTrue(m_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
-                    self.assertTrue(m_ddp_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
-                    for j, ((param_name, p), (_, p_ddp)) in enumerate(zip(m_child.named_parameters(),
-                                                                          m_ddp_child.named_parameters())):
-                        named_msg = layer_name + "." + param_name + " " + msg
-                        self.assertEqual(p.grad, p_ddp.grad, msg=named_msg, rtol=tol, atol=tol)
-                        if it == 0:
-                            p.grad = None
-                            p_ddp.grad = None
-                        else:
-                            m.zero_grad()
-                            m_ddp.zero_grad()
+        with torch.backends.cudnn.flags(deterministic=True, benchmark=False):
+            for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
+                model_msg = "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(self.rank, formats,
+                                                                                         dtypes, bucketsize)
+                try:
+                    m = ConvNet(layer_devs, formats, dtypes)
+                    m_ddp = DistributedDataParallel(copy.deepcopy(m),
+                                                    device_ids=replica_devices,
+                                                    process_group=process_group,
+                                                    bucket_cap_mb=bucketsize)
+                    has_half = any(p.dtype is torch.half for p in m.parameters())
+                    tol = 1.e-3 if has_half else 1.e-5
+                except:
+                    # Prints case-specific debugging info to narrow down failing case.
+                    print("Caught exception during model creation for " + model_msg)
+                    raise
+                # 3 iters:  First iter creates grads, second iter retests after rebucketing,
+                # third iter tries zeroed grads.
+                for it in range(3):
+                    iter_msg = "iter = {} ".format(it) + model_msg
+                    try:
+                        F.mse_loss(m(input).float(), target).backward()
+                        F.mse_loss(m_ddp(input[local_batch_start: local_batch_end]).float(),
+                                   target[local_batch_start: local_batch_end]).backward()
+                        for i, ((layer_name, m_child), m_ddp_child) in enumerate(zip(m.named_children(),
+                                                                                     m_ddp.module.children())):
+                            named_msg = layer_name + ".weight" + " " + iter_msg
+                            self.assertTrue(m_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
+                            self.assertTrue(m_ddp_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
+                            for j, ((param_name, p), p_ddp) in enumerate(zip(m_child.named_parameters(),
+                                                                             m_ddp_child.parameters())):
+                                named_msg = layer_name + "." + param_name + " " + iter_msg
+                                self.assertEqual(p.grad, p_ddp.grad, msg=named_msg, rtol=tol, atol=tol)
+                                if it == 0:
+                                    p.grad = None
+                                    p_ddp.grad = None
+                                else:
+                                    m.zero_grad()
+                                    m_ddp.zero_grad()
+                    except:
+                        # Makes sure we still get info if an error occurred somewhere other than the asserts.
+                        print("Caught exception during iterations at " + iter_msg)
+                        raise
 
     @requires_nccl()
     @skip_if_not_multigpu
