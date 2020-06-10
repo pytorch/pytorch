@@ -852,6 +852,11 @@ be provided to the export API as argument 'f'. ::
     input = torch.randn(2, 3, 224, 224, requires_grad=True)
     torch.onnx.export(model, (input, ), './large_model.onnx', use_external_data_format=True)
 
+
+This argument enables export of large models to ONNX. Models larger than 2GB cannot be exported
+in one file because of the protobuf size limit. Users should set ``use_external_data_format`` to
+``True`` to successfully export such models.
+
 Training
 --------
 ``Training`` argument in export API allows users to export models in a training-friendly mode.
