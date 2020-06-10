@@ -85,7 +85,7 @@ Tensor quantized_hardswish(const Tensor& qx, double output_scale, int64_t output
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("hardswish", quantized_hardswish);
+  m.impl("hardswish", TORCH_FN(quantized_hardswish));
 }
 
 }}  // namespace at::native

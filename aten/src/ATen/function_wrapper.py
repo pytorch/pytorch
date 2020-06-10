@@ -95,11 +95,11 @@ m.def("${unqual_schema_string}");
 # TORCH_LIBRARY macro invocation
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       torch::CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}));
+       torch::CppFunction::makeUnboxedOnly(&TypeDefault::${type_wrapper_name}));
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}", TORCH_FN(TypeDefault::${type_wrapper_name}));
 """)
 
 # NB: In the ordinary, TypeDerived code generation work flow, specification
@@ -112,14 +112,14 @@ m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_nam
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       torch::CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name}))
+                       torch::CppFunction::makeUnboxedOnly(&${Type}::${type_wrapper_name}))
 );
 """)
 
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       &${Type}::${type_wrapper_name})
+                       TORCH_FN(${Type}::${type_wrapper_name}))
 );
 """)
 
