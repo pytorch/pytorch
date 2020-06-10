@@ -176,8 +176,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
 
     return jacobian, reentrant, correct_grad_sizes
 
-def get_analytical_jacobian_fw(fn, input):
-    output = fn(input)
+def get_analytical_jacobian_fw(fn, input, output):
     # it is easier to call to_dense() on the sparse output than
     # to modify analytical jacobian
     if output.is_sparse:
@@ -339,34 +338,41 @@ def gradcheck(
         def fn(input):
             return _as_tuple(func(*input))[i]
 
-        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
         numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
-        if not correct_grad_sizes:
-            return fail_test('Analytical gradient has incorrect size')
+        if mode in ["all", "backward"]:
+            analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
 
-        for j, (a, n) in enumerate(zip(analytical, numerical)):
-            if a.numel() != 0 or n.numel() != 0:
-                if not torch.allclose(a, n, rtol, atol):
-                    return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
-                                     'numerical:%s\nbackward analytical:%s\n' % (i, j, n, a))
+            if not correct_grad_sizes:
+                return fail_test('Analytical gradient has incorrect size')
 
-        if not reentrant:
-            return fail_test('Backward is not reentrant, i.e., running backward with same '
-                             'input and grad_output multiple times gives different values, '
-                             'although analytical gradient matches numerical gradient. '
-                             'The tolerance for nondeterminism was {}.'.format(nondet_tol))
+            for j, (a, n) in enumerate(zip(analytical, numerical)):
+                if a.numel() != 0 or n.numel() != 0:
+                    if not torch.allclose(a, n, rtol, atol):
+                        return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
+                                         'numerical:%s\nbackward analytical:%s\n' % (i, j, n, a))
+
+            if not reentrant:
+                return fail_test('Backward is not reentrant, i.e., running backward with same '
+                                 'input and grad_output multiple times gives different values, '
+                                 'although analytical gradient matches numerical gradient. '
+                                 'The tolerance for nondeterminism was {}.'.format(nondet_tol))
 
         if mode in ["all", "forward"]:
             try:
-                fw_analytical = get_analytical_jacobian_fw(fn, tupled_inputs)
+                fw_analytical = get_analytical_jacobian_fw(fn, tupled_inputs, o)
             except RuntimeError as e:
                 msg = str(e)
-                if not "Trying to use forward prop with" in msg:
-                    raise e
-                else:
+                if "Trying to use forward prop with" in msg:
                     warnings.warn("Failed to compute gradcheck using fw mode: {}".format(msg))
                     continue
+                elif "Cannot set as a forward grad a Tensor that already has a forward grad." in msg:
+                    warnings.warn("Failed to compute gradcheck using fw mode because the user provided "
+                                  "function also uses forward gradient")
+                    continue
+                else:
+                    raise e
+
 
             for j, (a, n) in enumerate(zip(fw_analytical, numerical)):
                 if a.numel() != 0 or n.numel() != 0:

@@ -400,7 +400,13 @@ if (FwGradMode::is_enabled() && (${if_stmt})) {
 """)
 
 FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
-TORCH_CHECK(!(FwGradMode::is_enabled() && (${cond})), "Trying to use forward prop with ${name} that does not support it.");
+TORCH_CHECK(!(FwGradMode::is_enabled() && (${cond})), "Trying to use forward prop with ${msg} that does not support it.");
+""")
+
+FW_DERIVATIVE_FORBID_LIST_TEMPLATE = CodeTemplate("""\
+for (auto& _t: ${arg}) {
+    TORCH_CHECK(!(FwGradMode::is_enabled() && (${cond})), "Trying to use forward prop with ${msg} that does not support it.");
+}
 """)
 
 FACTORY_FUNCTION_NAMES = None
@@ -1187,6 +1193,12 @@ def emit_body(declaration):
             res = derivative['out_arg']
 
             if_stmt = " or ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp['name']) for inp in differentiable_inputs if inp['name'] in derivative['required_inputs']])
+            if not if_stmt:
+                # Handle functions like stack
+                # For these, we don't unpack anything and always call the user function
+                assert len(differentiable_inputs) == 1
+                assert differentiable_inputs[0]['dynamic_type'] == 'TensorList'
+                if_stmt = "true"
             fw_grad_defined = ""
             for inp in differentiable_inputs:
                 if inp['name'] in derivative['required_inputs']:
@@ -1199,21 +1211,25 @@ def emit_body(declaration):
         return content
 
     def emit_forbid_fw_derivatives(is_inplace=False):
-        to_check = []
-        for inp in differentiable_inputs:
-            if inp["dynamic_type"] == "Tensor":
-                to_check.append(FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp["name"]))
-            # TODO support Tensorlist here
-
-        if len(to_check) > 0:
-            cond = " or ".join(to_check)
+        def get_msg():
             if is_inplace:
                 msg = name + " (because it is inplace)"
             else:
                 msg = name
-            return FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, name=msg)
-        else:
-            return ""
+            return msg
+        res = ""
+        to_check = []
+        for inp in differentiable_inputs:
+            if inp["dynamic_type"] == "Tensor":
+                to_check.append(FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp["name"]))
+            if inp["dynamic_type"] == "TensorList":
+                cond = FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp="_t")
+                res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(arg=inp["name"], cond=cond, msg=get_msg())
+
+        if len(to_check) > 0:
+            cond = " or ".join(to_check)
+            res += FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, msg=get_msg())
+        return res
 
 
     env = {}
@@ -1245,6 +1261,7 @@ def emit_body(declaration):
             body.extend(emit_fw_derivatives())
         elif not undifferentiable:
             body.append(emit_forbid_fw_derivatives())
+
     # post_record_trace must appear before save_outputs so that saved outputs
     # have their tracing state saved (that is setup by recordTrace)
     body.append(post_record_trace)

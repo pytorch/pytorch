@@ -351,6 +351,12 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
 
         grad_res = tuple(out.fw_grad for out in outputs)
+
+        # cleanup
+        for el_inp in inputs:
+            el_inp.fw_grad = None
+        for out in outputs:
+            out.fw_grad = None
     else:
 
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")

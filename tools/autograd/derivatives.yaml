@@ -1811,6 +1811,7 @@
 
 - name: stack(Tensor[] tensors, int dim=0) -> Tensor
   tensors: "grad.defined() ? unbind(grad, dim) : std::vector<Tensor>(tensors.size())"
+  result: stack_forward(tensors, dim)
 
 # fused RNN kernels
 
