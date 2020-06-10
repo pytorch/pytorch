@@ -494,6 +494,14 @@ Tensor& rand_out(Tensor& result, IntArrayRef size, c10::optional<Generator> gene
 Tensor rand_like(
     const Tensor& self,
     const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.uniform_(0, 1, c10::nullopt);
+}
+
+Tensor rand_like(
+    const Tensor& self,
+    const TensorOptions& options,
     c10::optional<Generator>& generator,
     c10::optional<c10::MemoryFormat>& optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -563,10 +571,29 @@ Tensor randint_like(
     const Tensor& self,
     int64_t high,
     const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.random_(0, high, c10::nullopt);
+}
+
+Tensor randint_like(
+    const Tensor& self,
+    int64_t high,
+    const TensorOptions& options,
     c10::optional<Generator>& generator,
     c10::optional<c10::MemoryFormat>& optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.random_(0, high, generator);
+}
+
+Tensor randint_like(
+    const Tensor& self,
+    int64_t low,
+    int64_t high,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.random_(low, high, c10::nullopt);
 }
 
 Tensor randint_like(
@@ -610,6 +637,14 @@ Tensor& normal_out(Tensor& result, double mean, double std,
                    IntArrayRef size, c10::optional<Generator> generator) {
   result.resize_(size);
   return result.normal_(mean, std, generator);
+}
+
+Tensor randn_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.normal_(0, 1, c10::nullopt);
 }
 
 Tensor randn_like(
