@@ -44,7 +44,7 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indice,
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
   auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
+  iter.check_all_same_dtype(false);
   iter.dont_resize_outputs();
   iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
   iter.add_output(result);
