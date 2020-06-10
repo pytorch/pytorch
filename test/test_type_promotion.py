@@ -707,12 +707,14 @@ class TestTypePromotion(TestCase):
         o = torch.empty(1, device=device, dtype=dtype)
 
         # Tests div (including /) deprecation
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
             c = a / b
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
             c = torch.div(a, b)
-        with self.maybeWarnsRegex(UserWarning, '^Integer division.+is deprecated.+'):
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
             torch.div(a, b, out=o)
+        with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported.+'):
+            a.div_(b)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
