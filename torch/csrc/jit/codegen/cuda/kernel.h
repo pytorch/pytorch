@@ -40,7 +40,7 @@ struct NaivePWKernelArgsReq : KernelArgsReq {
   std::vector<int> dims_;
 };
 
-class CudaKernel {
+struct CudaKernel {
  public:
   CudaKernel() {
     fusion_ = std::make_unique<Fusion>();

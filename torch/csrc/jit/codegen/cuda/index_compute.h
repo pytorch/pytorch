@@ -57,6 +57,7 @@ namespace fuser {
 
 struct IndexCompute : public BackwardVisitor {
  private:
+  using BackwardVisitor::handle;
   void handle(Split*) override;
   void handle(Merge*) override;
   void handle(Expr*) override;

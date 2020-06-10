@@ -114,7 +114,7 @@ int TensorView::getComputeAtRelPos(int pos) {
     return pos;
 
   size_t pos_cav = 0, pos_this = 0;
-  while (pos_this < pos) {
+  while ((int)pos_this < pos) {
     TORCH_INTERNAL_ASSERT(
         pos_cav < nDims(), "Error computing relative position in computeAt.");
     if (compute_at_view_->axis(pos_cav)->isBroadcast() &&

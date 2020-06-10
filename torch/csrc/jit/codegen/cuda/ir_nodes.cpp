@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -161,7 +160,7 @@ BroadcastOp::BroadcastOp(Val* _out, Val* _in)
         ndims++;
 
     TORCH_INTERNAL_ASSERT(
-        ndims == static_cast<TensorView*>(in_)->nDims(),
+        ndims == (int)static_cast<TensorView*>(in_)->nDims(),
         "Invalid broadcast op. Non-broadcasted dims don't match from input to output.");
   } else {
     TORCH_INTERNAL_ASSERT(
@@ -423,8 +422,8 @@ bool TensorDomain::sameAs(
   if (lhs.size() != rhs.size())
     return false;
   size_t i = 0;
-  for (auto null_ : lhs) {
-    if (!lhs[i]->sameAs(rhs[i]))
+  for (auto td_lhs : lhs) {
+    if (!td_lhs->sameAs(rhs[i++]))
       return false;
   }
   return true;

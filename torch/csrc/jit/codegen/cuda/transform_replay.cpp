@@ -194,7 +194,7 @@ TensorDomain* TransformReplay::replayPasC(
   // consumer ids we need to match in producer
   std::vector<IterDomain*> consumer_CA_ids;
   {
-    size_t itc = 0;
+    int itc = 0;
     while (itc < consumer_compute_at_axis) {
       if (consumer->axis(itc)->isBroadcast()) {
         itc++;
@@ -387,7 +387,7 @@ TensorDomain* TransformReplay::replayCasP(
   // producer ids we need to match in consumer
   std::vector<IterDomain*> producer_CA_ids;
   {
-    size_t itp = 0;
+    int itp = 0;
     while (itp < producer_compute_at_axis) {
       if (producer->axis(itp)->isReduction()) {
         itp++;

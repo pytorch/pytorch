@@ -116,36 +116,6 @@ Val* newValLike(Val* val, DataType dtype) {
   return newScalar(vtype, dtype);
 }
 
-Val* newConstScalar(DataType dtype, long int val) {
-  switch (dtype) {
-    case (DataType::Int):
-      return new Int(val);
-    default:
-      break;
-  }
-  TORCH_CHECK(
-      false,
-      "Could not generate a new Scalar with data type ",
-      dtype,
-      "and constant value: ",
-      val);
-}
-
-Val* newConstScalar(DataType dtype, double val) {
-  switch (dtype) {
-    case (DataType::Float):
-      return new Float(val);
-    default:
-      break;
-  }
-  TORCH_CHECK(
-      false,
-      "Could not generate a new Scalar with data type ",
-      dtype,
-      "and constant value: ",
-      val);
-}
-
 } // namespace
 
 TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1) {

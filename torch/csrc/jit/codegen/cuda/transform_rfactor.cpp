@@ -235,7 +235,6 @@ TensorDomain* TransformRFactor::runReplay(
   auto orig_td_root = orig_td->rootDomain();
 
   // Generate a new TensorDomain and set up map from one root to this one.
-  size_t rfactor_axes_found = 0;
   std::vector<IterDomain*> new_root(orig_td_root.size(), nullptr);
   std::unordered_map<IterDomain*, IterDomain*> replay_map;
 
