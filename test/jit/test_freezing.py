@@ -1014,4 +1014,4 @@ class TestFreezing(JitTestCase):
         m.eval()
         fm = torch._C._freeze_module(m._c, ["modify_a"])
         FileCheck().check('prim::GetAttr[name="a"]').run(fm.forward.graph)
-        FileCheck().check('prim::GetAttr[name="a"]').run(fm.modify_a.graph)
+        FileCheck().check('prim::GetAttr[name="b"]').run(fm.modify_a.graph)

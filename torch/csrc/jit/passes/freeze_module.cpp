@@ -17,7 +17,7 @@ class AttributePropagator {
   AttributePropagator(Module& module, std::vector<std::string>& preservedAttrs)
       : module_(module) {
     // Currently only top level attributes and functions can  be preserved
-    // explicitely.
+    // explicitly.
     auto checkName = [this](std::string& name) {
       if (module_.hasattr(name)) {
         insertMutableAttr(name, module_.attr(name), module_._ivalue());
@@ -514,8 +514,9 @@ class AttributePropagator {
         }
       }
       for (auto& fn : type->methods()) {
-        if (preservedMethods_.count(fn) && *type == *module_.type())
+        if (preservedMethods_.count(fn) && *type == *module_.type()) {
           continue;
+        }
         funcsToRemove.push_back(fn);
       }
 
