@@ -294,6 +294,8 @@ def get_testing_overrides():
         torch.fft: lambda input, signal_ndim, normalized=False: -1,
         torch.flatten: lambda input, start_dim=0, end_dim=-1: -1,
         torch.flip: lambda input, dims: -1,
+        torch.fliplr: lambda input: -1,
+        torch.flipud: lambda input: -1,
         torch.frobenius_norm: lambda input, dim=None, keepdim=False, out=None: -1,
         torch.floor: lambda input, out=None: -1,
         torch.floor_divide: lambda input, other: -1,

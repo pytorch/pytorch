@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
+#include <regex>
 #include <stack>
 
 namespace torch {
@@ -33,6 +34,7 @@ using QConfigTypePtrMap =
 using NameModuleVector = std::vector<std::pair<std::string, Module>>;
 using OptionalModuleVector = std::vector<c10::optional<Module>>;
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
+using graph_rewrite_helper::MatchFilter;
 using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithAtenConv;
 
@@ -408,85 +410,156 @@ class InsertObserversHelper {
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
-  const PatternInfo nn_conv1d_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %input, %inplace):
-    %relu = prim::Constant[name="relu"]()
-    %first_module = match::module[name="Conv1d"](%self)
-    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+  const PatternInfo nn_conv1d_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %relu, %inplace):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )");
-  const PatternInfo nn_conv1d_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %input):
-    %first_module = match::module[name="Conv1d"](%self)
-    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_module = match::module[name="ReLU"](%self)
-    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-    return (%second_output) )");
-  const PatternInfo nn_conv2d_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %input, %inplace):
-    %relu = prim::Constant[name="relu"]()
-    %first_module = match::module[name="Conv2d"](%self)
-    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )");
-  const PatternInfo nn_conv2d_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %input):
-    %first_module = match::module[name="Conv2d"](%self)
-    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_module = match::module[name="ReLU"](%self)
-    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-    return (%second_output) )");
-  const PatternInfo nn_conv3d_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %input, %inplace):
-    %relu = prim::Constant[name="relu"]()
-    %first_module = match::module[name="Conv3d"](%self)
-    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )");
-  const PatternInfo nn_conv3d_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %input):
-    %first_module = match::module[name="Conv3d"](%self)
-    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_module = match::module[name="ReLU"](%self)
-    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-    return (%second_output) )");
-  const PatternInfo matmul_add = PatternInfo::parse_from_str(R"(
-graph(%input, %weight, %bias, %4):
-     %weight_t = aten::t(%weight)
-     %first_output = aten::matmul(%input, %weight_t)
-     %second_output = aten::add_(%first_output, %bias, %4)
-     return (%second_output) )");
+    return (%second_output) )",
+      {is_conv1d_module, is_functional_relu});
 
-  const PatternInfo add_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b):
-     %one = prim::Constant[value=1]()
-     %first_output = aten::add(%a, %b, %one)
-     %second_module = match::module[name="ReLU"](%self)
-     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-     return (%second_output) )");
+  const PatternInfo nn_conv1d_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %relu):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_conv1d_module, is_relu_module});
 
-  const PatternInfo add_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b, %inplace):
-     %one = prim::Constant[value=1]()
-     %first_output = aten::add(%a, %b, %one)
-     %relu = prim::Constant[name="relu"]()
+  const PatternInfo nn_conv1d_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )",
+      {is_conv1d_module});
+
+  const PatternInfo nn_conv1d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )",
+      {is_conv1d_module});
+
+  const PatternInfo nn_conv2d_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %relu, %inplace):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )",
+      {is_conv2d_module, is_functional_relu});
+
+  const PatternInfo nn_conv2d_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %relu):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_conv2d_module, is_relu_module});
+
+  const PatternInfo nn_conv2d_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )",
+      {is_conv2d_module});
+
+  const PatternInfo nn_conv2d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )",
+      {is_conv2d_module});
+
+  const PatternInfo nn_conv3d_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %relu, %inplace):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )",
+      {is_conv3d_module, is_functional_relu});
+
+  const PatternInfo nn_conv3d_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %relu):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_conv3d_module, is_relu_module});
+
+  const PatternInfo nn_conv3d_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %conv, %input):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )",
+      {is_conv3d_module});
+
+  const PatternInfo nn_conv3d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv):
+    %first_output = prim::CallMethod[name="forward"](%conv, %input)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )",
+      {is_conv3d_module});
+
+  const PatternInfo add_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %a, %b, %alpha, %relu):
+     %first_output = aten::add(%a, %b, %alpha)
+     %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+     return (%second_output) )",
+      {aten_add_alpha_is_one, is_relu_module});
+
+  const PatternInfo add_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %a, %b, %alpha, %relu, %inplace):
+     %first_output = aten::add(%a, %b, %alpha)
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-     return (%second_output) )");
+     return (%second_output) )",
+      {aten_add_alpha_is_one, is_functional_relu});
 
-  const PatternInfo inplace_add_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b):
-     %one = prim::Constant[value=1]()
-     %first_output = aten::add_(%a, %b, %one)
-     %second_module = match::module[name="ReLU"](%self)
-     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-     return (%second_output) )");
+  const PatternInfo inplace_add_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %a, %b, %alpha, %relu):
+     %first_output = aten::add_(%a, %b, %alpha)
+     %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+     return (%second_output) )",
+      {aten_add_alpha_is_one, is_relu_module});
 
-  const PatternInfo inplace_add_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b, %inplace):
-     %one = prim::Constant[value=1]()
-     %first_output = aten::add_(%a, %b, %one)
-     %relu = prim::Constant[name="relu"]()
+  const PatternInfo inplace_add_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %a, %b, %alpha, %relu, %inplace):
+     %first_output = aten::add_(%a, %b, %alpha)
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )",
+      {aten_add_alpha_is_one, is_functional_relu});
+
+  const PatternInfo add_aten_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %alpha):
+     %first_output = aten::add(%a, %b, %alpha)
+     %second_output = aten::relu(%first_output)
+     return (%second_output) )");
+
+  const PatternInfo add_aten_relu_ = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %alpha):
+     %first_output = aten::add(%a, %b, %alpha)
+     %second_output = aten::relu_(%first_output)
+     return (%second_output) )");
+
+  const PatternInfo inplace_add_aten_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %alpha):
+     %first_output = aten::add_(%a, %b, %alpha)
+     %second_output = aten::relu(%first_output)
+     return (%second_output) )");
+
+  const PatternInfo inplace_add_aten_relu_ = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %alpha):
+     %first_output = aten::add_(%a, %b, %alpha)
+     %second_output = aten::relu_(%first_output)
      return (%second_output) )");
 
   const PatternInfo nn_bn_nn_relu = PatternInfo::parse_from_str(R"(
@@ -536,23 +609,19 @@ graph(%self, %a, %b, %inplace):
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
-          nn_conv1d_f_relu,
-          nn_conv1d_nn_relu,
-          nn_conv2d_f_relu,
-          nn_conv2d_nn_relu,
-          nn_conv3d_f_relu,
-          nn_conv3d_nn_relu,
-          matmul_add,
-          add_nn_relu,
-          add_f_relu,
-          inplace_add_nn_relu,
-          inplace_add_f_relu,
-          nn_bn_nn_relu,
-          nn_bn_f_relu,
-          mul_nn_relu,
-          mul_f_relu,
-          inplace_mul_nn_relu,
-          inplace_mul_f_relu,
+          nn_conv1d_f_relu,      nn_conv1d_nn_relu,
+          nn_conv1d_aten_relu,   nn_conv1d_aten_relu_,
+          nn_conv2d_f_relu,      nn_conv2d_nn_relu,
+          nn_conv2d_aten_relu,   nn_conv2d_aten_relu_,
+          nn_conv3d_f_relu,      nn_conv3d_nn_relu,
+          nn_conv3d_aten_relu,   nn_conv3d_aten_relu_,
+          add_nn_relu,           add_f_relu,
+          inplace_add_nn_relu,   inplace_add_f_relu,
+          add_aten_relu,         add_aten_relu_,
+          inplace_add_aten_relu, inplace_add_aten_relu_,
+          nn_bn_nn_relu,         nn_bn_f_relu,
+          mul_nn_relu,           mul_f_relu,
+          inplace_mul_nn_relu,   inplace_mul_f_relu,
   };
 };
 
@@ -639,6 +708,12 @@ void InsertObserversHelper::delayObservingValuesInPattern(
 
   const auto& matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
+    if (!std::all_of(
+            pattern.filters.begin(),
+            pattern.filters.end(),
+            [&](const MatchFilter& f) { return f(match, vmap); })) {
+      continue;
+    }
     auto first_output = match.values_map.at(vmap.at("first_output"));
     auto second_output = match.values_map.at(vmap.at("second_output"));
     GRAPH_DEBUG(
@@ -916,7 +991,14 @@ InsertObserversHelper::insertObserversFor(
     }
 
     for (auto* v : block->outputs()) {
-      block_output_observers.push_back(getObserverFor(v));
+      // we need explictly skip the values that are already observed
+      // this might happen in subblocks for `if` since
+      // these subblock has access to all values before the `if` node
+      if (!isObserved(v, block_observed_values)) {
+        block_output_observers.emplace_back(getObserverFor(v));
+      } else {
+        block_output_observers.emplace_back(c10::nullopt);
+      }
     }
   }
 
@@ -1019,8 +1101,8 @@ InsertObserversHelper::insertObserversFor(
           }
         }
       } else if (n->kind() == prim::If) {
-        std::vector<size_t> aggregated_observed_outputs;
-        std::vector<c10::optional<script::Module>> aggregated_output_observers;
+        // a vector recoding whether each output is observed or not
+        std::vector<bool> aggregated_output_observe_state;
         for (Block* subblock : n->blocks()) {
           if (alwaysRaisesException(subblock)) {
             continue;
@@ -1029,60 +1111,59 @@ InsertObserversHelper::insertObserversFor(
           // so subblock_observed_values == block_observed_values
           auto info_from_subblock =
               insertObserversFor(subblock, module, block_observed_values);
+          // subblock for prim::If doesn't have inputs
           auto output_observers = std::get<1>(info_from_subblock);
           auto subblock_observed_outputs = std::get<2>(info_from_subblock);
-          // subblock for prim::If doesn't have inputs
-          if (aggregated_observed_outputs.size() > 0) {
-            TORCH_CHECK(
-                aggregated_observed_outputs == subblock_observed_outputs,
-                "quantization doesn't work for the case where branches "
-                "of `if` doesn't both return quantized/non-quantized "
-                "values");
-          } else {
-            for (auto idx : subblock_observed_outputs) {
-              block_observed_values.insert(n->output(idx));
-            }
-            aggregated_observed_outputs = subblock_observed_outputs;
-          }
-          if (aggregated_output_observers.size() > 0) {
-            TORCH_CHECK(
-                aggregated_output_observers == output_observers,
-                "quantization doesn't work for the case where branches "
-                "of `if` doesn't both return values quantized the same "
-                "way");
-          } else {
-            for (auto i = 0; i < n->outputs().size(); ++i) {
-              if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
-                  !block_observed_values.count(n->output(i)) &&
-                  !observed_values_.count(n->output(i))) {
-                recordObserved(
-                    n->output(i),
-                    *output_observers[i],
-                    values_to_observe,
-                    block_observed_values);
-              }
-            }
-            aggregated_output_observers = output_observers;
-          }
-        }
-      } else {
-        for (Value* v : n->outputs()) {
-          propagateObservedProperty(v, block_observed_values);
-          if (!inputs_outputs.count(v) &&
-              !isObserved(v, block_observed_values)) {
-            auto observer_opt = getObserverFor(v);
-            // If the node is one of the propagate quant node, e.g.
-            // aten::cat, we should observe its output only
-            // if the input of the node is observed
-            if (observer_opt &&
-                shouldPropagateQuant(n, block_observed_values)) {
+
+          // We'll insert output observer for each subblock, and in the end
+          // we will check if output of subblocks are quantized consistently
+          for (size_t i = 0; i < subblock->outputs().size(); ++i) {
+            Value* output = subblock->outputs()[i];
+            if (output_observers[i] && !inputs_outputs.count(output) &&
+                !isObserved(output, block_observed_values)) {
               recordObserved(
-                  v, *observer_opt, values_to_observe, block_observed_values);
+                  output,
+                  *output_observers[i],
+                  values_to_observe,
+                  block_observed_values);
             }
           }
+          for (auto idx : subblock_observed_outputs) {
+            block_observed_values.insert(subblock->outputs()[idx]);
+          }
+          std::vector<bool> subblock_output_observe_state;
+          for (size_t i = 0; i < subblock->outputs().size(); ++i) {
+            Value* output = subblock->outputs()[i];
+            subblock_output_observe_state.push_back(
+                isObserved(output, block_observed_values));
+          }
+          if (aggregated_output_observe_state.size() > 0) {
+            TORCH_CHECK(
+                aggregated_output_observe_state == subblock_output_observe_state,
+                "branches for `if` should return values that are observed "
+                "consistently");
+          } else {
+            aggregated_output_observe_state = subblock_output_observe_state;
+          }
         }
-        for (Block* subblock : n->blocks()) {
-          blocks_to_visit.push(subblock);
+        // mark the output of if as observed
+        for (size_t i = 0; i < n->outputs().size(); ++i) {
+          if (aggregated_output_observe_state[i]) {
+            block_observed_values.insert(n->output(i));
+          }
+        }
+      }
+      for (Value* v : n->outputs()) {
+        propagateObservedProperty(v, block_observed_values);
+        if (!inputs_outputs.count(v) && !isObserved(v, block_observed_values)) {
+          auto observer_opt = getObserverFor(v);
+          // If the node is one of the propagate quant node, e.g.
+          // aten::cat, we should observe its output only
+          // if the input of the node is observed
+          if (observer_opt && shouldPropagateQuant(n, block_observed_values)) {
+            recordObserved(
+                v, *observer_opt, values_to_observe, block_observed_values);
+          }
         }
       }
     }
