@@ -1104,12 +1104,16 @@ void copy_image_to_buffer(
 
 class VulkanTensor::Impl {
  public:
-  Impl(std::vector<int64_t> sizes) : sizes_(std::move(sizes)) {
+  Impl(std::vector<int64_t> sizes)
+      : sizes_(std::move(sizes)),
+        strides_(std::vector<int64_t>(sizes_.size())),
+        numel_(std::accumulate(
+            std::begin(sizes_),
+            std::end(sizes_),
+            1,
+            std::multiplies<int64_t>())) {
     TORCH_CHECK(
         initVulkanContextOnce(), "Vulkan Failed to create Vulkan Context");
-    numel_ = std::accumulate(
-        std::begin(sizes_), std::end(sizes_), 1, std::multiplies<int64_t>());
-    strides_ = std::vector<int64_t>(sizes_.size());
   }
 
   std::vector<int64_t> sizes() const {
