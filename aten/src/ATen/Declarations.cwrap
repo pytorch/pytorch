@@ -303,6 +303,8 @@
   return: accreal
   arguments:
     - THTensor* self
+  backends:
+    - CPU
 ]]
 [[
   name: _th_fmod
@@ -368,20 +370,6 @@
     - THTensor* self
     - THTensor* other
     - arg: int64_t dim
-]]
-[[
-  name: _th_diag
-  cname: diag
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - long diagonal
-  backends:
-    - CUDA
 ]]
 [[
   name: _th_addmm

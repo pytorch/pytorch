@@ -49,7 +49,7 @@ RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
 # Install rocm
-ARG ROCM
+ARG ROCM_VERSION
 ADD ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
