@@ -2643,72 +2643,66 @@ t2.start()
         else:
             return op_with_args[0], op_with_args[1], op_with_args[2]
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
         with torch.backends.cudnn.flags(deterministic=True):
-            for op, args in self.autocast_lists.torch_fp16:
-                self._run_autocast_outofplace(op, args, torch.float16)
+            for op_with_args in self.autocast_lists.torch_fp16:
+                skip_test = False
+                op, args = op_with_args[0], op_with_args[1]
+                if len(op_with_args) == 3:
+                    skip_test = op_with_args[2]  # TEST_WITH_ROCM
+                if not skip_test:
+                    self._run_autocast_outofplace(op, args, torch.float16)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp32(self):
         for op_with_args in self.autocast_lists.torch_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_need_autocast_promote(self):
         for op, args in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args, torch.float32)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_expect_builtin_promote(self):
         for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
             self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp16(self):
         with torch.backends.cudnn.flags(deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp32(self):
         for op, args in self.autocast_lists.nn_fp32:
             self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp16(self):
         with torch.backends.cudnn.flags(deterministic=True):
             for op, args in self.autocast_lists.methods_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=None)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp32(self):
         for op, args in self.autocast_lists.methods_fp32:
             self._run_autocast_outofplace(op, args, torch.float32, module=None)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_expect_builtin_promote(self):
         for op, args, out_type in self.autocast_lists.methods_expect_builtin_promote:
             self._run_autocast_outofplace(op, args, torch.float32, module=None, out_type=out_type)
 
-    @skipIfRocm
     def test_autocast_banned(self):
         with torch.cuda.amp.autocast():
             for op, args, module in self.autocast_lists.banned:
                 with self.assertRaises(RuntimeError):
                     getattr(module, op)(*args)
 
-    @skipIfRocm
     def test_autocast_ignored_types(self):
         with torch.cuda.amp.autocast():
             for ignore_type in (torch.double, torch.int32):
@@ -2742,7 +2736,6 @@ t2.start()
                         type_no_autocast = torch.norm(a_ignore).dtype
                     self.assertTrue(torch.norm(a_ignore).dtype is type_no_autocast)
 
-    @skipIfRocm
     def test_autocast_custom_enabled(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
@@ -2772,7 +2765,6 @@ t2.start()
             loss = output.sum()
         loss.backward()
 
-    @skipIfRocm
     def test_autocast_custom_disabled(self):
         class MyMM(torch.autograd.Function):
             @staticmethod

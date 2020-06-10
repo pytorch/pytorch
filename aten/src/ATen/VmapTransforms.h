@@ -56,11 +56,11 @@ struct TORCH_API MultiBatchVmapTransform {
 // PhysicalView stores a physical tensor with all of its batch dimensions at
 // the front and some levels that correspond to said batch dimensions.
 //
-// The levels contain the information necessary to perform the logical<->physical
-// mapping. For example, given:
-//   physical_view = PhysicalView(tensor=ones(2, 3, 4, 5), levels={1, 3}),
-// the levels tell us that dim 0 corresponds to the vmap at level 1,
-// and dim 1 corresponds to the vmap at level 3.
+// The levels bitset specifies which vmap levels correspond to the batch
+// dimensions at the front of the tensor. In particular, the number of set bits
+// corresponds to the number of batch dimensions on `tensor` and the rightmost
+// bit of `levels` specifies the minimum number of nested vmaps we are in at
+// this point in time.
 struct TORCH_API PhysicalView {
   PhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
       : levels_(levels), tensor_(tensor) {

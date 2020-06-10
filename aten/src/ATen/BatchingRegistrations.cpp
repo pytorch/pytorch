@@ -24,6 +24,8 @@ namespace at {
 // The signature of a batching rule should look like exactly like the C++ signature
 // of its operator.
 //
+// First, see NOTE: [Logical vs physical args] in VmapTransforms.h for terminology.
+//
 // At a high level, what a batching rule does is the following:
 // 1. Converts (logical) BatchedTensors to views on physical tensors.
 // 2. Converts logical arguments (e.g. dimension indexes, shapes) to physical
@@ -33,7 +35,7 @@ namespace at {
 // 4. Converts physical results back to BatchedTensors.
 //
 // Steps 1, 2, and 4 differ for operators with different batching behaviors. When
-// writing a new batching rule, please select an VmapTransform that matches the
+// writing a new batching rule, please select a VmapTransform that matches the
 // batching behavior of your operation. The VmapTransform provides helper functions
 // to do steps (1), (2), and (4).
 // (see NOTE: [What is an VmapTransform?] in VmapTransforms.h)
