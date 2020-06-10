@@ -9,6 +9,26 @@
 #include <cstddef>
 #include <vector>
 
+
+typedef struct ncclComm* ncclComm_t;
+
+#define TORCH_CUDA_NCCL_UNIQUE_ID_BYTES 128
+typedef struct {
+  char internal[TORCH_CUDA_NCCL_UNIQUE_ID_BYTES];
+} ncclUniqueId;
+
+
+
+namespace torch {
+namespace cuda {
+namespace nccl {
+
+// NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
+// Don't use them outside of these files.
+namespace detail {
+/*
+The below enums are from https://github.com/NVIDIA/nccl/blob/master/src/nccl.h.in 
+however they're declare anyonomously there, so we can't forward declare them here.*/
 /* Error type */
 typedef enum {
   ncclSuccess = 0,
@@ -18,16 +38,7 @@ typedef enum {
   ncclInvalidArgument = 4,
   ncclInvalidUsage = 5,
   ncclNumResults = 6
-} ncclResult_t;
-
-/* Reduction operation selector */
-typedef enum {
-  ncclSum = 0,
-  ncclProd = 1,
-  ncclMax = 2,
-  ncclMin = 3,
-  ncclNumOps = 4
-} ncclRedOp_t;
+} torchNcclResult_t;
 
 /* Data types */
 typedef enum {
@@ -46,27 +57,11 @@ typedef enum {
   ncclFloat64 = 8,
   ncclDouble = 8,
   ncclNumTypes = 9
-} ncclDataType_t;
-typedef struct ncclComm* ncclComm_t;
+} torchNcclDataType_t;
 
-#define TORCH_CUDA_NCCL_UNIQUE_ID_BYTES 128
-typedef struct {
-  char internal[TORCH_CUDA_NCCL_UNIQUE_ID_BYTES];
-} ncclUniqueId;
+TORCH_CUDA_API void throw_nccl_error(torchNcclResult_t status);
 
-
-
-namespace torch {
-namespace cuda {
-namespace nccl {
-
-// NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
-// Don't use them outside of these files.
-namespace detail {
-
-TORCH_CUDA_API void throw_nccl_error(ncclResult_t status);
-
-static void NCCL_CHECK(ncclResult_t status);
+static void NCCL_CHECK(torchNcclResult_t status);
 
 struct AutoNcclGroup {
   AutoNcclGroup() {
@@ -89,7 +84,7 @@ TORCH_CUDA_API void check_inputs(
     at::TensorList outputs,
     int input_multiplier,
     int output_multiplier);
-TORCH_CUDA_API ncclDataType_t get_data_type(const at::Tensor& t);
+TORCH_CUDA_API torchNcclDataType_t get_data_type(const at::Tensor& t);
 
 } // namespace detail
 

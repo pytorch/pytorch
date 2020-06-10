@@ -24,13 +24,13 @@ using namespace at;
 
 namespace detail {
 
-void throw_nccl_error(ncclResult_t status) {
+void throw_nccl_error(torchNcclResult_t status) {
   std::ostringstream err;
   err << "NCCL Error " << status << ": " << ncclGetErrorString(status);
   throw std::runtime_error(err.str());
 }
 
- void NCCL_CHECK(ncclResult_t status) {
+ void NCCL_CHECK(torchNcclResult_t status) {
   if (status != ncclSuccess) {
     throw_nccl_error(status);
   }
@@ -79,7 +79,7 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-ncclDataType_t get_data_type(const Tensor& t) {
+torchNcclDataType_t get_data_type(const Tensor& t) {
   if (t.type().backend() != Backend::CUDA) {
     throw std::runtime_error("Unconvertible NCCL type");
   }
