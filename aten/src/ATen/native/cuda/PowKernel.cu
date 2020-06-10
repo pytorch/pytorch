@@ -99,7 +99,7 @@ static inline __host__ __device__ B complex_pow_(B base, E exp) {
 
 void pow_tensor_tensor_kernel(TensorIterator& iter) {
   if (isComplexType(iter.dtype())) {
-    _AT_DISPATCH_C10_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return complex_pow_(base, exp);
       });
