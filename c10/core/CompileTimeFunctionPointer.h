@@ -26,4 +26,5 @@ struct is_compile_time_function_pointer<CompileTimeFunctionPointer<FuncType, fun
 
 }
 
-#define TORCH_FN(func) ::c10::CompileTimeFunctionPointer<decltype(func), &func>()
+#define TORCH_FN_TYPE(func) ::c10::CompileTimeFunctionPointer<decltype(func), &func>
+#define TORCH_FN(func) TORCH_FN_TYPE(func)()

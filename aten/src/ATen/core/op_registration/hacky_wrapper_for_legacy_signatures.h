@@ -56,39 +56,30 @@ struct scatter_tensor_options final {};
 
 template<class UnderlyingFuncPtr>
 struct scatter_tensor_options<UnderlyingFuncPtr, std::enable_if_t<!has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
-private:
-    static constexpr auto* func_ptr() {
-        // FuncType does not have TensorOptions arguments.
-        // Don't wrap anything but just return the base pointer.
-        return UnderlyingFuncPtr::func_ptr();
-    }
-public:
-    using FuncPtr = CompileTimeFunctionPointer<std::remove_pointer_t<decltype(func_ptr())>, func_ptr()>;
+    // FuncType does not have TensorOptions arguments.
+    // Don't wrap anything but just return the base pointer.
+    using FuncPtr = UnderlyingFuncPtr;
 };
 
 template<class UnderlyingFuncPtr>
 struct scatter_tensor_options<UnderlyingFuncPtr, std::enable_if_t<has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
 private:
-    static constexpr auto* func_ptr() {
-        // FuncType has TensorOptions arguments.
-        // Return a function pointer to a wrapper function that replaces those with expanded arguments.
-        using gathered_parameter_types = typename guts::infer_function_traits_t<typename UnderlyingFuncPtr::FuncType>::parameter_types;
-        constexpr size_t tensoroptions_arg_index =
-            guts::typelist::find_if<
-                gathered_parameter_types,
-                is_tensoroptions_arg_t
-            >::value;
+    // FuncType has TensorOptions arguments.
+    // Return a function pointer to a wrapper function that replaces those with expanded arguments.
+    using gathered_parameter_types = typename guts::infer_function_traits_t<typename UnderlyingFuncPtr::FuncType>::parameter_types;
+    static constexpr size_t tensoroptions_arg_index =
+        guts::typelist::find_if<
+            gathered_parameter_types,
+            is_tensoroptions_arg_t
+        >::value;
 
-        using parameters_before_tensoroptions =
-            guts::typelist::take_t<gathered_parameter_types, tensoroptions_arg_index>;
-        using parameters_after_tensoroptions =
-            guts::typelist::drop_t<gathered_parameter_types, tensoroptions_arg_index + 1>;
+    using parameters_before_tensoroptions =
+        guts::typelist::take_t<gathered_parameter_types, tensoroptions_arg_index>;
+    using parameters_after_tensoroptions =
+        guts::typelist::drop_t<gathered_parameter_types, tensoroptions_arg_index + 1>;
 
-        constexpr auto result = &scatter_tensor_options_<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>::wrapper;
-        return result;
-    }
 public:
-    using FuncPtr = CompileTimeFunctionPointer<std::remove_pointer_t<decltype(func_ptr())>, func_ptr()>;
+    using FuncPtr = TORCH_FN_TYPE(scatter_tensor_options_<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>::wrapper));
 };
 
 template<class FuncPtr, class... ParametersBeforeTensorOptions, class... ParametersAfterTensorOptions>
