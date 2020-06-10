@@ -818,7 +818,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_test(DynamicSliceExportMod(), x,
                       dynamic_axes={'input_1': [0, 1, 2],
-                      'output_1': [0, 1, 2]})
+                                    'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_dynamic(self):
@@ -1669,6 +1669,62 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Multinomial(), (weight,))
         self.run_test(MultinomialNoReplacement(), (weight,))
 
+    def _test_reduced_ops(self, op):
+        class ReducedOpModule(torch.nn.Module):
+            def forward(self, input):
+                return op(input, dim=-1)
+
+        if op != torch.mean:  # torch.mean only supports float types
+            x = torch.randint(10, (4, 4), dtype=torch.uint8)
+            self.run_test(ReducedOpModule(), x)
+
+            x = torch.randint(10, (4, 4), dtype=torch.int8)
+            self.run_test(ReducedOpModule(), x)
+
+            x = torch.randint(10, (4, 4), dtype=torch.int16)
+            self.run_test(ReducedOpModule(), x)
+
+            x = torch.randint(10, (4, 4), dtype=torch.int32)
+            self.run_test(ReducedOpModule(), x)
+
+            x = torch.randint(10, (4, 4), dtype=torch.int64)
+            self.run_test(ReducedOpModule(), x)
+
+        # torch.mean only supports float types
+        # ORT does not support double ReduceProd for double
+        if op != torch.prod and op != torch.mean:
+            x = torch.randn(4, 5, dtype=torch.double)
+            self.run_test(ReducedOpModule(), x)
+
+        if op != torch.prod:  # torch.prod not implemented for Half
+            x = torch.randn(4, 4, dtype=torch.half)
+            self.run_test(ReducedOpModule(), x)
+
+        x = torch.randn(4, 5, dtype=torch.float)
+        self.run_test(ReducedOpModule(), x)
+
+    def test_reduced_sum(self):
+        return self._test_reduced_ops(op=torch.sum)
+
+    def test_reduced_mean(self):
+        return self._test_reduced_ops(op=torch.mean)
+
+    def test_reduced_prod(self):
+        return self._test_reduced_ops(op=torch.prod)
+
+    def test_reduced_min_max(self):
+        class ReducedMinMaxModule(torch.nn.Module):
+            def forward(self, input):
+                return torch.min(input, dim=-1)[0], torch.max(input, dim=0)[0]
+        x = torch.randint(10, (4, 4), dtype=torch.int32)
+        self.run_test(ReducedMinMaxModule(), x)
+
+        x = torch.randint(10, (4, 4), dtype=torch.int64)
+        self.run_test(ReducedMinMaxModule(), x)
+
+        x = torch.randn(4, 5, dtype=torch.float)
+        self.run_test(ReducedMinMaxModule(), x)
+
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
             def forward(self, input):
@@ -1808,6 +1864,97 @@ class TestONNXRuntime(unittest.TestCase):
         batch_size2 = 4
         model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_test(model2, input2, do_constant_folding=True)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm_no_bias(self):
+        class LstmNet(torch.nn.Module):
+            def __init__(self, num_layers, bidirectional):
+                super(LstmNet, self).__init__()
+                self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers, bias=False, bidirectional=bidirectional)
+
+            def forward(self, input, initial_state):
+                return self.lstm(input, initial_state)
+
+        def get_LstmNet_model_and_inputs(num_layers, bidirectional):
+            input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+            num_directions = 2 if bidirectional else 1
+            model = LstmNet(num_layers, bidirectional)
+            h0 = torch.randn(num_layers * num_directions, BATCH_SIZE, RNN_HIDDEN_SIZE)
+            c0 = torch.randn(num_layers * num_directions, BATCH_SIZE, RNN_HIDDEN_SIZE)
+            return model, (input, (h0, c0))
+
+        num_layers = [1, 1, 2, 3]
+        bidirectional = [True, False, True, False]
+        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)] 
+        for model, input in models_and_inputs:
+            self.run_test(model, input)
+
+    def test_rnn_no_bias(self):
+        def make_model(layers, packed_sequence):
+            batch_first = True if packed_sequence == 2 else False
+            model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, bidirectional=False,
+                                 batch_first=batch_first, bias=False)
+
+            if packed_sequence == 1:
+                model = RnnModelWithPackedSequence(model, False)
+            if packed_sequence == 2:
+                model = RnnModelWithPackedSequence(model, True)
+            return model
+
+        def make_input(batch_size, layers, packed_sequence):
+            batch_first = True if packed_sequence == 2 else False
+            seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
+            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
+            inputs = [inputs]
+
+            h0 = torch.randn(layers, batch_size, RNN_HIDDEN_SIZE)
+            inputs.append(h0)
+            if packed_sequence != 0:
+                inputs.append(torch.IntTensor(seq_lengths))
+            if len(inputs) == 1:
+                input = inputs[0]
+            else:
+                input = tuple(inputs)
+            return input
+
+        layers = [1, 3, 1, 3, 1, 3]
+        packed_sequence = [0, 0, 1, 1, 2, 2]
+        models = [make_model(l, p) for l, p in zip(layers, packed_sequence)]
+        inputs = [make_input(RNN_BATCH_SIZE, l, p) for l, p in zip(layers, packed_sequence)]
+
+        for model, input in zip(models, inputs):
+            self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
+
+    def test_gru_no_bias(self):
+        class GruNet(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, bidirectional):
+                super(GruNet, self).__init__()
+                self.mygru = torch.nn.GRU(input_size, hidden_size, num_layers, bidirectional=bidirectional, bias=False)
+
+            def forward(self, input, initial_state):
+                out = self.mygru(input, initial_state)
+                return out
+
+        def get_GruNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
+                                        seq_len, bidirectional):
+            num_directions = 2 if bidirectional else 1
+            model = GruNet(input_size, hidden_size, num_layers, bidirectional)
+            input = torch.randn(seq_len, batch_size, input_size)
+            h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            return model, (input, h0)
+
+        input_size = [7, 5]
+        hidden_size = [3, 4]
+        num_layers = [2, 3]
+        batch_size = [3, 4]
+        seq_len = [5, 7]
+        bidirectional = [True, False] 
+        models_and_inputs = [get_GruNet_model_and_inputs(i, h, n, b, s, bi)
+                             for i, h, n, b, s, bi in zip(input_size, hidden_size, num_layers, batch_size, seq_len, bidirectional)]
+        for model, input in models_and_inputs:
+            self.run_test(model, input, do_constant_folding=True)
 
     def test_gru_constant_folding(self):
         class GruNet(torch.nn.Module):
@@ -3037,22 +3184,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(CrossEntropyLossMeanWeightIgnoreIndex(), input=(x, y))
 
-    def test_empty_branch(self):
-        class EmptyBranchModel(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, input):
-                out = input + 1
-                if out.dim() > 2:
-                    if out.dim() > 3:
-                        out += 3
-                    else:
-                        pass
-                else:
-                    pass
-                return out
-        x = torch.randn(1, 2, 3, requires_grad=True)
-        self.run_test(EmptyBranchModel(), x)
-
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss(self):
         class NLLModel(torch.nn.Module):
@@ -3213,6 +3344,74 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 5)
         self.run_test(ShapeModule(), (x,), rtol=1e-3, atol=1e-5)
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU(alpha=1.0)
+
+            def forward(self, input):
+                return self.celu(input)
+
+        input = torch.randn(2)
+        self.run_test(Celu(), (input,))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu_default(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU()
+
+            def forward(self, input):
+                return self.celu(input)
+
+        input = torch.randn(2)
+        self.run_test(Celu(), (input,))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu_alpha(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU(alpha=2)
+
+            def forward(self, input):
+                return self.celu(input)
+
+        input = torch.randn(2)
+        self.run_test(Celu(), (input,))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_celu_cast(self):
+        class Celu(torch.nn.Module):
+            def __init__(self):
+                super(Celu, self).__init__()
+                self.celu = torch.nn.CELU()
+
+            def forward(self, input):
+                return self.celu(input)
+
+        input = torch.randn(2, 5, 7, dtype=torch.float64)
+        self.run_test(Celu(), (input,))
+
+    def test_empty_branch(self):
+        class EmptyBranchModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                out = input + 1
+                if out.dim() > 2:
+                    if out.dim() > 3:
+                        out += 3
+                    else:
+                        pass
+                else:
+                    pass
+                return out
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_test(EmptyBranchModel(), x)
 
     def test_onnx_proto_checker(self):
         class Model(torch.nn.Module):
@@ -3489,7 +3688,7 @@ TestONNXRuntime_opset12 = type(str("TestONNXRuntime_opset12"),
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    (unittest.TestCase,),
                                    dict(TestONNXRuntime.__dict__,
-                                   keep_initializers_as_inputs=False))
+                                        keep_initializers_as_inputs=False))
 
 
 # opset 10 tests, with keep_initializers_as_inputs=False for
@@ -3497,7 +3696,7 @@ TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=10,
-                                    keep_initializers_as_inputs=False))
+                                         keep_initializers_as_inputs=False))
 
 
 # opset 11 tests, with keep_initializers_as_inputs=False for
@@ -3505,14 +3704,14 @@ TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
 TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=11,
-                                    keep_initializers_as_inputs=False))
+                                         keep_initializers_as_inputs=False))
 
 # opset 12 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=12,
-                                    keep_initializers_as_inputs=False))
+                                         keep_initializers_as_inputs=False))
 
 
 if __name__ == '__main__':
