@@ -158,7 +158,7 @@ IValue tensorToListRecursive(
     } else {
       TORCH_CHECK(
           false,
-          ty->python_str(),
+          ty->repr_str(),
           " is not one of the supported types for tolist: int, float, bool");
     }
   }

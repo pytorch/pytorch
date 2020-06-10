@@ -1,8 +1,9 @@
+#include <torch/csrc/distributed/autograd/context/context.h>
+
 #include <functional>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
-#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace torch {
 namespace distributed {
@@ -209,6 +210,44 @@ const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
     getGradients() const {
   std::lock_guard<std::mutex> guard(lock_);
   return accumulatedGrads_;
+}
+
+void DistAutogradContext::runGradCallbackForVariable(
+    const torch::autograd::Variable& variable,
+    GradCallback&& cb) {
+  torch::Tensor grad;
+  {
+    std::lock_guard<std::mutex> guard(lock_);
+    auto it = accumulatedGrads_.find(variable);
+    TORCH_INTERNAL_ASSERT(
+        it != accumulatedGrads_.end(),
+        "The grad for the variable should exist in dist_autograd context.");
+    grad = it->value();
+  }
+  if (cb(grad)) {
+    std::lock_guard<std::mutex> guard(lock_);
+    // Needs to update the grad in the map.
+    accumulatedGrads_.insert_or_assign(variable, std::move(grad));
+  }
+}
+
+namespace {
+thread_local ContextPtr tl_context_ptr;
+} // namespace
+
+ThreadLocalDistAutogradContext::ThreadLocalDistAutogradContext(
+    ContextPtr&& new_context)
+    : prev_context_ptr_(std::move(tl_context_ptr)) {
+  tl_context_ptr = std::move(new_context);
+}
+
+ThreadLocalDistAutogradContext::~ThreadLocalDistAutogradContext() {
+  tl_context_ptr = std::move(prev_context_ptr_);
+}
+
+// static
+ContextPtr ThreadLocalDistAutogradContext::getContextPtr() {
+  return tl_context_ptr;
 }
 
 } // namespace autograd

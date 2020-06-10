@@ -344,6 +344,45 @@ void RequestCallbackImpl::processRpc(
         return;
       }
 
+      auto setRRefValue = [ownerRRef, postProcessing](
+                              const c10::intrusive_ptr<c10::ivalue::Future>&
+                                  jitFuture) mutable {
+        try {
+          ownerRRef->setValue(jitFuture->value());
+        } catch (const std::exception& e) {
+          ownerRRef->setError(e.what());
+        }
+        postProcessing();
+      };
+
+      auto isAsyncExecution = scriptRemoteCall.isAsyncExecution();
+      auto asyncPostProcessing =
+          [ownerRRef,
+           postProcessing,
+           setRRefValue{std::move(setRRefValue)},
+           isAsyncExecution](const c10::intrusive_ptr<c10::ivalue::Future>&
+                                 jitFuture) mutable {
+            if (isAsyncExecution) {
+              // The user function will return a JIT future, install
+              // setRRefValue and postProcessing to that valueFuture
+              try {
+                auto valueJitFuture = jitFuture->value().toFuture();
+                valueJitFuture->addCallback(
+                    [valueJitFuture,
+                     setRRefValue{std::move(setRRefValue)}]() mutable {
+                      setRRefValue(valueJitFuture);
+                    });
+              } catch (const std::exception& e) {
+                ownerRRef->setError(e.what());
+                postProcessing();
+              }
+            } else {
+              // The user function will return a value. Set OwnerRRef when that
+              // value is ready.
+              setRRefValue(jitFuture);
+            }
+          };
+
       c10::intrusive_ptr<c10::ivalue::Future> jitFuture;
       try {
         jitFuture = PythonRpcHandler::getInstance()
@@ -351,23 +390,18 @@ void RequestCallbackImpl::processRpc(
                         ->get_function(scriptRemoteCall.qualifiedName())
                         .runAsync(stack);
         if (jitFuture->completed()) { // short-cut.
-          ownerRRef->setValue(jitFuture->value());
-          postProcessing();
+          asyncPostProcessing(jitFuture);
           return;
         }
       } catch (const std::exception& e) {
-        ownerRRef->setError(e.what());
-        postProcessing();
+        asyncPostProcessing(jitFuture);
         return;
       }
-      jitFuture->addCallback([ownerRRef, postProcessing, jitFuture]() {
-        try {
-          ownerRRef->setValue(jitFuture->value());
-        } catch (const std::exception& e) {
-          ownerRRef->setError(e.what());
-        }
-        postProcessing();
-      });
+      jitFuture->addCallback(
+          [jitFuture,
+           asyncPostProcessing{std::move(asyncPostProcessing)}]() mutable {
+            asyncPostProcessing(jitFuture);
+          });
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
