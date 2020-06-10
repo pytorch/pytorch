@@ -41,7 +41,9 @@ struct NcclCommList {
   int ndevices;
   NcclCommList(const std::vector<int>& devices)
       : comms(new ncclComm_t[devices.size()]), ndevices(devices.size()) {
-    NCCL_CHECK(ncclCommInitAll(comms.get(), devices.size(), devices.data()));
+    NCCL_CHECK(
+        static_cast<torchNcclResult_t>(ncclCommInitAll(
+                          comms.get(), devices.size(), devices.data())));
   }
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {
@@ -205,7 +207,7 @@ std::uint64_t version() {
 void get_unique_id(torchNcclUniqueId& id) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  NCCL_CHECK(ncclGetUniqueId(&id));
+  NCCL_CHECK(static_cast<torchNcclResult_t>(ncclGetUniqueId(&static_cast<const ncclUniqueId>(id))));
 #else
   AT_ERROR("PyTorch built without NCCL support");
 #endif
@@ -218,7 +220,8 @@ ncclComm_t comm_init_rank(
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   ncclComm_t comm;
-  NCCL_CHECK(ncclCommInitRank(&comm, nranks, comm_id, rank));
+  NCCL_CHECK(
+      static_cast<torchNcclResult_t>(ncclCommInitRank(&comm, nranks, static_cast<const ncclUniqueId>(comm_id), rank)));
   return comm;
 #else
   return nullptr;
@@ -239,7 +242,7 @@ void comm_destroy(ncclComm_t comm)
 
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  NCCL_CHECK(ncclCommDestroy(comm));
+  NCCL_CHECK(static_cast<torchNcclResult_t>(ncclCommDestroy(comm)));
 #endif
 }
 
@@ -272,7 +275,8 @@ void broadcast(
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   check_inputs(tensors, tensors, 1, 1);
-  ncclDataType_t data_type = get_data_type(tensors[0]);
+  ncclDataType_t data_type =
+      static_cast < ncclDataType_t>(get_data_type(tensors[0]));
   int64_t numel = tensors[0].numel();
 
   const auto comms = user_comms.empty() ? get_communicators(tensors)
@@ -295,8 +299,8 @@ void broadcast(
         "maximum NCCL supports (",
         count_max,
         ")");
-    NCCL_CHECK(ncclBcast(
-        tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
+    NCCL_CHECK(static_cast<torchNcclResult_t>(ncclBcast(
+        tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream)));
   }
 #else
   AT_ERROR("PyTorch built without NCCL support");
@@ -318,7 +322,8 @@ void reduce(
   check_inputs(inputs, outputs, 1, 1);
   const auto len = inputs.size();
 
-  ncclDataType_t data_type = get_data_type(inputs[0]);
+  ncclDataType_t data_type =
+      static_cast<ncclDataType_t>(get_data_type(inputs[0]));
 
   const auto count = inputs[0].numel();
   auto comms_ref = user_comms.empty() ? get_communicators(inputs)
@@ -334,7 +339,8 @@ void reduce(
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
-    NCCL_CHECK(ncclReduce(
+    NCCL_CHECK(
+        static_cast < torchNcclResult_t(ncclReduce(
         inputs[i].data_ptr(),
         outputs[i].data_ptr(),
         count,
@@ -342,7 +348,7 @@ void reduce(
         (ncclRedOp_t)op,
         root,
         comms_ref[i],
-        stream));
+        stream)));
   }
 #else
   AT_ERROR("PyTorch built without NCCL support");
@@ -369,7 +375,8 @@ void all_reduce(
   check_inputs(inputs, outputs, 1, 1);
   const auto len = inputs.size();
 
-  ncclDataType_t data_type = get_data_type(inputs[0]);
+  ncclDataType_t data_type =
+      static_cast<ncclDataType_t>(get_data_type(inputs[0]));
 
   const auto count = inputs[0].numel();
   auto comms_ref = user_comms.empty() ? get_communicators(inputs)
@@ -385,14 +392,14 @@ void all_reduce(
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
-    NCCL_CHECK(ncclAllReduce(
+    NCCL_CHECK(static_cast<torchNcclResult_t>(ncclAllReduce(
         inputs[i].data_ptr(),
         outputs[i].data_ptr(),
         count,
         data_type,
         (ncclRedOp_t)op,
         comms_ref[i],
-        stream));
+        stream)));
   }
 #else
   AT_ERROR("PyTorch built without NCCL support");
@@ -410,7 +417,8 @@ void reduce_scatter(
   const auto len = inputs.size();
   check_inputs(inputs, outputs, 1, len);
 
-  ncclDataType_t data_type = get_data_type(inputs[0]);
+  ncclDataType_t data_type =
+      static_cast<ncclDataType_t>(get_data_type(inputs[0]));
 
   const auto count = inputs[0].numel() / len;
   auto comms_ref = user_comms.empty() ? get_communicators(inputs)
@@ -426,14 +434,14 @@ void reduce_scatter(
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
-    NCCL_CHECK(ncclReduceScatter(
+    NCCL_CHECK(static_cast<torchNcclResult_t>(ncclReduceScatter(
         inputs[i].data_ptr(),
         outputs[i].data_ptr(),
         count,
         data_type,
         (ncclRedOp_t)op,
         comms_ref[i],
-        stream));
+        stream)));
   }
 #else
   AT_ERROR("PyTorch built without NCCL support");
@@ -450,7 +458,7 @@ void all_gather(
   const auto len = inputs.size();
   check_inputs(inputs, outputs, len, 1);
 
-  ncclDataType_t data_type = get_data_type(inputs[0]);
+  ncclDataType_t data_type = static_cast<ncclDataType_t>(get_data_type(inputs[0]));
 
   const auto count = inputs[0].numel();
   auto comms_ref = user_comms.empty() ? get_communicators(inputs)
@@ -467,21 +475,21 @@ void all_gather(
         : streams[i]->stream();
 
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-      NCCL_CHECK(ncclAllGather(
+      NCCL_CHECK(static_cast<torchNcclResult_t>(ncclAllGather(
           inputs[i].data_ptr(),
           outputs[i].data_ptr(),
           count,
           data_type,
           comms_ref[i],
-          stream));
+          stream)));
 #else
-      NCCL_CHECK(ncclAllGather(
+      NCCL_CHECK(static_cast<torchNcclResult_t>(ncclAllGather(
           inputs[i].data_ptr(),
           count,
           data_type,
           outputs[i].data_ptr(),
           comms_ref[i],
-          stream));
+          stream)));
 #endif
   }
 #else
