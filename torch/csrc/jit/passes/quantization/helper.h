@@ -80,8 +80,7 @@ TORCH_API bool nodeQuantizable(Node* n,
 
 // Check if a use of the value is quantizable, this depends on
 // both the use node and the offset
-TORCH_API bool useQuantizable(const Use& use,
-    QuantType quant_type = QuantType::STATIC);
+TORCH_API bool useQuantizable(const Use& use, QuantType quant_type);
 
 // Given a CallFunction node, extract the graph of the called function
 TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
