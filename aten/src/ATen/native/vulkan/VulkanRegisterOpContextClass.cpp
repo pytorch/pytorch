@@ -31,7 +31,7 @@ TORCH_LIBRARY(vulkan, m) {
           });
 }
 
-TORCH_LIBRARY(vulkan_prepacked, m) {
+TORCH_LIBRARY(vulkan_prepack, m) {
   m.def(
       "conv2d_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
       "int[2] padding, int[2] dilation, int groups, "
@@ -42,11 +42,13 @@ TORCH_LIBRARY(vulkan_prepacked, m) {
       "__torch__.torch.classes.vulkan.Conv2dOpContext W_prepack) -> Tensor Y");
 }
 
-TORCH_LIBRARY_IMPL(vulkan_prepacked, Vulkan, m) {
+TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
   m.impl("conv2d_clamp_prepack", createConv2dClampPrePackOpContext);
-  m.impl("conv2d_clamp_run", detail::convolution2d::conv2d_clamp_run);
 }
 
+TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
+  m.impl("conv2d_clamp_run", detail::convolution2d::conv2d_clamp_run);
+}
 } // namespace vulkan
 } // namespace native
 } // namespace at

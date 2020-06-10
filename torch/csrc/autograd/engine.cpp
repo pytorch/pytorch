@@ -291,20 +291,17 @@ void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
   }
 }
 
-// The guard that sets and restores current_graph_task.
-struct GraphTaskGuard {
-  GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
-    last_graph_task_ = std::move(current_graph_task);
-    current_graph_task = std::move(graph_task);
-  }
-  ~GraphTaskGuard() { restore_current_graph_task(); }
+GraphTaskGuard::GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
+  last_graph_task_ = std::move(current_graph_task);
+  current_graph_task = std::move(graph_task);
+}
+GraphTaskGuard::~GraphTaskGuard() {
+  restore_current_graph_task();
+}
 
-  void restore_current_graph_task() {
-    current_graph_task = std::move(last_graph_task_);
-  }
-
-  std::shared_ptr<GraphTask> last_graph_task_;
-};
+void GraphTaskGuard::restore_current_graph_task() {
+  current_graph_task = std::move(last_graph_task_);
+}
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
 // case:
@@ -1026,7 +1023,7 @@ auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device
 
 auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, int device_index) -> std::shared_ptr<ReadyQueue> {
   if (device_index == CPU_DEVICE) {
-    // return the cpu ready queue passed in 
+    // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
