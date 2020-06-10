@@ -1129,6 +1129,7 @@ def _jit_compile(name,
                  with_cuda,
                  is_python_module,
                  keep_intermediates=True):
+    rebuild = os.environ.get('TORCH_EXTENSIONS_REBUILD', None)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
@@ -1146,7 +1147,7 @@ def _jit_compile(name,
                   'Bumping to version {0} and re-building as {1}_v{0}...'.format(version, name))
         name = '{}_v{}'.format(name, version)
 
-    if version != old_version:
+    if version != old_version or rebuild:
         baton = FileBaton(os.path.join(build_directory, 'lock'))
         if baton.try_acquire():
             try:
