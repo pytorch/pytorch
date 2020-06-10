@@ -1513,7 +1513,7 @@ class TestAutograd(TestCase):
 
         def func(z):
             z_ = torch.view_as_complex(z)
-            z_select = torch.select(z_, z_.dim()-1, 0)
+            z_select = torch.select(z_, z_.dim() - 1, 0)
             z_select_real = torch.view_as_real(z_select)
             return z_select_real.sum()
 
