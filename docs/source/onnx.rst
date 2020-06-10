@@ -601,10 +601,13 @@ you can create and register your own custom ops implementation in PyTorch. Here'
             return torch.ops.custom_ops.foo_forward(input1, input2, self.attr1, self.attr2)
 
     model = FooModel(attr1, attr2)
-    torch.onnx.export(model, (dummy_input1, dummy_input2), 'model.onnx')
+    torch.onnx.export(model, (dummy_input1, dummy_input2), 'model.onnx', custom_opsets={"custom_ops": 2})
 
 Depending on the custom operator, you can export it as one or a combination of existing ONNX ops.
-You can also export it as a custom op in ONNX as well. In that case, you will need to extend the backend of your choice
+You can also export it as a custom op in ONNX as well. In that case, you can specify the custom domain
+and version (custom opset) using the ``custom_opsets`` dictionary at export. If not
+explicitly specified, the custom opset version is set to 1 by default.
+Using custom ONNX ops, you will need to extend the backend of your choice
 with matching custom ops implementation, e.g. `Caffe2 custom ops <https://caffe2.ai/docs/custom-operators.html>`_,
 `ONNX Runtime custom ops <https://github.com/microsoft/onnxruntime/blob/master/docs/AddingCustomOp.md>`_.
 
@@ -836,6 +839,21 @@ Q: Is tensor list exportable to ONNX?
     })
 
     assert [torch.allclose(o, torch.tensor(o_ort)) for o, o_ort in zip(out, out_ort)]
+
+Use external data format
+------------------------
+``use_external_data_format`` argument in export API enables export of models in ONNX external
+data format. With this option enabled, the exporter stores some model parameters in external
+binary files, rather than the ONNX file itself. These external binary files are stored in the
+same location as the ONNX file. A string specifying where to store the files should
+be provided as to the export API as argument 'f'.
+
+Training
+--------
+``training`` enables users to export their models in a training-friendly mode. Exporting a model
+in this training-friendly mode avoids certain model optimizations that might interfere with model
+parameter training.
+
 
 Functions
 --------------------------
