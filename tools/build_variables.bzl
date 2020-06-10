@@ -177,6 +177,7 @@ libtorch_core_sources = [
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
     "torch/csrc/jit/passes/xnnpack_rewrite.cpp",
+    "torch/csrc/jit/passes/quantization/qat_combine_conv_bn.cpp",
     "torch/csrc/jit/passes/quantization/helper.cpp",
     "torch/csrc/jit/passes/quantization/insert_observers.cpp",
     "torch/csrc/jit/passes/quantization/insert_quant_dequant.cpp",

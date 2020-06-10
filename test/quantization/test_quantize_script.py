@@ -2624,12 +2624,12 @@ class TestQuantizeQATScript(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
-                self.bn = torch.nn.BatchNorm2d(1)
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.bn1 = torch.nn.BatchNorm2d(1)
 
             def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
+                x = self.conv1(x)
+                x = self.bn1(x)
                 return x
 
         m = torch.jit.script(M())
@@ -2637,9 +2637,9 @@ class TestQuantizeQATScript(QuantizationTestCase):
 
         # TODO(future PR): modify this as needed after we add QAT conv-bn logic
         assert len(attrs_with_prefix(m, '_observer_')) == 2
-        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
+        assert len(attrs_with_prefix(m.conv1, '_observer_')) == 1
         FileCheck().check('FakeQuantize = prim::GetAttr[name="_observer_') \
-                   .check('prim::GetAttr[name="conv"]') \
+                   .check('prim::GetAttr[name="conv1"]') \
                    .check('prim::CallMethod') \
                    .check_not('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
