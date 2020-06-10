@@ -207,7 +207,8 @@ std::uint64_t version() {
 void get_unique_id(torchNcclUniqueId& id) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  NCCL_CHECK(static_cast<torchNcclResult_t>(ncclGetUniqueId(&static_cast<const ncclUniqueId>(id))));
+  ncclUniqueId* nccl_id = reinterpret_cast<ncclUniqueId*>(&id);
+  NCCL_CHECK(static_cast<torchNcclResult_t>(ncclGetUniqueId(nccl_id)));
 #else
   AT_ERROR("PyTorch built without NCCL support");
 #endif
