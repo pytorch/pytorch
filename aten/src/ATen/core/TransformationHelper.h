@@ -132,7 +132,7 @@ C10_HOST_DEVICE inline T log_normal(T val) {
 }
 
 /**
- * Transforms bernoulli distributed `val` between 0.0 and 1.0 to
+ * Transforms uniformly distributed `val` between 0.0 and 1.0 to
  * bernoulli distributed with success probability `p`.
  */
 template <typename T>
