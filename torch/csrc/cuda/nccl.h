@@ -9,15 +9,7 @@
 #include <cstddef>
 #include <vector>
 
-
 typedef struct ncclComm* ncclComm_t;
-
-#define TORCH_CUDA_NCCL_UNIQUE_ID_BYTES 128
-typedef struct {
-  char internal[TORCH_CUDA_NCCL_UNIQUE_ID_BYTES];
-} ncclUniqueId;
-
-
 
 namespace torch {
 namespace cuda {
@@ -59,6 +51,11 @@ typedef enum {
   ncclNumTypes = 9
 } torchNcclDataType_t;
 
+#define TORCH_CUDA_NCCL_UNIQUE_ID_BYTES 128
+typedef struct {
+  char internal[TORCH_CUDA_NCCL_UNIQUE_ID_BYTES];
+} torchNcclUniqueId;
+
 TORCH_CUDA_API void throw_nccl_error(torchNcclResult_t status);
 
 static void NCCL_CHECK(torchNcclResult_t status);
@@ -95,8 +92,9 @@ TORCH_CUDA_API std::uint64_t version();
 
 bool is_available(at::TensorList tensors);
 
-TORCH_CUDA_API void get_unique_id(ncclUniqueId& id);
-TORCH_CUDA_API ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank);
+TORCH_CUDA_API void get_unique_id(torchNcclUniqueId& id);
+TORCH_CUDA_API ncclComm_t
+comm_init_rank(int nranks, const torchNcclUniqueId& comm_id, int rank);
 TORCH_CUDA_API void comm_destroy(ncclComm_t comm);
 
 TORCH_CUDA_API void broadcast(

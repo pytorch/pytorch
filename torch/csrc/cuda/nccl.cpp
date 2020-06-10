@@ -202,8 +202,7 @@ std::uint64_t version() {
 #endif
 }
 
-void get_unique_id(ncclUniqueId& id)
-{
+void get_unique_id(torchNcclUniqueId& id) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   NCCL_CHECK(ncclGetUniqueId(&id));
@@ -212,7 +211,10 @@ void get_unique_id(ncclUniqueId& id)
 #endif
 }
 
-ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank) {
+ncclComm_t comm_init_rank(
+    int nranks,
+    const torchNcclUniqueId& comm_id,
+    int rank) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   ncclComm_t comm;
