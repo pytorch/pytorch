@@ -118,12 +118,15 @@ Reducer::Reducer(
         auto grad_accumulator =
             torch::autograd::impl::grad_accumulator(variable);
 
+        using torch::distributed::autograd::ThreadLocalDistAutogradContext;
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
             grad_accumulator->add_post_hook(
                 torch::make_unique<torch::autograd::utils::LambdaPostHook>(
                     [=](const torch::autograd::variable_list& outputs,
                         const torch::autograd::variable_list& /* unused */) {
+                      this->rpc_context_.set(
+                          ThreadLocalDistAutogradContext::getContextPtr());
                       this->autograd_hook(index);
                       return outputs;
                     })),
@@ -213,26 +216,29 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   // as part of the current backwards pass, and zero the part
   // of the bucket it would otherwise hold.
   auto bucket_view = replica.contents.narrow(0, offset, length);
-  auto& grad = variable.grad();
-  if (grad.defined()) {
-    // Ensure that the gradient type matches the bucket type.
-    TORCH_CHECK(
-        grad.options().type_equal(bucket_view.options()),
-        "Expected ",
-        bucket_view.toString(),
-        ", got ",
-        grad.toString());
-    // Assert that the grad tensor and the bucket don't share storage.
-    // If they did, we could avoid the copy altogether.
-    // The reason for not doing this is that existing code calls
-    // `detach_` from `zero_grad`, which is incompatible with views.
-    TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
-    TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
-    TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
-    bucket_view.copy_(grad.view({-1}), /* non_blocking */ true);
-  } else {
-    bucket_view.zero_();
-  }
+  runGradCallbackForVariable(variable, [&](auto& grad) {
+    if (grad.defined()) {
+      // Ensure that the gradient type matches the bucket type.
+      TORCH_CHECK(
+          grad.options().type_equal(bucket_view.options()),
+          "Expected ",
+          bucket_view.toString(),
+          ", got ",
+          grad.toString());
+      // Assert that the grad tensor and the bucket don't share storage.
+      // If they did, we could avoid the copy altogether.
+      // The reason for not doing this is that existing code calls
+      // `detach_` from `zero_grad`, which is incompatible with views.
+      TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
+      TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
+      TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
+      bucket_view.copy_(grad.view({-1}), /* non_blocking */ true);
+    } else {
+      bucket_view.zero_();
+    }
+    // The grad is not modified and dosesn't need to be written back.
+    return false;
+  });
 }
 
 void Reducer::mark_variable_ready_sparse(VariableIndex index) {
@@ -242,18 +248,21 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
-  auto& grad = variable.grad();
-  TORCH_CHECK(grad.defined(), "Expected sparse gradient to be defined.");
-  TORCH_CHECK(
-      grad.options().layout() == c10::kSparse,
-      "Expected variable to have sparse gradient.");
+  runGradCallbackForVariable(variable, [&](auto& grad) {
+    TORCH_CHECK(grad.defined(), "Expected sparse gradient to be defined.");
+    TORCH_CHECK(
+        grad.options().layout() == c10::kSparse,
+        "Expected variable to have sparse gradient.");
 
-  // Sparse tensors cannot be grouped together with other sparse tensors
-  // in a single reduction operation like we can for dense tensors.
-  // Therefore, the `offsets` and `lengths` vectors in the bucket replica
-  // struct are empty, and there is no pre-existing accumulation tensor.
-  // Directly assign the sparse tensor to the `contents` field.
-  replica.contents = grad;
+    // Sparse tensors cannot be grouped together with other sparse tensors
+    // in a single reduction operation like we can for dense tensors.
+    // Therefore, the `offsets` and `lengths` vectors in the bucket replica
+    // struct are empty, and there is no pre-existing accumulation tensor.
+    // Directly assign the sparse tensor to the `contents` field.
+    replica.contents = grad;
+    // The grad is not modified and dosesn't need to be written back.
+    return false;
+  });
 }
 
 // The function `autograd_hook` is called after the gradient for a
@@ -693,15 +702,19 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 
       auto bucket_view =
           replica.contents.narrow(0, offset, length).view(variable.sizes());
-      auto& grad = variable.grad();
-
-      // If a parameter is globally unused, we keep its grad untouched.
-      if (!global_unused) {
-        if (!grad.defined()) {
-          grad = at::empty(bucket_view.sizes(), bucket_view.options());
+      runGradCallbackForVariable(variable, [&](auto& grad) {
+        // If a parameter is globally unused, we keep its grad untouched.
+        if (!global_unused) {
+          if (!grad.defined()) {
+            grad = at::empty(bucket_view.sizes(), bucket_view.options());
+          }
+          grad.copy_(bucket_view);
+          // The grad is modified and needs to be written back.
+          return true;
         }
-        grad.copy_(bucket_view);
-      }
+        // The grad is not modified.
+        return false;
+      });
     }
   }
 }
@@ -756,6 +769,30 @@ void Reducer::finalize_backward() {
     local_used_work_->wait();
   }
   local_used_maps_reduced_ = false;
+}
+
+void Reducer::runGradCallbackForVariable(
+    torch::autograd::Variable& variable,
+    GradCallback&& cb) {
+  auto context_ptr = rpc_context_.context_ptr.load();
+  if (context_ptr == nullptr) {
+    cb(variable.grad());
+  } else {
+    // Under distributed autograd
+    context_ptr->runGradCallbackForVariable(variable, std::move(cb));
+  }
+}
+
+void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
+  // We should set 'new_context_ptr' even if it's nullptr. That means the
+  // reducer is under a local backward run.
+  const auto new_context_raw_ptr = new_context_ptr.get();
+  if (context_ptr.exchange(new_context_raw_ptr) != new_context_raw_ptr) {
+    // Set the shared ptr to the context only if it's set first time.
+    // All call sites should use the same context ptr.
+    // Use an atomic to avoid data race from multiple threads.
+    context_ptr_holder = std::move(new_context_ptr);
+  }
 }
 
 void Reducer::sync_bucket_indices(

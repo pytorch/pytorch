@@ -130,4 +130,16 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
   }
 }
 
+Tensor fliplr(const Tensor& self) {
+  TORCH_CHECK(self.dim() >= 2, "Input must be >= 2-d.");
+
+  return self.flip({1});
+}
+
+Tensor flipud(const Tensor& self) {
+  TORCH_CHECK(self.dim() >= 1, "Input must be >= 1-d.");
+
+  return self.flip({0});
+}
+
 }} // namespace at::native

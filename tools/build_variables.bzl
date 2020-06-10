@@ -233,6 +233,7 @@ libtorch_core_sources = [
 ]
 
 libtorch_distributed_sources = [
+    "torch/csrc/distributed/autograd/autograd.cpp",
     "torch/csrc/distributed/autograd/utils.cpp",
     "torch/csrc/distributed/autograd/context/container.cpp",
     "torch/csrc/distributed/autograd/context/context.cpp",

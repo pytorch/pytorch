@@ -73,7 +73,7 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
         return fut->constValue();
       };
   // Define a future that completes after the profiling callbacks are run.
-  auto profiledFut = fut->then(futureProfilingFunc, fut->type());
+  auto profiledFut = fut->then(futureProfilingFunc, fut->elementType());
   return profiledFut;
 }
 

@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 
+#include <thread>
+
 #if !AT_NNPACK_ENABLED()
 
 namespace at {
