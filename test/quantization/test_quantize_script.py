@@ -13,7 +13,6 @@ from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
 from torch.quantization import get_default_qconfig
-from torch.quantization import default_qat_qconfig
 
 # torch.quantization.quantize_script
 from torch.quantization.quantize_script import script_qconfig
