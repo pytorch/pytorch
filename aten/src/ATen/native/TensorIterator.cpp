@@ -671,7 +671,7 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
     const Tensor& b, bool check_mem_overlap) {
-  auto iter = TensorIterator();
+  auto iter = TensorIteratorConfig();
   iter.set_check_mem_overlap(check_mem_overlap);
   iter.add_output(out);
   iter.add_input(a);
@@ -680,57 +680,51 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   iter.promote_inputs_to_common_dtype(true);
   iter.cast_common_dtype_to_outputs(true);
   iter.enforce_safe_casting_to_output(true);
-  iter.build();
-  return iter;
+  return TensorIterator(iter);
 }
 
 TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     const Tensor& b, bool check_mem_overlap) {
-  auto iter = TensorIterator();
+  auto iter = TensorIteratorConfig();
   iter.set_check_mem_overlap(check_mem_overlap);
   iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);
   iter.config_allow_cpu_scalars_ = true;
   iter.promote_inputs_to_common_dtype(true);
-  iter.build();
-  return iter;
+  return TensorIterator(iter);
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
-    bool check_mem_overlap) {
-  auto iter = TensorIterator();
+    bool check_mem_overlapConfig) {
+  auto iter = TensorIteratorConfig();
   iter.set_check_mem_overlap(check_mem_overlap);
   iter.add_output(out);
   iter.add_input(a);
-  iter.num_outputs_ = 1;
   iter.cast_common_dtype_to_outputs(true);
   iter.enforce_safe_casting_to_output(true);
-  iter.build();
-  return iter;
+  return TensorIterator(iter);
 }
 
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
-  auto iter = TensorIterator();
+  auto iter = TensorIteratorConfig();
   iter.check_all_same_dtype(false);
   iter.add_output(out);
   // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
-  iter.config_resize_outputs_ = false;
-  iter.build();
-  return iter;
+  iter.dont_resize_outputs();
+  return TensorIterator(iter);
 }
 
 TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out.defined());
-  auto iter = TensorIterator();
+  auto iter = TensorIteratorConfig();
   iter.add_output(out);
   iter.add_input(a);
-  iter.config_resize_outputs_ = false;
-  iter.config_is_reduction_ = true;
+  iter.dont_resize_outputs();
+  iter.is_reduction(true);
   // TODO: not supporting casting to outputs is only really necessary for arg{min,max}
   iter.promote_inputs_to_common_dtype(true);
-  iter.build();
-  return iter;
+  return TensorIterator(iter);
 }
 
 TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
@@ -745,15 +739,21 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
       " and output2 has ", out2.sizes());
   TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
       " and output2 has ", out2.strides());
-  auto iter = TensorIterator();
+  auto iter = TensorIteratorConfig();
   iter.add_output(out1);
   iter.add_output(out2);
   iter.add_input(a);
-  iter.config_resize_outputs_ = false;
-  iter.config_is_reduction_ = true;
+  iter.dont_resize_outputs();
+  iter.is_reduction(true);
   iter.check_all_same_dtype(false);
-  iter.build();
-  return iter;
+  return TensorIterator(iter);
+}
+
+void TensorIterator::populate_operands() {
+  for (int i = 0; i < config_.tensors_.size(); i++) {
+    operands_.emplace_back(std::move(config_.tensors_[i]));
+  }
+  num_outputs_ = config_.num_outputs_;
 }
 
 void TensorIterator::mark_outputs() {
