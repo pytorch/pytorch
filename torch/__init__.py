@@ -296,7 +296,6 @@ def set_deterministic(d):
     """
     _C._set_deterministic(d)
 
-
 def is_deterministic():
     r"""Returns True if the global deterministic flag is turned on and
     operations are being forced to use a deterministic implementation.
