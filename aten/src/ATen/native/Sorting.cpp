@@ -214,10 +214,65 @@ std::tuple<Tensor, Tensor> topk(
     int64_t dim,
     bool largest,
     bool sorted) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  at::topk_out(values, indices, self, k, dim, largest, sorted);
-  return std::make_tuple(values, indices);
+  const int limit = 100000;
+  // const int limit = 20000;
+  const int _dividers[] = {100, 50, 25, 20, 15, 12, 10, 13, 11, 7, 5, 3, 2};
+  // const int _dividers[] = {10, 12, 15, 20, 25, 50, 100};
+  // const int _dividers[] = {10, 12, 15, 25};
+  // const int _dividers[] = {15, 20, 25, 50, 100};
+  // const int _dividers[] = {2, 3, 5, 7, 11, 13, 15, 17};
+  int selected_divider = -1;
+
+  if (self.size(dim) >= limit) {
+    for (int _divider : _dividers) {
+      if (self.size(dim) % _divider == 0 && self.size(dim) > k * _divider) {
+        selected_divider = _divider;
+        break;
+      }
+    }
+  }
+
+  if (selected_divider < 0) {
+    // The original path
+    Tensor values = at::empty({0}, self.options());
+    Tensor indices = at::empty({0}, self.options().dtype(kLong));
+    at::topk_out(values, indices, self, k, dim, largest, sorted);
+    return std::make_tuple(values, indices);
+  }
+  else {
+    // divide and conquer, see https://github.com/pytorch/pytorch/issues/38475
+    const int64_t size_dim_old = self.size(dim);
+    const int64_t size_dim_new = self.size(dim) / selected_divider;
+    TORCH_INTERNAL_ASSERT(self.size(dim) % selected_divider == 0, 
+      "\nShould have self.size(dim) %% selected_divider == 0, but self.size(dim) = ", 
+      self.size(dim), ", selected_divisor = ", selected_divider);
+    TORCH_INTERNAL_ASSERT(size_dim_new >= k, 
+      "\nShould have size_dim_new >= k, but size_dim_new = ", 
+      size_dim_new, ", k = ", k);
+
+    std::vector<int64_t> sizes_new = self.sizes().vec();
+    int insert_dim = dim >= 0 ? dim : self.ndimension() + dim;
+    sizes_new.insert(sizes_new.begin() + insert_dim, selected_divider);
+    sizes_new[insert_dim+1] = size_dim_new;
+
+    std::vector<int64_t> indices_shape(self.ndimension()+1, 1);
+    indices_shape[insert_dim] = selected_divider;
+    indices_shape[insert_dim+1] = size_dim_new;
+
+    std::vector<int64_t> sizes_new_infer = self.sizes().vec();
+    sizes_new_infer[insert_dim] = -1;
+
+    auto partial = at::topk(self.view(sizes_new), k, insert_dim+1, largest, sorted);
+    auto indices_view = at::arange(size_dim_old, self.options().dtype(at::kLong))
+                          .view(indices_shape)
+                          .expand(sizes_new)
+                          .gather(insert_dim+1, std::get<1>(partial))
+                          .view(sizes_new_infer);
+
+    auto values_2d = std::get<0>(partial).view(sizes_new_infer);
+    auto topk_2 = at::topk(values_2d, k, dim, largest, sorted);
+    return std::make_tuple(std::get<0>(topk_2), indices_view.gather(dim, std::get<1>(topk_2)));
+  }
 }
 
 std::tuple<Tensor&, Tensor&> median_out(
