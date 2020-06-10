@@ -2566,13 +2566,52 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         qconfig_dict = {'': default_dynamic_qconfig}
         m1 = quantize_dynamic_script(model, qconfig_dict)
         out_graph = m1(data)
-
-        m2 = prepare_dynamic_script(model, qconfig_dict)
-        m2(data)
-        m2 = convert_dynamic_script(m2)
-        out_ref = m2(data)
-        self.assertEqual(out_graph, out_ref)
-
         FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(m1.graph)
+
+        # Check to make sure weight observers run correctly
+        ref_qparams = []
+        qconfig = script_qconfig(default_dynamic_qconfig)
+        wt_module = wrap_cpp_module(qconfig.weight)
+        for wt in [model.res1.weight, model.res2.weight]:
+            wt_module(wt)
+            qparams = wt_module.calculate_qparams()
+            ref_qparams.append((qparams[0].item(), qparams[1].item()))
+
+        m2 = prepare_dynamic_script(model, qconfig_dict)
+        m2 = convert_dynamic_script(m2, debug=True)
+        graph_params = []
+        for x, obs in m2._modules._c.items():
+            if x == 'res1':
+                graph_params.append((obs.getattr('6_scale_0'), obs.getattr('6_zero_point_0')))
+            elif x == 'res2':
+                graph_params.append((obs.getattr('10_scale_0'), obs.getattr('10_zero_point_0')))
+        self.assertEqual(ref_qparams, graph_params)
+
+    def test_dynamic_weight_observer(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+                self.fc2 = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                x = self.fc(x)
+                return self.fc2(x)
+
+        qconfig_dict = {'': default_dynamic_qconfig}
+        model = torch.jit.script(M()).eval()
+        qconfig = script_qconfig(default_dynamic_qconfig)
+        ref_qparams = []
+        wt_module = wrap_cpp_module(qconfig.weight)
+        for wt in [model.fc.weight, model.fc2.weight]:
+            wt_module(wt)
+            qparams = wt_module.calculate_qparams()
+            ref_qparams.append((qparams[0].item(), qparams[1].item()))
+        model = prepare_dynamic_script(model, qconfig_dict)
+        model = convert_dynamic_script(model, debug=True)
+        graph_params = []
+        for x, obs in model._modules._c.items():
+            graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
+        self.assertEqual(ref_qparams, graph_params)
