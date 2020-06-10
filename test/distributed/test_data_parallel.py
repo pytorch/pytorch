@@ -705,8 +705,8 @@ class TestDataParallel(TestCase):
         layer_formats = ([torch.contiguous_format] * 4,
                          [torch.channels_last] * 2 + [torch.contiguous_format] * 2,
                          [torch.channels_last] * 4,)
-        layer_dtypes = (# [torch.float] * 4,
-                        # [torch.float] * 2 + [torch.half] * 2,
+        layer_dtypes = ([torch.float] * 4,
+                        [torch.float] * 2 + [torch.half] * 2,
                         [torch.half] * 4,)
 
         ndevs = torch.cuda.device_count()
@@ -714,35 +714,37 @@ class TestDataParallel(TestCase):
         target = torch.randn(ndevs, 2, 4, 4, device="cuda:0", dtype=torch.float)
         device_ids = list(range(ndevs))
 
-        for formats, dtypes in product(layer_formats, layer_dtypes):
-            m = ConvNet(formats, dtypes).cuda(device="cuda:0")
-            m2 = ConvNet(formats, dtypes).cuda(device="cuda:0")
-            m2.load_state_dict(m.state_dict())
-            m_dp = dp.DataParallel(m2, device_ids=device_ids)
-            has_half = any(p.dtype is torch.half for p in m.parameters())
-            tol = 1.e-3 if has_half else 1.e-5
-            # 3 iters:  First iter creates grads, second iter retests after rebucketing, third iter tries zeroed grads.
-            for it in range(3):
-                # Debugging info to show which case went wrong.
-                msg = "iter = {}, formats = {}, dtypes = {}".format(it, formats, dtypes)
-                # print(msg)
-                F.mse_loss(m(input).float(), target).backward()
-                F.mse_loss(m_dp(input).float(), target).backward()
-                for i, ((layer_name, m_child), (_, m_dp_child)) in enumerate(zip(m.named_children(),
-                                                                                 m_dp.module.named_children())):
-                    named_msg = layer_name + ".weight" + " " + msg
-                    self.assertTrue(m_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
-                    self.assertTrue(m_dp_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
-                    for j, ((param_name, p), (_, p_ddp)) in enumerate(zip(m_child.named_parameters(),
-                                                                          m_dp_child.named_parameters())):
-                        named_msg = layer_name + "." + param_name + " " + msg
-                        self.assertEqual(p.grad, p_ddp.grad, msg=named_msg, rtol=tol, atol=tol)
-                        if it == 0:
-                            p.grad = None
-                            p_ddp.grad = None
-                        else:
-                            m.zero_grad()
-                            m_dp.zero_grad()
+        with torch.backends.cudnn.flags(deterministic=True, benchmark=False):
+            # Includes case-specific debugging info to narrow down failing case.
+            for formats, dtypes in product(layer_formats, layer_dtypes):
+                model_msg = "formats = {}, dtypes = {}".format(formats, dtypes)
+                try:
+                    m = ConvNet(formats, dtypes).cuda(device="cuda:0")
+                    m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
+                    has_half = any(p.dtype is torch.half for p in m.parameters())
+                    tol = 1.e-3 if has_half else 1.e-5
+                except:
+                    print("Caught exception during model creation for " + model_msg)
+                    raise
+                # 2 iters:  First iter creates grads, second iter tries zeroed grads.
+                for it in range(2):
+                    iter_msg = "iter = {} ".format(it) + model_msg
+                    try:
+                        F.mse_loss(m(input).float(), target).backward()
+                        F.mse_loss(m_dp(input).float(), target).backward()
+                        for i, ((layer_name, m_child), m_dp_child) in enumerate(zip(m.named_children(),
+                                                                                    m_dp.module.children())):
+                            named_msg = layer_name + ".weight" + " " + iter_msg
+                            self.assertTrue(m_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
+                            self.assertTrue(m_dp_child.weight.grad.is_contiguous(memory_format=formats[i]), named_msg)
+                            for j, ((param_name, p), p_dp) in enumerate(zip(m_child.named_parameters(),
+                                                                            m_dp_child.parameters())):
+                                named_msg = layer_name + "." + param_name + " " + iter_msg
+                                self.assertEqual(p.grad, p_dp.grad, msg=named_msg, rtol=tol, atol=tol)
+                    except:
+                        # Makes sure we still get info if the error occurred somewhere other than the asserts.
+                        print("Caught exception exception during iterations at " + iter_msg)
+                        raise
 
 
 if __name__ == '__main__':
