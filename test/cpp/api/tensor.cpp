@@ -576,6 +576,21 @@ TEST(TensorTest, TorchTensorCtorMultiDimErrorChecks) {
   }
 }
 
+TEST(TensorTest, TorchTensorCtorComplexErrorChecks) {
+  {
+    ASSERT_THROWS_WITH(torch::tensor(c10::complex<float>(0.1, 0.2), torch::kFloat),
+      "tensor_cpu not implemented for kFloat");
+  }
+  {
+    ASSERT_THROWS_WITH(torch::tensor({c10::complex<float>(0.1, 0.2)}, torch::kFloat),
+      "tensor_cpu not implemented for kFloat");
+  }
+  {
+    ASSERT_THROWS_WITH(torch::tensor(std::vector<c10::complex<float>>{c10::complex<float>(0.1, 0.2)}, torch::kFloat),
+      "tensor_cpu not implemented for kFloat");
+  }
+}
+
 void test_TorchTensorCtorMultiDim_CUDA_expected_dtype(c10::ScalarType default_dtype) {
   AutoDefaultDtypeMode dtype_mode(default_dtype);
 
