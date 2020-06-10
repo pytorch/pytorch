@@ -251,24 +251,6 @@
   use_c10_dispatcher: full
   variants: function
 
-# Temporary methods for getting the real and imaginary values in complex tensors. These are needed
-# until we support real and imag as tensor attributes which is blocked by the untyped storage task
-# TODO: remove these methods when we add real and imag as tensor attributes
-
-- func: copy_real(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: copy_real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-
-- func: copy_imag(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: copy_imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-
 - func: conj(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -422,6 +404,42 @@
     CPU: argmin
     CUDA: argmin
 
+- func: acosh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: acosh_(Tensor(a!) self) -> Tensor(a!)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: asinh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: asinh_(Tensor(a!) self) -> Tensor(a!)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: atanh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: atanh_(Tensor(a!) self) -> Tensor(a!)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
@@ -500,15 +518,9 @@
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: bernoulli_tensor_cpu_
-    CUDA: bernoulli_tensor_cuda_
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: bernoulli_scalar_cpu_
-    CUDA: bernoulli_scalar_cuda_
 
 # This out-of-place version isn't used explicitly, but needed by jit.
 # There is no default valid on `p` here because it would introduce ambiguity
@@ -1325,6 +1337,16 @@
 
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
+- func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, int N, int C, int HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: native_group_norm
+    CUDA: native_group_norm
+
+- func: native_group_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int N, int C, int HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: native_group_norm_backward
+    CUDA: native_group_norm_backward
+
 - func: quantized_group_norm(Tensor input, int num_groups, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
   requires_tensor: True
   dispatch:
@@ -2134,6 +2156,30 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: rad2deg(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  supports_named_tensor: True
+
+- func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  supports_named_tensor: True
+
+- func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: deg2rad(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  supports_named_tensor: True
+
+- func: deg2rad_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  supports_named_tensor: True
+
+- func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2655,6 +2701,7 @@
   dispatch:
     CPU: threshold
     CUDA: threshold_cuda
+    QuantizedCPU: quantized_threshold
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   variants: function
@@ -2711,6 +2758,14 @@
   dispatch:
     CPU: flip_cpu
     CUDA: flip_cuda
+
+- func: fliplr(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: flipud(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
 
 - func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
   use_c10_dispatcher: full
@@ -4291,15 +4346,12 @@
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: diag_out
-    CUDA: legacy::cuda::_th_diag_out
+    CPU: diag_cpu_out
+    CUDA: diag_cuda_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: diag
-    CUDA: legacy::cuda::_th_diag
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -4340,7 +4392,7 @@
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_trace
-    CUDA: legacy::cuda::_th_trace
+    CUDA: trace_cuda
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

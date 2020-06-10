@@ -812,6 +812,26 @@ def save_rref(rref_var, fname):
     torch.save(rref_var, fname)
 
 
+@torch.jit.script
+def script_add(x, y):
+    # type: (Tensor, Tensor) -> Tensor
+    return x + y
+
+
+@rpc.functions.async_execution
+@torch.jit.script
+def async_add(to, x, y):
+    # type: (str, Tensor, Tensor) -> Future[Tensor]
+    return rpc.rpc_async(to, script_add, (x, y))
+
+
+@rpc.functions.async_execution
+@torch.jit.script
+def async_wrong_type():
+    # type: () -> Tensor
+    return torch.zeros(2)
+
+
 class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, FutureTypingTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
@@ -1042,3 +1062,46 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         events = prof.function_events
         function_event = get_function_event(events, "foo")
         self.assertEqual(function_event.name, "foo")
+
+    @dist_init
+    def test_async_function_simple(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(
+            dst1,
+            async_add,
+            args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
+        )
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_async_function_wrong_return_type(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected Future but got Tensor"
+        ):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                async_wrong_type
+            )
+
+    @dist_init
+    def test_async_function_wrong_decorator_order(self):
+        # @torch.jit.script complains about undefined value rpc. Error is shown
+        # below. The reason for not checking error string is to avoid making
+        # JIT error handling code depend on RPC tests, as we don't have any
+        # restrictions on the error message here.
+        #
+        # RuntimeError:
+        # undefined value rpc:
+        # def async_wrong_decorator_order(to, x, y):
+        #    # type: (str, Tensor, Tensor) -> Future[Tensor]
+        #    return rpc.rpc_async(to, script_add, (x, y))
+        #           ~~~ <--- HERE
+        with self.assertRaises(RuntimeError):
+            @torch.jit.script
+            @rpc.functions.async_execution
+            def async_wrong_decorator_order(to, x, y):
+                # type: (str, Tensor, Tensor) -> Future[Tensor]
+                return rpc.rpc_async(to, script_add, (x, y))
