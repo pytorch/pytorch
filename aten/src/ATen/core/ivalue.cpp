@@ -650,30 +650,59 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
       ctx->dstFuture->markCompleted(ctx->asIvalue);
     }
   };
-  for (int32_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
-    ctx->srcFutures.get(i)->addCallback(func);
-  }
   if (ctx->srcFutures.size() == 0) {
     ctx->dstFuture->markCompleted(ctx->asIvalue);
+  } else {
+    auto typePtr = ctx->srcFutures.get(0)->elementType();
+    for (int32_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+      TORCH_CHECK(i == 0 || *ctx->srcFutures.get(i)->elementType() == *typePtr);
+      ctx->srcFutures.get(i)->addCallback(func);
+    }
   }
   return ctx->dstFuture;
 }
 
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
-    std::vector<intrusive_ptr<ivalue::Future>> srcs) {
-  auto typePtr = srcs.empty() ? AnyType::get() : srcs[0]->elementType();
-  // Lists are generally expected to have a consistent type, check
-  // for this unless we have a compelling target use case.
-  for (size_t i = 1, len = srcs.size(); i < len; ++i) {
-    TORCH_CHECK(*srcs[i]->elementType() == *typePtr,
-                "Expected ", typePtr->str(), " type in list but saw ",
-                srcs[i]->elementType()->str());
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+    List<intrusive_ptr<ivalue::Future>> srcs) {
+  if (srcs.empty()) {
+    auto res = make_intrusive<ivalue::Future>(NoneType::get());
+    res->markCompleted();
+    return res;
   }
-  List<intrusive_ptr<ivalue::Future>> asList(FutureType::create(typePtr));
-  asList.reserve(srcs.size());
-  for (auto&& s : srcs) {
-    asList.push_back(std::move(s));
+  TypePtr typePtr = srcs.get(0)->elementType();
+  for (size_t i = 0, tot = srcs.size(); i < tot; ++i) {
+    if (srcs.get(i)->completed()) {
+      return srcs.get(i);
+    }
+    TORCH_CHECK(i == 0 || (*typePtr == *srcs.get(i)->elementType()));
   }
-  return collectAll(asList);
+  struct Ctx {
+    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs, TypePtr typePtr)
+        : srcFutures(std::move(srcs)),
+          dstFuture(make_intrusive<ivalue::Future>(typePtr)) {}
+    std::atomic<bool> done{false};
+    List<intrusive_ptr<ivalue::Future>> srcFutures;
+    intrusive_ptr<ivalue::Future> dstFuture;
+  };
+  auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr);
+  std::function<void(size_t)> func = [ctx](size_t index) {
+    if (!ctx->done.exchange(true)) {
+      intrusive_ptr<ivalue::Future> dst = ctx->dstFuture;
+      intrusive_ptr<ivalue::Future> src = ctx->srcFutures.get(index);
+      ctx->dstFuture.reset(); // Once future is satisfied, remove refs.
+      ctx->srcFutures =
+          List<intrusive_ptr<ivalue::Future>>(ctx->srcFutures.elementType());
+      if (src->hasError()) {
+        dst->setError(*src->error());
+      } else {
+        dst->markCompleted(src->constValue());
+      }
+    }
+  };
+  for (size_t tot = ctx->srcFutures.size(), i = 0; i < tot; ++i) {
+    ctx->srcFutures.get(i)->addCallback([func, i]() { func(i); });
+  }
+  return ctx->dstFuture;
 }
+
 } // namespace c10
