@@ -1,4 +1,9 @@
+#if !defined(C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H)
+#error "c10/util/complex_utils.h is not meant to be individually included. Include c10/util/complex_type.h instead."
+#endif
+
 #include <limits>
+
 
 namespace c10 {
 

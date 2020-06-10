@@ -1712,14 +1712,23 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         slices = [sym_help._slice_helper(g, w, axes=[0], starts=[x * n], ends=[y * n]) for x, y in intervals]
         return g.op('Concat', *slices, axis_i=0)
 
-    def transform_weights(layer_index):
+    def transform_weights_no_bias(layer_index):
+        weights = layer_weights[layer_index]
         if variant == 'RNN':
-            weight_ih, weight_hh, bias_ih, bias_hh = layer_weights[layer_index]
+            weight_ih, weight_hh = weights
+        elif variant == 'GRU' or variant == 'LSTM':
+            weight_ih, weight_hh = \
+                [reform_weights(g, w, hidden_size, reform_permutation) for w in weights]
+        return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh))
+
+    def transform_weights(layer_index):
+        weights = layer_weights[layer_index]
+        if variant == 'RNN':
+            weight_ih, weight_hh, bias_ih, bias_hh = weights
         elif variant == 'GRU' or variant == 'LSTM':
             weight_ih, weight_hh, bias_ih, bias_hh = \
-                [reform_weights(g, w, hidden_size, reform_permutation) for w in layer_weights[layer_index]]
+                [reform_weights(g, w, hidden_size, reform_permutation) for w in weights]
         bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
-
         return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
 
     def retrieve_state(x, start, end):
@@ -1727,15 +1736,25 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
 
     for i in range(num_layers):
         if unidirectional:
-            weight_ih, weight_hh, bias_concat = transform_weights(i)
+            if weights_per_layer == 4:
+                weight_ih, weight_hh, bias_concat = transform_weights(i)
+            else:
+                weight_ih, weight_hh = transform_weights_no_bias(i)
+                bias_concat = unused(g)
+
             state_indices = i, i + 1
         else:
-            weight_ih_f, weight_hh_f, bias_f = transform_weights(2 * i)
-            weight_ih_b, weight_hh_b, bias_b = transform_weights(2 * i + 1)
+            if weights_per_layer == 4:
+                weight_ih_f, weight_hh_f, bias_f = transform_weights(2 * i)
+                weight_ih_b, weight_hh_b, bias_b = transform_weights(2 * i + 1)
+                bias_concat = g.op('Concat', bias_f, bias_b, axis_i=0)
+            else:
+                weight_ih_f, weight_hh_f = transform_weights_no_bias(2 * i)
+                weight_ih_b, weight_hh_b = transform_weights_no_bias(2 * i + 1)
+                bias_concat = unused(g)
 
             weight_ih = g.op('Concat', weight_ih_f, weight_ih_b, axis_i=0)
             weight_hh = g.op('Concat', weight_hh_f, weight_hh_b, axis_i=0)
-            bias_concat = g.op('Concat', bias_f, bias_b, axis_i=0)
 
             state_indices = 2 * i, 2 * i + 2
 

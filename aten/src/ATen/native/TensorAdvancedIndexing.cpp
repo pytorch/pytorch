@@ -520,48 +520,40 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
 }
 
 Tensor & gather_out_cpu_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "gather_out(): Expected dtype int64 for index");
   result.resize_(index.sizes());
   gather_stub(result.device().type(), result, self, dim, index);
   return result;
 }
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "gather(): Expected dtype int64 for index");
   Tensor result = at::empty({0}, self.options());
   return gather_out_cpu_cuda(result, self, dim, index, sparse_grad);
 }
 
-Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_(): Expected dtype int64 for index");
-  scatter_stub(self.device().type(), self, dim, index, src);
+Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  scatter_stub(self.device().type(), self, dim, index, source);
   return self;
 }
 
-Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_fill_(): Expected dtype int64 for index");
-  scatter_fill_stub(self.device().type(), self, dim, index, src);
+Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  scatter_fill_stub(self.device().type(), self, dim, index, source);
   return self;
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter(): Expected dtype int64 for index");
   return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter(): Expected dtype int64 for index");
   return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add_(): Expected dtype int64 for index");
   scatter_add_stub(self.device().type(), self, dim, index, src);
   return self;
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "scatter_add(): Expected dtype int64 for index");
   return self.clone(at::MemoryFormat::Preserve).scatter_add_(dim, index, source);
 }
 
