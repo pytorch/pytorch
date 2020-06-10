@@ -48,6 +48,7 @@ namespace jit {
   _(UnifyTypes)                        \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
+  _(LoopPeeler)                        \
   _(InsertBailOuts)                    \
   _(PeepholeOptimize)                  \
   _(RecordFunction)                    \
