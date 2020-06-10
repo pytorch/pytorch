@@ -16,6 +16,7 @@ using torch::autograd::Engine;
 using torch::autograd::FutureVariableList;
 using torch::autograd::GraphRoot;
 using torch::autograd::GraphTask;
+using torch::autograd::GraphTaskGuard;
 using torch::autograd::InputBuffer;
 using torch::autograd::Node;
 using torch::autograd::NodeTask;
@@ -40,6 +41,7 @@ class DistAccumulateGradCaptureHook
         autogradContext_(std::move(autogradContext)) {}
 
   at::Tensor operator()(const at::Tensor& grad) override {
+    ThreadLocalDistAutogradContext contextGuard{ContextPtr(autogradContext_)};
     variable_list inputGrads = {grad};
     // It's intended that pre/post hooks are still called even if the grad is
     // undenfined here.
@@ -59,7 +61,6 @@ class DistAccumulateGradCaptureHook
       autogradContext_->accumulateGrad(
           accumulateGrad_->variable, inputGrads[0], 3 /* num_expected_refs */);
     }
-
     const variable_list kEmptyOuput;
     for (const auto& hook : accumulateGrad_->post_hooks()) {
       (*hook)(kEmptyOuput, inputGrads);
@@ -277,6 +278,7 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
       if (task.fn_ && !local_graph_task->has_error_.load()) {
         AutoGradMode grad_mode(local_graph_task->grad_mode_);
         try {
+          GraphTaskGuard guard(local_graph_task);
           engine_.evaluate_function(
               local_graph_task, task.fn_.get(), task.inputs_, cpu_ready_queue);
         } catch (std::exception& e) {

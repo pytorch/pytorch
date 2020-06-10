@@ -6,7 +6,7 @@ namespace caffe2 {
 
 namespace {
 
-void SetInputTensorDescriptorTypeAndBuffer(
+void setInputTensorDescriptorTypeAndBuffer(
     const Tensor& cpu_tensor,
     onnxTensorDescriptorV1* desc) {
   if (cpu_tensor.template IsType<int32_t>()) {
@@ -39,7 +39,7 @@ void SetInputTensorDescriptorTypeAndBuffer(
   }
 }
 
-void SetInputTensorDescriptorTypeAndBuffer(
+void setInputTensorDescriptorTypeAndBuffer(
     const int8::Int8TensorCPU& cpu_int8tensor,
     onnxTensorDescriptorV1* desc) {
   const Tensor& cpu_tensor = cpu_int8tensor.t;
@@ -57,6 +57,20 @@ void SetInputTensorDescriptorTypeAndBuffer(
   desc->quantizationAxis = 1;
   desc->scales = &cpu_int8tensor.scale;
   desc->biases = &cpu_int8tensor.zero_point;
+}
+
+template <typename T>
+void adjustQuantizedOffsetImpl(Tensor* t, uint8_t offset) {
+  auto* data = t->mutable_data<T>();
+  for (size_t i = 0; i < t->numel(); ++i) {
+    data[i] -= offset;
+  }
+}
+
+void adjustQuantizedOffset(Tensor* t, uint8_t offset) {
+  if (t->template IsType<uint8_t>()) {
+    adjustQuantizedOffsetImpl<uint8_t>(t, offset);
+  }
 }
 
 TypeMeta OnnxifiTypeToDataType(uint64_t onnxifi_type) {
@@ -78,7 +92,7 @@ TypeMeta OnnxifiTypeToDataType(uint64_t onnxifi_type) {
   return it->second;
 }
 
-void SetOutputTensorDescriptorTypeAndBuffer(
+void setOutputTensorDescriptorTypeAndBuffer(
     uint64_t onnxifi_type,
     Tensor* cpu_tensor,
     onnxTensorDescriptorV1* desc) {
@@ -138,7 +152,7 @@ void BlobToTensorDescriptor(
     // Data type
     const auto& cpu_int8tensor = blob->template Get<int8::Int8TensorCPU>();
     const auto& cpu_tensor = cpu_int8tensor.t;
-    SetInputTensorDescriptorTypeAndBuffer(cpu_int8tensor, desc);
+    setInputTensorDescriptorTypeAndBuffer(cpu_int8tensor, desc);
     // Set dims
     const auto shape = cpu_tensor.sizes();
     desc->dimensions = shape.size();
@@ -154,7 +168,7 @@ void BlobToTensorDescriptor(
   } else {
     // Data type
     const auto& cpu_tensor = blob->template Get<TensorCPU>();
-    SetInputTensorDescriptorTypeAndBuffer(cpu_tensor, desc);
+    setInputTensorDescriptorTypeAndBuffer(cpu_tensor, desc);
     // Set dims
     const auto shape = cpu_tensor.sizes();
     desc->dimensions = shape.size();
@@ -383,7 +397,9 @@ void OnnxifiOp<CPUContext>::adjustOutputBatchSizes(int current_batch_size) {
   CPUContext context;
   Tensor tmp(CPU);
   for (int i = 0; i < OutputSize(); ++i) {
-    auto* output_tensor = Output(i);
+    Tensor* output_tensor = quantized_outputs_[i]
+        ? (&this->template Output<int8::Int8TensorCPU>(i)->t)
+        : Output(i);
     const auto& end = output_reshape_info.ends[i];
     if (output_reshape_info.fast_path[i]) {
       output_tensor->ShrinkTo(end.data<int32_t>()[0]);
@@ -393,6 +409,63 @@ void OnnxifiOp<CPUContext>::adjustOutputBatchSizes(int current_batch_size) {
           &tmp, *output_tensor, output_reshape_info.begins[i], end, &context);
       output_tensor->CopyFrom(tmp);
     }
+  }
+}
+
+template <>
+void OnnxifiOp<CPUContext>::setOutputShapeAndType(int output_idx) {
+  tensor_dims_int64_.clear();
+  std::vector<size_t> tensor_dims;
+  uint64_t type = ONNXIFI_DATATYPE_FLOAT32;
+  const auto it = output_shape_hints_.find(output_idx);
+  CAFFE_ENFORCE(
+      it != output_shape_hints_.end(),
+      "Cannot find shape hint for output: ",
+      output_names_[output_idx]);
+  const auto& info = it->second;
+  std::copy(
+      info.dims.begin(), info.dims.end(), std::back_inserter(tensor_dims));
+  type = it->second.onnxifi_type;
+  auto& tensor_descriptor = output_desc_[output_idx];
+  tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
+  tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
+  tensor_descriptor.dimensions = tensor_dims.size();
+  CAFFE_ENFORCE(
+      tensor_descriptor.dimensions != 0, tensor_descriptor.name, " has 0 dim");
+  auto& output_shape = output_shapes_[output_idx];
+  output_shape.clear();
+  output_shape.insert(
+      output_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
+  tensor_descriptor.shape = output_shape.data();
+  std::copy(
+      tensor_dims.cbegin(),
+      tensor_dims.cend(),
+      std::back_inserter(tensor_dims_int64_));
+
+  // Setup the output C2 tensor
+  if (!info.quantized) {
+    // Normal Tensor
+    auto* output_tensor = Output(
+        output_idx,
+        tensor_dims_int64_,
+        at::dtype(OnnxifiTypeToDataType(type)).device(CPU));
+    setOutputTensorDescriptorTypeAndBuffer(
+        type, output_tensor, &tensor_descriptor);
+  } else if (info.quantizationParams == 1) {
+    // single quantizer, output Int8Tensor
+    auto* output_tensor =
+        this->template Output<int8::Int8TensorCPU>(output_idx);
+    output_tensor->t.Resize(tensor_dims_int64_);
+    setOutputTensorDescriptorTypeAndBuffer(
+        type, &output_tensor->t, &tensor_descriptor);
+    tensor_descriptor.quantizationParams = 1;
+    tensor_descriptor.quantizationAxis = 1;
+    tensor_descriptor.scales = &output_tensor->scale;
+    tensor_descriptor.biases = &output_tensor->zero_point;
+  } else {
+    CAFFE_THROW(
+        "OnnxifiOp does not support output tensor with multi-quantization params: ",
+        output_names_[output_idx]);
   }
 }
 
@@ -411,37 +484,12 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     input_shape.insert(
         input_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
     tensor_descriptor.shape = input_shape.data();
-    SetInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
+    setInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
   }
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
   for (unsigned i = 0U; i < OutputSize(); ++i) {
-    tensor_dims_int64_.clear();
-    std::vector<size_t> tensor_dims;
-    uint64_t type = SetOutputShapeAndType(i, &tensor_dims);
-    auto& tensor_descriptor = output_desc_[i];
-    tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
-    tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
-    tensor_descriptor.dimensions = tensor_dims.size();
-    CAFFE_ENFORCE(
-        tensor_descriptor.dimensions != 0,
-        tensor_descriptor.name,
-        " has 0 dim");
-    auto& output_shape = output_shapes_[i];
-    output_shape.clear();
-    output_shape.insert(
-        output_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
-    tensor_descriptor.shape = output_shape.data();
-    std::copy(
-        tensor_dims.cbegin(),
-        tensor_dims.cend(),
-        std::back_inserter(tensor_dims_int64_));
-    auto* output_tensor = Output(
-        i,
-        tensor_dims_int64_,
-        at::dtype(OnnxifiTypeToDataType(type)).device(CPU));
-    SetOutputTensorDescriptorTypeAndBuffer(
-        type, output_tensor, &tensor_descriptor);
+    setOutputShapeAndType(i);
   }
   bool ext_supported = false;
   onnxMemoryFenceV1 input_fence;
@@ -522,6 +570,16 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         lib_->onnxReleaseEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+  }
+
+  if (adjust_quantized_offset_) {
+    for (unsigned i = 0U; i < OutputSize(); ++i) {
+      if (quantized_outputs_[i]) {
+        auto* int8_tensor = this->template Output<int8::Int8TensorCPU>(i);
+        int8_tensor->zero_point += adjust_quantized_offset_;
+        adjustQuantizedOffset(&int8_tensor->t, adjust_quantized_offset_);
+      }
+    }
   }
 
   if (adjust_output_batch_ && current_batch_size != max_batch_size_) {
