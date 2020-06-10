@@ -109,6 +109,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
+  if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
+    build_args+=("-DUSE_VULKAN=ON")
+  fi
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
