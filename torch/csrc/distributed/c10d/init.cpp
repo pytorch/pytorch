@@ -505,6 +505,36 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "alltoall_list",
+              &::c10d::ProcessGroup::alltoall_list,
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall_list",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& output,
+                 std::vector<at::Tensor>& input,
+                 std::vector<int64_t> outputSplitSizes,
+                 std::vector<int64_t> inputSplitSizes) {
+                return pg.alltoall_list(
+                    output,
+                    input,
+                    outputSplitSizes,
+                    inputSplitSizes,
+                    ::c10d::AllToAllOptions());
+              },
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "alltoall",
               &::c10d::ProcessGroup::alltoall,
               py::arg("output_tensor"),

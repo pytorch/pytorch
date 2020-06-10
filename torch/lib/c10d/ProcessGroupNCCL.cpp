@@ -537,6 +537,16 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
 namespace {
 
+// Single tensor version of check_gpu_tensors()
+void check_gpu_tensor(const at::Tensor& tensor) {
+  if (!tensor.is_cuda() || tensor.is_sparse()) {
+    throw std::runtime_error("Tensors must be CUDA and dense");
+  }
+  if (!tensor.is_contiguous()) {
+    throw std::runtime_error("Tensors must be contiguous");
+  }
+}
+
 // Check that all `tensors' have the same type and shape and are distributed
 // across distinct GPUs.
 void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
@@ -614,6 +624,77 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     flattened[i] = newLikeFlat(tensor_lists, i);
   }
   return flattened;
+}
+
+void checkSplitSizes(
+    const std::vector<int64_t>& split_sizes,
+    const at::Tensor& tensor,
+    int group_size) {
+  if (split_sizes.size() == 0) {
+    if (tensor.size(0) % group_size != 0) {
+      throw std::runtime_error(
+          "Tensor's dim 0 does not divide equally across group size");
+    }
+  } else {
+    if (split_sizes.size() != group_size) {
+      throw std::runtime_error(
+          "Number of tensor splits not equal to group size");
+    }
+    int sum = std::accumulate(split_sizes.begin(), split_sizes.end(), 0);
+    if (sum != tensor.size(0)) {
+      throw std::runtime_error("Split sizes doesn't match total dim 0 size");
+    }
+  }
+}
+
+int64_t computeLengthsAndOffsets(
+    const std::vector<int64_t>& split_sizes,
+    const at::Tensor& tensor,
+    std::vector<int>* lengths,
+    std::vector<int>* offsets) {
+  int64_t group_size = lengths->size();
+  bool equal_splits = false;
+  int64_t dim0_size = tensor.size(0);
+  int64_t row_size = (dim0_size ? tensor.numel() / dim0_size : 1);
+  int64_t split_size = 0;
+  int64_t offset = 0;
+
+  if (split_sizes.size() == 0) {
+    equal_splits = true;
+    split_size = tensor.size(0) / group_size;
+  }
+  for (int i = 0; i < group_size; i++) {
+    int64_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
+    if (length > std::numeric_limits<int>::max() ||
+        offset > std::numeric_limits<int>::max()) {
+      throw std::runtime_error(
+          "Length or offset larger than INT_MAX not supported");
+    }
+    (*lengths)[i] = length;
+    (*offsets)[i] = offset;
+    offset += length;
+  }
+  return offset;
+}
+
+int64_t computeLengthsAndOffsets(
+    const std::vector<at::Tensor>& tensors,
+    std::vector<int>* lengths,
+    std::vector<int>* offsets) {
+  int64_t group_size = lengths->size();
+  int64_t offset = 0;
+  for (int i = 0; i < group_size; i++) {
+    int64_t length = tensors[i].numel();
+    if (length > std::numeric_limits<int>::max() ||
+        offset > std::numeric_limits<int>::max()) {
+      throw std::runtime_error(
+          "Length or offset larger than INT_MAX not supported");
+    }
+    (*lengths)[i] = length;
+    (*offsets)[i] = offset;
+    offset += length;
+  }
+  return offset;
 }
 
 } // namespace
@@ -909,6 +990,88 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
   ncclWork->barrierTensors_ = std::move(barrierTensors);
 
   return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    std::vector<int64_t>& outputSplitSizes,
+    std::vector<int64_t>& inputSplitSizes,
+    const AllToAllOptions& opts) {
+#ifdef ENABLE_NCCL_P2P_SUPPORT
+  check_gpu_tensor(outputTensor);
+  check_gpu_tensor(inputTensor);
+  if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
+    std::vector<at::Tensor> inputTensors = {inputTensor};
+    std::vector<at::Tensor> outputTensors = {outputTensor};
+    return collective(
+        inputTensors,
+        outputTensors,
+        [&](at::Tensor& input,
+            at::Tensor& output,
+            ncclComm_t comm,
+            at::cuda::CUDAStream& stream) {
+          return gpuAlltoall(
+              input.data_ptr(),
+              output.data_ptr(),
+              input.numel() / size_,
+              input.element_size(),
+              getNcclDataType(input.scalar_type()),
+              comm,
+              stream.stream());
+        });
+  } else {
+    checkSplitSizes(inputSplitSizes, inputTensor, size_);
+    checkSplitSizes(outputSplitSizes, outputTensor, size_);
+    std::vector<at::Tensor> inputTensors = {inputTensor};
+    std::vector<at::Tensor> outputTensors = {outputTensor};
+    return collective(
+        inputTensors,
+        outputTensors,
+        [&](at::Tensor& input,
+            at::Tensor& output,
+            ncclComm_t comm,
+            at::cuda::CUDAStream& stream) {
+          std::vector<int> send_lengths(size_);
+          std::vector<int> recv_lengths(size_);
+          std::vector<int> send_offsets(size_);
+          std::vector<int> recv_offsets(size_);
+          computeLengthsAndOffsets(
+              inputSplitSizes, input, &send_lengths, &send_offsets);
+          computeLengthsAndOffsets(
+              outputSplitSizes, output, &recv_lengths, &recv_offsets);
+          return gpuAlltoallv(
+              input.data_ptr(),
+              send_lengths.data(),
+              send_offsets.data(),
+              output.data_ptr(),
+              recv_lengths.data(),
+              recv_offsets.data(),
+              input.element_size(),
+              getNcclDataType(input.scalar_type()),
+              comm,
+              stream.stream());
+        });
+  }
+#else
+  throw std::runtime_error("ProcessGroupNCCL does not support alltoall_base");
+#endif
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_list(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    std::vector<int64_t>& outputSplitSizes,
+    std::vector<int64_t>& inputSplitSizes,
+    const AllToAllOptions& opts) {
+  throw std::runtime_error("ProcessGroupNCCL does not support alltoall_list");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const AllToAllOptions& opts) {
+  throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(

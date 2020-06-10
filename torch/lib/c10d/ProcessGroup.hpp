@@ -171,6 +171,15 @@ class ProcessGroup {
     throw std::runtime_error("ProcessGroup does not support alltoall");
   }
 
+  virtual std::shared_ptr<ProcessGroup::Work> alltoall_list(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) {
+    throw std::runtime_error("ProcessGroup does not support alltoall");
+  }
+
   virtual std::shared_ptr<ProcessGroup::Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,

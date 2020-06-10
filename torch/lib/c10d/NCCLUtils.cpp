@@ -31,4 +31,76 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
       getNcclVersion();
 }
 
+#ifdef ENABLE_NCCL_P2P_SUPPORT
+ncclResult_t gpuAlltoall(
+    void* sendbuff,
+    void* recvbuff,
+    size_t count,
+    size_t elem_size,
+    ncclDataType_t type,
+    ncclComm_t comm,
+    cudaStream_t stream) {
+  int numRanks;
+  int myRank;
+  C10D_NCCL_CHECK(ncclCommCount(comm, &numRanks));
+  C10D_NCCL_CHECK(ncclCommUserRank(comm, &myRank));
+  size_t rankOffset = count * elem_size;
+  for (int r = 0; r < numRanks; r++) {
+    int sendRank = (myRank + r) % numRanks;
+    int recvRank = (myRank - r + numRanks) % numRanks;
+    C10D_NCCL_CHECK(ncclSend(
+        ((char*)sendbuff) + sendRank * rankOffset,
+        count,
+        type,
+        sendRank,
+        comm,
+        stream));
+    C10D_NCCL_CHECK(ncclRecv(
+        ((char*)recvbuff) + recvRank * rankOffset,
+        count,
+        type,
+        recvRank,
+        comm,
+        stream));
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t gpuAlltoallv(
+    void* sendbuff,
+    const int* sendcounts,
+    const int* sdispls,
+    void* recvbuff,
+    const int* recvcounts,
+    const int* rdispls,
+    size_t elem_size,
+    ncclDataType_t type,
+    ncclComm_t comm,
+    cudaStream_t stream) {
+  int numRanks;
+  int myRank;
+  C10D_NCCL_CHECK(ncclCommCount(comm, &numRanks));
+  C10D_NCCL_CHECK(ncclCommUserRank(comm, &myRank));
+  for (int r = 0; r < numRanks; r++) {
+    int sendRank = (myRank + r) % numRanks;
+    int recvRank = (myRank - r + numRanks) % numRanks;
+    C10D_NCCL_CHECK(ncclSend(
+        ((char*)sendbuff) + sdispls[sendRank] * elem_size,
+        sendcounts[sendRank],
+        type,
+        sendRank,
+        comm,
+        stream));
+    C10D_NCCL_CHECK(ncclRecv(
+        ((char*)recvbuff) + rdispls[recvRank] * elem_size,
+        recvcounts[recvRank],
+        type,
+        recvRank,
+        comm,
+        stream));
+  }
+  return ncclSuccess;
+}
+#endif
+
 } // namespace c10d

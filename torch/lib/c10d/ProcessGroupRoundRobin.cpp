@@ -76,6 +76,16 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::reduce_scatter(
   return next()->reduce_scatter(outputs, inputs, opts);
 };
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::alltoall_base(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    std::vector<int64_t>& outputSplitSizes,
+    std::vector<int64_t>& inputSplitSizes,
+    const AllToAllOptions& opts) {
+  return next()->alltoall_base(
+      outputTensor, inputTensor, outputSplitSizes, inputSplitSizes, opts);
+};
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::send(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
