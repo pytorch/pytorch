@@ -312,10 +312,6 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input);
   }
 
-  void add_input(const Tensor& input, Device device, ScalarType dtype) {
-    operands_.emplace_back(input, device, dtype);
-  }
-
   void set_check_mem_overlap(bool check_mem_overlap) {
     config_check_mem_overlap_ = check_mem_overlap;
   }
