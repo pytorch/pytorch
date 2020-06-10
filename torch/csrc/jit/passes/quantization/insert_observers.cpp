@@ -426,17 +426,21 @@ graph(%self, %input, %conv, %relu):
     return (%second_output) )",
       {is_conv1d_module, is_relu_module});
 
-  const PatternInfo nn_conv1d_aten_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv1d_aten_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu(%first_output)
-    return (%second_output) )", {is_conv1d_module});
+    return (%second_output) )",
+      {is_conv1d_module});
 
-  const PatternInfo nn_conv1d_aten_relu_ = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv1d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu_(%first_output)
-    return (%second_output) )", {is_conv1d_module});
+    return (%second_output) )",
+      {is_conv1d_module});
 
   const PatternInfo nn_conv2d_f_relu = PatternInfo::parse_from_str(
       R"(
@@ -454,17 +458,21 @@ graph(%self, %input, %conv, %relu):
     return (%second_output) )",
       {is_conv2d_module, is_relu_module});
 
-  const PatternInfo nn_conv2d_aten_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv2d_aten_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu(%first_output)
-    return (%second_output) )", {is_conv2d_module});
+    return (%second_output) )",
+      {is_conv2d_module});
 
-  const PatternInfo nn_conv2d_aten_relu_ = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv2d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu_(%first_output)
-    return (%second_output) )", {is_conv2d_module});
+    return (%second_output) )",
+      {is_conv2d_module});
 
   const PatternInfo nn_conv3d_f_relu = PatternInfo::parse_from_str(
       R"(
@@ -482,17 +490,21 @@ graph(%self, %input, %conv, %relu):
     return (%second_output) )",
       {is_conv3d_module, is_relu_module});
 
-  const PatternInfo nn_conv3d_aten_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv3d_aten_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %conv, %input):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu(%first_output)
-    return (%second_output) )", {is_conv3d_module});
+    return (%second_output) )",
+      {is_conv3d_module});
 
-  const PatternInfo nn_conv3d_aten_relu_ = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv3d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu_(%first_output)
-    return (%second_output) )", {is_conv3d_module});
+    return (%second_output) )",
+      {is_conv3d_module});
 
   const PatternInfo add_nn_relu = PatternInfo::parse_from_str(
       R"(
