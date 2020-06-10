@@ -393,7 +393,8 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   } else if (field == "named_modules" || field == "modules") {
     std::vector<SugaredValuePtr> keys;
     std::vector<SugaredValuePtr> values;
-    auto lambda = [&keys, &values](std::shared_ptr<ModuleValue> module,
+    auto lambda = [&keys, &values](
+                      std::shared_ptr<ModuleValue> module,
                       SugaredValuePtr value,
                       SugaredValuePtr key) -> void {
       keys.emplace_back(key);
