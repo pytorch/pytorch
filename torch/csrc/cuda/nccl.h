@@ -15,12 +15,11 @@ namespace torch {
 namespace cuda {
 namespace nccl {
 
-// NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
-// Don't use them outside of these files.
-namespace detail {
-/*
-The below enums are from https://github.com/NVIDIA/nccl/blob/master/src/nccl.h.in 
-however they're declare anyonomously there, so we can't forward declare them here.*/
+    /*
+The below enums are from
+https://github.com/NVIDIA/nccl/blob/master/src/nccl.h.in
+however they're declare anyonomously there, so we can't forward declare them
+here.*/
 /* Error type */
 typedef enum {
   ncclSuccess = 0,
@@ -55,6 +54,11 @@ typedef enum {
 typedef struct {
   char internal[TORCH_CUDA_NCCL_UNIQUE_ID_BYTES];
 } torchNcclUniqueId;
+
+// NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.
+// Don't use them outside of these files.
+namespace detail {
+
 
 TORCH_CUDA_API void throw_nccl_error(torchNcclResult_t status);
 
