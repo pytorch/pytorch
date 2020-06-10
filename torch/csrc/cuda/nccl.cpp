@@ -221,8 +221,9 @@ ncclComm_t comm_init_rank(
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   ncclComm_t comm;
+  ncclUniqueId* nccl_id = reinterpret_cast<ncclUniqueId*>(&id);
   NCCL_CHECK(
-      static_cast<torchNcclResult_t>(ncclCommInitRank(&comm, nranks, static_cast<const ncclUniqueId>(comm_id), rank)));
+      static_cast<torchNcclResult_t>(ncclCommInitRank(&comm, nranks, nccl_id, rank)));
   return comm;
 #else
   return nullptr;
