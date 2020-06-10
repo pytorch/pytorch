@@ -17,9 +17,9 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
     const float rpcTimeoutSeconds,
-    const bool asyncFunction) {
+    const bool isAsyncExecution) {
   auto scriptCall = std::make_unique<ScriptCall>(
-      qualifiedName, std::move(stack), asyncFunction);
+      qualifiedName, std::move(stack), isAsyncExecution);
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto futMessage = autograd::sendMessageWithAutograd(
       *rpcAgentPtr,
@@ -57,7 +57,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const bool isAsyncExecution) {
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto dstWorkerInfo = rpcAgentPtr->getWorkerInfo(dstWorkerName);
   auto& ctx = RRefContext::getInstance();
@@ -79,7 +80,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         qualifiedName,
         std::move(stack),
         userRRefPtr->rrefId(),
-        userRRefPtr->forkId());
+        userRRefPtr->forkId(),
+        isAsyncExecution);
 
     auto fm = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
@@ -105,7 +107,8 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         qualifiedName,
         std::move(stack),
         ownerRRefPtr->rrefId(),
-        ownerRRefPtr->rrefId());
+        ownerRRefPtr->rrefId(),
+        isAsyncExecution);
 
     auto fm = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,

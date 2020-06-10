@@ -202,7 +202,7 @@ class class_ {
     TORCH_CHECK(
         *first_arg_type == *classTypePtr,
         "self argument of __getstate__ must be the custom class type. Got ",
-        first_arg_type->python_str());
+        first_arg_type->repr_str());
     TORCH_CHECK(
         getstate_schema.returns().size() == 1,
         "__getstate__ should return exactly one value for serialization. Got: ",
@@ -214,9 +214,9 @@ class class_ {
         (*arg_type == *ser_type),
         "__setstate__'s argument should be the same type as the "
         "return value of __getstate__. Got ",
-        arg_type->python_str(),
+        arg_type->repr_str(),
         " but expected ",
-        ser_type->python_str());
+        ser_type->repr_str());
 
     return *this;
   }
