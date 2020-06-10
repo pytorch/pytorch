@@ -12,6 +12,7 @@ from torch.quantization import default_dynamic_qconfig
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
+from torch.quantization import default_qat_qconfig
 from torch.quantization import get_default_qconfig
 
 # torch.quantization.quantize_script
@@ -22,6 +23,7 @@ from torch.quantization.quantize_script import quantize_script
 from torch.quantization.quantize_script import prepare_dynamic_script
 from torch.quantization.quantize_script import convert_dynamic_script
 from torch.quantization.quantize_script import quantize_dynamic_script
+from torch.quantization.quantize_script import prepare_qat_script
 
 # Testing utils
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
@@ -2569,3 +2571,26 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
                    .check_not("aten::_choose_qparams_per_tensor") \
                    .run(m1.graph)
+
+class TestQuantizeQATScript(QuantizationTestCase):
+
+    def test_prepare_qat(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.fc(x)
+
+        m = torch.jit.script(M())
+        m = prepare_qat_script(m, {'': default_qat_qconfig})
+        # for input of FC for dynamic quant
+        assert len(attrs_with_prefix(m, '_observer_')) == 2
+        # for weight
+        assert len(attrs_with_prefix(m.fc, '_observer_')) == 1
+        FileCheck().check('FakeQuantize = prim::GetAttr[name="_observer_') \
+                   .check('prim::GetAttr[name="fc"]') \
+                   .check('prim::CallMethod') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .run(m.graph)
