@@ -772,6 +772,7 @@ class TestDataLoader(TestCase):
         batch_size = loader.batch_size
         for i, (batch_samples, batch_targets) in enumerate(loader):
             if batch_size is None:
+                sample, target = (batch_samples, batch_targets)
                 for data_point_idx, data_point in enumerate(self.data):
                     if data_point.eq(sample).all():
                         self.assertFalse(found_data[data_point_idx])
