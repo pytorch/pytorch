@@ -30,7 +30,8 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
       const c10::QualifiedName& qualifiedName,
       std::vector<at::IValue>&& stack,
       const RRefId& retRRefId,
-      const ForkId& retForkId);
+      const ForkId& retForkId,
+      const bool isAsyncExecution);
 
   inline const RRefId& retRRefId() const {
     return retRRefId_;

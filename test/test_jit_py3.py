@@ -405,6 +405,51 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
             torch.jit.script(wrong_type)
 
+    def test_subexpression_List_Future(self):
+
+        @torch.jit.script
+        def fn(x: List[torch.jit.Future[int]]) -> torch.jit.Future[int]:
+            return x[0]
+
+        FileCheck().check('Future[int]').check('Future[int]').run(fn.graph)
+
+    def test_subexpression_Tuple_int_int_Future(self):
+
+        @torch.jit.script
+        def fn(x: Tuple[int, int, torch.jit.Future[int]]) -> Tuple[int, torch.jit.Future[int]]:
+            return x[0], x[2]
+
+        FileCheck().check('(int, int, Future[int])').check('(int, Future[int])').run(fn.graph)
+
+    def test_subexpression_Dict_int_Future(self):
+
+        @torch.jit.script
+        def fn(x: Dict[int, torch.jit.Future[int]], y: int) -> torch.jit.Future[int]:
+            return x[y]
+
+        FileCheck().check('Dict(int, Future(int))').check('Future[int]').run(fn.graph)
+
+    def test_subexpression_Optional(self):
+
+        @torch.jit.script
+        def fn(x: Optional[Dict[int, torch.jit.Future[int]]]) -> Optional[torch.jit.Future[int]]:
+            if x is not None:
+                return x[0]
+            else:
+                return None
+
+        FileCheck().check('Dict(int, Future(int))?').run(fn.graph)
+
+    def test_unimported_type_resolution(self):
+        # verify fallback from the python resolver to the c++ resolver
+
+        @ torch.jit.script
+        def fn(x):
+            # type: (number) -> number
+            return x + 1
+
+        FileCheck().check('Scalar').run(fn.graph)
+
     def test_parser_bug(self):
         def parser_bug(o: Optional[torch.Tensor]):
             pass

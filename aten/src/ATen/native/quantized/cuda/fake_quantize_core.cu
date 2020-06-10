@@ -29,7 +29,7 @@ void fake_quantize_tensor_kernel_cuda(
   // scalar type of this function is guaranteed to be float
   float inv_scale = 1.0f / scale;
   auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
+  iter.check_all_same_dtype(false);
   iter.add_output(output);
   iter.add_input(input);
   iter.build();
@@ -57,7 +57,7 @@ void fake_quantize_grad_tensor_kernel_cuda(
   // scalar type of this function is guaranteed to be float
   float inv_scale = 1.0f / scale;
   auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
+  iter.check_all_same_dtype(false);
   iter.add_output(input_grad);
   iter.add_input(output_grad);
   iter.add_input(input);
