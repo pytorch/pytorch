@@ -137,13 +137,13 @@ class QLinearUnpackWeightFp16Legacy final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("linear_unpack.legacy", QLinearUnpackWeightInt8Legacy::run);
-  m.impl("linear_unpack_fp16.legacy", QLinearUnpackWeightFp16Legacy::run);
+  m.impl("linear_unpack.legacy", TORCH_FN(QLinearUnpackWeightInt8Legacy::run));
+  m.impl("linear_unpack_fp16.legacy", TORCH_FN(QLinearUnpackWeightFp16Legacy::run));
 }
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
-  m.impl("linear_unpack", QLinearUnpackWeightInt8::run);
-  m.impl("linear_unpack_fp16", QLinearUnpackWeightFp16::run);
+  m.impl("linear_unpack", TORCH_FN(QLinearUnpackWeightInt8::run));
+  m.impl("linear_unpack_fp16", TORCH_FN(QLinearUnpackWeightFp16::run));
 }
 
 } // namespace
