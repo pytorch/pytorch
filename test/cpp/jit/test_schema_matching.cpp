@@ -40,7 +40,14 @@ void testSchemaMatching() {
           return torch.test_vartype(a, non_float)
     )JIT";
 
-    ASSERT_THROWS_WITH(m.define(error_example), "previously matched to type");
+    std::string err = "";
+    try {
+      m.define(error_example);
+    } catch (const std::exception& e) {
+      err = e.what();
+    }
+    TORCH_INTERNAL_ASSERT(
+        err.find("previously matched to type") != std::string::npos);
   }
   {
     RegisterOperators reg({
