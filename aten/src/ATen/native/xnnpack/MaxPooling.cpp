@@ -56,6 +56,37 @@ bool use_max_pool2d(
   //   Namely, setting both output_min and output_max to 0 is not valid usage.
   // * Finally, application of this operator to the input tensor with the given
   //   max pool 2d parameters must result in an output tensor with a valid shape.
+  const int64_t pt_outputHeight = pooling_output_shape(
+      input.size(Layout::Activation4D::height),
+      parameters.kernel[Layout::Parameter::height],
+      parameters.padding[Layout::Parameter::height],
+      parameters.stride[Layout::Parameter::height],
+      parameters.dilation[Layout::Parameter::height],
+      ceil_mode);
+  const int64_t pt_outputWidth = pooling_output_shape(
+      input.size(Layout::Activation4D::width),
+      parameters.kernel[Layout::Parameter::width],
+      parameters.padding[Layout::Parameter::width],
+      parameters.stride[Layout::Parameter::width],
+      parameters.dilation[Layout::Parameter::width],
+      ceil_mode);
+  const int64_t xnnpack_outputHeight = pooling_output_shape(
+      input.size(Layout::Activation4D::height),
+      parameters.kernel[Layout::Parameter::height],
+      parameters.padding[Layout::Parameter::height],
+      parameters.stride[Layout::Parameter::height],
+      parameters.dilation[Layout::Parameter::height],
+      false);
+  const int64_t xnnpack_outputWidth = pooling_output_shape(
+      input.size(Layout::Activation4D::width),
+      parameters.kernel[Layout::Parameter::width],
+      parameters.padding[Layout::Parameter::width],
+      parameters.stride[Layout::Parameter::width],
+      parameters.dilation[Layout::Parameter::width],
+      false);
+
+  const bool output_size_eq = (pt_outputHeight == xnnpack_outputHeight) &&
+    (pt_outputWidth == xnnpack_outputWidth);
 
   return xnnpack::internal::available() &&
       // Input
@@ -82,7 +113,7 @@ bool use_max_pool2d(
       (parameters.dilation[Layout::Parameter::height] > 0) &&
       (parameters.dilation[Layout::Parameter::width] > 0) &&
       // Ceil Mode
-      !ceil_mode &&
+      (!ceil_mode || output_size_eq) &&
       // Output Min / Max
       (output_max > output_min) &&
       // Output

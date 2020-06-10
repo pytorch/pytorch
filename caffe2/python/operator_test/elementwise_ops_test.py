@@ -142,7 +142,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(
         X=hu.tensor(
-            elements=st.floats(0.1, 10),
+            elements=hu.floats(0.1, 10),
             # allow empty tensor
             min_value=0),
         inplace=st.booleans(),
@@ -196,7 +196,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
                 ensure_outputs_are_inferred=True,
             )
 
-    @given(X=hu.tensor(elements=st.floats(0.1, 10.0), dtype=np.float32),
+    @given(X=hu.tensor(elements=hu.floats(0.1, 10.0), dtype=np.float32),
            inplace=st.booleans(), **hu.gcs)
     def test_rsqrt(self, X, inplace, gc, dc):
         op = core.CreateOperator(
@@ -267,7 +267,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             ensure_outputs_are_inferred=True,
         )
 
-    @given(X=hu.tensor(elements=st.floats(1.0, 10.0), dtype=np.float32),
+    @given(X=hu.tensor(elements=hu.floats(1.0, 10.0), dtype=np.float32),
            in_place=st.booleans(), **hu.gcs)
     def test_cbrt_grad(self, X, in_place, gc, dc):
         op = core.CreateOperator(
@@ -689,7 +689,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._test_bitwise_binary_op(
             "BitwiseXor", np.bitwise_xor, n, m, k, t, gc, dc)
 
-    @given(X=hu.tensor(elements=st.floats(0.5, 2), dtype=np.float32),
+    @given(X=hu.tensor(elements=hu.floats(0.5, 2), dtype=np.float32),
            inplace=st.booleans(), **hu.gcs)
     def test_reciprocal(self, X, inplace, gc, dc):
         def reciprocal_op(X):
