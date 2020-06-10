@@ -1081,9 +1081,9 @@ void AliasDb::replaceWithNewValue(Value* existing, Value* new_value) {
       *unshapedType(existing->type()) == *unshapedType(new_value->type()),
       "Types must be strictly equal if you are replacing aliasing information. ",
       "Got existing: '",
-      existing->type()->python_str(),
+      existing->type()->repr_str(),
       "', new_value: '",
-      new_value->type()->python_str(),
+      new_value->type()->repr_str(),
       "'");
   if (!isMutableTypeInternal(existing)) {
     return;
@@ -1099,9 +1099,9 @@ void AliasDb::copyValue(Value* from, Value* to) {
       *unshapedType(from->type()) == *unshapedType(to->type()),
       "Types must be strictly equal if you are copying aliasing information. ",
       "Got from: '",
-      from->type()->python_str(),
+      from->type()->repr_str(),
       "', to: '",
-      to->type()->python_str(),
+      to->type()->repr_str(),
       "'");
   if (!isMutableTypeInternal(to)) {
     return;
@@ -1557,8 +1557,8 @@ void Lint(const AliasDb* db) {
     auto it = db->elementMap_.find(v);
     if (it == db->elementMap_.end()) {
       failed = true;
-      ss << "Value %" << v->debugName() << " of type "
-         << v->type()->python_str() << " wasn't found in the element map.\n"
+      ss << "Value %" << v->debugName() << " of type " << v->type()->repr_str()
+         << " wasn't found in the element map.\n"
          << "It was defined in " << *v->node();
     }
   }
