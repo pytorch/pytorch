@@ -204,6 +204,13 @@ class ProcessGroupGloo : public ProcessGroup {
       std::vector<std::vector<at::Tensor>>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputCounts,
+      std::vector<int64_t>& inputCounts,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
