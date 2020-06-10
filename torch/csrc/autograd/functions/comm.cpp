@@ -41,11 +41,8 @@ variable_list Scatter::apply(variable_list&& inputs) {
     grad_fn->set_next_edges(collect_next_edges(input));
   }
 
-  auto device_indices = fmap(devices_, [](const at::Device& device) -> int64_t {
-    return device.index();
-  });
   auto tensors = torch::cuda::scatter(
-      std::move(input), device_indices, chunk_sizes_, dim_, streams_);
+      input, devices_, chunk_sizes_, dim_, streams_);
 
   std::vector<Variable> variables;
   variables.reserve(tensors.size());
@@ -119,10 +116,7 @@ variable_list Gather::apply(variable_list&& inputs) {
     }
   }
 
-  // This is special logic for torch::cuda::gather!
-  const auto destination_index =
-      destination_device_.is_cpu() ? -1 : destination_device_.index();
-  auto variable = torch::cuda::gather(tensors, dim_, destination_index);
+  auto variable = torch::cuda::gather(tensors, dim_, destination_device_);
   if (grad_fn) {
     set_history(variable, grad_fn);
   }

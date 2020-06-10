@@ -1,3 +1,4 @@
+#include <torch/csrc/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/cuda/comm.h>
 #include <torch/csrc/cuda/Stream.h>
@@ -18,20 +19,24 @@ void initCommMethods(PyObject *module) {
   m.def(
        "_broadcast_coalesced",
        [](std::vector<at::Tensor>& tensors,
-          std::vector<int64_t> devices,
+          py::object py_devices,
           size_t buffer_size) {
+          auto devices = THPUtils_unpackPySequence_to_DeviceList(py_devices.ptr());
+          // Note: We're holding the GIL up to here.
+          pybind11::gil_scoped_release no_gil;
          return broadcast_coalesced(tensors, devices, buffer_size);
        },
        py::arg("tensors"),
        py::arg("devices"),
-       py::arg("buffer_size"),
-       py::call_guard<py::gil_scoped_release>())
+       py::arg("buffer_size"))
       .def(
           "_broadcast",
-          [](at::Tensor& tensor, std::vector<int64_t> devices) {
+          [](at::Tensor& tensor, py::object py_devices) {
+            auto devices = THPUtils_unpackPySequence_to_DeviceList(py_devices.ptr());
+            // Note: We're holding the GIL up to here.
+            pybind11::gil_scoped_release no_gil;
             return broadcast(tensor, devices);
           },
-          py::call_guard<py::gil_scoped_release>(),
           py::arg("tensor"),
           py::arg("devices"))
       .def(
@@ -45,10 +50,11 @@ void initCommMethods(PyObject *module) {
       .def(
           "_scatter",
           [](at::Tensor& tensor,
-             std::vector<int64_t>& devices,
-             c10::optional<std::vector<int64_t>> chunk_sizes,
+             py::object py_devices,
+             const c10::optional<std::vector<int64_t>>& chunk_sizes,
              int64_t dim,
              c10::optional<py::object> py_streams) {
+            auto devices = THPUtils_unpackPySequence_to_DeviceList(py_devices.ptr());
             c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams;
             if (py_streams) {
               py::handle handle = *py_streams;
@@ -68,7 +74,7 @@ void initCommMethods(PyObject *module) {
           [](at::Tensor& tensor,
              std::vector<at::Tensor>& out_tensors,
              int64_t dim,
-             c10::optional<py::object> py_streams) {
+             const c10::optional<py::object>& py_streams) {
             c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams;
             if (py_streams) {
               py::handle handle = *py_streams;
@@ -86,13 +92,18 @@ void initCommMethods(PyObject *module) {
           "_gather",
           [](std::vector<at::Tensor>& tensors,
              int64_t dim,
-             c10::optional<int32_t> destination_index) {
-            return gather(tensors, dim, destination_index);
+             const c10::optional<py::object>& py_device) {
+            c10::optional<at::Device> device;
+            if (py_device) {
+              device = THPUtils_unpackDevice(py_device->ptr());
+            }
+            // Note: We're holding the GIL up to here.
+            pybind11::gil_scoped_release no_gil;
+            return gather(tensors, dim, device);
           },
           py::arg("tensors"),
           py::arg("dim"),
-          py::arg("destination_index"),
-          py::call_guard<py::gil_scoped_release>())
+          py::arg("destination"))
       .def(
           "_gather_out",
           [](std::vector<at::Tensor>& tensors,
