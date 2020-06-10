@@ -364,7 +364,7 @@ def async_add_with_future_ctor(to, x, y, z):
     fut = torch.futures.Future()
     rpc.rpc_async(to, torch.add, args=(x, y)).then(
         lambda fut1: fut.set_result(fut1.wait() + z)
-    ).wait()
+    )
     return fut
 
 
@@ -2759,25 +2759,49 @@ class RpcTest(RpcAgentTestFixture):
         elif mode == RPCExecMode.REMOTE:
             return rpc.remote(to, fn, args=args, kwargs=kwargs).to_here()
 
-    @dist_init
-    def test_async_function_raise(self):
+    def _test_async_function_raise(self, mode):
         with self.assertRaisesRegex(RuntimeError, "Expected error"):
-            rpc.rpc_sync(
+            self._run_func_in_mode(
                 worker_name((self.rank + 1) % self.world_size),
-                async_raise_func
+                async_raise_func,
+                mode
             )
 
     @dist_init
-    def test_async_function_wrong_return_type(self):
+    def test_async_function_raise(self):
+        self._test_async_function_raise(RPCExecMode.SYNC)
+
+    @dist_init
+    def test_async_function_raise_async(self):
+        self._test_async_function_raise(RPCExecMode.ASYNC)
+
+    @dist_init
+    def test_async_function_raise_remote(self):
+        self._test_async_function_raise(RPCExecMode.REMOTE)
+
+    def _test_async_function_wrong_return_type(self, mode):
         errMsg = (
             "Functions decorated with @rpc\\.async_function must return a "
             "torch\\.futures\\.Future object,"
         )
         with self.assertRaisesRegex(RuntimeError, errMsg):
-            rpc.rpc_sync(
+            self._run_func_in_mode(
                 worker_name((self.rank + 1) % self.world_size),
-                async_wrong_type
+                async_wrong_type,
+                mode
             )
+
+    @dist_init
+    def test_async_function_wrong_return_type(self):
+        self._test_async_function_wrong_return_type(RPCExecMode.SYNC)
+
+    @dist_init
+    def test_async_function_wrong_return_type_async(self):
+        self._test_async_function_wrong_return_type(RPCExecMode.ASYNC)
+
+    @dist_init
+    def test_async_function_wrong_return_type_remote(self):
+        self._test_async_function_wrong_return_type(RPCExecMode.REMOTE)
 
     @dist_init
     def test_async_function_simple(self):
@@ -2868,17 +2892,30 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.REMOTE
         )
 
-    @dist_init
-    def test_return_future(self):
+    def _test_return_future(self, mode):
         with self.assertRaisesRegex(
             RuntimeError,
             "Can not pickle torch.futures.Future"
         ):
-            rpc.rpc_sync(
+            self._run_func_in_mode(
                 worker_name((self.rank + 1) % self.world_size),
                 return_future,
+                mode
             )
 
+    @dist_init
+    def test_return_future(self):
+        self._test_return_future(RPCExecMode.SYNC)
+
+    @dist_init
+    def test_return_future_async(self):
+        self._test_return_future(RPCExecMode.ASYNC)
+
+    @dist_init
+    def test_return_future_remote(self):
+        self._test_return_future(RPCExecMode.REMOTE)
+
+    @_skip_if_tensorpipe_agent
     @dist_init
     def test_rref_timeout(self):
         # This test is similar to ones in FaultyProcessGroupTest, but is meant to be
