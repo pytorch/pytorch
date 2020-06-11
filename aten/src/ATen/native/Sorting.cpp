@@ -215,12 +215,7 @@ std::tuple<Tensor, Tensor> topk(
     bool largest,
     bool sorted) {
   const int limit = 100000;
-  // const int limit = 20000;
   const int _dividers[] = {100, 50, 25, 20, 15, 12, 10, 13, 11, 7, 5, 3, 2};
-  // const int _dividers[] = {10, 12, 15, 20, 25, 50, 100};
-  // const int _dividers[] = {10, 12, 15, 25};
-  // const int _dividers[] = {15, 20, 25, 50, 100};
-  // const int _dividers[] = {2, 3, 5, 7, 11, 13, 15, 17};
   int selected_divider = -1;
 
   if (self.size(dim) >= limit && self.device().type() == at::kCUDA) {
