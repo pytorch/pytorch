@@ -289,8 +289,8 @@ class InsertObserversHelper {
       std::unordered_set<Value*> graph_observed_values =
           std::unordered_set<Value*>());
 
-  void setDynamicFlag(bool is_dynamic) {
-    is_dynamic_ = is_dynamic;
+  void setQuantType(QuantType quant_type) {
+    quant_type_ = quant_type;
   }
 
  private:
@@ -455,8 +455,8 @@ class InsertObserversHelper {
   // want to add to the module instance that has the block
   std::unordered_map<Block*, NameModuleVector> block_observer_map_;
 
-  // Is dynamic quantization enabled for the observer pass.
-  bool is_dynamic_ = false;
+  // Type of quantization for this pass.
+  QuantType quant_type_ = QuantType::STATIC;
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
@@ -901,7 +901,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // For dynamic quantization we only insert observers at the input
   // of the quantizable function.
-  if (!is_dynamic_) {
+  if (quant_type_ == QuantType::STATIC) {
     // Check whether producer is quantizable
     if (nodeQuantizable(v->node()) || isPropagateQuantNode(v->node())) {
       return true;
@@ -909,7 +909,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether node input value is quantizable
   for (const auto& use : v->uses()) {
-    if (useQuantizable(use, is_dynamic_)) {
+    if (useQuantizable(use, quant_type_)) {
       return true;
     }
   }
@@ -1269,7 +1269,7 @@ Module InsertObservers(
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
     bool inplace,
-    bool is_dynamic) {
+    QuantType quant_type) {
   ModuleQConfigMap map_before_clone;
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
@@ -1279,7 +1279,7 @@ Module InsertObservers(
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
-  helper.setDynamicFlag(is_dynamic);
+  helper.setQuantType(quant_type);
   helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name, /* is_entry_point */ true);
   return module;
