@@ -167,10 +167,10 @@ TEST(TensorIteratorTest, SerialLoopSingleThread) {
 
 TEST(TensorIteratorTest, InputDType) {
   auto iter = at::TensorIterator();
+  iter.check_all_same_dtype(false);
   iter.add_output(at::ones({1, 1}, at::dtype(at::kBool)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
-  iter.dont_compute_common_dtype();
   iter.build();
   EXPECT_TRUE(iter.input_dtype() == at::kFloat);
   EXPECT_TRUE(iter.input_dtype(0) == at::kFloat);
@@ -182,7 +182,7 @@ TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
   iter.add_output(at::ones({1, 1}, at::dtype(at::kBool)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
-  iter.compute_common_dtype_only_for_inputs();
+  iter.promote_inputs_to_common_dtype(true);
   iter.build();
   EXPECT_TRUE(iter.dtype(0) == at::kBool);
   EXPECT_TRUE(iter.dtype(1) == at::kDouble);
@@ -192,25 +192,14 @@ TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
 
 TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
   auto iter = at::TensorIterator();
+  iter.check_all_same_dtype(false);
   iter.add_output(at::ones({1, 1}, at::dtype(at::kLong)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
   iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
-  iter.compute_common_dtype_only_for_inputs();
-  iter.dont_compute_common_dtype();
   iter.build();
   EXPECT_TRUE(iter.dtype(0) == at::kLong);
   EXPECT_TRUE(iter.dtype(1) == at::kFloat);
   EXPECT_TRUE(iter.dtype(2) == at::kDouble);
-}
-
-TEST(TensorIteratorTest, DoNotComputeCommonDTypeIfOutputIsUndefined) {
-  Tensor out;
-  auto iter = at::TensorIterator();
-  iter.add_output(out);
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
-  iter.compute_common_dtype_only_for_inputs();
-  ASSERT_ANY_THROW(iter.build());
 }
 
 TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {

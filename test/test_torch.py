@@ -1363,7 +1363,8 @@ class AbstractTestCases:
             except RuntimeError:
                 pass
             with mp.Pool(1) as pool:
-                self.assertTrue(pool.map(method, [arg]))
+                out: list = pool.map(method, [arg])
+                self.assertTrue(out[0])
 
         @staticmethod
         def _test_multinomial_invalid_probs(probs):
@@ -1372,7 +1373,7 @@ class AbstractTestCases:
                 torch.multinomial(probs.to('cpu'), 2)
                 return False  # Should not be reached
             except RuntimeError as e:
-                return 'invalid multinomial distribution' in str(e)
+                return 'probability tensor contains either `inf`, `nan` or element < 0' in str(e)
 
         @slowTest
         @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
@@ -1384,7 +1385,6 @@ class AbstractTestCases:
             self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
             self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
             self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
-            self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
         @suppress_warnings
         def test_range(self):
@@ -11462,7 +11462,7 @@ class TestTorchDeviceType(TestCase):
         # complex
         m1 = torch.tensor((4.0000 + 4.0000j), dtype=torch.complex64)
         m2 = torch.tensor(4., dtype=torch.float64)
-        self.assertRaisesRegex(RuntimeError, r"result type ComplexDouble can't be cast to the desired output type Double",
+        self.assertRaisesRegex(RuntimeError, r"result type ComplexFloat can't be cast to the desired output type Double",
                                lambda: torch.add(m1, m1, out=m2))
 
 
@@ -14111,7 +14111,7 @@ class TestTorchDeviceType(TestCase):
     @deviceCountAtLeast(2)
     @onlyCUDA
     def test_cross_device_binary_ops(self, devices):
-        vals = (1, (2,))
+        vals = (1., (2.,))
         cpu_tensor = torch.randn(2, 2)
         for op in (operator.add, torch.add,
                    operator.sub, torch.sub,
@@ -14122,13 +14122,13 @@ class TestTorchDeviceType(TestCase):
                 a = torch.tensor(a, device=devices[0])
                 b = torch.tensor(b, device=devices[1])
 
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(a, b)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(b, a)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(a, cpu_tensor)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(cpu_tensor, a)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
@@ -17500,6 +17500,41 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             a = np.array(val, dtype=torch_to_numpy_dtype_dict[dtype])
             self.assertEqual(t, torch.from_numpy(a))
 
+    def test_multinomial_invalid(self, device):
+        def test(probs):
+            with self.assertRaisesRegex(RuntimeError,
+                                        'probability tensor contains either `inf`, `nan` or element < 0'):
+                torch.multinomial(probs.to(device), 2)
+                torch.cuda.synchronize()
+
+        test(torch.Tensor([1, -1, 1]))
+        test(torch.Tensor([1, inf, 1]))
+        test(torch.Tensor([1, -inf, 1]))
+        test(torch.Tensor([1, 1, nan]))
+
+    def test_multinomial_invalid_distribution(self, device):
+        def test(probs, replacement):
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"invalid multinomial distribution \(sum of probabilities <= 0\)"):
+                torch.multinomial(probs, 2, replacement)
+                torch.cuda.synchronize()
+
+        x = torch.zeros(3, device=device)
+        y = torch.zeros(3, 3, device=device)
+        z = torch.zeros(3, 3, device=device)
+        z[1, :] = 1
+
+        test(x, False)
+        test(y, False)
+        test(z, False)
+
+        # Verify only for CPU as replacement=True
+        # throws device side assert triggered.
+        if self.device_type == 'cpu':
+            test(x, True)
+            test(y, True)
+            test(z, True)
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
@@ -17780,7 +17815,7 @@ class TestDevicePrecision(TestCase):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
 
-        err_string = "output with device cpu doesn't match the desired device {0}".format(device)
+        err_string = "Expected all tensors to be on the same device, but found at least two devices, {0}".format(device)
 
         with self.assertRaisesRegex(RuntimeError, err_string):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
