@@ -99,9 +99,11 @@ class DataParallel(Module):
 
 
     Args:
-        module (Module): module to be parallelized
-        device_ids (list of int or torch.device): CUDA devices (default: all devices)
-        output_device (int or torch.device): device location of output (default: device_ids[0])
+        module (Module): module to be parallelized.
+        device_ids (list of int, str or torch.device, optional): CUDA devices
+            used to parallel :attr:`module`. Default: all visible CUDA devices.
+        output_device (int, str or torch.device, optional): output device location.
+            Can be either a CPU or a CUDA device. Default: ``device_ids[0]``
 
     Attributes:
         module (Module): the module to be parallelized
@@ -129,14 +131,14 @@ class DataParallel(Module):
 
         self.dim = dim
         self.module = module
-        self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
-        self.output_device = _get_device_index(output_device, True)
-        self.src_device_obj = torch.device("cuda:{}".format(self.device_ids[0]))
+        self.device_ids = device_ids
+        self.output_device = output_device
+        self.src_device_obj = torch.device(device_ids[0])
 
         _check_balance(self.device_ids)
 
         if len(self.device_ids) == 1:
-            self.module.cuda(device_ids[0])
+            self.module.to(device_ids[0])
 
     def forward(self, *inputs, **kwargs):
         if not self.device_ids:
@@ -169,19 +171,21 @@ class DataParallel(Module):
 
 
 def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, module_kwargs=None):
-    r"""Evaluates module(input) in parallel across the GPUs given in device_ids.
+    r"""Evaluates ``module(input)`` in parallel across the GPUs given in ``device_ids``.
 
-    This is the functional version of the DataParallel module.
+    This is the functional version of the :class:`DataParallel` module.
 
     Args:
         module (Module): the module to evaluate in parallel
         inputs (Tensor): inputs to the module
-        device_ids (list of int or torch.device): GPU ids on which to replicate module
-        output_device (list of int or torch.device): GPU location of the output  Use -1 to indicate the CPU.
-            (default: device_ids[0])
+        device_ids (list of int, str or torch.device, optional): CUDA devices
+            used to parallel :attr:`module`. Default: all visible CUDA devices.
+        output_device (int, str or torch.device, optional): output device location.
+            Can be either a CPU or a CUDA device. Default: ``device_ids[0]``
+
     Returns:
-        a Tensor containing the result of module(input) located on
-        output_device
+        a Tensor containing the result of ``module(input)`` located on
+        :attr:`output_device`
     """
     if not isinstance(inputs, tuple):
         inputs = (inputs,)
@@ -192,9 +196,7 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
     if output_device is None:
         output_device = device_ids[0]
 
-    device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
-    output_device = _get_device_index(output_device, True)
-    src_device_obj = torch.device("cuda:{}".format(device_ids[0]))
+    src_device_obj = torch.device(device_ids[0])
 
     for t in chain(module.parameters(), module.buffers()):
         if t.device != src_device_obj:
