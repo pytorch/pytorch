@@ -6,7 +6,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
-#include <c10/util/complex.h>
 
 #include <complex>
 #include <cstdint>
