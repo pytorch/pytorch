@@ -139,6 +139,9 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // when the input tensors are of the same size and strides,
   // reuse the same iterator for all input tensors
   bool reuse_iterator = true;
+  bool no_type_promotion = true;
+  // Check the type of the result
+  no_type_promotion = result.dtype() == notSkippedTensor.dtype();
 
   // compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
@@ -157,12 +160,13 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     }
 
     if (tensor.sizes() != notSkippedTensor.sizes() ||
-        tensor.strides() != notSkippedTensor.strides() ||
-        tensor.dtype() != notSkippedTensor.dtype()) {
+        tensor.strides() != notSkippedTensor.strides()) {
       reuse_iterator = false;
     }
+    if (tensor.dtype() != notSkippedTensor.dtype()) {
+      no_type_promotion = false;
+    }
   }
-
   // compute the size of the result
   auto result_size = notSkippedTensor.sizes().vec();
   result_size[dim] = cat_dim_size;
@@ -172,13 +176,13 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   allContiguous = allContiguous && result.is_contiguous();
   ScalarType dtype = notSkippedTensor.scalar_type();
-  if (use_serial_kernel && allContiguous && (dtype == ScalarType::Double || dtype == ScalarType::Float)) {
+  if (use_serial_kernel && allContiguous && no_type_promotion && (dtype == ScalarType::Double || dtype == ScalarType::Float)) {
     cat_serial_stub(kCPU, result, tensors, dim);
     return result;
   }
 
   int64_t offset = 0;
-  if (reuse_iterator && result.is_contiguous()) {
+  if (reuse_iterator && result.is_contiguous() && no_type_promotion) {
     auto source_slice = notSkippedTensor;
     auto slice_dim_size = source_slice.size(dim);
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
