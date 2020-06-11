@@ -1105,3 +1105,47 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
             def async_wrong_decorator_order(to, x, y):
                 # type: (str, Tensor, Tensor) -> Future[Tensor]
                 return rpc.rpc_async(to, script_add, (x, y))
+
+    @dist_init
+    def test_async_function_remote(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        rref = rpc.remote(
+            dst1,
+            async_add,
+            args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
+        )
+        self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_async_function_remote_multi(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        num = 20
+        rrefs = []
+        for i in range(num):
+            rrefs.append(
+                rpc.remote(
+                    dst1,
+                    async_add,
+                    args=(dst2, torch.ones(2, 2), torch.ones(2, 2) * i)
+                )
+            )
+
+        for i in range(num):
+            self.assertEqual(rrefs[i].to_here(), torch.ones(2, 2) + i)
+
+    @dist_init
+    def test_async_function_wrong_return_type_remote(self):
+        rref = rpc.remote(
+            worker_name((self.rank + 1) % self.world_size),
+            async_wrong_type
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected Future but got Tensor"
+        ):
+            rref.to_here()
