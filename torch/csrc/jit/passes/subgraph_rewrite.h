@@ -68,7 +68,7 @@ class TORCH_API SubgraphRewriter {
       [](const Match&, const std::unordered_map<std::string, Value*>&) {
         return true;
       }) {
-    runOnGraph(graph, {filter});
+    runOnGraph(graph, std::vector<MatchFilter>({filter}));
   }
 
 
