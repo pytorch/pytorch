@@ -57,8 +57,6 @@ VIEW_FUNCTIONS = {
     '_values': 'self',
     'indices': 'self',
     'values': 'self',
-    'view_as_real': 'self',
-    'view_as_complex': 'self',
     # sparse_coo ctor output should really be views of both indices and values,
     # but we only supports making as view of a single variable, and indices is
     # discrete anyways.
@@ -68,11 +66,14 @@ VIEW_FUNCTIONS = {
 
 VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
 
+for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
+    VIEW_FUNCTIONS[key] = 'self'
+
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split', 'real', 'imag'})
 
 def format_return_type(returns):
     if len(returns) == 0:

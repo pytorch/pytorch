@@ -197,7 +197,6 @@ template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
   if (self.is_complex()) {
-    // note: float_tensor lives only as long as the self tensor lives
     auto float_tensor = at::view_as_real(self);
     // variance for normal distribution of the real and imaginary values
     // is half of the input variance

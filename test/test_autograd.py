@@ -1502,7 +1502,7 @@ class TestAutograd(TestCase):
         gradcheck(func, [x])
         gradgradcheck(func, [x])
 
-    def test_complex_view_functions(self):
+    def test_complex_views(self):
         x = torch.randn(10, dtype=torch.cdouble, requires_grad=True)
         x.real.sum().backward()
         self.assertEqual(x.grad, torch.ones_like(x))

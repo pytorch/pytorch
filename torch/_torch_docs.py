@@ -1154,13 +1154,13 @@ add_docstr(torch.view_as_real,
            r"""
 view_as_real(input) -> Tensor
 
-Returns a view of :attr:`input` as a complex tensor. For an input complex tensor of
+Returns a view of :attr:`input` as a real tensor. For an input complex tensor of
 :attr:`size` :math:`m1, m2, \dots, mi`, this function returns a new
-real tensor of size :math:`m1, m2, \dots, mi x 2`, where the last dimension of size 2
+real tensor of size :math:`m1, m2, \dots, mi, 2`, where the last dimension of size 2
 represents the real and imaginary components of complex numbers.
 
 .. warning::
-    :func:`view_as_real` is only supported for tensors with complex dtypes.
+    :func:`view_as_real` is only supported for tensors with ``complex dtypes``.
 
 Example::
     >>> x=torch.randn(4, dtype=torch.cfloat)
@@ -1177,16 +1177,15 @@ add_docstr(torch.view_as_complex,
            r"""
 view_as_complex(input) -> Tensor
 
-Returns a view of :attr:`input` as real tensor. For an input complex tensor of
-:attr:`size` :math:`m1, m2, \dots, mi x 2`, this function returns a new
+Returns a view of :attr:`input` as a complex tensor. For an input complex tensor of
+:attr:`size` :math:`m1, m2, \dots, mi, 2`, this function returns a new
 complex tensor of :attr:`size` :math:`m1, m2, \dots, mi` where the last dimension of
 the input tensor is expected to represent the real and imaginary components of complex numbers.
 
 .. warning::
-    :func:`view_as_complex` is only supported for tensors with :attr:`float` and :attr:`double` tensors.
-    For input with `complex dtypes`, the tensor must have a `stride` of 1 for it's last dimension.
-    The strides of all other dimensions must be even numbers. In addition, the input is expected to have
-    the last dimension of :attr:`size` 2.
+    :func:`view_as_complex` is only supported for tensors with :class:`torch.dtype` ``torch.float64`` and ``torch.float32`.
+    The input is expected to have the last dimension of :attr:`size` 2. In addition, the tensor must have a `stride` of 1 for it's last dimension.
+    The strides of all other dimensions must be even numbers.
 
 Example::
     >>> x=torch.randn(4, 2)
@@ -5687,8 +5686,8 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
 
-.. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)` 
-          will also remove the batch dimension, which can lead to unexpected 
+.. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)`
+          will also remove the batch dimension, which can lead to unexpected
           errors.
 
 Args:
@@ -6079,7 +6078,7 @@ fliplr(input) -> Tensor
 
 Flip array in the left/right direction, returning a new tensor.
 
-Flip the entries in each row in the left/right direction. 
+Flip the entries in each row in the left/right direction.
 Columns are preserved, but appear in a different order than before.
 
 Note:
