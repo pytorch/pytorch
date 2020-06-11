@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 
 namespace torch {
 namespace jit {
@@ -41,7 +40,7 @@ TORCH_API Module InsertQuantDeQuant(
     Module& module,
     const std::string& method_name,
     bool inplace,
-    QuantType quant_type = QuantType::STATIC);
+    bool is_dynamic = false);
 
 } // namespace jit
 } // namespace torch
