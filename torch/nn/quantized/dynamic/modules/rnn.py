@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch import Tensor  # noqa: F401
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
-
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
@@ -33,6 +33,8 @@ class RNNBase(torch.nn.Module):
 
     _FLOAT_MODULE = nn.RNNBase
 
+    _version = 2
+
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False, dtype=torch.qint8):
@@ -47,6 +49,7 @@ class RNNBase(torch.nn.Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.dtype = dtype
+        self.version = 2
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -84,8 +87,13 @@ class RNNBase(torch.nn.Module):
                         torch.ops.quantized.linear_prepack(w_ih, b_ih)
                     packed_hh = \
                         torch.ops.quantized.linear_prepack(w_hh, b_hh)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
-                        packed_ih, packed_hh, b_ih, b_hh)
+                    if self.version is None or self.version < 2:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, b_ih, b_hh)
+                    else:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, b_ih, b_hh, True)
+
                 else:
                     w_ih = torch.Tensor(gate_size, layer_input_size).float()
                     w_hh = torch.Tensor(gate_size, hidden_size).float()
@@ -192,6 +200,13 @@ class RNNBase(torch.nn.Module):
             return hx
         return apply_permutation(hx, permutation)
 
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+        self.version = version
+        super(RNNBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                   missing_keys, unexpected_keys, error_msgs)
+
     @classmethod
     def from_float(cls, mod):
         assert type(mod) == torch.nn.LSTM, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM'
@@ -243,18 +258,20 @@ class RNNBase(torch.nn.Module):
                     def quantize_and_pack(w, b):
                         weight_observer = weight_observer_method()
                         weight_observer(w)
-                        wt_scale, wt_zp = weight_observer.calculate_qparams()
-                        qweight = torch.quantize_per_tensor(
-                            w.float(), float(wt_scale), int(wt_zp), torch.qint8)
+                        qweight = _quantize_weight(w.float(), weight_observer)
                         packed_weight = \
                             torch.ops.quantized.linear_prepack(qweight, b)
                         return packed_weight
                     packed_ih = quantize_and_pack(weight_ih, bias_ih)
                     packed_hh = quantize_and_pack(weight_hh, bias_hh)
+                    if qRNNBase.version is None or qRNNBase.version < 2:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, bias_ih, bias_hh)
+                    else:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, bias_ih, bias_hh, True)
 
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
-                        packed_ih, packed_hh, bias_ih, bias_hh)
-                else:
+                elif dtype == torch.float16:
                     packed_ih = torch.ops.quantized.linear_prepack_fp16(
                         weight_ih.float(), bias_ih)
                     packed_hh = torch.ops.quantized.linear_prepack_fp16(
@@ -262,6 +279,8 @@ class RNNBase(torch.nn.Module):
 
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
                         packed_ih, packed_hh)
+                else:
+                    raise RuntimeError('Unsupported dtype specified for dynamic quantized LSTM!')
 
                 _all_weight_values.append(PackedParameter(cell_params))
         qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)

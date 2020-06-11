@@ -97,11 +97,9 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x4L;
 // 1. Initial version
 // 2. Removed op_version_set version numbers
 // 3. Added type tags to pickle serialization of container types
-// 4. (Currently read-only) Will change torch.div to throw a runtime error
-//      when it would have performed floor division. Bumping the version counter
-//      will let us presever torch.div's historic behavior for programs
-//      serialized with file formats 1--3.
-constexpr uint64_t kProducedFileFormatVersion = 0x3L;
+// 4. Stopped integer division using torch.div
+//      (a versioned symbol preserves the historic behavior of versions 1--3)
+constexpr uint64_t kProducedFileFormatVersion = 0x4L;
 
 // Writer-specific constants
 constexpr uint64_t kFieldAlignment = 64;

@@ -387,7 +387,9 @@ struct ParserImpl {
     auto subscript_exprs =
         parseList('[', ',', ']', &ParserImpl::parseSubscriptExp);
 
-    return Subscript::create(range, Expr(value), subscript_exprs);
+    const auto whole_range =
+        SourceRange(range.source(), range.start(), L.cur().range.start());
+    return Subscript::create(whole_range, Expr(value), subscript_exprs);
   }
 
   Maybe<Expr> maybeParseTypeAnnotation() {
