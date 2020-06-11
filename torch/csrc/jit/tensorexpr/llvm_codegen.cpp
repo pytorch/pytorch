@@ -322,12 +322,105 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   irb_.CreateRet(cc);
 }
 
+class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
+ private:
+  const Expr* mutate(const Intrinsics* v) {
+    if (v->op_type() == kTanh) {
+      ScalarType stype = v->dtype().scalar_type();
+      if (stype == ScalarType::Float) {
+        return fast_tanh(v->param(0));
+      }
+    } else if (v->op_type() == kSigmoid) {
+      ScalarType stype = v->dtype().scalar_type();
+      if (stype == ScalarType::Float) {
+        return fast_sigmoid(v->param(0));
+      }
+    }
+    // TODO: fast exp
+    // TODO: fast erf
+    // TODO: fast sigmoid
+    return GenericIntrinsicsExpander::mutate(v);
+  }
+
+  // The default tanh is quite slow, use the Eigen version from here:
+  // https://bitbucket.org/eigen/eigen/src/94875feeeeb9abe5509b314197da1991ba2070f5/Eigen/src/Core/MathFunctionsImpl.h#lines-26
+  const Expr* fast_tanh(const Expr* v_ptr) {
+    // TODO: investigate why "v = v_ptr" leads to a boolean conversion.
+    ExprHandle v{v_ptr};
+    Dtype dtype = v.dtype();
+    int lanes = dtype.lanes();
+    // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
+    // times. Clamp the input expression to [-9, 9]
+    ExprHandle plus_9 = to_vec(9.0f, lanes);
+    ExprHandle minus_9 = to_vec(-9.0f, lanes);
+    ExprHandle v1 = Min::make(v, plus_9, false);
+    v1 = Max::make(v1, minus_9, false);
+
+    // The coefficients for the numerator
+    ExprHandle alpha_1 = to_vec(4.89352455891786e-03f, lanes);
+    ExprHandle alpha_3 = to_vec(6.37261928875436e-04f, lanes);
+    ExprHandle alpha_5 = to_vec(1.48572235717979e-05f, lanes);
+    ExprHandle alpha_7 = to_vec(5.12229709037114e-08f, lanes);
+    ExprHandle alpha_9 = to_vec(-8.60467152213735e-11f, lanes);
+    ExprHandle alpha_11 = to_vec(2.00018790482477e-13f, lanes);
+    ExprHandle alpha_13 = to_vec(-2.76076847742355e-16f, lanes);
+
+    // The coeffecients for the denominator
+    ExprHandle beta_0 = to_vec(4.89352518554385e-03f, lanes);
+    ExprHandle beta_2 = to_vec(2.26843463243900e-03f, lanes);
+    ExprHandle beta_4 = to_vec(1.18534705686654e-04f, lanes);
+    ExprHandle beta_6 = to_vec(1.19825839466702e-06f, lanes);
+
+    // numerator
+    ExprHandle v2 = v1 * v1;
+    ExprHandle p = v2 * alpha_13 + alpha_11;
+    p = v2 * p + alpha_9;
+    p = v2 * p + alpha_7;
+    p = v2 * p + alpha_5;
+    p = v2 * p + alpha_3;
+    p = v2 * p + alpha_1;
+    p = v1 * p;
+
+    // denominator
+    ExprHandle q = v2 * beta_6 + beta_4;
+    q = v2 * q + beta_2;
+    q = v2 * q + beta_0;
+
+    ExprHandle result = p / q;
+    return result.node();
+  }
+
+  const Expr* fast_sigmoid(const Expr* v_ptr) {
+    // sigmoid(x) = (tanh(x / 2) + 1) / 2
+    ExprHandle x{v_ptr};
+    int lanes = x.dtype().lanes();
+    ExprHandle one_v = to_vec(1.f, lanes);
+    ExprHandle half_v = to_vec(0.5f, lanes);
+    ExprHandle x2 = x * half_v;
+    ExprHandle y{fast_tanh(x2.node())};
+    ExprHandle z = (y + one_v) * half_v;
+    return z.node();
+  }
+
+  ExprHandle to_vec(float v, int lanes) {
+    if (lanes == 1) {
+      return v;
+    } else {
+      return Broadcast::make(v, lanes);
+    }
+  }
+};
+
 void LLVMCodeGenImpl::emitKernel(
     Stmt* stmt,
     const std::vector<llvm::Type*>& params) {
   // Set insert point to the real function.
   bb_ = llvm::BasicBlock::Create(getContext(), "entry", fn_);
   irb_.SetInsertPoint(bb_);
+
+  // Maybe expand some of the intrinsics.
+  LLVMIntrinsicsExpander intrinsics_expander;
+  stmt = stmt->accept_mutator(&intrinsics_expander);
 
   // Compile the kernel.
   stmt->accept(this);

@@ -818,7 +818,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_test(DynamicSliceExportMod(), x,
                       dynamic_axes={'input_1': [0, 1, 2],
-                      'output_1': [0, 1, 2]})
+                                    'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_dynamic(self):
@@ -1865,6 +1865,97 @@ class TestONNXRuntime(unittest.TestCase):
         model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_test(model2, input2, do_constant_folding=True)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm_no_bias(self):
+        class LstmNet(torch.nn.Module):
+            def __init__(self, num_layers, bidirectional):
+                super(LstmNet, self).__init__()
+                self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers, bias=False, bidirectional=bidirectional)
+
+            def forward(self, input, initial_state):
+                return self.lstm(input, initial_state)
+
+        def get_LstmNet_model_and_inputs(num_layers, bidirectional):
+            input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+            num_directions = 2 if bidirectional else 1
+            model = LstmNet(num_layers, bidirectional)
+            h0 = torch.randn(num_layers * num_directions, BATCH_SIZE, RNN_HIDDEN_SIZE)
+            c0 = torch.randn(num_layers * num_directions, BATCH_SIZE, RNN_HIDDEN_SIZE)
+            return model, (input, (h0, c0))
+
+        num_layers = [1, 1, 2, 3]
+        bidirectional = [True, False, True, False]
+        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)] 
+        for model, input in models_and_inputs:
+            self.run_test(model, input)
+
+    def test_rnn_no_bias(self):
+        def make_model(layers, packed_sequence):
+            batch_first = True if packed_sequence == 2 else False
+            model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, bidirectional=False,
+                                 batch_first=batch_first, bias=False)
+
+            if packed_sequence == 1:
+                model = RnnModelWithPackedSequence(model, False)
+            if packed_sequence == 2:
+                model = RnnModelWithPackedSequence(model, True)
+            return model
+
+        def make_input(batch_size, layers, packed_sequence):
+            batch_first = True if packed_sequence == 2 else False
+            seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
+            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
+            inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
+            inputs = [inputs]
+
+            h0 = torch.randn(layers, batch_size, RNN_HIDDEN_SIZE)
+            inputs.append(h0)
+            if packed_sequence != 0:
+                inputs.append(torch.IntTensor(seq_lengths))
+            if len(inputs) == 1:
+                input = inputs[0]
+            else:
+                input = tuple(inputs)
+            return input
+
+        layers = [1, 3, 1, 3, 1, 3]
+        packed_sequence = [0, 0, 1, 1, 2, 2]
+        models = [make_model(l, p) for l, p in zip(layers, packed_sequence)]
+        inputs = [make_input(RNN_BATCH_SIZE, l, p) for l, p in zip(layers, packed_sequence)]
+
+        for model, input in zip(models, inputs):
+            self.run_test(model, input, batch_size=RNN_BATCH_SIZE)
+
+    def test_gru_no_bias(self):
+        class GruNet(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, bidirectional):
+                super(GruNet, self).__init__()
+                self.mygru = torch.nn.GRU(input_size, hidden_size, num_layers, bidirectional=bidirectional, bias=False)
+
+            def forward(self, input, initial_state):
+                out = self.mygru(input, initial_state)
+                return out
+
+        def get_GruNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
+                                        seq_len, bidirectional):
+            num_directions = 2 if bidirectional else 1
+            model = GruNet(input_size, hidden_size, num_layers, bidirectional)
+            input = torch.randn(seq_len, batch_size, input_size)
+            h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            return model, (input, h0)
+
+        input_size = [7, 5]
+        hidden_size = [3, 4]
+        num_layers = [2, 3]
+        batch_size = [3, 4]
+        seq_len = [5, 7]
+        bidirectional = [True, False] 
+        models_and_inputs = [get_GruNet_model_and_inputs(i, h, n, b, s, bi)
+                             for i, h, n, b, s, bi in zip(input_size, hidden_size, num_layers, batch_size, seq_len, bidirectional)]
+        for model, input in models_and_inputs:
+            self.run_test(model, input, do_constant_folding=True)
+
     def test_gru_constant_folding(self):
         class GruNet(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -2766,6 +2857,30 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, batch1, batch2, alpha, beta))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_linspace(self):
+        class LinSpace(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.linspace(x, y, steps=11), \
+                    torch.linspace(-x, -y, steps=11), \
+                    torch.linspace(x, y * 100, steps=1991), \
+                    torch.linspace(0, x / 10, steps=1), \
+                    torch.linspace(0, x / 10, steps=0), \
+                    torch.linspace(0, x * 100 - 1, steps=1001), \
+                    torch.linspace(x * -100, x * 100, steps=4001)
+
+        x = torch.tensor(10, dtype=torch.float)
+        y = torch.tensor(20, dtype=torch.float)
+        self.run_test(LinSpace(), (x, y))
+
+        x = torch.tensor(10, dtype=torch.int)
+        y = torch.tensor(20, dtype=torch.int)
+        self.run_test(LinSpace(), (x, y))
+
+        x = torch.tensor(10, dtype=torch.float64)
+        y = torch.tensor(20, dtype=torch.float64)
+        self.run_test(LinSpace(), (x, y))
+
     def test_numel(self):
         class MyModule(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3597,7 +3712,7 @@ TestONNXRuntime_opset12 = type(str("TestONNXRuntime_opset12"),
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    (unittest.TestCase,),
                                    dict(TestONNXRuntime.__dict__,
-                                   keep_initializers_as_inputs=False))
+                                        keep_initializers_as_inputs=False))
 
 
 # opset 10 tests, with keep_initializers_as_inputs=False for
@@ -3605,7 +3720,7 @@ TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=10,
-                                    keep_initializers_as_inputs=False))
+                                         keep_initializers_as_inputs=False))
 
 
 # opset 11 tests, with keep_initializers_as_inputs=False for
@@ -3613,14 +3728,14 @@ TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
 TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=11,
-                                    keep_initializers_as_inputs=False))
+                                         keep_initializers_as_inputs=False))
 
 # opset 12 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=12,
-                                    keep_initializers_as_inputs=False))
+                                         keep_initializers_as_inputs=False))
 
 
 if __name__ == '__main__':
