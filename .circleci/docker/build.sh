@@ -182,23 +182,21 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-rocm-py3.6-clang7)
+  pytorch-linux-xenial-rocm3.3-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
-    CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM=yes
+    ROCM_VERSION=3.3
     # newer cmake version required
     CMAKE_VERSION=3.6.3
     ;;
-  pytorch-linux-bionic-rocm-py3.6-clang7)
+  pytorch-linux-bionic-rocm3.3-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
-    CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM=yes
+    ROCM_VERSION=3.3
     ;;
 esac
 
@@ -239,7 +237,7 @@ docker build \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
-       --build-arg "ROCM=${ROCM:-}" \
+       --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
@@ -295,11 +293,7 @@ if [ -n "$CLANG_VERSION" ]; then
   if !(drun clang --version 2>&1 | grep -qF "clang version $CLANG_VERSION"); then
     echo "CLANG_VERSION=$CLANG_VERSION, but:"
     drun clang --version
-    if [[ "$image" == *-rocm* ]]; then
-      echo "For ROCm builds, version mismatch expected."
-    else
-      exit 1
-    fi
+    exit 1
   fi
 fi
 
