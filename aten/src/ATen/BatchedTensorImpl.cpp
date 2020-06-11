@@ -93,6 +93,20 @@ bool BatchedTensorImpl::has_storage() const {
   TORCH_INTERNAL_ASSERT(false, "Can't query has_storage for BatchedTensorImpl");
 }
 
+Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
+  TORCH_INTERNAL_ASSERT(!isBatched(tensor));
+  auto tensor_dim = tensor.dim();
+  TORCH_CHECK(
+      tensor_dim <= kVmapMaxTensorDims,
+      "vmap only supports tensors of dimensionality up to ", kVmapMaxTensorDims,
+      "; got a tensor with dim ", tensor_dim);
+  TORCH_INTERNAL_ASSERT(
+      std::all_of(bdims.begin(), bdims.end(),
+          [](const BatchDim& bdim) { return bdim.level() < kVmapNumLevels; }),
+      "We only support up to ", kVmapNumLevels, " nested vmaps");
+  return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
+}
+
 Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
   const auto* batched = maybeGetBatched(tensor);
   if (!batched) {

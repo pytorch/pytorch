@@ -45,6 +45,49 @@ TEST(VmapTest, TestBatchedTensor) {
     Tensor tensor = addBatchDim(ones({3}), /*lvl*/1, /*dim*/0);
   }
 }
+
+// returns {{lvl=0,dim=0}, {lvl=1,dim=1}, ..., {lvl=kVmapNumLevels-1,dim=kVmapNumLevels-1}};
+static BatchDims maxBatchDimsAtFront() {
+  BatchDims result;
+  for (int64_t lvl = 0; lvl < kVmapNumLevels; lvl++) {
+    result.emplace_back(lvl, /*dim=*/lvl);
+  }
+  return result;
+}
+
+TEST(VmapTest, TestBatchedTensorMaxLevel) {
+  {
+    // Should not throw
+    auto tensor = ones({2, 3, 4});
+    makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels - 1, /*dim*/0}});
+  }
+  {
+    auto tensor = ones({2, 3, 4});
+    ASSERT_THROW(
+        makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels, /*dim*/0}}),
+        c10::Error);
+  }
+  {
+    auto tensor = ones({2, 3, 4});
+    ASSERT_THROW(
+        makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels + 5, /*dim*/0}}),
+        c10::Error);
+  }
+  {
+    // create a BatchedTensor with kVmapNumLevels levels.
+    // Should not throw
+    auto tensor = ones(std::vector<int64_t>(kVmapNumLevels, 1));
+    makeBatched(tensor, maxBatchDimsAtFront());
+  }
+  {
+    // create a BatchedTensor with kVmapNumLevels+1 levels.
+    auto tensor = ones(std::vector<int64_t>(kVmapNumLevels + 1, 1));
+    auto batch_dims = maxBatchDimsAtFront();
+    batch_dims.emplace_back(/*lvl*/kVmapNumLevels, /*dim*/kVmapNumLevels);
+    ASSERT_THROW(makeBatched(tensor, batch_dims), c10::Error);
+  }
+}
+
 TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // No batch dims
