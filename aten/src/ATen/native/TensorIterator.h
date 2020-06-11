@@ -221,8 +221,6 @@ struct CAFFE2_API TensorIterator {
 
   /// Removes an operand from this iterator
   void remove_operand(int arg);
-  /// Removes a dimension from this iterator
-  void remove_dimension(int dim);
   /// Shrinks an iterated dimension
   void narrow(int dim, int64_t start, int64_t size);
   /// Narrows every dim after and including `start_dim` to size one.
@@ -426,18 +424,87 @@ protected:
   bool cast_common_dtype_to_outputs() { return config_cast_common_dtype_to_outputs_; }
 
 protected:
+
+  /// Records the "computation" shape of the output tensor.  The computation
+  /// shape is different from the regular shape in a few ways:
+  ///
+  ///   - The shape may be permuted (via permute_dimensions) so that we
+  ///     process the dimensions in the most computationally efficient order
+  ///     (rather than the logical order given to us by the users.)
+  ///   - The shape may have adjacent dimensions collapsed (via
+  ///     coalesce_dimensions) so that we minimize the number of
+  ///     dimensions we have to explicitly iterate over.  For example,
+  ///     a pointwise operation on a contiguous tensor "computationally"
+  ///     consists of only a single dimension.
+  ///
+  /// In other words, the computation shape is the output shape as it
+  /// actually matters for implementing the kernel, but not necessarily the
+  /// output shape that the user will see in the end.
+  ///
+  /// The lifecycle of mutations to shape_ in TensorIterator:
+  ///   - declare_static_shape() sets an initial shape explicitly
+  ///     provided by user, otherwise
+  ///   - compute_shape() computes the true (non-computational) shape
+  ///     specified by the user.
+  ///   - reorder_dimensions() reorders dimensions to improve coalescing.
+  ///   - coalesce_dimensions() then coalesces adjacent dimensions when
+  ///     possible.
+  ///
+  /// The shape may also be further modified if we create sub-TensorIterators,
+  /// e.g., via narrow or select_all_keeping_dim.
   DimVector shape_;
+
+  /// Temporarily records the permutation computed by reorder_dimensions.
+  /// This permutation maps the computation output dimension (dim) to
+  /// the original true output dimension (perm_[dim]).  It is used by
+  /// invert_perm to undo the permutation.  After coalesce_dimensions is
+  /// called, the permutation is no longer valid (as, in general, there
+  /// is no permutation that will make computation dimensions to
+  /// output dimensions); methods that manipulate perm_ are obligated
+  /// to test that !has_coalesced_dimensions
   DimVector perm_;
-  /// The index offsets into the original tensors for each dimension
-  DimVector view_offsets_;
-  NameVector names_;
-  SmallVector<OperandInfo, 4> operands_;
-  int num_outputs_ = 0;
-  ScalarType common_dtype_ = ScalarType::Undefined;
+
+  /// Has coalesce_dimensions() (or any moral equivalent, e.g., fast_build())
+  /// been called?  This is SOLELY used to check validity of perm_.
   bool has_coalesced_dimensions_ = false;
+
+  /// The index offsets into the original tensors for each dimension.
+  /// This is only non-zero when you narrow() a TensorIterator (e.g.,
+  /// when you make sub-TensorIterators).
+  DimVector view_offsets_;
+
+  /// The computed names of the output tensor.  Computed by compute_names()
+  NameVector names_;
+
+  /// The operands of the TensorIterator: both the inputs and outputs.  The
+  /// outputs MUST come first in the operands_ list.  There is always an
+  /// operand for each output of the TensorIterator, even if TensorIterator
+  /// will ultimately be responsible for allocating the output; in those
+  /// cases, tensor is simply undefined (and will be populated later
+  /// during build()).
+  ///
+  /// This list is initially populated prior to build(), but build() mutates
+  /// OperandInfo to populate more information.
+  SmallVector<OperandInfo, 4> operands_;
+
+  /// Number of outputs in operands_ (the length of the outputs prefix
+  /// in operands_).
+  int num_outputs_ = 0;
+
+  /// Whether or not all operands have the same shape.  Having all the same
+  /// shape affects whether or not the iterator is eligible for fast setup.
+  bool all_ops_same_shape_ = false;
+
+  /// The "computation" dtype of TensorIterator, specifying what the dtype
+  /// we will do the internal computation in TensorIterator.  Typically,
+  /// this matches the dtype of the output tensors, but not always!
+  ScalarType common_dtype_ = ScalarType::Undefined;
+
+  /// Set by split(), see should_accumulate() and is_final_output()
   bool accumulate_ = false;
   bool final_output_ = true;
-  bool all_ops_same_shape_ = false;
+
+  /// Set by analyze_memory_format(), specifies the memory layout of the output.
   bool requires_channels_last_output_ = false;
   bool requires_channels_last_3d_output_ = false;
 
