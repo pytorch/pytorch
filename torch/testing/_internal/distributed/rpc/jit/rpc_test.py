@@ -119,6 +119,7 @@ class RRefAPITest:
 
     @dist_init
     def test_global_var_rref(self):
+        dist.barrier()
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, get_dict)
         rpc.rpc_sync(dst, write_dict, args=(rref, 1, 10))
