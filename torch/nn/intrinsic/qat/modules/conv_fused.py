@@ -79,15 +79,27 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         self.bn.training = False
         return self
 
-    def _forward(self, input):
-        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
-        scale_factor = self.bn.weight / running_std
-        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape([-1, 1, 1, 1]))
+    # Runs the conv forward with scaled weights and unscales the weights.
+    #
+    # Note: this is implemented as a standalone function to match the
+    #   rules of graph mode quantization, which will mimic this code.
+    #   In particular, the inputs and outputs of this function should be
+    #   observed, and no intermediate values of this function should be
+    #   observed.
+    def _conv_forward_and_unscale(self, input, scaled_weight, scale_factor):
         # this does not include the conv bias
         conv = self._conv_forward(input, scaled_weight)
         conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
         if self.bias is not None:
             conv_orig = conv_orig + self.bias.reshape([1, -1, 1, 1])
+        return conv_orig
+
+    def _forward(self, input):
+        running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
+        scale_factor = self.bn.weight / running_std
+        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape([-1, 1, 1, 1]))
+        conv_orig = self._conv_forward_and_unscale(input, scaled_weight,
+                                                   scale_factor)
         conv = self.bn(conv_orig)
         return conv
 
