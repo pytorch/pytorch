@@ -547,6 +547,28 @@ class TestHub(TestCase):
         entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
         self.assertObjectIn('mnist', entry_lists)
 
+    def test_request_headers(self):
+        req_headers = hub.REQ_HEADERS
+        hub.REQ_HEADERS = {}
+        try:
+            actual = hub.get_headers()
+            desired = {}
+            self.assertDictEqual(actual, desired)
+
+            with self.assertRaises(TypeError):
+                hub.set_headers(None)
+
+            headers = {"key1": "val1", "key2": "val2"}
+            hub.set_headers(headers)
+
+            actual = hub.get_headers()
+            desired = headers
+            self.assertIsNot(actual, desired)
+            self.assertDictEqual(actual, desired)
+
+        finally:
+            hub.REQ_HEADERS = req_headers
+
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_download_url_to_file(self):
         temp_file = os.path.join(tempfile.gettempdir(), 'temp')
