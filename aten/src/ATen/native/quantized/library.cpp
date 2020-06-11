@@ -25,6 +25,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("add_scalar_relu(Tensor qa, Scalar b) -> Tensor qc");
   m.def("add_scalar_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_scalar_relu_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
+  // TODO: remove after broadcasting is supported
   m.def("add_scalar_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_scalar.Tensor(Tensor qa, Tensor b) -> Tensor qc");
   m.def("add_scalar_relu.Tensor(Tensor qa, Tensor b) -> Tensor qc");
@@ -104,6 +105,11 @@ TORCH_LIBRARY(quantized, m) {
   m.def("mul_scalar_relu(Tensor qa, Scalar b)-> Tensor qc");
   m.def("mul_scalar_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_scalar_relu_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
+  // TODO: remove after broadcasting is supported
+  m.def("mul_scalar.Tensor(Tensor qa, Tensor b)-> Tensor qc");
+  m.def("mul_scalar_relu.Tensor(Tensor qa, Tensor b)-> Tensor qc");
+  m.def("mul_scalar_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
+  m.def("mul_scalar_relu_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
   // NB: missing a space after comma here...
   m.def("max_pool2d(Tensor qx, int[] kernel_size, int[] stride, int[] padding, int[] dilation,bool ceil_mode) -> Tensor");
   m.def("relu6(Tensor qx, bool inplace=False) -> Tensor");

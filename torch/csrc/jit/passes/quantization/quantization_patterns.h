@@ -452,13 +452,13 @@ graph(%a_quant, %b_scalar, %alpha):
         const auto& match_vmap = match.values_map;
         auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
         auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-        std::cout << "b scalar is number:" << b_scalar->type()->isSubtypeOf(NumberType::get());
-        std::cout << "b type:" << b_scalar->type()->str() << std::endl;
+        auto b_scalar_value = toIValue(b_scalar);
         bool alpha_is_one = alpha && alpha->isInt() && alpha->toInt() == 1;
         bool input_is_scalar =
           b_scalar->type()->isSubtypeOf(NumberType::get()) ||
           (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
-           toIValue(b_scalar)->toTensor().dim() == 0);
+           b_scalar_value->isTensor() &&
+           b_scalar_value->toTensor().dim() == 0);
         return alpha_is_one && input_is_scalar;
       };
 
@@ -599,7 +599,13 @@ graph(%a_quant, %b_scalar):
          const std::unordered_map<std::string, Value*>& vmap) {
         const auto& match_vmap = match.values_map;
         auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-        return b_scalar->type()->isSubtypeOf(NumberType::get());
+        auto b_scalar_value = toIValue(b_scalar);
+        bool input_is_scalar =
+          b_scalar->type()->isSubtypeOf(NumberType::get()) ||
+          (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
+           b_scalar_value->isTensor() &&
+           b_scalar_value->toTensor().dim() == 0);
+        return input_is_scalar;
       };
 
   // quantized::mul_relu

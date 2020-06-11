@@ -586,33 +586,52 @@ graph(%self, %input, %batchnorm):
     %second_output = aten::relu_(%first_output)
     return (%second_output) )", {is_batchnorm2d_module});
 
-
   const PatternInfo mul_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b):
+graph(%self, %a, %b, %relu):
      %first_output = aten::mul(%a, %b)
-     %second_module = match::module[name="ReLU"](%self)
-     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-     return (%second_output) )");
+     %second_output = prim::CallMethod[name="forward"](%relu, %first_output)
+     return (%second_output) )", {is_relu_module});
 
   const PatternInfo mul_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b, %inplace):
+graph(%self, %a, %b, %relu, %inplace):
      %first_output = aten::mul(%a, %b)
-     %relu = prim::Constant[name="relu"]()
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-     return (%second_output) )");
+     return (%second_output) )", {is_functional_relu});
 
   const PatternInfo inplace_mul_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b):
+graph(%self, %a, %b, %relu):
      %first_output = aten::mul_(%a, %b)
-     %second_module = match::module[name="ReLU"](%self)
-     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-     return (%second_output) )");
+     %second_output = prim::CallMethod[name="forward"](%relu, %first_output)
+     return (%second_output) )", {is_relu_module});
 
   const PatternInfo inplace_mul_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b, %inplace):
+graph(%self, %a, %b, %relu, %inplace):
      %first_output = aten::mul_(%a, %b)
-     %relu = prim::Constant[name="relu"]()
      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )", {is_functional_relu});
+
+  const PatternInfo mul_aten_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %first_output = aten::mul(%a, %b)
+     %second_output = aten::relu(%first_output)
+     return (%second_output) )");
+
+  const PatternInfo mul_aten_relu_ = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %first_output = aten::mul(%a, %b)
+     %second_output = aten::relu_(%first_output)
+     return (%second_output) )");
+
+  const PatternInfo inplace_mul_aten_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %first_output = aten::mul_(%a, %b)
+     %second_output = aten::relu(%first_output)
+     return (%second_output) )");
+
+  const PatternInfo inplace_mul_aten_relu_ = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %first_output = aten::mul_(%a, %b)
+     %second_output = aten::relu_(%first_output)
      return (%second_output) )");
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
@@ -631,6 +650,8 @@ graph(%self, %a, %b, %inplace):
           nn_bn_aten_relu,       nn_bn_aten_relu_,
           mul_nn_relu,           mul_f_relu,
           inplace_mul_nn_relu,   inplace_mul_f_relu,
+          mul_aten_relu,         mul_aten_relu_,
+          inplace_mul_aten_relu, inplace_mul_aten_relu_,
   };
 };
 
