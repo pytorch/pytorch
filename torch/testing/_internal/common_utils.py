@@ -338,6 +338,10 @@ TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa')
 
+# Importing librosa is throwing an error on MacOS
+#   https://github.com/pytorch/pytorch/issues/39876
+TEST_LIBROSA = False if IS_MACOS else TEST_LIBROSA
+
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
