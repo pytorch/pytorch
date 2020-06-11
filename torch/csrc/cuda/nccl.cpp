@@ -33,8 +33,7 @@ void throw_nccl_error(torchNcclResult_t status) {
 
  void NCCL_CHECK(torchNcclResult_t status) {
   if (status != ncclSuccess) {
-    ncclResult_t nccl_status = static_cast<ncclResult_t>(status);
-    throw_nccl_error(nccl_status);
+    throw_nccl_error(status);
   }
 }
 
