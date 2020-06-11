@@ -305,6 +305,10 @@ class InsertObserversHelper {
       bool is_entry_point = false,
       bool is_user_defined_function = false);
 
+  // Record v as "ready for observation" by storing it in values_to_observe.
+  // If v is a part of a delayed observation pattern, record v's descendant
+  // (per delay rules) instead. The observers are inserted at a later stage
+  // by reading the state created by this function.
   void recordObserved(
       Value* v,
       const Module& observer_module,
@@ -341,8 +345,12 @@ class InsertObserversHelper {
       const Module& observer_module,
       NameModuleVector& observer_name_and_modules);
 
+  // Uses the state created by fillBoundaryValueMap and fillValueObserverMap
+  // to return an observer configured for a value, if it is needed.
   c10::optional<Module> getObserverFor(Value* v);
 
+  // Uses the state created by fillPassThroughValueMap to propage observed
+  // property which should pass through from inputs to outputs.
   void propagateObservedProperty(
       Value* output,
       std::unordered_set<Value*>& block_observed_values);
@@ -374,14 +382,27 @@ class InsertObserversHelper {
   void fillPassThroughValueMap(const std::shared_ptr<Graph>& graph);
 
   const ModuleQConfigMap& module_qconfig_map_;
+
   // Values we want to delay observation, used to delay the observation for
   // values in the middle of the ops that are supposed to be fused, e.g.
   // the output value of conv in the conv - relu pattern
   // the key is the intermediate output, e.g. output of conv
   // the value is the value we want to observe, e.g. output of relu
+  //
+  // example, assuming we want to delay conv-relu:
+  //   %x1 = conv(%x0)
+  //   %x2 = relu(%x1)
+  //
+  // delay_observation_map_ = {
+  //   %x1: %x2,
+  // }
   std::unordered_map<Value*, Value*> delay_observation_map_;
+
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
+
+  // Map of value to observer module configured for that value.
   std::unordered_map<Value*, Module> observer_for_value_;
+
   // Map from values from callsite into the values in the CallMethod graph
   // key of the map is the value from caller graph, and the value of the map
   // is the list of values in the callee graph (the graph
@@ -389,13 +410,40 @@ class InsertObserversHelper {
   // the reason it is a set is that a value in the caller graph
   // can both correspond to the output of one callee graph and input of another
   // callee graph.
+  //
+  // example:
+  //   // top level module
+  //   %x1 = conv(%x0)
+  //   %x2 = prim::CallFunction(%foo, %x1)
+  //
+  //   // graph of %foo
+  //   %y2 = conv(%y1)
+  //   return %y2
+  //
+  // boundary_value_map = {
+  //   // current module's output values to corresponding return values from
+  //   subgraph %x2: %y2,
+  //   // current module's input values to corresponding input value to subgraph
+  //   %x1: %y1,
+  // }
   std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
+
   std::unordered_set<Value*> observed_values_;
+
   // This is used for the observed values to pass through the ops like flatten,
   // so that output value of flatten does not need to be observed
   // key is the output of the op, value is a vector of values that need
   // to be observed in order to pass the observed property to the output
+  //
+  // example:
+  //   %x1 = flatten(%x0) // pass_through
+  //   %x2 = conv(%x1) // not pass_through
+  //
+  // pass_through_value_map_ = {
+  //   %x1: [%x0],
+  // }
   std::unordered_map<Value*, std::vector<Value*>> pass_through_value_map_;
+
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
   // record the current unique id used to avoid incrementing from 0
