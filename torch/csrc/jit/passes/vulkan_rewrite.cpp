@@ -13,7 +13,6 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
 
-
 namespace torch {
 namespace jit {
 
@@ -186,7 +185,9 @@ void vulkanFusePrePackedConvWithClamp(script::Module& module) {
 
 void vulkanFoldPrePackingOps(script::Module& m) {
   PrePackingOpsFilterFn filter_fn = [](const Node* n) -> bool {
-    return (n->kind() == Symbol::fromQualString("vulkan_prepack::conv2d_clamp_prepack"));
+    return (
+        n->kind() ==
+        Symbol::fromQualString("vulkan_prepack::conv2d_clamp_prepack"));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
