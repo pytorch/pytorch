@@ -14,7 +14,7 @@ using loop_t = TensorIterator::loop_t;
 using loop2d_t = TensorIterator::loop2d_t;
 using StrideVector = TensorIterator::StrideVector;
 
-void TensorIterator::reorder_dimensions() {
+void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
   // Sort the dimensions based on strides in ascending order with reduced dims
   // at the front. NOTE: that this inverts the order of C-contiguous tensors.
   // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
@@ -38,7 +38,7 @@ void TensorIterator::reorder_dimensions() {
       }
       int64_t stride0 = operands_[arg].stride_bytes[dim0];
       int64_t stride1 = operands_[arg].stride_bytes[dim1];
-      if (is_reduction() && operands_[arg].is_output) {
+      if (is_reduction_ && operands_[arg].is_output) {
         // move reduced dimensions to the front
         if ((stride0 == 0) != (stride1 == 0)) {
           return stride1 == 0 ? 1 : -1;
@@ -102,7 +102,7 @@ ScalarType TensorIterator::compute_common_dtype() {
 // NOTE: Checks for more specific behaviors (e.g. the first and second
 //   inputs must share a dtype, but the third must have the long dtype)
 //   should be implemented directly and outside of TensorIterator.
-void TensorIterator::compute_types() {
+void TensorIterator::compute_types(const TensorIteratorConfig& config) {
   // Reviews operands (1/2)
   //   - validates that all input tensors are defined
   //   - computes common device
@@ -124,9 +124,9 @@ void TensorIterator::compute_types() {
     //   the device it should be allocated on.
     if (!op.is_type_defined()) {
       TORCH_INTERNAL_ASSERT(op.is_output, "Found type undefined input tensor!");
-      TORCH_INTERNAL_ASSERT(check_all_same_device());
-      if (config_static_dtype_.has_value()) {
-        op.target_dtype = *config_static_dtype_;
+      TORCH_INTERNAL_ASSERT(config.check_all_same_device_);
+      if (config.static_dtype_.has_value()) {
+        op.target_dtype = *config.static_dtype_;
       } else {
         has_undefined_outputs = true;
         continue;
@@ -164,12 +164,12 @@ void TensorIterator::compute_types() {
   }
 
   // Checks that either the computation type is computable or unneeded
-  TORCH_INTERNAL_ASSERT(!(has_different_input_dtypes && !promote_inputs_to_common_dtype() &&
-                        (has_undefined_outputs || enforce_safe_casting_to_output() ||
-                        cast_common_dtype_to_outputs())));
+  TORCH_INTERNAL_ASSERT(!(has_different_input_dtypes && !config.promote_inputs_to_common_dtype_ &&
+                        (has_undefined_outputs || config.enforce_safe_casting_to_output_ ||
+                        config.cast_common_dtype_to_outputs_)));
 
   // Checks that all inputs and defined outputs are the same dtype, if requested
-  if (check_all_same_dtype() &&
+  if (config.check_all_same_dtype_ &&
       (has_different_input_dtypes || has_different_output_dtypes ||
       (common_dtype_ != output_dtype && output_dtype != ScalarType::Undefined))) {
     // Throws an informative error message
@@ -184,16 +184,16 @@ void TensorIterator::compute_types() {
   }
 
   // Short-circuits if no additional work required
-  if (!has_undefined_outputs && !check_all_same_device() &&
-      !promote_inputs_to_common_dtype() && !cast_common_dtype_to_outputs() &&
-      !enforce_safe_casting_to_output()) {
+  if (!has_undefined_outputs && !config.check_all_same_device_ &&
+      !config.promote_inputs_to_common_dtype_ && !config.cast_common_dtype_to_outputs_ &&
+      !config.enforce_safe_casting_to_output_) {
     // Invalidates common_dtype_ if it could not be inferred
     common_dtype_ = has_different_input_dtypes ? ScalarType::Undefined : common_dtype_;
     return;
   }
 
   // Computes a common dtype, if needed
-  if (has_different_input_dtypes && promote_inputs_to_common_dtype()) {
+  if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_) {
     common_dtype_ = compute_common_dtype();
   }
 
@@ -202,7 +202,7 @@ void TensorIterator::compute_types() {
   //   - checks that all tensors are on the same device, if requested
   //   - checks that the common dtype can safely cast to each output, if requested
   //   - creates temporaries for CPU operations, if needed and requested
-  int max_cpu_scalars_on_cuda = allow_cpu_scalars() ? 1 : 0;
+  int max_cpu_scalars_on_cuda = config.allow_cpu_scalars_ ? 1 : 0;
   int current_cpu_scalars_on_cuda = 0;
   for (auto& op : operands_) {
     if (!op.is_type_defined()) {
@@ -217,7 +217,7 @@ void TensorIterator::compute_types() {
     }
 
     // Checks all tensors are on the same device, if requested
-    if (check_all_same_device()) {
+    if (config.check_all_same_device_) {
       // Handles CPU scalars on CUDA kernels that support them
       if (common_device.is_cuda() && op.tensor.dim() == 0 && op.tensor.device().is_cpu()) {
         TORCH_CHECK(current_cpu_scalars_on_cuda < max_cpu_scalars_on_cuda,
@@ -231,7 +231,7 @@ void TensorIterator::compute_types() {
     }
 
     // Checks safe casting, if requested
-    if (enforce_safe_casting_to_output() && op.is_output && op.current_dtype != common_dtype_) {
+    if (config.enforce_safe_casting_to_output_ && op.is_output && op.current_dtype != common_dtype_) {
       TORCH_CHECK(canCast(common_dtype_, op.current_dtype),
                   "result type ", common_dtype_, " can't be cast to the "
                   "desired output type ", op.current_dtype);
@@ -241,7 +241,7 @@ void TensorIterator::compute_types() {
     // TODO: reuse temporaries when possible (e.g. for inplace operations)
     if (common_device == kCPU) {
       // Casts to outputs by creating temporaries of the correct dtype (if needed)
-      if (cast_common_dtype_to_outputs() && op.is_output && op.current_dtype != common_dtype_) {
+      if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_) {
         op.original_tensor = op.tensor;
         op.tensor = at::empty_like(op.tensor,
                                    op.tensor.options().dtype(common_dtype_),
@@ -250,7 +250,7 @@ void TensorIterator::compute_types() {
     }
 
     // Promotes inputs by creating temporaries of the correct dtype
-      if (promote_inputs_to_common_dtype() && !op.is_output && op.current_dtype != common_dtype_) {
+      if (config.promote_inputs_to_common_dtype_ && !op.is_output && op.current_dtype != common_dtype_) {
         op.original_tensor = op.tensor;
         op.tensor = op.tensor.to(common_dtype_);
         op.current_dtype = common_dtype_;
@@ -339,7 +339,7 @@ void TensorIterator::allocate_outputs() {
   }
 }
 
-void TensorIterator::compute_names() {
+void TensorIterator::compute_names(const TensorIteratorConfig& config) {
   bool should_infer_names = std::any_of(
       operands_.begin(),
       operands_.end(),
@@ -356,7 +356,7 @@ void TensorIterator::compute_names() {
     // clobber their names in any case.  (If the output tensor was
     // also an input tensor, we'll pick it up when it shows up again
     // in operands).
-    if (resize_outputs() && op.is_output) continue;
+    if (config.resize_outputs_ && op.is_output) continue;
     // perform name inference
     if (names_.empty()) {
       names_ = op.tensor.names();
@@ -653,7 +653,7 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   for (auto& op : operands_) {
     op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
   }
-  if (size == 1 && !is_reduction()) {
+  if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
   }
 }
@@ -675,7 +675,7 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);
-  iter.config_allow_cpu_scalars_ = true;
+  iter.allow_cpu_scalars_ = true;
   iter.promote_inputs_to_common_dtype(true);
   iter.cast_common_dtype_to_outputs(true);
   iter.enforce_safe_casting_to_output(true);
@@ -689,13 +689,13 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);
-  iter.config_allow_cpu_scalars_ = true;
+  iter.allow_cpu_scalars_ = true;
   iter.promote_inputs_to_common_dtype(true);
   return TensorIterator(iter);
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
-    bool check_mem_overlapConfig) {
+    bool check_mem_overlap) {
   auto iter = TensorIteratorConfig();
   iter.set_check_mem_overlap(check_mem_overlap);
   iter.add_output(out);
@@ -748,14 +748,15 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
   return TensorIterator(iter);
 }
 
-void TensorIterator::populate_operands() {
-  for (int i = 0; i < config_.tensors_.size(); i++) {
-    operands_.emplace_back(std::move(config_.tensors_[i]));
+void TensorIterator::populate_operands(const TensorIteratorConfig& config) {
+  for (int i = 0; i < config.tensors_.size(); i++) {
+    operands_.emplace_back(*config.tensors_[i]);
   }
-  num_outputs_ = config_.num_outputs_;
+  num_outputs_ = config.num_outputs_;
 }
 
 void TensorIterator::mark_outputs() {
+  // TODO: merge this into populate_operands
   for (int i = 0; i < num_outputs_; i++) {
     operands_[i].is_output = true;
     const auto& output = operands_[i].tensor;
@@ -771,8 +772,8 @@ void TensorIterator::mark_outputs() {
   }
 }
 
-void TensorIterator::compute_mem_overlaps() {
-  if (!check_mem_overlap()) {
+void TensorIterator::compute_mem_overlaps(const TensorIteratorConfig& config) {
+  if (!config.check_mem_overlap_) {
     return;
   }
   for (int i = 0; i < num_outputs_; i++) {
@@ -786,8 +787,11 @@ void TensorIterator::compute_mem_overlaps() {
   }
 }
 
-void TensorIterator::compute_shape() {
-  if (static_shape()) return;
+void TensorIterator::compute_shape(const TensorIteratorConfig& config) {
+  if (config.static_shape_.has_value()) {
+    shape_ = *config.static_shape_;
+    return;
+  }
 
   all_ops_same_shape_ = true;
   bool has_scalars = false;
@@ -800,7 +804,7 @@ void TensorIterator::compute_shape() {
     // This preserves the legacy behavior where torch.add(..., out=dst) resizes
     // the destination tensor.  If the output tensor is also an input, we'll
     // pick it up later in the operands.
-    if (resize_outputs() && op.is_output) continue;
+    if (config.resize_outputs_ && op.is_output) continue;
     auto shape = op.tensor.sizes();
     if (shape.size() == 0) {
       has_scalars = true;
@@ -824,7 +828,7 @@ void TensorIterator::compute_shape() {
   for (int i = 0; i < num_outputs_; i++) {
     auto& tensor = operands_[i].tensor;
     if (tensor.defined() && !tensor.sizes().equals(shape_)) {
-      if (resize_outputs() && !operands_[i].is_read_write) {
+      if (config.resize_outputs_ && !operands_[i].is_read_write) {
         // Preserve legacy resizing behavior of out=... arguments
         // TODO: issue warning
         tensor.resize_(shape_);
@@ -838,16 +842,16 @@ void TensorIterator::compute_shape() {
         }
         continue;
       }
-      TORCH_CHECK(is_reduction(), "output with shape ", tensor.sizes(), " doesn't match the broadcast shape ",
+      TORCH_CHECK(is_reduction_, "output with shape ", tensor.sizes(), " doesn't match the broadcast shape ",
                  shape_);
     }
   }
 }
 
-void TensorIterator::compute_strides() {
+void TensorIterator::compute_strides(const TensorIteratorConfig& config) {
   for (auto& op : operands_) {
     if (op.tensor.defined()) {
-      IntArrayRef original_shape = static_shape() ? shape_ : op.tensor.sizes();
+      IntArrayRef original_shape = config.static_shape_ ? shape_ : op.tensor.sizes();
       auto original_stride = op.tensor.strides();
       auto element_size_in_bytes = op.tensor.element_size();
       auto offset = ndim() - original_shape.size();
@@ -934,11 +938,11 @@ int TensorIterator::get_dim_to_split() const {
   return dim_to_split;
 }
 
-bool TensorIterator::fast_set_up() {
+bool TensorIterator::fast_set_up(const TensorIteratorConfig& config) {
   // This function tries to do a fast setup to avoid needless reordering of dimensions and tracking output strides
   // Return true if it can do fast setup or false otherwise
   // TODO enable fast handling for reductions
-  FastSetupType setup_type = compute_fast_setup_type();
+  FastSetupType setup_type = compute_fast_setup_type(config);
   if (setup_type == FastSetupType::NONE) {
     return false;
   }
@@ -984,7 +988,7 @@ bool TensorIterator::fast_set_up() {
             op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor.strides(), op.options());
             op.current_dtype = op.target_dtype;
           }
-          else if (resize_outputs() && !op.is_read_write) {
+          else if (config.resize_outputs_ && !op.is_read_write) {
             // Note: This restride logic is for some of the tensor types, eg. qtensor.
             //       These tensor class allocate a contigious output tensor directly no matter
             //       what memory format the input tensors are. So we need to restride output here for fast setup.
@@ -1020,8 +1024,8 @@ bool TensorIterator::fast_set_up() {
   return true;
 }
 
-FastSetupType TensorIterator::compute_fast_setup_type() {
-  if (is_reduction() || !all_ops_same_shape_) {
+FastSetupType TensorIterator::compute_fast_setup_type(const TensorIteratorConfig& config) {
+  if (is_reduction_ || !all_ops_same_shape_) {
     return FastSetupType::NONE;
   }
 
@@ -1055,7 +1059,7 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
           continue;
         }
         if (!operands_[prev].tensor.strides().equals(op.tensor.strides())) {
-          if (!resize_outputs() || !op.is_output || op.is_read_write) {
+          if (!config.resize_outputs_ || !op.is_output || op.is_read_write) {
             return FastSetupType::NONE;
           }
         }
@@ -1066,26 +1070,31 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
   return FastSetupType::NONE;
 }
 
-void TensorIterator::build() {
+void TensorIterator::build(const TensorIteratorConfig& config) {
+  // populate some persistent configuration fields
+  is_reduction_ = config.is_reduction_;
+
+  // fill in operands_ based on configuration
+  populate_operands(config);
   // check input tensors memory format to use it during output allocation
   analyze_memory_format();
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
   // Check that the outputs have no internal overlap
   // and do not share memory with inputs.
-  compute_mem_overlaps();
+  compute_mem_overlaps(config);
   // Check that input dimensions are aligned correctly & compute outnames.
-  compute_names();
+  compute_names(config);
   // compute the broadcasted shape
-  compute_shape();
+  compute_shape(config);
   // compute the result dtype and device
-  compute_types();
+  compute_types(config);
   // try fast setup output tensor, if failed, fallback to normal setup
-  if (!fast_set_up()) {
+  if (!fast_set_up(config)) {
     // compute each tensor's stride after broadcasting
-    compute_strides();
+    compute_strides(config);
     // re-order dimensions to improve coalescing
-    reorder_dimensions();
+    reorder_dimensions(config);
     // allocate the output tensor if it's not provided
     allocate_outputs();
     // coalesce adjacent dimensions when possible
