@@ -61,7 +61,6 @@ VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 8192
 _hub_dir = None
-REQ_HEADERS = {}
 
 
 # Copied from tools/shared/module_loader to be included in torch package
@@ -359,30 +358,6 @@ def load(github, model, *args, **kwargs):
     return model
 
 
-def set_headers(headers):
-    r"""Set optional HTTP headers included in all requests by :module:`torch.hub` .
-
-    Args:
-        headers (dict): HTTP headers as (key, value) pairs. See
-            :class:`urllib.request.Request` for details.
-    """
-    if not isinstance(headers, dict):
-        msg = "headers should be a dictionary, but got type {} instead.".format(type(headers))
-        raise TypeError(msg)
-
-    global REQ_HEADERS
-    REQ_HEADERS = copy(headers)
-
-
-def get_headers():
-    r"""Get the currently set HTTP headers. See :func:`.set_headers` for details.
-
-    Returns:
-        dict: HTTP headers as (key, value) pairs.
-    """
-    return copy(REQ_HEADERS)
-
-
 def download_url_to_file(url, dst, hash_prefix=None, progress=True):
     r"""Download object at the given URL to a local path.
 
@@ -401,7 +376,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
     file_size = None
     # We use a different API for python2 since urllib(2) doesn't recognize the CA
     # certificates in older Python
-    req = Request(url, headers=REQ_HEADERS)
+    req = Request(url, headers={"User-Agent": "torch.hub"})
     u = urlopen(req)
     meta = u.info()
     if hasattr(meta, 'getheaders'):
