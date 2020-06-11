@@ -3,6 +3,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/xnnpack/Engine.h>
+#include <ATen/native/xnnpack/Factory.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
@@ -190,6 +192,19 @@ Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Sca
 }
 
 Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  // We assume BLAS is the best option if it's available, but we use XNNPACK to avoid the fallback path in THBlas_(gemm).
+  #if defined(USE_XNNPACK) && !defined(USE_BLAS)
+  if (alpha.type() == at::kInt && alpha.to<int>() == 1
+      && beta.type() == at::kInt && beta.to<int>() == 1
+      && self.scalar_type() == at::kFloat && mat1.scalar_type() == at::kFloat && mat2.scalar_type() == at::kFloat
+      && !self.requires_grad() && !mat1.requires_grad() && !mat2.requires_grad()
+      && mat1.ndimension() == 2 && mat2.ndimension() <= 2 && self.ndimension() == 1
+      && mat1.size(xnnpack::internal::Layout::Filter::output) == self.size(0)) {
+    result.resize_({ mat1.size(0), mat2.size(1) });
+    result.copy_(xnnpack::linear(mat1, mat2.t(), self));
+    return result;
+  }
+  #endif
   Tensor b_self;
   std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
   return legacy::cpu::_th_addmm_out(result, b_self, mat1, mat2, beta, alpha);
@@ -201,6 +216,15 @@ Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
 }
 
 Tensor& mm_cpu_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
+  #if defined(USE_XNNPACK) && !defined(USE_BLAS)
+  if (self.scalar_type() == at::kFloat && mat2.scalar_type() == at::kFloat
+      && !self.requires_grad() && !mat2.requires_grad()
+      && self.ndimension() == 2 && mat2.ndimension() <= 2) {
+    result.resize_({ self.size(0), mat2.size(1) });
+    result.copy_(xnnpack::linear(self, mat2.t(), {}));
+    return result;
+  }
+  #endif
   result.resize_({ self.size(0), mat2.size(1) });
   return legacy::cpu::_th_addmm_out(result, result, self, mat2, 0, 1);
 }
