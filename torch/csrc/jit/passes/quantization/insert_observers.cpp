@@ -363,6 +363,8 @@ class InsertObserversHelper {
 
   void delayObservingValuesInPattern(Graph& graph, const PatternInfo& pattern);
 
+  // Find and mark known patterns such as conv-relu (and others) where
+  // we should not insert observers in the middle of the pattern.
   void addValuesToDelayObservation(
       const Module& module,
       const std::string& method_name);
@@ -835,6 +837,8 @@ void InsertObserversHelper::preprocess(
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
 
+  // fill out various internal state which will be later used in
+  // insertObservers to insert the correct observers
   addValuesToDelayObservation(module, method_name);
   fillValueObserverMap(module, method_name);
   fillBoundaryValueMap(module, method_name);
@@ -1229,7 +1233,7 @@ Module InsertObservers(
   InsertObserversHelper helper(module_qconfig_map);
   helper.setDynamicFlag(is_dynamic);
   helper.preprocess(module, method_name);
-  helper.insertObservers(module, method_name, true);
+  helper.insertObservers(module, method_name, /* is_entry_point */ true);
   return module;
 }
 } // namespace jit
