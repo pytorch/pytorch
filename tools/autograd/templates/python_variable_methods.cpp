@@ -250,13 +250,13 @@ static double dispatch_to_CDouble(const Tensor & self) {
   return self.item<double>();
 }
 
-static c10::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
+static std::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
-  return self.item<c10::complex<double>>();
+  return self.item<std::complex<double>>();
 }
 
 static int64_t dispatch_to_CLong(const Tensor & self) {
