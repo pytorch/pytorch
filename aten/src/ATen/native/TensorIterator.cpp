@@ -640,14 +640,6 @@ void TensorIterator::unsafe_replace_operand(int arg, void* data) {
   operands_[arg].data = data;
 }
 
-void TensorIterator::remove_dimension(int dim) {
-  TORCH_INTERNAL_ASSERT(dim >= 0 && dim < ndim());
-  shape_.erase(shape_.begin() + dim);
-  for (auto& op : operands_) {
-    op.stride_bytes.erase(op.stride_bytes.begin() + dim);
-  }
-}
-
 void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   TORCH_INTERNAL_ASSERT(dim < ndim() && size >= 1);
   shape_[dim] = size;
