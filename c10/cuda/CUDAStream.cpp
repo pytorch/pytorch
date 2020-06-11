@@ -17,7 +17,6 @@ namespace cuda {
 namespace {
 
 
-typedef std::function<cudaStream_t()> CUDAStreamProvider;
 // Internal implementation that leaks the stream. It's not intended to be used
 // outside of this file.
 struct LeakyStreamInternals {
@@ -37,7 +36,6 @@ struct LeakyStreamInternals {
   DeviceIndex device_index = -1;
   int32_t stream_id = -1;
   cudaStream_t stream = nullptr;
-  CUDAStreamProvider stream_provider = std::function<cudaStream_t()>();
 };
 
 // Global stream state and constants
@@ -327,7 +325,7 @@ CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
 cudaStream_t CUDAStream::stream() const {
   auto ptr = CUDAStream_internals(*this);
   AT_ASSERT(ptr);
-  return ptr->stream_provider ? ptr->stream_provider() : ptr->stream;
+  return ptr->stream;
 }
 
 // Returns a stream from the requested pool
@@ -378,17 +376,33 @@ void setCurrentCUDAStream(CUDAStream stream) {
   current_streams[ptr->device_index] = ptr;
 }
 
-CUDAStream registerCustomCUDAStream(DeviceIndex device_index, CUDAStreamProvider stream_provider) {
+// registers an external stream to the custom pool
+CUDAStream registerCustomCUDAStream(DeviceIndex device_index, cudaStream_t stream) {
   initCUDAStreamsOnce();
-  // counter++
-  uint32_t stream_id = custom_counter++;
-  // add type bits ....
-  LeakyStreamInternals* newStream = &custom_stream[device_index][custom_counter++]
+
+  // Make sure the device is valid
+  cudaDeviceProp prop;
+  auto deviceQueryResult = cudaGetDeviceProperties(&prop, i);
+  TORCH_CHECK(deviceQueryResult == cudaSuccess);
+
+  // Make sure the stream is good before we increase the counter
+  auto queryResult = cudaStreamQuery(stream);
+  TORCH_CHECK(queryResult == cudaSuccess);
+  // Stream is good just still working
+  TORCH_CHECK(queryResult == cudaErrorNotReady);
+
+  uint32_t stream_id = custom_counter[device_index]++;
+  // make sure the pool is not overflowing
+  TORCH_CHECK(stream_id < kStreamsPerPool);
+
+  LeakyStreamInternals* newStream = &custom_stream[device_index][stream_id]
+
   return CUDAStream(
     CUDAStream::UNCHECKED,
-    Stream(Stream::UNSAFE, Device(kCUDA, device_index), stream_id)
+    Stream(Stream::UNSAFE, Device(kCUDA, device_index), makeStreamId(StreamIdType::CUSTOM, stream_id))
   );
 }
+
 
 std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {
   return stream << s.unwrap();
