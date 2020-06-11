@@ -54,8 +54,8 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
-#include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
+#include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
@@ -543,7 +543,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
-          [](script::Module& module) { return vulkanInsertPrePackedOps(module); })
+          [](script::Module& module) {
+            return vulkanInsertPrePackedOps(module);
+          })
       .def(
           "_jit_pass_vulkan_fuse_clamp_w_prepacked_conv",
           [](script::Module& module) {
@@ -551,10 +553,14 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_vulkan_fold_prepacking_ops",
-          [](script::Module& module) { return vulkanFoldPrePackingOps(module); })
+          [](script::Module& module) {
+            return vulkanFoldPrePackingOps(module);
+          })
       .def(
           "_jit_pass_vulkan_optimize_for_mobile",
-          [](script::Module& module) { return vulkanOptimizeForMobile(module); })
+          [](script::Module& module) {
+            return vulkanOptimizeForMobile(module);
+          })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
