@@ -332,7 +332,7 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
     {
       tSlice = THTensor_(new)();
       THTensor_(select)(tSlice, tensor,dim,index_data[i]);
-      THTensor_(fill)(tSlice, val);
+      THTensor_wrap(tSlice).fill_(val);
       c10::raw::intrusive_ptr::decref(tSlice);
     }
     else

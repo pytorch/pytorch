@@ -9,9 +9,10 @@ import torch
 import torch.quantization.observer as obs
 
 qobserver_short_configs_dict = {
-    'attr_names': ('C', 'M', 'N', 'dtype'),
+    'attr_names': ('C', 'M', 'N', 'dtype', 'device'),
     'attrs': (
-        (3, 512, 512, torch.quint8),
+        (3, 512, 512, torch.quint8, torch.device('cpu')),
+        (3, 512, 512, torch.quint8, torch.device('cuda')),
     ),
     'tags': ('short',),
 }
@@ -20,6 +21,7 @@ qobserver_long_configs_dict = {
     'C': (1, 3, 8),
     'M': (256, 1024),
     'N': (256, 1024),
+    'device': ('cpu', 'cuda'),
     'dtype': (torch.quint8,),  # dtype doesn't change the timing, keep the same
     'tags': ('long',),
 }
@@ -70,9 +72,9 @@ qobserver_per_channel_list = op_bench.op_list(
 
 
 class QObserverBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, C, M, N, dtype, qscheme, op_func):
-        self.f_input = torch.rand(C, M, N)
-        self.op_func = op_func(dtype=dtype, qscheme=qscheme)
+    def init(self, C, M, N, dtype, qscheme, op_func, device):
+        self.f_input = torch.rand(C, M, N, device=device)
+        self.op_func = op_func(dtype=dtype, qscheme=qscheme).to(device)
 
     def forward(self):
         return self.op_func(self.f_input)

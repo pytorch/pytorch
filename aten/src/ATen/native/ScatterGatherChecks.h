@@ -8,6 +8,28 @@ namespace at { namespace native {
 
 namespace {
 
+// checks whether index.dtype == int64
+// and self.dtyp == src.dtype if src is a Tensor
+static void scatter_gather_dtype_check(
+  const std::string& method_name,
+  const Tensor& self,
+  const Tensor& index,
+  const c10::optional<Tensor>& src_opt = c10::nullopt
+) {
+  TORCH_CHECK(
+    index.scalar_type() == at::ScalarType::Long,
+    method_name, "(): Expected dtype int64 for index"
+  );
+
+  if (src_opt.has_value()) {
+    auto src = src_opt.value();
+    TORCH_CHECK(
+      self.scalar_type() == src.scalar_type(),
+      method_name, "(): Expected self.dtype to be equal to src.dtype"
+    );
+  }
+}
+
 // Used for `gather`-like methods
 // Test:
 // 1. index.size(d) == self.size(d) for all d != dim
