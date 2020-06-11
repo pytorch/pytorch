@@ -44,7 +44,6 @@ VIEW_FUNCTIONS = {
     'expand': 'self',
     'narrow': 'self',
     'permute': 'self',
-    'reshape_as': 'self',
     'select': 'self',
     'slice': 'self',
     'squeeze': 'self',
@@ -52,7 +51,7 @@ VIEW_FUNCTIONS = {
     'transpose': 'self',
     'unfold': 'self',
     'unsqueeze': 'self',
-    'flatten': 'flatten',
+    'flatten': 'self',
     'view': 'self',
     'unbind': 'self',
     '_indices': 'self',
@@ -69,9 +68,12 @@ VIEW_FUNCTIONS = {
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
-# returns a view of its inputs
+# may return a view of its inputs; however they may sometimes return a copy.
+# (e.g. `contiguous`)
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
-    'chunk', 'split', 'detach', 'contiguous', 'reshape', 'expand_as', 'view_as'})
+    'chunk', 'split', 'detach', 'contiguous', 'reshape', 'reshape_as',
+    'expand_as', 'view_as',
+})
 
 def format_return_type(returns):
     if len(returns) == 0:
