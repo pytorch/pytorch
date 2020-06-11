@@ -17,11 +17,32 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
+@torch.jit.script
+def get_dict():
+    # type: () -> Dict[int, int]
+    x: Dict[int, int] = {}
+    return x
+
+
+@torch.jit.script
+def write_dict(global_dict_rref, k, v):
+    # type: (RRef[Dict[int, int]], int, int) -> None
+    global_dict_rref.local_value()[k] = v
+
+
+@torch.jit.script
+def read_dict(global_dict_rref, k):
+    # type: (RRef[Dict[int, int]], int) -> int
+    return global_dict_rref.local_value().get(k, 0)
+
+
 def sleep(t):
     time.sleep(t)
 
+
 def rpc_return_rref(dst):
     return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
+
 
 @torch.jit.script
 def rref_local_value(rref):
@@ -95,6 +116,18 @@ class RRefAPITest:
             worker_name(dst_rank), script_check_rref_confirmed, args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
+
+    @dist_init
+    def test_global_var_rref(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, get_dict)
+        rpc.rpc_sync(dst, write_dict, args=(rref, 1, 10))
+        rpc.rpc_sync(dst, write_dict, args=(rref, 2, 20))
+
+        v1 = rpc.rpc_sync(dst, read_dict, args=(rref, 1))
+        v2 = rpc.rpc_sync(dst, read_dict, args=(rref, 2))
+        self.assertEqual(v1, 10)
+        self.assertEqual(v2, 20)
 
 
 @torch.jit.script
