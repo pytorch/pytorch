@@ -567,5 +567,158 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
 #undef LARGE_INDEX
 }
 
+Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int dim,
+                              const Tensor& index) {
+  constexpr int MAX_CUTORCH_DIMS = 25;
+  constexpr string_view CUTORCH_DIM_WARNING =
+    "Tensor too large or too many (> 25) dimensions";
+
+  TORCH_CHECK(out.device() == self.device(), "Input and output must be on the "
+              "same device");
+
+  dim = at::maybe_wrap_dim(dim, self);
+  TORCH_CHECK(out.dims() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+  TORCH_CHECK(self.dims() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+  TORCH_CHECK(index.dims() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+
+  ptrdiff_t numIndices = index.nelem();
+
+  int selfDims = max(1, self.dims());
+
+  TORCH_CHECK(index.dims() <= 1,
+             "Index is supposed to be an empty tensor or a vector");
+  TORCH_CHECK(dim < selfDims, "Indexing dim is out of bounds");
+  TORCH_CHECK(selfDims > 0, "Source tensor is empty");
+
+  std::vector<int64_t> newSize = self.sizes().vec();
+  if (self->dim() > 0) {
+    newSize[dim] = numIndices;
+  }
+  at::native::resize_(out, newSize, {});
+
+  ptrdiff_t outTotalSize = out.nelem();
+  if (outTotalSize == 0) {
+    return;
+  }
+
+  bool indContig = index.is_contiguous();
+
+  // The `self` is partitioned into two parts:
+  // -the size of each slice we are indexing, which is the
+  // total size of the tensor ignoring dimension `dim`;
+  // -the number of indices we are choosing, which is the total size
+  // of the tensor `indices`.
+  int64_t selfSelectDimSize = self.dims() == 0 ? 1 : self->size(dim);
+  ptrdiff_t sliceSize = outTotalSize / numIndices;
+
+  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+
+#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
+  indexSelectSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>     \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
+      outInfo, selfInfo, indicesInfo,                            \
+      outSelectDim, selfSelectDim, static_cast<TYPE>(sliceSize), \
+      selfSelectDimSize);
+
+#define LARGE_INDEX(TENSOR_TYPE, TYPE,                           \
+                    DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)     \
+  indexSelectLargeIndex<TENSOR_TYPE, TYPE,                       \
+                        DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR> \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(            \
+      outInfo, selfInfo, indicesInfo,                             \
+      outSelectDim, selfSelectDim, static_cast<TYPE>(outTotalSize), \
+      static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),  \
+      selfSelectDimSize);
+
+  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
+
+  dim3 largeIndexGrid(std::min(THCCeilDiv(outTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexBlock(std::min(outTotalSize, (ptrdiff_t)128));
+
+  auto index_select_kernel = [&]() {
+    if (cuda::detail::canUse32BitIndexMath(out) &&
+        cuda::detail::canUse32BitIndexMath(self) &&
+        cuda::detail::canUse32BitIndexMath(indices)) {
+      TensorInfo<scalar_t, unsigned int> outInfo = getTensorInfo<scalar_t, unsigned int>(out);
+      int outSelectDim = outInfo.collapseDims(dim);
+      outInfo.reduceDim(outSelectDim);
+
+      TensorInfo<scalar_t, unsigned int> selfInfo = getTensorInfo<scalar_t, unsigned int>(self);
+      int selfSelectDim = selfInfo.collapseDims(dim);
+      selfInfo.reduceDim(selfSelectDim);
+
+      TensorInfo<int64_t, unsigned int> indicesInfo = getTensorInfo<int64_t, unsigned int>(index);
+      indicesInfo.collapseDims();
+
+      // A reasonable choice for when to have each thread iterate over
+      // indices to choose
+      if (numIndices <= 16) {
+        if (outInfo.dims == 1 && selfInfo.dims == 1 && indContig) {
+          SMALL_INDEX(scalar_t, unsigned int, 1, 1, -2);
+        } else if (outInfo.dims == 2 && selfInfo.dims == 2 && indContig) {
+          SMALL_INDEX(scalar_t, unsigned int, 2, 2, -2);
+        } else if (outInfo.dims == 3 && selfInfo.dims == 3 && indContig) {
+          SMALL_INDEX(scalar_t, unsigned int, 3, 3, -2);
+        } else {
+          SMALL_INDEX(scalar_t, unsigned int, -1, -1, -1);
+        }
+      } else {
+        bool indexIsMajor = indexShouldBeMajor(outInfo, outSelectDim);
+
+        if (outInfo.dims == 1 && selfInfo.dims == 1 && indContig) {
+          LARGE_INDEX(scalar_t, unsigned int, 1, 1, -2, true);
+        } else if (outInfo.dims == 2 && selfInfo.dims == 2 && indContig) {
+          if (indexIsMajor) {
+            LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, true);
+          } else {
+            LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, false);
+          }
+        } else if (outInfo.dims == 3 && selfInfo.dims == 3 && indContig) {
+          if (indexIsMajor) {
+            LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, true);
+          } else {
+            LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, false);
+          }
+        } else {
+          LARGE_INDEX(scalar_t, unsigned int, -1, -1, -1, true);
+        }
+      }
+    } else {
+      TensorInfo<scalar_t, uint64_t> outInfo = getTensorInfo<scalar_t, uint64_t>(out);
+      int outSelectDim = outInfo.collapseDims(dim);
+      outInfo.reduceDim(outSelectDim);
+
+      TensorInfo<scalar_t, uint64_t> selfInfo = getTensorInfo<scalar_t, uint64_t>(self);
+      int selfSelectDim = selfInfo.collapseDims(dim);
+      selfInfo.reduceDim(selfSelectDim);
+
+      TensorInfo<int64_t, uint64_t> indicesInfo = getTensorInfo<int64_t, uint64_t>(index);
+      indicesInfo.collapseDims();
+
+      LARGE_INDEX(scalar_t, uint64_t, -1, -1, -1, true);
+    }
+  };
+#if defined(__HIP_PLATFORM_HCC__)
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      out.scalar_type(), "index_select_cuda", index_select_kernel);
+#else // __HIP_PLATFORM_HCC__
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+      at::ScalarType::Half, at::ScalarType::Bool,
+      out.scalar_type(), "index_select_cuda", index_select_kernel);
+#endif // __HIP_PLATFORM_HCC__
+#undef SMALL_INDEX
+#undef LARGE_INDEX
+
+}
+
+Tensor index_select_cuda(const Tensor& self, int dim, const Tensor& index) {
+  Tensor out;
+  index_select_out_cuda(out, self, dim, index);
+  return out;
+}
+
+
 } //at
 } //native
