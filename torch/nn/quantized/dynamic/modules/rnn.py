@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch import Tensor  # noqa: F401
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
-
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
@@ -258,9 +258,7 @@ class RNNBase(torch.nn.Module):
                     def quantize_and_pack(w, b):
                         weight_observer = weight_observer_method()
                         weight_observer(w)
-                        wt_scale, wt_zp = weight_observer.calculate_qparams()
-                        qweight = torch.quantize_per_tensor(
-                            w.float(), float(wt_scale), int(wt_zp), torch.qint8)
+                        qweight = _quantize_weight(w.float(), weight_observer)
                         packed_weight = \
                             torch.ops.quantized.linear_prepack(qweight, b)
                         return packed_weight
@@ -273,7 +271,7 @@ class RNNBase(torch.nn.Module):
                         cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
                             packed_ih, packed_hh, bias_ih, bias_hh, True)
 
-                else:
+                elif dtype == torch.float16:
                     packed_ih = torch.ops.quantized.linear_prepack_fp16(
                         weight_ih.float(), bias_ih)
                     packed_hh = torch.ops.quantized.linear_prepack_fp16(
@@ -281,6 +279,8 @@ class RNNBase(torch.nn.Module):
 
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
                         packed_ih, packed_hh)
+                else:
+                    raise RuntimeError('Unsupported dtype specified for dynamic quantized LSTM!')
 
                 _all_weight_values.append(PackedParameter(cell_params))
         qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)
