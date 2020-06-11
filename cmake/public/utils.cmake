@@ -224,12 +224,6 @@ function(torch_compile_options libname)
     # until they can be unified, keep these lists synced with setup.py
     if(MSVC)
 
-      if(BUILD_SHARED_LIBS)
-        set(MSVC_RUNTIME_LIBRARY_OPTION "/MD")
-      else()
-        set(MSVC_RUNTIME_LIBRARY_OPTION "/MT")
-      endif()
-
       if(MSVC_Z7_OVERRIDE)
         set(MSVC_DEBINFO_OPTION "/Z7")
       else()
@@ -237,7 +231,6 @@ function(torch_compile_options libname)
       endif()
 
       target_compile_options(${libname} PUBLIC
-        ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
         /DNOMINMAX
