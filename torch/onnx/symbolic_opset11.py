@@ -672,3 +672,15 @@ def flatten(g, input, start_dim, end_dim):
     from torch.onnx.symbolic_opset9 import _reshape_from_tensor
     p = _reshape_from_tensor(g, input, shape)
     return p
+
+
+def linspace(g, start, end, steps, dtype, *options):
+    parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    steps_ = sym_help._get_const(steps, 'i', 'steps')
+    if steps_ == 1:
+        return g.op("Cast", start, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+    diff = g.op("Cast", g.op("Sub", end, start), to_i=sym_help.cast_pytorch_to_onnx['Double'])
+    delta = g.op("Div", diff, g.op("Constant", value_t=torch.tensor(steps_ - 1, dtype=torch.double)))
+    end = g.op("Add", g.op("Cast", end, to_i=sym_help.cast_pytorch_to_onnx['Double']), delta)
+    start = g.op("Cast", start, to_i=sym_help.cast_pytorch_to_onnx['Double'])
+    return g.op("Cast", g.op("Range", start, end, delta), to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
