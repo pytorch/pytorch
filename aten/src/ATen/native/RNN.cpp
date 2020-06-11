@@ -1310,7 +1310,38 @@ bool _use_cudnn_rnn_flatten_weight() {
   }
 
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
-ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
+//ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
+
+// scenarios where runtime is dominated by memory fetches of the weight matrix.
+ std::tuple<Tensor, Tensor> quantized_gru_input(
+      const Tensor& _input,
+      const Tensor& hx,
+      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,
+      bool has_biases,
+      int64_t num_layers,
+      double dropout_p,
+      bool train,
+      bool bidirectional,
+      bool batch_first) {
+    std::vector<QRNNCellParamsWrapper> params;
+    for (c10::intrusive_ptr<CellParamsBase> x : _params) {
+      params.emplace_back(std::move(x));
+    }
+    auto input = batch_first ? _input.transpose(0, 1) : _input;
+    auto results =
+        _rnn_impl_with_concat<GRUCell<QRNNCellParamsWrapper>, FullLayer, FullBidirectionalLayer>(
+            input,
+            params,
+            hx.unbind(0),
+            num_layers,
+            dropout_p,
+            train,
+            bidirectional);
+    if (batch_first) {
+      std::get<0>(results).transpose_(0, 1);
+    }
+    return results;
+  }
 
 // BC wrappers for quantized_gru
 
@@ -1340,6 +1371,46 @@ std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
       bidirectional,
       batch_first);
 }
+/*
+std::tuple<Tensor,Tensor> quantized_gru_data(const Tensor &data,
+     const Tensor& batch_sizes, const Tensor& hx)
+{
+  std::cout << "In quantized_gru_data" << data.sizes();
+  return std::tuple<Tensor,Tensor>(data, data);
+}
+*/
+std::tuple<Tensor, Tensor> quantized_gru_data(
+      const Tensor& data,
+      const Tensor& batch_sizes,
+      const Tensor& hx,
+      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,
+      bool has_biases,
+      int64_t num_layers,
+      double dropout_p,
+      bool train,
+      bool bidirectional) {
+    std::cout << "In function quantized_gru_data" << num_layers;
+    std::vector<QRNNCellParamsWrapper> params;
+    for (c10::intrusive_ptr<CellParamsBase> x : _params) {
+      params.emplace_back(std::move(x));
+    }
+    PackedSequence input{data, batch_sizes};
+
+    std::tuple<PackedSequence, Tensor> result;
+    std::cout << "num_layers" << num_layers;
+    result =
+        _rnn_impl_with_concat<GRUCell<QRNNCellParamsWrapper>, PackedLayer, PackedBidirectionalLayer>(
+            input,
+            params,
+            hx.unbind(0),
+            num_layers,
+            dropout_p,
+            train,
+            bidirectional);
+    auto& packed_output = std::get<0>(result);
+    return std::make_tuple(
+        std::move(packed_output.data), std::move(std::get<1>(result)));
+  }
 
 std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
     const Tensor& data,
@@ -1356,7 +1427,8 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
       "deprecated and may be removed! Please re-export your model "
       "using the newer definitions in torch.jit.quantized");
   auto params = gather_quantized_params(std::move(_params));
-  return quantized_gru_data(
+  return std::tuple<Tensor,Tensor>(data, data);
+  /*return quantized_gru_data(
       data,
       batch_sizes,
       hx,
@@ -1366,6 +1438,7 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
       dropout_p,
       train,
       bidirectional);
+      */
 }
 
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
@@ -1667,6 +1740,8 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     bool bidirectional,
     c10::optional<ScalarType> dtype,
     bool use_dynamic) {
+
+  std::cout << "In function quantized_lstm_Data" << dtype.value();
   auto hx = hx_.vec();
   std::vector<QRNNCellParamsWrapper> params;
   params.reserve(_params_.size());
@@ -1884,14 +1959,18 @@ static auto registry =
                 .kernel<
                     decltype(make_quantized_cell_params),
                     make_quantized_cell_params>(DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
+        .op("quantized::quantized_gru_input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_gru_input), quantized_gru_input>(
                     DispatchKey::CPUTensorId))
-        .op("aten::quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)",
+        .op("quantized::quantized_gru_data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_gru_data), quantized_gru_data>(
                     DispatchKey::CPUTensorId))
+//        .op("quantized::quantized_gru_data(Tensor data, Tensor batch_sizes, Tensor hx) -> (Tensor, Tensor)",
+//            torch::RegisterOperators::options()
+//                .kernel<decltype(quantized_gru_data), quantized_gru_data>(
+//                    DispatchKey::CPUTensorId))
         .op("aten::quantized_gru.input_legacy(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<

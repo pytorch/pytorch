@@ -46,6 +46,7 @@ class RNNBase(torch.nn.Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.dtype = dtype
+        self.training = False
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -478,62 +479,89 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
+    _FLOAT_MODULE = nn.GRU
+
+    __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
+
     def __init__(self, *args, **kwargs):
         super(GRU, self).__init__('GRU', *args, **kwargs)
 
     def _get_name(self):
         return 'DynamicQuantizedGRU'
 
-    @torch._jit_internal._overload_method  # noqa: F811
-    def forward(self, input, hx=None):  # noqa: F811
-        # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
-        pass
+    def check_forward_args(self, input, hidden, batch_sizes):
+        # type: (Tensor, Tensor, Optional[Tensor])->None
+        self.check_input(input, batch_sizes)
+        expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
-    @torch._jit_internal._overload_method  # noqa: F811
-    def forward(self, input, hx=None):  # noqa: F811
-        # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]
-        pass
+        self.check_hidden_size(hidden, expected_hidden_size,
+                               'Expected hidden size {}, got {}')
 
-    def forward(self, input, hx=None):  # noqa: F811
-        orig_input = input
-        # xxx: isinstance check needs to be in conditional for TorchScript to compile
-        if isinstance(orig_input, PackedSequence):
-            input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = batch_sizes[0]
-            max_batch_size = int(max_batch_size)
-        else:
-            batch_sizes = None
-            max_batch_size = input.size(0) if self.batch_first else input.size(1)
-            sorted_indices = None
-            unsorted_indices = None
-
+    def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
+        # type: (Tensor, Optional[Tensor], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
-            hx = torch.zeros(self.num_layers * num_directions,
-                             max_batch_size, self.hidden_size,
-                             dtype=input.dtype, device=input.device)
+            zeros = torch.zeros(self.num_layers * num_directions,
+                                max_batch_size, self.hidden_size,
+                                dtype=input.dtype, device=input.device)
+            hx = zeros
         else:
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
             hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
+
         _all_params = ([m.param for m in self._all_weight_values])
         if batch_sizes is None:
-            result = torch.quantized_gru(input, hx, _all_params, self.bias, self.num_layers,
+            result = torch.ops.quantized.quantized_gru_input(input, hx, _all_params, self.bias, self.num_layers,
                                          self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = torch.quantized_gru(input, batch_sizes, hx, _all_params, self.bias,
+            result = torch.ops.quantized.quantized_gru_data(input, batch_sizes, hx,  _all_params, self.bias,
                                          self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
 
-        # xxx: isinstance check needs to be in conditional for TorchScript to compile
-        if isinstance(orig_input, PackedSequence):
-            output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
-            return output_packed, self.permute_hidden(hidden, unsorted_indices)
+        return output, hidden
+
+
+    @torch.jit.export
+    def forward_tensor(self, input, hx=None):
+        # type: (Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        batch_sizes = None
+        max_batch_size = input.size(0) if self.batch_first else input.size(1)
+        sorted_indices = None
+        unsorted_indices = None
+
+        output, hidden = self.forward_impl(
+            input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    @torch.jit.export
+    def forward_packed(self, input, hx=None):
+        # type: (PackedSequence, Optional[Tensor]) -> Tuple[PackedSequence, Tensor]  # noqa
+        input, batch_sizes, sorted_indices, unsorted_indices = input
+        max_batch_size = batch_sizes[0]
+        max_batch_size = int(max_batch_size)
+        output, hidden = self.forward_impl(
+            input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        output = PackedSequence(output, batch_sizes,
+                                sorted_indices, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    def permute_hidden(self, hx, permutation):
+        # type: (Tensor, Optional[Tensor]) -> Tensor
+        if permutation is None:
+            return hx
+        return apply_permutation(hx, permutation)
+    @torch.jit.ignore
+    def forward(self, input, hx=None):
+        if isinstance(input, PackedSequence):
+            return self.forward_packed(input, hx)
         else:
-            return output, self.permute_hidden(hidden, unsorted_indices)
+            return self.forward_tensor(input, hx)
 
     @classmethod
     def from_float(cls, mod):
@@ -663,7 +691,6 @@ class RNNCellBase(torch.nn.Module):
                 weight_observer = weight_observer_method()
                 weight_observer(weight)
                 wt_scale, wt_zp = weight_observer.calculate_qparams()
-                print('Scale,zp', wt_scale, wt_zp)
                 qweight = torch.quantize_per_tensor(
                     weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
                 packed_weight = \
@@ -682,7 +709,6 @@ class RNNCellBase(torch.nn.Module):
 
         qRNNCellBase._packed_weight_ih = process_weights(mod.weight_ih, mod.bias_ih, dtype)
         qRNNCellBase._packed_weight_hh = process_weights(mod.weight_hh, mod.bias_hh, dtype)
-        print('Returing quantized packed weights', dtype)
         return qRNNCellBase
 
 
@@ -750,7 +776,7 @@ class RNNCell(RNNCellBase):
         self.nonlinearity = nonlinearity
 
     def _get_name(self):
-        return 'DynamicRNNCell'
+        return 'DynamicQuantizedRNNCell'
 
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor
@@ -844,7 +870,7 @@ class LSTMCell(RNNCellBase):
         super(LSTMCell, self).__init__(*args, num_chunks=4, **kwargs)
 
     def _get_name(self):
-        return 'DynamicLSTMCell'
+        return 'DynamicQuantizedLSTMCell'
 
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
@@ -854,7 +880,6 @@ class LSTMCell(RNNCellBase):
             hx = (zeros, zeros)
         self.check_forward_hidden(input, hx[0], '[0]')
         self.check_forward_hidden(input, hx[1], '[1]')
-        print('Calling quantized_lstm_cell')
         return torch.ops.quantized.quantized_lstm_cell_dynamic(
             input, hx,
             self._packed_weight_ih, self._packed_weight_hh,
@@ -930,7 +955,7 @@ class GRUCell(RNNCellBase):
         super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, dtype=dtype)
 
     def _get_name(self):
-        return 'DynamicGRUCell'
+        return 'DynamicQuantizedGRUCell'
 
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor
