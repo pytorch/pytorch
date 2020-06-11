@@ -106,17 +106,6 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   if (PyFloat_Check(obj)) {
     return PyFloat_AS_DOUBLE(obj);
   }
-  if (PyLong_Check(obj)) {
-    int overflow;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (overflow != 0) {
-      throw std::runtime_error("Overflow when unpacking double");
-    }
-    if (value > DOUBLE_INT_MAX || value < -DOUBLE_INT_MAX) {
-      throw std::runtime_error("Precision loss when unpacking double");
-    }
-    return (double)value;
-  }
   double value = PyFloat_AsDouble(obj);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();

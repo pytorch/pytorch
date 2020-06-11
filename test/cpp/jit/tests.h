@@ -48,6 +48,7 @@ namespace jit {
   _(UnifyTypes)                        \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
+  _(LoopPeeler)                        \
   _(InsertBailOuts)                    \
   _(PeepholeOptimize)                  \
   _(RecordFunction)                    \
@@ -82,6 +83,7 @@ namespace jit {
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
   _(DefaultArgTypeHinting)             \
+  _(Futures)                           \
   _(MobileTypeParser)                  \
   _(LiteInterpreterBuiltinFunction)    \
   _(LiteInterpreterPrim)               \

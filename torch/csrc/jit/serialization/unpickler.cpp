@@ -149,7 +149,7 @@ void restoreContainerTypeTags(IValue& ivalue, TypePtr type) {
   } else if (auto list_type = type->cast<ListType>()) {
     ivalue.toList().unsafeSetElementType(list_type->getElementType());
   } else {
-    AT_ERROR("Unknown type for tag restoration: " + type->python_str());
+    AT_ERROR("Unknown type for tag restoration: " + type->annotation_str());
   }
 }
 

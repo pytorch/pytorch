@@ -485,6 +485,7 @@ class TestClassType(JitTestCase):
 
     def test_interface(self):
         global Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2
+
         @torch.jit.script
         class Foo(object):
             def __init__(self):
@@ -647,6 +648,7 @@ class TestClassType(JitTestCase):
 
     def test_overloaded_fn(self):
         global Foo, MyClass  # see [local resolution in python]
+
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):
@@ -802,6 +804,7 @@ class TestClassType(JitTestCase):
 
     def test_cast_overloads(self):
         global Foo  # see [local resolution in python]
+
         @torch.jit.script
         class Foo(object):
             def __init__(self, val):
