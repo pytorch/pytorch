@@ -1,4 +1,3 @@
-import sys
 import ast
 import inspect
 import re
@@ -15,9 +14,6 @@ from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
 from typing import Callable
-
-
-PY35 = sys.version_info >= (3, 5)
 
 
 class Module(object):
