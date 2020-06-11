@@ -15,7 +15,7 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
+    DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/${ROCM_VERSION}
     # Add rocm repository
     wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
     echo "deb [arch=amd64] $DEB_ROCM_REPO xenial main" > /etc/apt/sources.list.d/rocm.list
@@ -34,6 +34,10 @@ install_ubuntu() {
                    rccl \
                    rocprofiler-dev \
                    roctracer-dev
+
+  # Cleanup
+  apt-get autoclean && apt-get clean
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 }
 
 install_centos() {
@@ -66,6 +70,12 @@ install_centos() {
                    rocthrust \
                    rocprofiler-dev \
                    roctracer-dev
+
+  # Cleanup
+  yum clean all
+  rm -rf /var/cache/yum
+  rm -rf /var/lib/yum/yumdb
+  rm -rf /var/lib/yum/history
 }
 
 # Install Python packages depending on the base OS

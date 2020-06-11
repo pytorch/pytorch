@@ -1599,9 +1599,9 @@ Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
     TORCH_CHECK(
         v->type()->isSubtypeOf(elem_type),
         "Expected a list element that subtypes '",
-        elem_type->python_str(),
+        elem_type->repr_str(),
         "' but got an element of type '",
-        v->type()->python_str(),
+        v->type()->repr_str(),
         "'");
   }
   n->output()->setType(ListType::create(elem_type));
@@ -1714,7 +1714,7 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
   } else {
     TORCH_CHECK(
         false,
-        ptr->python_str(),
+        ptr->repr_str(),
         " is not one of the supported element types for tolist: int, float, bool");
   }
 

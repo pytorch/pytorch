@@ -186,31 +186,31 @@ struct normal_distribution {
     T stdv;
 };
 
+template <typename T>
+struct DiscreteDistributionType { using type = float; };
+
+template <> struct DiscreteDistributionType<double> { using type = double; };
+
 /**
  * Samples a bernoulli distribution given a probability input
  */
 template <typename T>
 struct bernoulli_distribution {
 
-  inline bernoulli_distribution(T p_in) {
-    TORCH_CHECK(p_in >= 0 && p_in <= 1);
+  C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
+    TORCH_CHECK_IF_NOT_ON_CUDA(p_in >= 0 && p_in <= 1);
     p = p_in;
   }
 
   template <typename RNG>
-  inline int operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    return uniform(generator) < p;
+    return transformation::bernoulli<T>(uniform(generator), p);
   }
 
   private:
     T p;
 };
-
-template <typename T>
-struct GeometricType { using type = float; };
-
-template <> struct GeometricType<double> { using type = double; };
 
 /**
  * Samples a geometric distribution given a probability input
