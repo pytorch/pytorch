@@ -8,7 +8,6 @@
 
 namespace at {
 namespace native {
-
 namespace {
 
 template <typename scalar_t>
@@ -38,31 +37,37 @@ void store_result(char * C10_RESTRICT data, int64_t stride, int64_t index, scala
   *ptr += value;
 }
 
-template <typename scalar_t>
-scalar_t row_sum(const char * C10_RESTRICT in_data, const int64_t in_stride, const int64_t size) {
+// Simultaneously sum over n rows at once
+template <typename scalar_t, int64_t nrows>
+std::array<scalar_t, nrows> multi_row_sum(
+    const char * C10_RESTRICT in_data,
+    const int64_t row_stride,
+    const int64_t col_stride,
+    const int64_t size) {
   constexpr int64_t num_levels = 4;
-  constexpr int64_t ilp_factor = 4;
 
   const int64_t level_power =
-    std::max(4l, std::lround(std::ceil(std::log2(size) / (num_levels + 1))));
+    std::max(4l, std::lround(std::ceil(
+        std::log2(size) / (num_levels + 1))));
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
-  scalar_t acc[num_levels][ilp_factor];
-  std::fill_n(&acc[0][0], num_levels * ilp_factor, scalar_t(0));
+  scalar_t acc[num_levels][nrows];
+  std::fill_n(&acc[0][0], num_levels * nrows, scalar_t(0));
 
   int64_t i = 0;
-  for (; i + level_step * ilp_factor < size;) {
-    for (int64_t j = 0; j < level_step; ++j, i += ilp_factor) {
+  for (; i + level_step <= size;) {
+    for (int64_t j = 0; j < level_step; ++j, ++i) {
+      const char * sum_base = in_data + i * row_stride;
       #pragma unroll
-      for (int64_t k = 0; k < ilp_factor; ++k) {
-        acc[0][k] += load<scalar_t>(in_data, in_stride, i + k);
+      for (int64_t k = 0; k < nrows; ++k) {
+        acc[0][k] += load<scalar_t>(sum_base, col_stride, k);
       }
     }
 
     for (int64_t j = 1; j < num_levels; ++j) {
       #pragma unroll
-      for (int64_t k = 0; k < ilp_factor; ++k) {
+      for (int64_t k = 0; k < nrows; ++k) {
         acc[j][k] += acc[j-1][k];
         acc[j-1][k] = scalar_t(0);
       }
@@ -74,29 +79,47 @@ scalar_t row_sum(const char * C10_RESTRICT in_data, const int64_t in_stride, con
     }
   }
 
-  for (; i + ilp_factor < size; i += ilp_factor) {
-    #pragma unroll
-    for (int64_t k = 0; k < ilp_factor; ++k) {
-      acc[0][k] += load<scalar_t>(in_data, in_stride, i + k);
-    }
-  }
-
   for (; i < size; ++i) {
-    acc[0][0] += load<scalar_t>(in_data, in_stride, i);
-  }
-
-  for (int64_t i = 1; i < ilp_factor; ++i) {
-    for (int64_t j = 0; j < num_levels; ++j) {
-      acc[j][0] += acc[j][i];
+    const char * sum_base = in_data + i * row_stride;
+    #pragma unroll
+    for (int64_t k = 0; k < nrows; ++k) {
+      acc[0][k] += load<scalar_t>(sum_base, col_stride, k);
     }
   }
 
-  scalar_t acc_sum = acc[0][0];
   for (int64_t j = 1; j < num_levels; ++j) {
-    acc_sum += acc[j][0];
+    #pragma unroll
+    for (int64_t k = 0; k < nrows; ++k) {
+      acc[0][k] += acc[j][k];
+    }
   }
 
-  return acc_sum;
+  std::array<scalar_t, nrows> ret;
+  for (int64_t k = 0; k < nrows; ++k) {
+    ret[k] = acc[0][k];
+  }
+  return ret;
+}
+
+template <typename scalar_t>
+scalar_t row_sum(const char * C10_RESTRICT in_data,
+                 const int64_t in_stride, const int64_t size) {
+  constexpr int64_t ilp_factor = 4;
+
+  // Interpret row as a (-1, ilp_factor) shaped array to find partial sums
+  const int64_t size_ilp = size / ilp_factor;
+  auto partial_sums = multi_row_sum<scalar_t, ilp_factor>(
+      in_data, in_stride * ilp_factor, in_stride, size_ilp);
+
+  for (int64_t i = size_ilp * ilp_factor; i < size; ++i) {
+    partial_sums[0] += load<scalar_t>(in_data, in_stride, i);
+  }
+
+  for (int64_t k = 1; k < ilp_factor; ++k) {
+    partial_sums[0] += partial_sums[k];
+  }
+
+  return partial_sums[0];
 }
 
 template <typename scalar_t>
@@ -131,27 +154,43 @@ void vectorized_outer_sum(
     char * C10_RESTRICT data[2], int64_t inner_stride, int64_t out_stride,
     int64_t size0, int64_t size1) {
   using vec_t = Vec256<scalar_t>;
+  constexpr int64_t nrows = 4;
   constexpr int64_t vec_stride = vec_t::size() * sizeof(scalar_t);
-  const int64_t vec_size = size1 / vec_t::size();
 
   // Input is contiguous over the second (non-reduced) dimension
-  for (int64_t j = 0; j < vec_size; ++j) {
-    const auto *row_in = data[1] + j * vec_stride;
-    auto vec_acc = row_sum<vec_t>(row_in, inner_stride, size0);
+  int64_t j = 0;
+  for (; j + nrows * vec_t::size() <= size1; j += nrows * vec_t::size()) {
+    const auto *row_in = data[1] + j * sizeof(scalar_t);
+    auto sums = multi_row_sum<vec_t, nrows>(row_in, inner_stride, vec_stride, size0);
 
-    scalar_t ans[vec_t::size()];
-    vec_acc.store(ans);
-    for (int64_t k = 0; k < vec_t::size(); ++k) {
-      store_result(data[0], out_stride, j * vec_t::size() + k, ans[k]);
+    for (int64_t i = 0; i < nrows; ++i) {
+      const int64_t base_idx = j + i * vec_t::size();
+
+      scalar_t ans[vec_t::size()];
+      sums[i].store(ans);
+      for (int64_t k = 0; k < vec_t::size(); ++k) {
+        store_result(data[0], out_stride, base_idx + k, ans[k]);
+      }
     }
   }
 
-  for (int64_t j = vec_size * vec_t::size(); j < size1; ++j) {
-    auto ans = row_sum<scalar_t>(data[1] + j * sizeof(scalar_t), inner_stride, size0);
+  for (; j + vec_t::size() <= size1; j += vec_t::size()) {
+    const auto *row_in = data[1] + j * sizeof(scalar_t);
+    const vec_t sums = row_sum<vec_t>(row_in, inner_stride, size0);
+
+    scalar_t ans[vec_t::size()];
+    sums.store(ans);
+    for (int64_t k = 0; k < vec_t::size(); ++k) {
+      store_result(data[0], out_stride, j + k, ans[k]);
+    }
+  }
+
+  for (; j < size1; ++j) {
+    const auto *row_in = data[1] + j * sizeof(scalar_t);
+    scalar_t ans = row_sum<scalar_t>(row_in, inner_stride, size0);
     store_result(data[0], out_stride, j, ans);
   }
 }
-
 
 void sum_kernel_impl(TensorIterator &iter) {
   if (isIntegralType(iter.dtype(), /*includeBool=*/ true)) {
@@ -164,6 +203,7 @@ void sum_kernel_impl(TensorIterator &iter) {
     return;
   }
 
+  // Custom floating point sum for better accuracy
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
     ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "sum_cpu",
     [&] {
