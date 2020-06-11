@@ -10,6 +10,7 @@
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace c10d {
 
@@ -126,6 +127,12 @@ class Reducer {
   // the performance cost is negligible.
   std::vector<std::vector<size_t>> rebuildBuckets();
 
+  using GradCallback =
+      torch::distributed::autograd::DistAutogradContext::GradCallback;
+  void runGradCallbackForVariable(
+      torch::autograd::Variable& variable,
+      GradCallback&& cb);
+
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
   //
@@ -210,6 +217,16 @@ class Reducer {
   std::vector<at::Tensor> rebuilt_params_;
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
+
+  struct RpcContext {
+    using ContextPtr = torch::distributed::autograd::ContextPtr;
+    // The shared_ptr is to hold the context instance.
+    ContextPtr context_ptr_holder;
+    std::atomic<ContextPtr::element_type*> context_ptr{nullptr};
+
+    void set(ContextPtr&& new_context_ptr);
+  };
+  RpcContext rpc_context_;
 };
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
