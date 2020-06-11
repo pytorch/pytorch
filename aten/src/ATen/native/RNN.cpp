@@ -1312,14 +1312,7 @@ std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
       bidirectional,
       batch_first);
 }
-/*
-std::tuple<Tensor,Tensor> quantized_gru_data(const Tensor &data,
-     const Tensor& batch_sizes, const Tensor& hx)
-{
-  std::cout << "In quantized_gru_data" << data.sizes();
-  return std::tuple<Tensor,Tensor>(data, data);
-}
-*/
+
 std::tuple<Tensor, Tensor> quantized_gru_data(
       const Tensor& data,
       const Tensor& batch_sizes,
@@ -1368,18 +1361,16 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
       "deprecated and may be removed! Please re-export your model "
       "using the newer definitions in torch.jit.quantized");
   auto params = gather_quantized_params(std::move(_params));
-  return std::tuple<Tensor,Tensor>(data, data);
-  /*return quantized_gru_data(
-      data,
-      batch_sizes,
-      hx,
-      std::move(params),
-      has_biases,
-      num_layers,
-      dropout_p,
-      train,
-      bidirectional);
-      */
+  return quantized_gru_data(
+                            data,
+                            batch_sizes,
+                            hx,
+                            std::move(params),
+                            has_biases,
+                            num_layers,
+                            dropout_p,
+                            train,
+                            bidirectional);
 }
 
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
