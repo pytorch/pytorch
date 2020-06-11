@@ -46,6 +46,29 @@ struct TORCH_API MultiBatchVmapTransform {
   static std::vector<VmapPhysicalView> logicalToPhysical(TensorList logical_tensors);
 };
 
+// VmapTransform for operators that broadcast all inputs.
+// Given some logical views on Tensors, `logicalToPhysical`:
+// - permutes all of the batch dims to the front of the tensors
+// - aligns all the batch dims to the collective levels of all of the tensors.
+//   If a tensor does not have a batch dim for a vmap level, then it receives
+//   a size-one dimension for said level.
+// - aligns the non-batch dims to have the same dimensionality, adding extra
+//   size-1 dimensions in between the batch dimensions and the non-batch dimensions
+//   so that the batch dimensions are lined up from the right.
+//
+// For example: given inputs of size (B, 2) and (B, 3, 2) where B is the batch
+// dimension, BroadcastingVmapTransform returns VmapPhysicalViews that wrap tensors
+// of size (B, 1, 2) and (B, 3, 2).
+//
+// Given inputs of size (B, 2) and (2,), BroadcastingVmapTransform returns
+// VmapPhysicalViews wrapping tensors of size (B, 2) and (1, 2). We don't
+// actually *need* to return a tensor of size (B, 2) for the second tensor
+// because the broadcasting operation takes care of that for us, but we do
+// it anyways to keep things simple.
+struct TORCH_API BroadcastingVmapTransform {
+  static std::vector<VmapPhysicalView> logicalToPhysical(TensorList logical_tensors);
+};
+
 // NOTE: [What is a VmapPhysicalView?]
 // VmapPhysicalView represents a physical view on a Tensor.
 //
