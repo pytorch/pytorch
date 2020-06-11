@@ -151,7 +151,7 @@ template <typename RNG, typename ret_type,                                      
           ), int>::type = 0>                                                                            \
 bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, TYPE mean, TYPE stdv, ret_type* ret) {       \
   if (generator->next_##TYPE##_normal_sample()) {                                                       \
-    TYPE ret = *(generator->next_##TYPE##_normal_sample()) * stdv + mean;                               \
+    *ret = *(generator->next_##TYPE##_normal_sample()) * stdv + mean;                                   \
     generator->set_next_##TYPE##_normal_sample(c10::optional<TYPE>());                                  \
     return true;                                                                                        \
   }                                                                                                     \
