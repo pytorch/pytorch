@@ -389,11 +389,11 @@ void RequestCallbackImpl::processRpc(
                         .jitCompilationUnit()
                         ->get_function(scriptRemoteCall.qualifiedName())
                         .runAsync(stack);
-        if (jitFuture->completed()) { // short-cut.
-          asyncPostProcessing(jitFuture);
-          return;
-        }
       } catch (const std::exception& e) {
+        jitFuture->setError(e.what());
+        return;
+      }
+      if (jitFuture->completed()) { // short-cut.
         asyncPostProcessing(jitFuture);
         return;
       }
