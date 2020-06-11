@@ -20,8 +20,8 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       break;
     case at::kFloat: *(float*)data = (float)THPUtils_unpackDouble(obj); break;
     case at::kDouble: *(double*)data = THPUtils_unpackDouble(obj); break;
-    case at::kComplexFloat: *(std::complex<float>*)data = (std::complex<float>)THPUtils_unpackComplexDouble(obj); break;
-    case at::kComplexDouble: *(std::complex<double>*)data = THPUtils_unpackComplexDouble(obj); break;
+    case at::kComplexFloat: *(c10::complex<float>*)data = (c10::complex<float>)THPUtils_unpackComplexDouble(obj); break;
+    case at::kComplexDouble: *(c10::complex<double>*)data = THPUtils_unpackComplexDouble(obj); break;
     case at::kBool: *(bool*)data = THPUtils_unpackNumberAsBool(obj); break;
     case at::kBFloat16:
       *(at::BFloat16*)data = at::convert<at::BFloat16, double>(THPUtils_unpackDouble(obj));
@@ -41,10 +41,10 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
     case at::kFloat: return PyFloat_FromDouble(*(float*)data);
     case at::kDouble: return PyFloat_FromDouble(*(double*)data);
     case at::kComplexFloat: {
-      std::complex<float>* data_ = (std::complex<float>*)data;
+      c10::complex<float>* data_ = (c10::complex<float>*)data;
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
-    case at::kComplexDouble: return PyComplex_FromCComplex(*reinterpret_cast<Py_complex *>((std::complex<double>*)data));
+    case at::kComplexDouble: return PyComplex_FromCComplex(*reinterpret_cast<Py_complex *>((c10::complex<double>*)data));
     case at::kBool: return PyBool_FromLong(*(bool*)data);
     case at::kBFloat16: return PyFloat_FromDouble(at::convert<double, at::BFloat16>(*(at::BFloat16*)data));
     default: throw std::runtime_error("invalid type");
