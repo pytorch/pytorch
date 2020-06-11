@@ -548,55 +548,47 @@ class TestDataParallel(TestCase):
     def test_scatter_gpu(self):
         self._test_scatter(torch.randn((4, 4)).cuda())
 
-    def _test_gather(self, output_device):
+    def _test_gather(self, gather_output_device):
+        output_device_obj = torch.device(gather_output_device) if gather_output_device != -1 else torch.device('cpu')
         inputs = (
             torch.randn(2, 4, device='cuda:0', requires_grad=True),
             torch.randn(2, 4, device='cuda:1', requires_grad=True),
         )
-        result = dp.gather(inputs, output_device)
+        result = dp.gather(inputs, gather_output_device)
         self.assertEqual(result.size(), torch.Size([4, 4]))
         self.assertEqual(result[:2], inputs[0])
         self.assertEqual(result[2:], inputs[1])
-        if output_device != -1:
-            self.assertEqual(result.get_device(), output_device)
-        else:
-            self.assertFalse(result.is_cuda)
-        grad = torch.randn((4, 4))
-        if output_device != -1:
-            grad = grad.cuda(output_device)
+        self.assertEqual(result.device, output_device_obj)
+        grad = torch.randn((4, 4), device=output_device_obj)
         result.backward(grad)
         self.assertEqual(inputs[0].grad, grad[:2])
         self.assertEqual(inputs[1].grad, grad[2:])
-        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
+        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), gather_output_device), inputs)
 
         # test scalar inputs, should stack into a vector in this case
         inputs = (
             torch.randn((), device='cuda:0', requires_grad=True),
             torch.randn((), device='cuda:1', requires_grad=True),
         )
-        result = dp.gather(inputs, output_device)
+        result = dp.gather(inputs, gather_output_device)
         self.assertEqual(result.size(), torch.Size([2]))
         self.assertEqual(result[0], inputs[0])
         self.assertEqual(result[1], inputs[1])
-        if output_device != -1:
-            self.assertEqual(result.get_device(), output_device)
-        else:
-            self.assertFalse(result.is_cuda)
-        grad = torch.randn(2)
-        if output_device != -1:
-            grad = grad.cuda(output_device)
+        self.assertEqual(result.device, output_device_obj)
+        grad = torch.randn(2, device=output_device_obj)
         result.backward(grad)
         self.assertEqual(inputs[0].grad, grad[0])
         self.assertEqual(inputs[1].grad, grad[1])
-        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
+        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), gather_output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_cpu(self):
-        self._test_gather(-1)
+        self._test_gather('cpu')
+        self._test_gather(-1)  # ``-1`` is the deprecated way to represent CPU
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_gpu(self):
-        self._test_gather(0)
+        self._test_gather('cuda:0')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_different_len_dicts(self):
