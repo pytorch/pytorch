@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 import types
 import uuid
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import torch
 import torch.distributed.rpc as rpc
@@ -14,22 +14,16 @@ _NON_SCRIPTABLE_REMOTE_MODULE_MODULE = (
 )
 
 
-def _gen_global_unique_name():
-    return f"{uuid.uuid4().hex}"
-
-
 # RPC handler.
 def _instantiate_template(module_interface_cls):
     instantiator.instantiate_scriptable_remote_module_template(module_interface_cls)
 
 
-def _module_creator_wrapper(
-    module_creator, args, kwargs, module_interface_cls=None
-):
-    module = module_creator(*args, **kwargs)
+def _create_module(module_cls, args, kwargs, module_interface_cls=None):
+    module = module_cls(*args, **kwargs)
     if not isinstance(module, nn.Module):
         raise ValueError(
-            "Expect module_creator returns an instancee of <class nn.Module>, "
+            "Expect `module_cls(*args, **kwargs)` returns an instancee of <class nn.Module>, "
             f"but it returns an instance of {type(module)}."
         )
     if module_interface_cls is not None:
@@ -41,10 +35,9 @@ class _RemoteModule(nn.Module):
     def __init__(
         self,
         on: str,
-        module_creator: Callable,
+        module_cls: nn.Module,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
-        name: str = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -56,9 +49,9 @@ class _RemoteModule(nn.Module):
         gradients back to the corresponding remote module.
 
         The arguments of ``forward_async`` and ``forward`` are the same as
-        the ``forward`` method of the module returned by the ``module_creator``.
+        the ``forward`` method of the module returned by the ``module_cls``.
 
-        For example, if ``module_creator`` returns an instace of ``nn.Linear``,
+        For example, if ``module_cls`` returns an instace of ``nn.Linear``,
         that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
         the generated ``RemoteModule`` will have 2 methods in signature of
         ``def forward(input: Tensor) -> Tensor:`` and
@@ -66,25 +59,14 @@ class _RemoteModule(nn.Module):
 
         Arguments:
             on (str or WorkerInfo): id or name of the destination worker.
-            module_creator (Callable): A ``module_creator`` could be
-                1. A type object that is subclass of ``nn.Module``.
-                    For example,
-                    >>> class MyModule(nn.Module):
-                    >>>     def forward(input):
-                    >>>         return input + 1
-                    >>>
-                    >>> module_creator = MyModule
-                2. A function that returns a instance of ``nn.Module``.
-                    For example,
-                    >>> def module_creator():
-                    >>>     module = MyModule()
-                    >>>     scripted_module = torch.jit.script(module)
-                    >>>     return scripted_module
-            args (Sequence, optional): args to be passed to ``module_creator``.
-            kwargs (Dict, optional): kwargs to be passed to ``module_creator``.
-            name (str, optional): The unique name of the created RemoteModule,
-                useful for profiling purpose. If not provided, a UUID4 will
-                be generated as its name.
+            module_cls (nn.Module): For example,
+                >>> class MyModule(nn.Module):
+                >>>     def forward(input):
+                >>>         return input + 1
+                >>>
+                >>> module_cls = MyModule
+            args (Sequence, optional): args to be passed to ``module_cls``.
+            kwargs (Dict, optional): kwargs to be passed to ``module_cls``.
             _module_interface_cls (type, optional): The TorchScript interface type for the module
                 to be created. The type object should be decorated by @torch.jit.interface.
                 If not provided, the generated RemoteModule is not torchscript-able.
@@ -92,7 +74,7 @@ class _RemoteModule(nn.Module):
 
         Returns:
             A remote module instance which wraps the :class:`~nn.Module` created by the
-            user-provided ``module_creator``, it has a blocking ``forward`` method and an
+            user-provided ``module_cls``, it has a blocking ``forward`` method and an
             asynchronous ``forward_async`` method that returns a future of the ``forward`` call
             on the user-provided module on the remote side.
 
@@ -130,16 +112,6 @@ class _RemoteModule(nn.Module):
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
 
-        # Users can specify a unique name for the generated RemoteModule.
-        # For example, a RemoteModule represents a shard of a EmbeddingBag.
-        # In the case of re-sharding after resuming from a checkpoint.
-        # The shard can be referenced using this unique name.
-        self._name = (  # Assign a global name for the module to be created.
-            name
-            if name is not None
-            else _gen_global_unique_name()
-        )
-
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
             self.is_scriptable = True
@@ -162,8 +134,8 @@ class _RemoteModule(nn.Module):
         # Create the module on the remote side.
         self.module_rref = rpc.rpc_sync(
             on,
-            _module_creator_wrapper,
-            (module_creator, args, kwargs, _module_interface_cls),
+            _create_module,
+            (module_cls, args, kwargs, _module_interface_cls),
         )
 
         # Install generated methods.
@@ -171,10 +143,6 @@ class _RemoteModule(nn.Module):
             method_name = method.__name__
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
-
-    @torch.jit.export
-    def name(self):
-        return self._name
 
 
 class RemoteModule(_RemoteModule):
@@ -187,9 +155,9 @@ class RemoteModule(_RemoteModule):
         gradients back to the corresponding remote module.
 
         The arguments of ``forward_async`` and ``forward`` are the same as
-        the ``forward`` method of the module returned by the ``module_creator``.
+        the ``forward`` method of the module returned by the ``module_cls``.
 
-        For example, if ``module_creator`` returns an instace of ``nn.Linear``,
+        For example, if ``module_cls`` returns an instace of ``nn.Linear``,
         that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
         the generated ``RemoteModule`` will have 2 methods in signature of
         ``def forward(input: Tensor) -> Tensor:`` and
@@ -197,29 +165,18 @@ class RemoteModule(_RemoteModule):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        module_creator (Callable): A ``module_creator`` could be
-            1. A type object that is subclass of ``nn.Module``.
-                For example,
-                >>> class MyModule(nn.Module):
-                >>>     def forward(input):
-                >>>         return input + 1
-                >>>
-                >>> module_creator = MyModule
-            2. A function that returns a instance of ``nn.Module``.
-                For example,
-                >>> def module_creator():
-                >>>     module = MyModule()
-                >>>     scripted_module = torch.jit.script(module)
-                >>>     return scripted_module
-        args (Sequence, optional): args to be passed to ``module_creator``.
-        kwargs (Dict, optional): kwargs to be passed to ``module_creator``.
-        name (str, optional): The unique name of the created RemoteModule,
-            useful for profiling purpose. If not provided, a UUID4 will
-            be generated as its name.
+        module_cls (nn.Module): For example,
+            >>> class MyModule(nn.Module):
+            >>>     def forward(input):
+            >>>         return input + 1
+            >>>
+            >>> module_cls = MyModule
+        args (Sequence, optional): args to be passed to ``module_cls``.
+        kwargs (Dict, optional): kwargs to be passed to ``module_cls``.
 
     Returns:
         A remote module instance which wraps the :class:`~nn.Module` created by the
-        user-provided ``module_creator``, it has a blocking ``forward`` method and an
+        user-provided ``module_cls``, it has a blocking ``forward`` method and an
         asynchronous ``forward_async`` method that returns a future of the ``forward`` call
         on the user-provided module on the remote side.
 
@@ -252,11 +209,8 @@ class RemoteModule(_RemoteModule):
     def __init__(
         self,
         on: str,
-        module_creator: Callable,
+        module_cls: nn.Module,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
-        name: str = None,
     ):
-        super().__init__(
-            on, module_creator, args, kwargs, name=name
-        )
+        super().__init__(on, module_cls, args, kwargs)
