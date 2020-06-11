@@ -23,6 +23,10 @@ namespace jit {
 struct RewritePatternDescr;
 struct Match;
 
+using MatchFilter =
+  std::function<bool(const Match&,
+                     const std::unordered_map<std::string, Value*>&)>;
+
 /** Run pattern-based subgraph rewrites on all methods in the module.
  *
  * This pass will go through all methods in the module and try to replace all
@@ -56,12 +60,17 @@ class TORCH_API SubgraphRewriter {
   // graph.
   void runOnGraph(
       std::shared_ptr<Graph>& graph,
-      const std::function<
-          bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
-          filter =
-              [](const Match&, const std::unordered_map<std::string, Value*>&) {
-                return true;
-              });
+      const std::vector<MatchFilter>& filters = {});
+
+  void runOnGraph(
+      std::shared_ptr<Graph>& graph,
+      const MatchFilter& filter =
+      [](const Match&, const std::unordered_map<std::string, Value*>&) {
+        return true;
+      }) {
+    runOnGraph(graph, {filter});
+  }
+);
 
   // Register standard rewrite patterns.
   void RegisterDefaultPatterns();
@@ -85,13 +94,9 @@ class TORCH_API SubgraphRewriter {
   void rewriteSinglePatternOnGraph(
       std::shared_ptr<Graph>& graph,
       const RewritePatternDescr& pattern,
-      const std::function<
-          bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
-          filter =
-              [](const Match&, const std::unordered_map<std::string, Value*>&) {
-                return true;
-              });
-  bool overlapsWithPreviousMatches(const Match* match);
+      const std::vector<MatchFilter>& filters = {});
+
+ bool overlapsWithPreviousMatches(const Match* match);
 };
 
 /** Rewrite pattern descriptor.
