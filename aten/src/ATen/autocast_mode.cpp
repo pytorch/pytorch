@@ -358,7 +358,7 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
 #define KERNEL(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
   m.impl(REGISTER_NAME, \
-    TORCH_FN((WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call)));
+    (WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, &FUNC>::type::call));
 
 #define KERNEL_UNBOXED_ONLY(FUNC, REGISTER_NAME, SIGNATURE, POLICY) \
   m.impl_UNBOXED(REGISTER_NAME, \
