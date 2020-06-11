@@ -113,13 +113,13 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   return value;
 }
 
-inline std::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
+inline c10::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
   Py_complex value = PyComplex_AsCComplex(obj);
   if (value.real == -1.0 && PyErr_Occurred()) {
     throw python_error();
   }
 
-  return std::complex<double>(value.real, value.imag);
+  return c10::complex<double>(value.real, value.imag);
 }
 
 inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
