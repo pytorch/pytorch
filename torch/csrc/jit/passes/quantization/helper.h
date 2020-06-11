@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 
 #include <functional>
 #include <regex>
@@ -75,12 +74,11 @@ TORCH_API bool userDefinedCallFunction(Node* n);
 TORCH_API bool hasScalarInput(Node* n);
 
 // Check if a node is quantizable
-TORCH_API bool nodeQuantizable(Node* n,
-    QuantType quant_type = QuantType::STATIC);
+TORCH_API bool nodeQuantizable(Node* n, bool is_dynamic = false);
 
 // Check if a use of the value is quantizable, this depends on
 // both the use node and the offset
-TORCH_API bool useQuantizable(const Use& use, QuantType quant_type);
+TORCH_API bool useQuantizable(const Use& use, bool is_dynamic);
 
 // Given a CallFunction node, extract the graph of the called function
 TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
