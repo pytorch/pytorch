@@ -292,6 +292,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: fill_
    .. automethod:: flatten
    .. automethod:: flip
+   .. automethod:: fliplr
+   .. automethod:: flipud
    .. automethod:: float
    .. automethod:: floor
    .. automethod:: floor_

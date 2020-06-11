@@ -331,6 +331,8 @@ _(aten, fft) \
 _(aten, fill) \
 _(aten, flatten) \
 _(aten, flip) \
+_(aten, fliplr) \
+_(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
 _(aten, fmod_) \
