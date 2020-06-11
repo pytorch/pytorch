@@ -1484,7 +1484,11 @@ class TestONNXRuntime(unittest.TestCase):
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
             def forward(self, x, k):
-                return torch.topk(x, k, largest=False, sorted=False)
+                # When sorted=False, order of elements in the outout tensors
+                # are not expected to match between PyTorch and ORT
+                topk_unsorted = torch.topk(x, k, largest=False, sorted=False)
+                topk_sorted = torch.topk(x, k, largest=False, sorted=True)
+                return topk_sorted, torch.sort(topk_unsorted.values).values
 
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
