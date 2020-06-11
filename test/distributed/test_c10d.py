@@ -1892,10 +1892,10 @@ class ConvNet(nn.Module):
         super(ConvNet, self).__init__()
         self.gpus = gpus
         self.dtypes = dtypes
-        self.conv0 = torch.nn.Conv2d(2, 3, (2, 2)).to(gpus[0]).to(memory_format=layouts[0]).to(dtypes[0])
-        self.conv1 = torch.nn.Conv2d(3, 4, (2, 2)).to(gpus[1]).to(memory_format=layouts[1]).to(dtypes[1])
-        self.conv2 = torch.nn.Conv2d(4, 3, (2, 2)).to(gpus[2]).to(memory_format=layouts[2]).to(dtypes[2])
-        self.conv3 = torch.nn.Conv2d(3, 2, (2, 2)).to(gpus[3]).to(memory_format=layouts[3]).to(dtypes[3])
+        self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(gpus[0]).to(memory_format=layouts[0]).to(dtypes[0])
+        self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(gpus[1]).to(memory_format=layouts[1]).to(dtypes[1])
+        self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(gpus[2]).to(memory_format=layouts[2]).to(dtypes[2])
+        self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(gpus[3]).to(memory_format=layouts[3]).to(dtypes[3])
 
     def forward(self, x):
         x = x.to(self.dtypes[0])
@@ -2794,12 +2794,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                         [torch.float] * 2 + [torch.half] * 2,
                         [torch.half] * 4)
 
-        input = torch.randn(global_batch_size, 2, 8, 8).to(layer_devs[0])
-        target = torch.randn(global_batch_size, 2, 4, 4).to(layer_devs[-1])
+        input = torch.randn(global_batch_size, 8, 8, 8).to(layer_devs[0])
+        target = torch.randn(global_batch_size, 8, 4, 4).to(layer_devs[-1])
         local_batch_start = self.rank * local_batch_size
         local_batch_end = (self.rank + 1) * local_batch_size
 
-        with torch.backends.cudnn.flags(deterministic=True, benchmark=False):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
             for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
                 model_msg = "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(self.rank, formats,
                                                                                          dtypes, bucketsize)
@@ -2851,7 +2851,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         replica_devices = [dev0]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
         layer_devs = [dev0] * 4
-        local_batch_size = 1
+        local_batch_size = 8
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
@@ -2864,7 +2864,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         replica_devices = [dev0, dev1]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
         layer_devs = [dev0] * 4
-        local_batch_size = 2
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
@@ -2877,7 +2877,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         replica_devices = None
         # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
         layer_devs = [dev0] * 2 + [dev1] * 2
-        local_batch_size = 1
+        local_batch_size = 8
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @skip_if_not_multigpu

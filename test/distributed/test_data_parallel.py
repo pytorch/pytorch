@@ -689,17 +689,17 @@ class TestDataParallel(TestCase):
             def __init__(self, layouts, dtypes):
                 super(ConvNet, self).__init__()
                 self.dtypes = dtypes
-                self.conv0 = torch.nn.Conv2d(2, 3, (2, 2)).to(memory_format=layouts[0]).to(dtypes[0])
-                self.conv1 = torch.nn.Conv2d(3, 4, (2, 2)).to(memory_format=layouts[1]).to(dtypes[1])
-                self.conv2 = torch.nn.Conv2d(4, 3, (2, 2)).to(memory_format=layouts[2]).to(dtypes[2])
-                self.conv3 = torch.nn.Conv2d(3, 2, (2, 2)).to(memory_format=layouts[3]).to(dtypes[3])
+                self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(memory_format=layouts[0]).to(dtypes[0])
+                self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(memory_format=layouts[1]).to(dtypes[1])
+                self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(memory_format=layouts[2]).to(dtypes[2])
+                self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(memory_format=layouts[3]).to(dtypes[3])
 
             def forward(self, x):
                 x = x.to(self.dtypes[0])
                 x = self.conv0(x).to(self.dtypes[1])
                 x = self.conv1(x).to(self.dtypes[2])
                 x = self.conv2(x).to(self.dtypes[3])
-                x = self.conv3(x).to(self.dtypes[3])
+                x = self.conv3(x)
                 return x
 
         layer_formats = ([torch.contiguous_format] * 4,
@@ -710,11 +710,11 @@ class TestDataParallel(TestCase):
                         [torch.half] * 4,)
 
         ndevs = torch.cuda.device_count()
-        input = torch.randn(ndevs, 2, 8, 8, device="cuda:0", dtype=torch.float)
-        target = torch.randn(ndevs, 2, 4, 4, device="cuda:0", dtype=torch.float)
+        input = torch.randn(ndevs * 8, 8, 8, 8, device="cuda:0", dtype=torch.float)
+        target = torch.randn(ndevs * 8, 8, 4, 4, device="cuda:0", dtype=torch.float)
         device_ids = list(range(ndevs))
 
-        with torch.backends.cudnn.flags(deterministic=True, benchmark=False):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
             for formats, dtypes in product(layer_formats, layer_dtypes):
                 model_msg = "formats = {} dtypes = {}".format(formats, dtypes)
                 try:
