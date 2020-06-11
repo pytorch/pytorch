@@ -192,32 +192,30 @@ void initJITBindings(PyObject* module) {
              const std::string& method_name,
              const py::dict& qconfig_dict,
              bool inplace,
-             int quant_type_int) {
+             bool is_dynamic) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
                 c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
-            auto quant_type = static_cast<QuantType>(quant_type_int);
             return InsertObservers(
-                module, method_name, dict, inplace, quant_type);
+                module, method_name, dict, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
           py::arg("inplace"),
-          py::arg("quant_type_int") = 1)
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_quant_dequant",
           [](Module& module,
              const std::string& method_name,
              bool inplace,
-             int quant_type_int) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertQuantDeQuant(module, method_name, inplace, quant_type);
+             bool is_dynamic) {
+            return InsertQuantDeQuant(module, method_name, inplace, is_dynamic);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("inplace"),
-          py::arg("quant_type_int") = 1)
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_insert_prepack_unpack",
           [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
@@ -247,12 +245,11 @@ void initJITBindings(PyObject* module) {
           [](Module& module) { SwapFunctionalLinear(module); })
       .def(
           "_jit_pass_quant_finalize",
-          [](Module& module, int quant_type_int) {
-            auto quant_type = static_cast<QuantType>(quant_type_int);
-            return Finalize(module, quant_type);
+          [](Module& module, bool is_dynamic) {
+            return Finalize(module, is_dynamic);
           },
           py::arg("module"),
-          py::arg("quant_type_int") = 1)
+          py::arg("is_dynamic") = false)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
