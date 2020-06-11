@@ -29,7 +29,7 @@ graph(%a, %b):
 
   parseIR(pattern, &pattern_graph, vmap);
 
-  auto filter_b_is_constant =
+  auto b_is_constant =
     [](const Match& match,
        const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
@@ -37,7 +37,7 @@ graph(%a, %b):
     return b_node->kind() == prim::Constant;
   };
 
-  auto filter_b_is_one =
+  auto b_is_one =
     [](const Match& match,
        const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
@@ -45,7 +45,7 @@ graph(%a, %b):
     return b_val && b_val->isInt() && b_val->toInt() == 1;
   };
 
-  auto filter_b_is_two =
+  auto b_is_two =
     [](const Match& match,
        const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
@@ -62,7 +62,7 @@ graph(%a, %b):
   {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(pattern, replacement);
-    rewriter.runOnGraph(graph, filter_b_is_constant);
+    rewriter.runOnGraph(graph, b_is_constant);
     FileCheck().check("d::ddd")->check_not("c::ccc")->run(*graph);
   }
 
@@ -70,7 +70,7 @@ graph(%a, %b):
   {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(pattern, replacement);
-    rewriter.runOnGraph(graph, {filter_b_is_constant, filter_b_is_one});
+    rewriter.runOnGraph(graph, {b_is_constant, b_is_one});
     FileCheck().check("d::ddd")->check_not("c::ccc")->run(*graph);
   }
 
@@ -78,7 +78,7 @@ graph(%a, %b):
   {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(pattern, replacement);
-    rewriter.runOnGraph(graph, {filter_b_is_constant, filter_b_is_two});
+    rewriter.runOnGraph(graph, {b_is_constant, b_is_two});
     FileCheck().check("c::ccc")->check_not("d::ddd")->run(*graph);
   }
 }
