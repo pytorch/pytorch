@@ -1526,6 +1526,42 @@ class TestAutograd(TestCase):
         func(z).backward()
         self.assertEqual(z.grad, z1.grad)
 
+    def test_view_func_for_complex_views(self):
+        x = torch.randn(2, 2, 2, dtype=torch.double, requires_grad=True)
+        y = x.clone().detach().requires_grad_(True)
+
+        x0 = x.clone()
+        x1 = x0.reshape(4, 2)
+        x1.mul_(2)
+        x1.sum().backward()
+
+        y0 = y.clone()
+        y1 = torch.view_as_complex(y0)
+        # parent has view_func but child does not
+        y2 = y1.reshape(4)
+        # child has view_func but parent does not
+        y3 = torch.view_as_real(y2)
+        y3.mul_(2)
+        y3.sum().backward()
+
+        self.assertEqual(x.grad, y.grad)
+
+        a = torch.randn(2, 2, 2, dtype=torch.double, requires_grad=True)
+        b = x.clone().detach().requires_grad_(True)
+
+        a0 = a.clone()
+        a1 = torch.view_as_complex(a0)
+        # both parent and child have view_func
+        a2 = torch.view_as_real(a1)
+        a2.mul_(2)
+        a2.sum().backward()
+
+        b0 = b.clone()
+        b0.mul_(2)
+        b0.sum().backward()
+
+        self.assertEqual(a.grad, b.grad)
+
     def test_stack(self):
         x = torch.randn(10, 10, requires_grad=True)
         y = torch.randn(10, 10, requires_grad=True)

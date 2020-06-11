@@ -17982,9 +17982,9 @@ class TestViewOps(TestCase):
             self.assertEqual(res, transpose_if_not_contig(c_t, contiguous_input, dim0, dim1))
             self.assertTrue(self.is_view_of(t, res))
 
-        test_view_as_complex()
-        test_view_as_complex(contiguous_input=False)
-        test_view_as_complex(contiguous_input=False, dim0=0, dim1=2)
+        fn()
+        fn(contiguous_input=False)
+        fn(contiguous_input=False, dim0=0, dim1=2)
 
     @onlyOnCPUAndCUDA
     def test_view_as_real(self, device):
@@ -17996,8 +17996,8 @@ class TestViewOps(TestCase):
             self.assertEqual(res, transpose_if_not_contig(t, contiguous_input))
             self.assertTrue(self.is_view_of(c_t, res))
 
-        test_view_as_real()
-        test_view_as_real(contiguous_input=False)
+        fn()
+        fn(contiguous_input=False)
 
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))

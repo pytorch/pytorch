@@ -55,7 +55,7 @@ Tensor view_as_complex(const Tensor& self) {
   auto new_strides = computeStrideForViewAsComplex(self.strides());
   const auto complex_type = c10::toComplexType(self.scalar_type());
 
-  TORCH_INTERNAL_ASSERT(self.storage_offset() % 2 == 0);
+  TORCH_CHECK(self.storage_offset() % 2 == 0, "Tensor must have a storage_offset divisible by 2");
   auto new_storage_offset = self.storage_offset() / 2;
 
   return at::empty({0}, self.options().dtype(complex_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
