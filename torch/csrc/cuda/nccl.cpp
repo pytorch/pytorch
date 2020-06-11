@@ -32,7 +32,7 @@ void throw_nccl_error(torchNcclResult_t status) {
 }
 
  void NCCL_CHECK(torchNcclResult_t status) {
-  if (status != ncclSuccess) {
+  if (status != torchNcclResult_t::ncclSuccess) {
     throw_nccl_error(status);
   }
 }
