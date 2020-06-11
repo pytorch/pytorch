@@ -17957,7 +17957,7 @@ class TestViewOps(TestCase):
 
         return True
 
-    def transpose_if_not_contig(x, contiguous=False, dim0=0, dim1=1):
+    def transpose_if_not_contig(self, x, contiguous=False, dim0=0, dim1=1):
         if contiguous:
             return x
         else:
@@ -17969,7 +17969,7 @@ class TestViewOps(TestCase):
             t = torch.randn(3, 4, 2, device=device)
             c_t = t[:, :, 0] + 1j * t[:, :, 1]
 
-            input = transpose_if_not_contig(t, contiguous_input, dim0, dim1)
+            input = self.transpose_if_not_contig(t, contiguous_input, dim0, dim1)
 
             if (input.size()[-1] != 2 or
                     input.stride()[-1] > 2):
@@ -17979,7 +17979,7 @@ class TestViewOps(TestCase):
                 return
 
             res = torch.view_as_complex(input)
-            self.assertEqual(res, transpose_if_not_contig(c_t, contiguous_input, dim0, dim1))
+            self.assertEqual(res, self.transpose_if_not_contig(c_t, contiguous_input, dim0, dim1))
             self.assertTrue(self.is_view_of(t, res))
 
         fn()
@@ -17992,8 +17992,8 @@ class TestViewOps(TestCase):
             t = torch.randn(3, 4, 2, device=device)
             c_t = t[:, :, 0] + 1j * t[:, :, 1]
 
-            res = torch.view_as_real(transpose_if_not_contig(c_t, contiguous_input))
-            self.assertEqual(res, transpose_if_not_contig(t, contiguous_input))
+            res = torch.view_as_real(self.transpose_if_not_contig(c_t, contiguous_input))
+            self.assertEqual(res, self.transpose_if_not_contig(t, contiguous_input))
             self.assertTrue(self.is_view_of(c_t, res))
 
         fn()
