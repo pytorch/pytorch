@@ -145,8 +145,8 @@ class TestRNGExtension(common.TestCase):
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)
 
-        # t = torch.empty(10, dtype=torch.int64).random_()
-        # self.assertNotEqual(t, fourty_two)
+        t = torch.empty(10, dtype=torch.int64).random_()
+        self.assertNotEqual(t, fourty_two)
 
         gen = torch.Generator(device='cpu')
         t = torch.empty(10, dtype=torch.int64).random_(generator=gen)

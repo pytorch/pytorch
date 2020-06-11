@@ -59,42 +59,48 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistered_th
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
-  auto registrar = RegisterOperators()
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(incrementKernel), &incrementKernel>(DispatchKey::CPU))
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CUDA))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CPU))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CUDA));
-  expectCallsIncrement(DispatchKey::CPU);
-}
+/* Following tests are being commented due to the change for https://github.com/pytorch/pytorch/issues/37010
+   Before RegisterOperators is fully replaced, some tests for it are still needed.
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
-  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(incrementKernel), &incrementKernel>(DispatchKey::CPU));
-  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CUDA));
-  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CPU));
-  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CUDA));
-  expectCallsIncrement(DispatchKey::CPU);
-}
+   TODO: clean up.
+ */
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
-  {
-    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(incrementKernel), &incrementKernel>(DispatchKey::CPU));
-    {
-      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(decrementKernel), &decrementKernel>(DispatchKey::CUDA));
+// TEST(OperatorRegistrationTest_FunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
+//   auto registrar = RegisterOperators()
+//       .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(incrementKernel), &incrementKernel>(DispatchKey::CPU))
+//       .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CUDA))
+//       .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CPU))
+//       .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CUDA));
+//   expectCallsIncrement(DispatchKey::CPU);
+// }
 
-      // assert that schema and cpu kernel are present
-      expectCallsIncrement(DispatchKey::CPU);
-      expectCallsDecrement(DispatchKey::CUDA);
-    }
+// TEST(OperatorRegistrationTest_FunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
+//   auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(incrementKernel), &incrementKernel>(DispatchKey::CPU));
+//   auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CUDA));
+//   auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CPU));
+//   auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(errorKernel), &errorKernel>(DispatchKey::CUDA));
+//   expectCallsIncrement(DispatchKey::CPU);
+// }
 
-    // now registrar2 is destructed. Assert that schema is still present but cpu kernel is not
-    expectCallsIncrement(DispatchKey::CPU);
-    expectDoesntFindKernel("_test::my_op", DispatchKey::CUDA);
-  }
+// TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
+//   {
+//     auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(incrementKernel), &incrementKernel>(DispatchKey::CPU));
+//     {
+//       auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(decrementKernel), &decrementKernel>(DispatchKey::CUDA));
 
-  // now both registrars are destructed. Assert that the whole schema is gone
-  expectDoesntFindOperator("_test::my_op");
-}
+//       // assert that schema and cpu kernel are present
+//       expectCallsIncrement(DispatchKey::CPU);
+//       expectCallsDecrement(DispatchKey::CUDA);
+//     }
+
+//     // now registrar2 is destructed. Assert that schema is still present but cpu kernel is not
+//     expectCallsIncrement(DispatchKey::CPU);
+//     expectDoesntFindKernel("_test::my_op", DispatchKey::CUDA);
+//   }
+
+//   // now both registrars are destructed. Assert that the whole schema is gone
+//   expectDoesntFindOperator("_test::my_op");
+// }
 
 bool was_called = false;
 
@@ -149,22 +155,28 @@ Tensor kernelWithTensorOutput(const Tensor& input) {
   return input;
 }
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators()
-      .op("_test::returning_tensor(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorOutput), &kernelWithTensorOutput>(DispatchKey::CPU))
-      .op("_test::returning_tensor(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorOutput), &kernelWithTensorOutput>(DispatchKey::CUDA));
+/* Following tests are being commented due to the change for https://github.com/pytorch/pytorch/issues/37010
+   Before RegisterOperators is fully replaced, some tests for it are still needed.
 
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::returning_tensor", ""});
-  ASSERT_TRUE(op.has_value());
+   TODO: clean up.
+ */
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
+// TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
+//   auto registrar = RegisterOperators()
+//       .op("_test::returning_tensor(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorOutput), &kernelWithTensorOutput>(DispatchKey::CPU))
+//       .op("_test::returning_tensor(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorOutput), &kernelWithTensorOutput>(DispatchKey::CUDA));
 
-  result = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
-}
+//   auto op = c10::Dispatcher::singleton().findSchema({"_test::returning_tensor", ""});
+//   ASSERT_TRUE(op.has_value());
+
+//   auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
+//   EXPECT_EQ(1, result.size());
+//   EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
+
+//   result = callOp(*op, dummyTensor(DispatchKey::CUDA));
+//   EXPECT_EQ(1, result.size());
+//   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
+// }
 
 c10::List<Tensor> kernelWithTensorListOutput(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
   return c10::List<Tensor>({input1, input2, input3});
@@ -246,39 +258,45 @@ Tensor kernelWithTensorInputByValueWithOutput(Tensor input1) {
   return input1;
 }
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators()
-      .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByReferenceWithOutput), &kernelWithTensorInputByReferenceWithOutput>(DispatchKey::CPU))
-      .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByReferenceWithOutput), &kernelWithTensorInputByReferenceWithOutput>(DispatchKey::CUDA));
+/* Following tests are being commented due to the change for https://github.com/pytorch/pytorch/issues/37010
+   Before RegisterOperators is fully replaced, some tests for it are still needed.
 
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
-  ASSERT_TRUE(op.has_value());
+   TODO: clean up.
+ */
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
+// TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
+//   auto registrar = RegisterOperators()
+//       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByReferenceWithOutput), &kernelWithTensorInputByReferenceWithOutput>(DispatchKey::CPU))
+//       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByReferenceWithOutput), &kernelWithTensorInputByReferenceWithOutput>(DispatchKey::CUDA));
 
-  result = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
-}
+//   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
+//   ASSERT_TRUE(op.has_value());
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators()
-      .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByValueWithOutput), &kernelWithTensorInputByValueWithOutput>(DispatchKey::CPU))
-      .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByValueWithOutput), &kernelWithTensorInputByValueWithOutput>(DispatchKey::CUDA));
+//   auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
+//   EXPECT_EQ(1, result.size());
+//   EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
 
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
-  ASSERT_TRUE(op.has_value());
+//   result = callOp(*op, dummyTensor(DispatchKey::CUDA));
+//   EXPECT_EQ(1, result.size());
+//   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
+// }
 
-  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
+// TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
+//   auto registrar = RegisterOperators()
+//       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByValueWithOutput), &kernelWithTensorInputByValueWithOutput>(DispatchKey::CPU))
+//       .op("_test::tensor_input(Tensor input) -> Tensor", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByValueWithOutput), &kernelWithTensorInputByValueWithOutput>(DispatchKey::CUDA));
 
-  result = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  EXPECT_EQ(1, result.size());
-  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
-}
+//   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
+//   ASSERT_TRUE(op.has_value());
+
+//   auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
+//   EXPECT_EQ(1, result.size());
+//   EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
+
+//   result = callOp(*op, dummyTensor(DispatchKey::CUDA));
+//   EXPECT_EQ(1, result.size());
+//   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
+// }
 
 Tensor captured_input;
 
@@ -290,39 +308,45 @@ void kernelWithTensorInputByValueWithoutOutput(Tensor input1) {
   captured_input = input1;
 }
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators()
-      .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByReferenceWithoutOutput), &kernelWithTensorInputByReferenceWithoutOutput>(DispatchKey::CPU))
-      .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByReferenceWithoutOutput), &kernelWithTensorInputByReferenceWithoutOutput>(DispatchKey::CUDA));
+/* Following tests are being commented due to the change for https://github.com/pytorch/pytorch/issues/37010
+   Before RegisterOperators is fully replaced, some tests for it are still needed.
 
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
-  ASSERT_TRUE(op.has_value());
+   TODO: clean up.
+ */
 
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
-  EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
+// TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
+//   auto registrar = RegisterOperators()
+//       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByReferenceWithoutOutput), &kernelWithTensorInputByReferenceWithoutOutput>(DispatchKey::CPU))
+//       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByReferenceWithoutOutput), &kernelWithTensorInputByReferenceWithoutOutput>(DispatchKey::CUDA));
 
-  outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
-}
+//   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
+//   ASSERT_TRUE(op.has_value());
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators()
-      .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByValueWithoutOutput), &kernelWithTensorInputByValueWithoutOutput>(DispatchKey::CPU))
-      .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByValueWithoutOutput), &kernelWithTensorInputByValueWithoutOutput>(DispatchKey::CUDA));
+//   auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
+//   EXPECT_EQ(0, outputs.size());
+//   EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
 
-  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
-  ASSERT_TRUE(op.has_value());
+//   outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
+//   EXPECT_EQ(0, outputs.size());
+//   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
+// }
 
-  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
-  EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
+// TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
+//   auto registrar = RegisterOperators()
+//       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByValueWithoutOutput), &kernelWithTensorInputByValueWithoutOutput>(DispatchKey::CPU))
+//       .op("_test::tensor_input(Tensor input) -> ()", RegisterOperators::options().kernel<decltype(kernelWithTensorInputByValueWithoutOutput), &kernelWithTensorInputByValueWithoutOutput>(DispatchKey::CUDA));
 
-  outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
-}
+//   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
+//   ASSERT_TRUE(op.has_value());
+
+//   auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
+//   EXPECT_EQ(0, outputs.size());
+//   EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
+
+//   outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
+//   EXPECT_EQ(0, outputs.size());
+//   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
+// }
 
 int64_t captured_int_input = 0;
 

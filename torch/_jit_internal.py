@@ -629,6 +629,10 @@ class RRef(Generic[T]):
         self.__args__ = types
 
 def is_future(ann):
+    if ann is Future:
+        raise RuntimeError('Attempted to use torch.jit.Future without a '
+                           'contained type. Please add a contained type, e.g. '
+                           'torch.jit.Future[int]')
     return getattr(ann, "__origin__", None) is Future
 
 def is_rref(ann):

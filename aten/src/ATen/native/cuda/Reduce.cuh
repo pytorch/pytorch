@@ -15,10 +15,9 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <functional>
 #include <iosfwd>
-#include <tuple>
 #include <type_traits>
 #include <utility>
-#include <thrust/tuple.h>
+#include <thrust/pair.h>
 
 namespace at { namespace native {
 
@@ -651,17 +650,6 @@ struct ReduceOp {
   }
 
   //Currently implemented for max of two outputs
-  template<class T>
-  C10_DEVICE void set_results(const thrust::tuple<T, T> x, const index_t base_offset) const {
-    if (noutputs >= 1) {
-      auto res0 = (out_scalar_t*)((char*)dst[0] + base_offset);
-      *res0 = thrust::get<0>(x);
-    }
-    if (noutputs >= 2) {
-      auto res1 = (out_scalar_t *) ((char *) dst[1] + base_offset);
-      *res1 = thrust::get<1>(x);
-    }
-  }
   template<class T1, class T2>
   C10_DEVICE void set_results(const thrust::pair<T1, T2> x, const index_t base_offset) const {
     if (noutputs >= 1) {

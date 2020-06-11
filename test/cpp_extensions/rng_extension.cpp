@@ -53,7 +53,7 @@ size_t getInstanceCount() {
   return instance_count;
 }
 
-TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
+TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   m.impl_UNBOXED("aten::random_.from",                 random_from_to);
   m.impl_UNBOXED("aten::random_.to",                   random_to);
   m.impl_UNBOXED("aten::random_",                      random_);
