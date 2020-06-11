@@ -218,7 +218,7 @@ std::tuple<Tensor, Tensor> topk(
   const int _dividers[] = {100, 50, 25, 20, 15, 12, 10, 13, 11, 7, 5, 3, 2};
   int selected_divider = -1;
 
-  if (self.size(dim) >= limit && self.device().type() == at::kCUDA) {
+  if (self.dim() > 0 && self.size(dim) >= limit && self.device().type() == at::kCUDA) {
     for (int _divider : _dividers) {
       if (self.size(dim) % _divider == 0 && self.size(dim) > k * _divider) {
         selected_divider = _divider;
