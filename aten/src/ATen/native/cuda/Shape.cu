@@ -379,11 +379,11 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
       return !t.defined() || t.is_contiguous(memory_format);
     });
   ScalarType firstType = inputs[0].scalar_type();
-  const bool allSameType = std::all_of(inputs.begin(), inputs.end(),
+  bool allSameType = std::all_of(inputs.begin(), inputs.end(),
     [firstType](const Tensor& t) {
       return t.scalar_type() == firstType;
     });
-
+  allSameType = allSameType && (out.scalar_type() == firstType);
   if (inputs.size() > 1 &&
       !hasSkippedInput &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
