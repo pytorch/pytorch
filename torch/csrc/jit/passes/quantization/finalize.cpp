@@ -85,9 +85,9 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
 } // namespace
 
-void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
+void QuantFusion(std::shared_ptr<Graph>& graph, QuantType quant_type) {
   std::vector<QuantFusionInfo> patterns;
-  if (is_dynamic) {
+  if (quant_type == QuantType::DYNAMIC) {
     patterns = dynamic_quant_fusion_pattern_and_replacements();
   } else {
     patterns = quant_fusion_pattern_and_replacements();
@@ -125,10 +125,10 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-Module Finalize(Module& module, bool is_dynamic) {
+Module Finalize(Module& module, QuantType quant_type) {
   auto graph = module.get_method("forward").graph();
   InsertPrepackUnpack(graph);
-  QuantFusion(graph, is_dynamic);
+  QuantFusion(graph, quant_type);
   auto frozen = freeze_module(module);
   FoldQuantizedPrepackingOps(frozen);
   return frozen;
