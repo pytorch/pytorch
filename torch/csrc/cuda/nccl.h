@@ -68,12 +68,12 @@ struct AutoNcclGroup {
   AutoNcclGroup() {
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    NCCL_CHECK(ncclGroupStart());
+    NCCL_CHECK(static_cast <torchNcclResult_t>(ncclGroupStart()));
 #endif
   }
   ~AutoNcclGroup() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    NCCL_CHECK(ncclGroupEnd());
+    NCCL_CHECK(static_cast<torchNcclResult_t>(ncclGroupStart()));
 #endif
     (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
