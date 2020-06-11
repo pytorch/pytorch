@@ -111,7 +111,7 @@ c10::IValue getFunctionTuple(const Function& func) {
   std::vector<IValue> types;
   types.reserve(code.type_table().size());
   for (const TypePtr& t : code.type_table()) {
-    types.emplace_back(t->python_str());
+    types.emplace_back(t->annotation_str());
   }
 
   // since the register location is embedded into the bytecode, pass the

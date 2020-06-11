@@ -21,7 +21,7 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
-      profilerConfig_(profilerConfig) {
+      profilerConfig_(std::move(profilerConfig)) {
   tensors_ = wrappedMessage_.tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_REQ,
@@ -38,13 +38,13 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
     rpc::MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
-    torch::autograd::profiler::ProfilerConfig& profilerConfig)
+    torch::autograd::profiler::ProfilerConfig profilerConfig)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
       tensors_(std::move(tensors)),
-      profilerConfig_(profilerConfig) {
+      profilerConfig_(std::move(profilerConfig)) {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cant be null");
 }
 
@@ -71,7 +71,7 @@ rpc::Message RpcWithProfilingReq::toMessageImpl() && {
   // and id, as well as some profiling metadata.
   std::vector<at::IValue> ivalues{wrappedMsgType, fromWorkerId_};
   // Attach serialized profilerConfig.
-  ivalues.emplace_back(profilerConfig_.toIValues());
+  ivalues.emplace_back(profilerConfig_.toIValue());
   // Pickle it into a char payload to be sent over the wire.
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> profilingPayload =
@@ -139,8 +139,8 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
       origMsgType,
       std::move(wrappedRpc),
       wrappedMsgType,
-      wrappedMessage.tensors(),
-      cfg);
+      std::move(wrappedMessage.tensors()),
+      std::move(cfg));
 }
 } // namespace autograd
 } // namespace distributed

@@ -82,8 +82,7 @@ Message getMessageWithProfiling(
   auto wrappedProfilingMsg = RpcWithProfilingReq(
       dstId, msgType, std::move(wrappedRpcMessage), profilerConfig);
 
-  auto msgWithProfiling = std::move(wrappedProfilingMsg).toMessage();
-  return msgWithProfiling;
+  return std::move(wrappedProfilingMsg).toMessage();
 }
 
 Message getMessageWithAutograd(

@@ -679,10 +679,10 @@ graph(%input, %weight):
             def forward(self, x):
                 if self.use_skip:
                     x = self.conv(x)
-                    return torch.flatten(x)
+                    return torch.reshape(x, x.shape)
                 else:
                     x = self.conv(x)
-                    return torch.flatten(x)
+                    return torch.reshape(x, x.shape)
 
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
@@ -700,21 +700,24 @@ graph(%input, %weight):
             def __init__(self):
                 super(M, self).__init__()
                 self.quant_prop = QuantProp(True)
-                self.res2 = Res(False)
+                self.res = Res(False)
 
             def forward(self, x):
                 x = self.quant_prop(x)
-                x = self.res2(x)
+                x = self.res(x)
                 return x
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        m = torch.jit.script(M()).eval()
-        m = prepare_script(m, {'': default_qconfig})
-        # one observer for input and one observer for output
-        # no observer for output of quant_prop
-        assert len(attrs_with_prefix(m, '_observer_',)) == 2
-        # one observer for output of conv for each branch
-        assert len(attrs_with_prefix(m.quant_prop, '_observer_',)) == 2
+        data = [torch.rand(1, 3, 10, 10, dtype=torch.float)]
+        result = {False : [1, 2, 2], True : [2, 1, 0]}
+        for tracing in [True, False]:
+            if tracing:
+                m = torch.jit.trace(M(), data).eval()
+            else:
+                m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_',)) == result[tracing][0]
+            assert len(attrs_with_prefix(m.quant_prop, '_observer_',)) == result[tracing][1]
+            assert len(attrs_with_prefix(m.res, '_observer_',)) == result[tracing][2]
 
     def test_insert_observers_for_nested_if(self):
         class Res(torch.nn.Module):
@@ -744,14 +747,69 @@ graph(%input, %weight):
                 x = self.res2(x)
                 return x
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = torch.rand((1, 3, 10, 10), dtype=torch.float)
+        result = {True : 3, False : 1}
         for tracing in [True, False]:
             if tracing:
-                m = torch.jit.trace(M(), data[0][0])
+                m = torch.jit.trace(M(), data).eval()
             else:
-                m = torch.jit.script(M())
-            m = prepare_script(m.eval(), {'': default_qconfig})
-            assert len(attrs_with_prefix(m, '_observer_',)) == 3
+                m = torch.jit.script(M()).eval()
+            m = prepare_script(m, {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_')) == result[tracing]
+
+    def test_insert_observers_for_if_consistent_observation(self):
+        """ check quantization for if works as long as
+        output of all branches are quantized/observed consistently
+        """
+        class M(torch.nn.Module):
+            def __init__(self, cond):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.cond = cond
+
+            def forward(self, x):
+                x = self.conv(x)
+                # x is already observed
+                if self.cond:
+                    x = torch.flatten(x)
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self, cond):
+                super(M2, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.cond = cond
+
+            def forward(self, x):
+                x = self.conv1(x)
+                if self.cond:
+                    x = self.conv2(x)
+                    # x will be observed in the branch
+                else:
+                    x = torch.flatten(x)
+                # since output for both branch are quantized
+                # the if node is quantized consistently
+                return x
+
+        data = torch.rand((1, 3, 5, 5), dtype=torch.float)
+        options = list(itertools.product([True, False], [True, False]))
+        for cond, tracing in options:
+            if tracing:
+                m = torch.jit.trace(M(cond), data)
+            else:
+                m = torch.jit.script(M(cond))
+            m = prepare_script(m, {'': default_qconfig})
+            assert len(attrs_with_prefix(m, '_observer_')) == 2
+
+        for cond, tracing in options:
+            if tracing:
+                m = torch.jit.trace(M2(cond), data)
+            else:
+                m = torch.jit.script(M2(cond))
+            m = prepare_script(m, {'': default_qconfig})
+            num_observers = 2 if tracing and not cond else 3
+            assert len(attrs_with_prefix(m, '_observer_')) == num_observers
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
@@ -1142,10 +1200,12 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
     """
-    def _test_op_impl(self, module, data, quantized_op, tracing=False, debug=False, check=True):
+    def _test_op_impl(self, module, data, quantized_op, tracing=False, debug=False, check=True, eval_mode=True):
         if debug:
             print('Testing:', str(module))
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        if eval_mode:
+            module = module.eval()
         *inputs, target = data[0]
         if tracing:
             model = torch.jit.trace(module, inputs).eval()
@@ -1788,6 +1848,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         FileCheck().check_not("aten::batch_norm") \
                    .run(model.graph)
 
+    @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
         class BNRelu(torch.nn.Module):
             def __init__(self, inplace):
@@ -1798,7 +1859,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             def forward(self, x):
                 return self.relu(self.bn(x))
 
-        # Note Fusion for functional Relu with inplace argument isn't currently supported in fusion patterns.
         class BNFuncRelu(torch.nn.Module):
             def __init__(self):
                 super(BNFuncRelu, self).__init__()
@@ -1817,11 +1877,12 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for instance in [BNRelu(True), BNRelu(False), BNFuncRelu(), BNFuncInplaceRelu()]:
-            model = self._test_op_impl(instance, data, "quantized::batch_norm2d_relu")
-            FileCheck().check_not("aten::batch_norm") \
-                       .check_not("aten::relu") \
-                       .check_not("aten::relu_") \
-                       .run(model.graph)
+            for tracing in [True, False]:
+                model = self._test_op_impl(instance, data, "quantized::batch_norm2d_relu", tracing)
+                FileCheck().check_not("aten::batch_norm") \
+                           .check_not("aten::relu") \
+                           .check_not("aten::relu_") \
+                           .run(model.graph)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
@@ -2222,6 +2283,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.relu(x)
                 x = F.relu(x)
                 x.relu_()
+                y = []
+                y.append(x)
+                x, _ = y
                 x = self.conv(x)
                 return x
 

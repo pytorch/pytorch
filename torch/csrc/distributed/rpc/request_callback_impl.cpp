@@ -359,6 +359,45 @@ void RequestCallbackImpl::processRpc(
         return;
       }
 
+      auto setRRefValue = [ownerRRef, postProcessing](
+                              const c10::intrusive_ptr<c10::ivalue::Future>&
+                                  jitFuture) mutable {
+        try {
+          ownerRRef->setValue(jitFuture->value());
+        } catch (const std::exception& e) {
+          ownerRRef->setError(e.what());
+        }
+        postProcessing();
+      };
+
+      auto isAsyncExecution = scriptRemoteCall.isAsyncExecution();
+      auto asyncPostProcessing =
+          [ownerRRef,
+           postProcessing,
+           setRRefValue{std::move(setRRefValue)},
+           isAsyncExecution](const c10::intrusive_ptr<c10::ivalue::Future>&
+                                 jitFuture) mutable {
+            if (isAsyncExecution) {
+              // The user function will return a JIT future, install
+              // setRRefValue and postProcessing to that valueFuture
+              try {
+                auto valueJitFuture = jitFuture->value().toFuture();
+                valueJitFuture->addCallback(
+                    [valueJitFuture,
+                     setRRefValue{std::move(setRRefValue)}]() mutable {
+                      setRRefValue(valueJitFuture);
+                    });
+              } catch (const std::exception& e) {
+                ownerRRef->setError(e.what());
+                postProcessing();
+              }
+            } else {
+              // The user function will return a value. Set OwnerRRef when that
+              // value is ready.
+              setRRefValue(jitFuture);
+            }
+          };
+
       c10::intrusive_ptr<c10::ivalue::Future> jitFuture;
       try {
         jitFuture = PythonRpcHandler::getInstance()
@@ -366,23 +405,18 @@ void RequestCallbackImpl::processRpc(
                         ->get_function(scriptRemoteCall.qualifiedName())
                         .runAsync(stack);
         if (jitFuture->completed()) { // short-cut.
-          ownerRRef->setValue(jitFuture->value());
-          postProcessing();
+          asyncPostProcessing(jitFuture);
           return;
         }
       } catch (const std::exception& e) {
-        ownerRRef->setError(e.what());
-        postProcessing();
+        asyncPostProcessing(jitFuture);
         return;
       }
-      jitFuture->addCallback([ownerRRef, postProcessing, jitFuture]() {
-        try {
-          ownerRRef->setValue(jitFuture->value());
-        } catch (const std::exception& e) {
-          ownerRRef->setError(e.what());
-        }
-        postProcessing();
-      });
+      jitFuture->addCallback(
+          [jitFuture,
+           asyncPostProcessing{std::move(asyncPostProcessing)}]() mutable {
+            asyncPostProcessing(jitFuture);
+          });
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
@@ -721,7 +755,6 @@ void RequestCallbackImpl::processRpc(
                 }
               }
               // find __start_profile event and __cuda_start_event.
-              // TODO: only find __cuda_start_event if record_cuda = true.
               bool cuda_profiling_enabled = profilingConfig.state ==
                   torch::autograd::profiler::ProfilerState::CUDA;
               bool found_cpu_start = false;
@@ -731,7 +764,7 @@ void RequestCallbackImpl::processRpc(
               // operation ran on.
               std::unordered_map<int, const torch::autograd::profiler::Event*>
                   cudaProfilerStarts;
-              for (const auto& e : profiledEvents) {
+              for (auto& e : profiledEvents) {
                 if (!found_cpu_start &&
                     0 == strcmp(e.name(), "__start_profile")) {
                   profilerStart = &e;
@@ -739,6 +772,7 @@ void RequestCallbackImpl::processRpc(
                 }
                 if (cuda_profiling_enabled &&
                     0 == strcmp(e.name(), "__cuda_start_event")) {
+                  e.setCudaUs(e.cpu_us());
                   auto device = e.device();
                   TORCH_CHECK(
                       device != -1,
@@ -767,23 +801,30 @@ void RequestCallbackImpl::processRpc(
               TORCH_CHECK(
                   !cuda_profiling_enabled || cudaProfilerStarts.size() > 0,
                   "Profiler was enabled with CUDA recording, but did not find __cuda_start_event.");
-              // precompute the relative CUDA time before serialization.
-              for (auto& e : profiledEvents) {
-                if (cuda_profiling_enabled && e.has_cuda()) {
-                  auto cuda_device = e.device();
-                  TORCH_CHECK(
-                      cuda_device != -1,
-                      "CUDA profiling was enabled but could not find CUDA device.");
-                  auto it = cudaProfilerStarts.find(cuda_device);
-                  TORCH_CHECK(
-                      it != cudaProfilerStarts.end(),
-                      c10::str(
-                          "Failed to find __cuda_start-event for device ",
-                          cuda_device));
-                  auto cudaProfilerStartEvent = it->second;
-                  double cuda_elapsed_us =
-                      cudaProfilerStartEvent->cuda_elapsed_us(e);
-                  e.setCudaElapsedUs(cuda_elapsed_us);
+
+              if (cuda_profiling_enabled) {
+                // Compute and set global time for when this CUDA kernel was
+                // launched/ended, since deserialized event will not have a
+                // corresponding CUDA event.
+                for (auto& e : profiledEvents) {
+                  if (e.has_cuda()) {
+                    auto cuda_device = e.device();
+                    TORCH_CHECK(
+                        cuda_device != -1,
+                        "CUDA profiling was enabled but could not find CUDA device.");
+                    auto it = cudaProfilerStarts.find(cuda_device);
+                    TORCH_CHECK(
+                        it != cudaProfilerStarts.end(),
+                        c10::str(
+                            "Failed to find __cuda_start_event for device ",
+                            cuda_device));
+                    auto cudaProfilerStartEvent = it->second;
+                    double cuda_elapsed_us =
+                        cudaProfilerStartEvent->cuda_elapsed_us(e);
+                    double cuda_us =
+                        cuda_elapsed_us + cudaProfilerStartEvent->cpu_us();
+                    e.setCudaUs(cuda_us);
+                  }
                 }
               }
             });

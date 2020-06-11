@@ -115,9 +115,9 @@ struct TORCH_API ProfilerConfig {
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.
-  at::IValue toIValues() const;
+  at::IValue toIValue() const;
 
-  // Reconstructs a ProfilerConfig from IValues given by toIValues.
+  // Reconstructs a ProfilerConfig from IValues given by toIValue.
   static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
 
 };
@@ -140,21 +140,56 @@ struct TORCH_API Event final {
       bool record_cuda,
       at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {},
-      int node_id = -1,
-      bool record_cpu_ns = true, bool is_remote = false)
+      int node_id = -1
+      )
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes), node_id_(node_id), record_cpu_ns_(record_cpu_ns), is_remote_(is_remote) {
+        shapes_(shapes), node_id_(node_id) {
           record(record_cuda);
+  }
+
+  // Constructor to be used in conjunction with Event::fromIValue.
+  Event(
+      EventKind kind,
+      at::StringView name,
+      uint16_t thread_id,
+      at::RecordFunctionHandle handle,
+      std::vector<std::vector<int64_t>>&& shapes,
+      int node_id,
+      bool is_remote,
+      int64_t cpu_memory_usage,
+      int64_t cpu_ns,
+      bool cuda_recorded,
+      int64_t cuda_memory_usage = 0,
+      int device = -1,
+      double cuda_us = -1)
+      : cpu_ns_(cpu_ns),
+        name_(std::move(name)),
+        kind_(kind),
+        thread_id_(thread_id),
+        handle_(handle),
+        shapes_(shapes),
+        cpu_memory_usage_(cpu_memory_usage),
+        cuda_memory_usage_(cuda_memory_usage),
+        device_(device),
+        node_id_(node_id),
+        is_remote_(is_remote),
+        cuda_us_(cuda_us) {
+    // Sanity check values that were deserialized
+    TORCH_INTERNAL_ASSERT(cpu_ns_ > 0);
+    if (cuda_recorded) {
+      TORCH_INTERNAL_ASSERT(device_ >= 0);
+      TORCH_INTERNAL_ASSERT(cuda_us_ >= 0);
+    }
   }
 
   // Returns IValues corresponding to event structure, to be used for
   // serialization.
-  at::IValue toIValues() const;
+  at::IValue toIValue() const;
 
-  // Reconstructs an event from IValues given by toIValues.
+  // Reconstructs an event from IValues given by toIValue.
   static Event fromIValue(const at::IValue& eventIValue);
 
   void record(bool record_cuda);
@@ -185,16 +220,17 @@ struct TORCH_API Event final {
   double cpu_elapsed_us(const Event & e) const {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
+
+  double cpu_us() const {
+    return cpu_ns_ / (1000.0);
+  }
+
   double cuda_elapsed_us(const Event & e) const;
   bool has_cuda() const {
-    return (isRemote() && device_ != -1) || cuda_event != nullptr;
+    return cuda_event != nullptr || (isRemote() && device_ != -1);
   }
   int device() const {
     return device_;
-  }
-
-  void setDevice(int device) {
-    device_ = device;
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
@@ -232,40 +268,13 @@ struct TORCH_API Event final {
     node_id_ = node_id;
   }
 
-  // Set CPU memory usage on this event
-  Event& setCPUMemoryUsage(int64_t cpu_memory_usage) {
-    cpu_memory_usage_ = cpu_memory_usage;
-    return *this;
-  }
-
-  // Set cpu_ns_
-  void setCPUns(int64_t cpu_ns) {
-    cpu_ns_ = cpu_ns;
-  }
-
-  // Set cuda_memory_usage_
-  void setCudaMemoryUsage(int64_t cuda_memory_usage) {
-    cuda_memory_usage_ = cuda_memory_usage;
-  }
-
-  // Set cuda_elapsed_us_.
-  void setCudaElapsedUs(double cuda_elapsed_us) {
-    cuda_elapsed_us_ = cuda_elapsed_us;
-  }
-
-  // Get precomputed cuda_elapsed_us_
-  double getCudaElapsedUs() const {
-    TORCH_CHECK(!has_cuda() || cuda_elapsed_us_ != -1);
-    return cuda_elapsed_us_;
-  }
-
-  int64_t getCPUns() {
-    return cpu_ns_;
-  }
-
   bool isRemote() const {
     return is_remote_;
   }
+
+  void setCudaUs(double cuda_us) {
+    cuda_us_ = cuda_us;
+}
 
 private:
   // signed to allow for negative intervals, initialized for safety.
@@ -280,9 +289,8 @@ private:
   int device_ = -1;
   struct CUevent_st* cuda_event = nullptr;
   int node_id_ = 0;
-  bool record_cpu_ns_ = true;
-  double cuda_elapsed_us_ = -1;
   bool is_remote_ = false;
+  double cuda_us_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid

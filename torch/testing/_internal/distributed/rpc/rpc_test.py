@@ -1039,7 +1039,9 @@ class RpcTest(RpcAgentTestFixture):
         print(p.key_averages().table())
         with TemporaryFileName() as fname:
             path = fname
+            path = "/tmp/dist_trace_abs2.json"
             p.export_chrome_trace(path)
+            print(f"Wrote profile to {path}")
             with open(path) as f:
                 trace = json.load(f)
                 event_names = [event['name'] for event in trace]

@@ -14,9 +14,6 @@ static void lerp_kernel_scalar(
     const Tensor& self,
     const Tensor& end,
     Scalar weight) {
-  // lerp() only uses TensorIterator for CPU. Since TensorIterator would
-  // would attempt to promote types inconsistent with the CUDA implementation,
-  // restrict types explicitly here
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
   auto iter = TensorIterator::binary_op(ret, self, end,
                                         /*check_mem_overlap=*/true);
@@ -38,11 +35,8 @@ static void lerp_kernel_tensor(
     const Tensor& self,
     const Tensor& end,
     const Tensor& weights) {
-  // lerp() only uses TensorIterator for CPU. Since TensorIterator would
-  // would attempt to promote types inconsistent with the CUDA implementation,
-  // restrict types explicitly here
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
-  TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", end.dtype());
+  TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", weights.dtype());
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(true);
   iter.add_output(ret);

@@ -173,7 +173,7 @@ struct ProfilerThreadLocalState
     // Lock to serialize access from multiple callback threads.
     std::lock_guard<std::mutex> guard(remoteProfiledEventsMutex_);
     if (remoteProfiledEvents_) {
-      (*remoteProfiledEvents_).push_back(std::move(remoteProfiledEvents));
+      (*remoteProfiledEvents_).emplace_back(remoteProfiledEvents);
     } else {
       remoteProfiledEvents_ = {std::move(remoteProfiledEvents)};
     }
@@ -378,7 +378,7 @@ void registerCUDAMethods(CUDAStubs* stubs) {
 
 ProfilerConfig::~ProfilerConfig() = default;
 
-at::IValue ProfilerConfig::toIValues() const {
+at::IValue ProfilerConfig::toIValue() const {
   c10::impl::GenericList eventIValueList(at::AnyType::get());
   eventIValueList.reserve(3);
   eventIValueList.emplace_back(static_cast<int64_t>(state));
@@ -394,21 +394,23 @@ ProfilerConfig ProfilerConfig::fromIValue(
       "Expected IValue to contain type c10::impl::GenericList");
   auto ivalues = profilerConfigIValue.toList();
   TORCH_INTERNAL_ASSERT(
-      ivalues.size() >= kProfilerConfigIValuesSize,
+      ivalues.size() == kProfilerConfigIValuesSize,
       c10::str(
-          "Expected at least ",
+          "Expected exactly ",
           kProfilerConfigIValuesSize,
           " ivalues to resconstruct ProfilerConfig."));
-  ProfilerConfig cfg(
+  return ProfilerConfig(
       static_cast<ProfilerState>(ivalues.get(0).toInt()),
       ivalues.get(1).toBool(),
       ivalues.get(2).toBool());
-  return cfg;
 }
 
 
 ProfilerConfig getProfilerConfig() {
   auto state_ptr = getProfilerTLSState();
+  TORCH_CHECK(
+      state_ptr,
+      "Tried to access profiler config, but profiler is not enabled!");
   return state_ptr->config();
 }
 
@@ -480,9 +482,7 @@ void Event::record(bool record_cuda) {
     cuda_stubs->record(&device_, &cuda_event, &cpu_ns_);
     return;
   }
-  if (record_cpu_ns_) {
-    cpu_ns_ = getTime();
-  }
+  cpu_ns_ = getTime();
 }
 
 /* static */ Event Event::fromIValue(const at::IValue& eventIValue) {
@@ -497,40 +497,24 @@ void Event::record(bool record_cuda) {
       " elements to reconstruct Event.");
 
   Event evt(
-      static_cast<EventKind>(ivalues.get(0).toInt()),
-      at::StringView(ivalues.get(1).toStringRef()),
-      ivalues.get(2).toInt(),
-      false, // TODO: record_cuda
-      static_cast<at::RecordFunctionHandle>(ivalues.get(3).toDouble()),
-      {}, // TODO: record shapes
-      ivalues.get(4).toInt(),
-      false, // Don't record cpu_ns_ since this is a remote event
-      true /* is_remote */
+    static_cast<EventKind>(ivalues.get(0).toInt()), // EventKind
+    at::StringView(ivalues.get(1).toStringRef()), // name
+    ivalues.get(2).toInt(), // thread
+    static_cast<at::RecordFunctionHandle>(ivalues.get(3).toDouble()), // handle
+    {}, // TODO: record shapes
+    ivalues.get(4).toInt(), // node id
+    true, // is remote
+    ivalues.get(5).toInt(), // cpu_mem_usage
+    ivalues.get(6).toInt(), // cpu_ns
+    ivalues.get(7).toBool(), // was cuda recorded
+    ivalues.get(8).toInt(), // cuda memory usage
+    ivalues.get(9).toInt(), // device
+    ivalues.get(10).toDouble() // cuda_us
   );
-  TORCH_CHECK(evt.isRemote(), "Expected event to be remote.");
-  TORCH_INTERNAL_ASSERT(
-      evt.getCPUns() == 0,
-      "Did not expect to record cpu_ns for Event created via Event::fromIValue.");
-  auto currentIdx = 5;
-  evt = evt.setCPUMemoryUsage(ivalues.get(currentIdx++).toInt());
-  auto cpu_ns = ivalues.get(currentIdx++).toInt();
-  evt.setCPUns(cpu_ns);
-  bool cuda_recorded = ivalues.get(currentIdx++).toBool();
-  if (cuda_recorded) {
-    int64_t cuda_mem_usage = ivalues.get(currentIdx++).toInt();
-    evt.setCudaMemoryUsage(cuda_mem_usage);
-    double cuda_elapsed_us = ivalues.get(currentIdx++).toDouble();
-    TORCH_INTERNAL_ASSERT(
-        cuda_elapsed_us != -1,
-        "Failed to record cuda_elapsed_us when profiler was enabled with record_cuda=True.");
-    evt.setCudaElapsedUs(cuda_elapsed_us);
-    auto remoteCudaDevice = ivalues.get(currentIdx).toInt();
-    evt.setDevice(remoteCudaDevice);
-  }
   return evt;
 }
 
-at::IValue Event::toIValues() const {
+at::IValue Event::toIValue() const {
   c10::impl::GenericList eventIValueList(at::AnyType::get());
   eventIValueList.reserve(kEventIValuesSize);
   eventIValueList.emplace_back(static_cast<int64_t>(kind_));
@@ -544,12 +528,17 @@ at::IValue Event::toIValues() const {
   bool cuda_profiling_enabled = has_cuda();
   eventIValueList.emplace_back(cuda_profiling_enabled);
   eventIValueList.emplace_back(static_cast<int64_t>(cuda_memory_usage_));
-  eventIValueList.emplace_back(cuda_elapsed_us_);
   eventIValueList.emplace_back(device_);
+  eventIValueList.emplace_back(cuda_us_);
   return at::IValue(eventIValueList);
 }
 
 double Event::cuda_elapsed_us(const Event & e) const {
+  if (isRemote() && e.isRemote()) {
+    // validate that cuda_us_ has been set properly.
+    TORCH_INTERNAL_ASSERT(cuda_us_ >= 0 && e.cuda_us_ >=0);
+    return e.cuda_us_ - cuda_us_;
+  }
   TORCH_CHECK(e.has_cuda() && has_cuda(), "Events were not recorded for CUDA");
   TORCH_CHECK(e.device() == device(), c10::str("Events are not on the same device: ", e.device(), " vs ", device()));
   return cuda_stubs->elapsed(cuda_event, e.cuda_event);

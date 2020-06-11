@@ -81,7 +81,7 @@ rpc::Message RpcWithProfilingResp::toMessageImpl() && {
   ivalues.emplace_back(
       at::IValue(static_cast<int32_t>(profiledEvents_.size())));
   for (const auto& e : profiledEvents_) {
-    ivalues.emplace_back(e.toIValues());
+    ivalues.emplace_back(e.toIValue());
   }
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> profilingPayload =
@@ -145,7 +145,7 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
       origMsgType,
       std::move(wrappedRpc),
       wrappedMsgType,
-      wrappedMessage.tensors(),
+      std::move(wrappedMessage.tensors()),
       std::move(remoteEvents));
 }
 } // namespace autograd
