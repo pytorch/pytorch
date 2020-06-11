@@ -33,6 +33,8 @@ class RNNBase(torch.nn.Module):
 
     _FLOAT_MODULE = nn.RNNBase
 
+    _version = 2
+
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False, dtype=torch.qint8):
@@ -47,6 +49,7 @@ class RNNBase(torch.nn.Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.dtype = dtype
+        self.version = 2
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -84,8 +87,13 @@ class RNNBase(torch.nn.Module):
                         torch.ops.quantized.linear_prepack(w_ih, b_ih)
                     packed_hh = \
                         torch.ops.quantized.linear_prepack(w_hh, b_hh)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
-                        packed_ih, packed_hh, b_ih, b_hh)
+                    if self.version is None or self.version < 2:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, b_ih, b_hh)
+                    else:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, b_ih, b_hh, True)
+
                 else:
                     w_ih = torch.Tensor(gate_size, layer_input_size).float()
                     w_hh = torch.Tensor(gate_size, hidden_size).float()
@@ -192,6 +200,13 @@ class RNNBase(torch.nn.Module):
             return hx
         return apply_permutation(hx, permutation)
 
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+        self.version = version
+        super(RNNBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                   missing_keys, unexpected_keys, error_msgs)
+
     @classmethod
     def from_float(cls, mod):
         assert type(mod) == torch.nn.LSTM, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM'
@@ -251,9 +266,13 @@ class RNNBase(torch.nn.Module):
                         return packed_weight
                     packed_ih = quantize_and_pack(weight_ih, bias_ih)
                     packed_hh = quantize_and_pack(weight_hh, bias_hh)
+                    if qRNNBase.version is None or qRNNBase.version < 2:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, bias_ih, bias_hh)
+                    else:
+                        cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
+                            packed_ih, packed_hh, bias_ih, bias_hh, True)
 
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(
-                        packed_ih, packed_hh, bias_ih, bias_hh)
                 else:
                     packed_ih = torch.ops.quantized.linear_prepack_fp16(
                         weight_ih.float(), bias_ih)
