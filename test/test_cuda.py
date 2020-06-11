@@ -1698,7 +1698,7 @@ class TestCuda(TestCase):
     def _test_multinomial_invalid_probs_cuda(probs):
         try:
             with torch.random.fork_rng(devices=[0]):
-                torch.multinomial(probs.to('cuda'), 2)
+                torch.multinomial(probs.to('cuda'), 2, replacement=True)
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
@@ -1714,7 +1714,6 @@ class TestCuda(TestCase):
         self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
-        self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")

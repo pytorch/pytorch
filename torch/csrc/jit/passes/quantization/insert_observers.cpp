@@ -991,7 +991,14 @@ InsertObserversHelper::insertObserversFor(
     }
 
     for (auto* v : block->outputs()) {
-      block_output_observers.push_back(getObserverFor(v));
+      // we need explictly skip the values that are already observed
+      // this might happen in subblocks for `if` since
+      // these subblock has access to all values before the `if` node
+      if (!isObserved(v, block_observed_values)) {
+        block_output_observers.emplace_back(getObserverFor(v));
+      } else {
+        block_output_observers.emplace_back(c10::nullopt);
+      }
     }
   }
 
@@ -1094,8 +1101,8 @@ InsertObserversHelper::insertObserversFor(
           }
         }
       } else if (n->kind() == prim::If) {
-        std::vector<size_t> aggregated_observed_outputs;
-        std::vector<c10::optional<script::Module>> aggregated_output_observers;
+        // a vector recoding whether each output is observed or not
+        std::vector<bool> aggregated_output_observe_state;
         for (Block* subblock : n->blocks()) {
           if (alwaysRaisesException(subblock)) {
             continue;
@@ -1104,39 +1111,45 @@ InsertObserversHelper::insertObserversFor(
           // so subblock_observed_values == block_observed_values
           auto info_from_subblock =
               insertObserversFor(subblock, module, block_observed_values);
+          // subblock for prim::If doesn't have inputs
           auto output_observers = std::get<1>(info_from_subblock);
           auto subblock_observed_outputs = std::get<2>(info_from_subblock);
-          // subblock for prim::If doesn't have inputs
-          if (aggregated_observed_outputs.size() > 0) {
-            TORCH_CHECK(
-                aggregated_observed_outputs == subblock_observed_outputs,
-                "quantization doesn't work for the case where branches "
-                "of `if` doesn't both return quantized/non-quantized "
-                "values");
-          } else {
-            for (auto idx : subblock_observed_outputs) {
-              block_observed_values.insert(n->output(idx));
+
+          // We'll insert output observer for each subblock, and in the end
+          // we will check if output of subblocks are quantized consistently
+          for (size_t i = 0; i < subblock->outputs().size(); ++i) {
+            Value* output = subblock->outputs()[i];
+            if (output_observers[i] && !inputs_outputs.count(output) &&
+                !isObserved(output, block_observed_values)) {
+              recordObserved(
+                  output,
+                  *output_observers[i],
+                  values_to_observe,
+                  block_observed_values);
             }
-            aggregated_observed_outputs = subblock_observed_outputs;
           }
-          if (aggregated_output_observers.size() > 0) {
+          for (auto idx : subblock_observed_outputs) {
+            block_observed_values.insert(subblock->outputs()[idx]);
+          }
+          std::vector<bool> subblock_output_observe_state;
+          for (size_t i = 0; i < subblock->outputs().size(); ++i) {
+            Value* output = subblock->outputs()[i];
+            subblock_output_observe_state.push_back(
+                isObserved(output, block_observed_values));
+          }
+          if (aggregated_output_observe_state.size() > 0) {
             TORCH_CHECK(
-                aggregated_output_observers == output_observers,
-                "quantization doesn't work for the case where branches "
-                "of `if` doesn't both return values quantized the same "
-                "way");
+                aggregated_output_observe_state == subblock_output_observe_state,
+                "branches for `if` should return values that are observed "
+                "consistently");
           } else {
-            for (auto i = 0; i < n->outputs().size(); ++i) {
-              if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
-                  !isObserved(n->output(i), block_observed_values)) {
-                recordObserved(
-                    n->output(i),
-                    *output_observers[i],
-                    values_to_observe,
-                    block_observed_values);
-              }
-            }
-            aggregated_output_observers = output_observers;
+            aggregated_output_observe_state = subblock_output_observe_state;
+          }
+        }
+        // mark the output of if as observed
+        for (size_t i = 0; i < n->outputs().size(); ++i) {
+          if (aggregated_output_observe_state[i]) {
+            block_observed_values.insert(n->output(i));
           }
         }
       }
