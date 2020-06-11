@@ -15,7 +15,7 @@ void testFilterMatch() {
       R"IR(
 graph(%0):
   %a = a::aaa(%0)
-  %b = prim::Constant[value=1]()
+  %b : int = prim::Constant[value=1]()
   %c = c::ccc(%a, %b)
   return (%c))IR",
       graph.get());
@@ -58,28 +58,28 @@ graph(%a, %b):
   %d = d::ddd(%a, %b)
   return (%d))IR";
 
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(pattern, replacement);
+
   // b is constant, so the match will succeed
   {
-    SubgraphRewriter rewriter;
-    rewriter.RegisterRewritePattern(pattern, replacement);
-    rewriter.runOnGraph(graph, b_is_constant);
-    FileCheck().check("d::ddd")->check_not("c::ccc")->run(*graph);
+    auto g = graph->copy();
+    rewriter.runOnGraph(g, b_is_constant);
+    FileCheck().check("d::ddd")->check_not("c::ccc")->run(*g);
   }
 
   // b is constant and the value is one, the match will succeed
   {
-    SubgraphRewriter rewriter;
-    rewriter.RegisterRewritePattern(pattern, replacement);
-    rewriter.runOnGraph(graph, {b_is_constant, b_is_one});
-    FileCheck().check("d::ddd")->check_not("c::ccc")->run(*graph);
+    auto g = graph->copy();
+    rewriter.runOnGraph(g, {b_is_constant, b_is_one});
+    FileCheck().check("d::ddd")->check_not("c::ccc")->run(*g);
   }
 
   // b is constant but the value is not two, the match will fail
   {
-    SubgraphRewriter rewriter;
-    rewriter.RegisterRewritePattern(pattern, replacement);
-    rewriter.runOnGraph(graph, {b_is_constant, b_is_two});
-    FileCheck().check("c::ccc")->check_not("d::ddd")->run(*graph);
+    auto g = graph->copy();
+    rewriter.runOnGraph(g, {b_is_constant, b_is_two});
+    FileCheck().check("c::ccc")->check_not("d::ddd")->run(*g);
   }
 }
 
