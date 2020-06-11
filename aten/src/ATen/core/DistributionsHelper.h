@@ -142,46 +142,44 @@ DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_double_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(next_float_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_float_normal_sample);
 
-#define DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(TYPE)                                          \
-                                                                                                        \
-template <typename RNG, typename ret_type,                                                              \
-          typename std::enable_if<(                                                                     \
-            has_member_next_##TYPE##_normal_sample<RNG>::value &&                                       \
-            has_member_set_next_##TYPE##_normal_sample<RNG>::value                                      \
-          ), int>::type = 0>                                                                            \
-bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, TYPE mean, TYPE stdv, ret_type* ret) {       \
-  if (generator->next_##TYPE##_normal_sample()) {                                                       \
-    *ret = *(generator->next_##TYPE##_normal_sample()) * stdv + mean;                                   \
-    generator->set_next_##TYPE##_normal_sample(c10::optional<TYPE>());                                  \
-    return true;                                                                                        \
-  }                                                                                                     \
-  return false;                                                                                         \
-}                                                                                                       \
-                                                                                                        \
-template <typename RNG, typename ret_type,                                                              \
-          typename std::enable_if<(                                                                     \
-            !has_member_next_##TYPE##_normal_sample<RNG>::value ||                                      \
-            !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                     \
-          ), int>::type = 0>                                                                            \
-bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, TYPE mean, TYPE stdv, ret_type* ret) {       \
-  return false;                                                                                         \
-}                                                                                                       \
-                                                                                                        \
-template <typename RNG,                                                                                 \
-          typename std::enable_if<(                                                                     \
-            has_member_next_##TYPE##_normal_sample<RNG>::value &&                                       \
-            has_member_set_next_##TYPE##_normal_sample<RNG>::value                                      \
-          ), int>::type = 0>                                                                            \
-void maybe_set_next_##TYPE##_normal_sample(RNG* generator, TYPE cache) {                                \
-  generator->set_next_##TYPE##_normal_sample(cache);                                                    \
-}                                                                                                       \
-                                                                                                        \
-template <typename RNG,                                                                                 \
-          typename std::enable_if<(                                                                     \
-            !has_member_next_##TYPE##_normal_sample<RNG>::value ||                                      \
-            !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                     \
-          ), int>::type = 0>                                                                            \
-void maybe_set_next_##TYPE##_normal_sample(RNG* generator, TYPE cache) {                                \
+#define DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(TYPE)                                      \
+                                                                                                    \
+template <typename RNG, typename ret_type,                                                          \
+          typename std::enable_if<(                                                                 \
+            has_member_next_##TYPE##_normal_sample<RNG>::value &&                                   \
+            has_member_set_next_##TYPE##_normal_sample<RNG>::value                                  \
+          ), int>::type = 0>                                                                        \
+C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, ret_type* ret) {  \
+  if (generator->next_##TYPE##_normal_sample()) {                                                   \
+    *ret = *(generator->next_##TYPE##_normal_sample());                                             \
+    generator->set_next_##TYPE##_normal_sample(c10::optional<TYPE>());                              \
+    return true;                                                                                    \
+  }                                                                                                 \
+  return false;                                                                                     \
+}                                                                                                   \
+                                                                                                    \
+template <typename RNG, typename ret_type,                                                          \
+          typename std::enable_if<(                                                                 \
+            !has_member_next_##TYPE##_normal_sample<RNG>::value ||                                  \
+            !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
+          ), int>::type = 0>                                                                        \
+C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, ret_type* ret) {  \
+  return false;                                                                                     \
+}                                                                                                   \
+                                                                                                    \
+template <typename RNG, typename ret_type,                                                          \
+          typename std::enable_if<(                                                                 \
+            has_member_set_next_##TYPE##_normal_sample<RNG>::value                                  \
+          ), int>::type = 0>                                                                        \
+C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* generator, ret_type cache) { \
+  generator->set_next_##TYPE##_normal_sample(cache);                                                \
+}                                                                                                   \
+                                                                                                    \
+template <typename RNG, typename ret_type,                                                          \
+          typename std::enable_if<(                                                                 \
+            !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
+          ), int>::type = 0>                                                                        \
+C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* generator, ret_type cache) { \
 }
 
 DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double);
@@ -206,28 +204,28 @@ struct normal_distribution {
   C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
     dist_acctype<T> ret;
     // return cached values if available
-    if (std::is_same<T, double>::value) {
-      if (maybe_get_next_double_normal_sample(generator, mean, stdv, &ret)) {
-        return ret;
-      }
+    if (std::is_same<T, double>::value && maybe_get_next_double_normal_sample(generator, &ret)) {
+      ret = transformation::normal(ret, mean, stdv);
+      return ret;
+    } else if (maybe_get_next_float_normal_sample(generator, &ret)) {
+      ret = transformation::normal(ret, mean, stdv);
+      return ret;
     } else {
-      if (maybe_get_next_float_normal_sample(generator, mean, stdv, &ret)) {
-        return ret;
+      // otherwise generate new normal values
+      uniform_real_distribution<T> uniform(0.0, 1.0);
+      const dist_acctype<T> u1 = uniform(generator);
+      const dist_acctype<T> u2 = uniform(generator);
+      const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
+      const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
+      if (std::is_same<T, double>::value) {
+        maybe_set_next_double_normal_sample(generator, r * ::sin(theta));
+      } else {
+        maybe_set_next_float_normal_sample(generator, r * ::sin(theta));
       }
+      ret = r * ::cos(theta);
+      ret = transformation::normal(ret, mean, stdv);
+      return ret;
     }
-    // otherwise generate new normal values
-    uniform_real_distribution<T> uniform(0.0, 1.0);
-    const dist_acctype<T> u1 = uniform(generator);
-    const dist_acctype<T> u2 = uniform(generator);
-    const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
-    const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
-    if (std::is_same<T, double>::value) {
-      maybe_set_next_double_normal_sample(generator, r * ::sin(theta));
-    } else {
-      maybe_set_next_float_normal_sample(generator, r * ::sin(theta));
-    }
-    ret = transformation::normal(r * ::cos(theta), mean, stdv);
-    return ret;
   }
 
   private:
