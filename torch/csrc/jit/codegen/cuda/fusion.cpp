@@ -220,8 +220,8 @@ void Fusion::print() {
 
 void Fusion::printMath() {
   FusionGuard fg(this);
-  IRMathPrinter op_exprs(std::cout);
-  op_exprs.handle(this);
+  for (auto expr : exprs(true))
+    std::cout << expr << std::endl;
 }
 
 void Fusion::printTransforms() {

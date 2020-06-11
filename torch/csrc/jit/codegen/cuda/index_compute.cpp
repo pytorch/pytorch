@@ -15,9 +15,8 @@ void IndexCompute::handle(Split* split) {
 
   auto outer_it = index_map_.find(outer_id);
   auto inner_it = index_map_.find(inner_id);
-  TORCH_INTERNAL_ASSERT(
-      outer_it != index_map_.end() && inner_it != index_map_.end(),
-      "Error in index compute, did not compute a necessary intermediate value.");
+  if (outer_it == index_map_.end() || inner_it == index_map_.end())
+    return;
 
   auto outer_ind = outer_it->second;
   auto inner_ind = inner_it->second;
@@ -32,9 +31,8 @@ void IndexCompute::handle(Merge* merge) {
   auto inner_id = merge->inner();
 
   auto out_it = index_map_.find(out_id);
-  TORCH_INTERNAL_ASSERT(
-      out_it != index_map_.end(),
-      "Error in index compute, did not compute a necessary intermediate value.");
+  if (out_it == index_map_.end())
+    return;
 
   auto out_ind = out_it->second;
 

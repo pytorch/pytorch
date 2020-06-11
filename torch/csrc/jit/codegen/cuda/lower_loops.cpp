@@ -247,39 +247,50 @@ std::vector<Expr*> UnrollPass::runPass(
   return mutated_exprs;
 }
 
-void LoopNestGenerator::pushAlloc(TensorView* tv) {
+// Create, place, and return the allocation for tv
+Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   TORCH_INTERNAL_ASSERT(
       !(FusionGuard::getCurFusion()->hasInput(tv) ||
         FusionGuard::getCurFusion()->hasOutput(tv)),
       "Tried to allocate an input or output tensor.");
 
-  // Compute at axis can be == tv->nDims() meaning it's inline
-  decltype(tv->nDims()) alloc_pos = 0;
-  // Do we need to close to root and alloc there?
-  bool reset = true;
-  while (alloc_pos <= tv->nDims()) {
+  // First figure out which loop nest this allocation needs to be placed in
+  // Do we need to place the allocation at the root?
+  size_t alloc_pos = 0;
+  // If there's no computeAt, then we want to be allocated at the root
+  while (alloc_pos <= tv->nDims() && tv->hasComputeAt()) {
+    // If we have a computeAt and we reached computeAt pos that's where it  goes
     if (tv->hasComputeAt() && alloc_pos == tv->getThisComputeAtAxis()) {
-      reset = false;
       break;
     }
+
+    // If we found an unroll, we want to place the allocation outside the unroll
     if (alloc_pos < tv->nDims() &&
         tv->getComputeAtAxis(alloc_pos).first->parallel_method() ==
             ParallelType::Unroll) {
-      reset = false;
       break;
     }
     alloc_pos++;
   }
-  alloc_pos = reset ? 0 : alloc_pos;
 
+  // Grab the dimensions the allocation will be based on
   std::vector<Val*> alloc_dims;
   for (auto i = alloc_pos; i < tv->nDims(); i++) {
     IterDomain* dim = tv->getComputeAtAxis(i).first;
-    if (dim->isThreadDim() || dim->isReduction())
+    if (
+        // If shared memory, don't use any IDs bound to a grid dimension
+        (tv->memory_type_ == MemoryType::Shared && dim->isBlockDim()) ||
+        // If local memory, don't use any IDs bound to a grid or block dimension
+        (tv->memory_type_ == MemoryType::Local && dim->isThread()) ||
+        // If we're reducing this dimension, don't use it in the allocation
+        // computation
+        dim->isReduction())
       continue;
     alloc_dims.push_back(dim->extent());
   }
 
+  // Multiply all the dimensions we're going to use for the allocation together
+  // to get the total size
   Val* size;
   if (alloc_dims.size() == 0) {
     size = new Int(1);
@@ -289,17 +300,26 @@ void LoopNestGenerator::pushAlloc(TensorView* tv) {
       size = mul(size, alloc_dims[i]);
     }
   }
+
+  // Create the allocation node
   Allocate* alloc = new Allocate(tv, size);
 
+  // Place the allocation
   if (alloc_pos == 0) {
+    // If we allocate at the root, insert at the begining of the lowered
+    // expressions
     lowered_exprs.insert(lowered_exprs.begin(), alloc);
   } else if (alloc_pos == for_loops.size()) {
-    // inline
-    scope_utils::pushBack(for_loops[alloc_pos - 1], alloc);
+    // If we allocate inline, push to the back of the last for loop
+    scope_utils::pushBack(for_loops[for_loops.size() - 1], alloc);
   } else {
+    // Otherwise we allocate in some loop nest that is not inline, or root, so
+    // insert right before the loop we're just outside of
     scope_utils::insertBefore(
         for_loops[alloc_pos - 1], for_loops[alloc_pos], alloc);
   }
+
+  return alloc;
 }
 
 void LoopNestGenerator::openFor(std::pair<IterDomain*, TensorView*> id_pair) {
@@ -329,29 +349,39 @@ void LoopNestGenerator::pushBack(Expr* expr) {
     scope_utils::pushBack(for_loops.back(), expr);
 }
 
-// Update for loop structure based on this TensorView
-void LoopNestGenerator::initReduction(TensorView* tv, Val* init_val) {
-  // This logic was taken from allocation placement, as we want to initialize
-  // the reduction buffers right after they're allocated. Compute at axis can be
-  // == tv->nDims() meaning it's inline
-  decltype(tv->nDims()) alloc_pos = 0;
-  // Do we need to close to root and alloc there?
-  bool reset = true;
-  while (alloc_pos <= tv->nDims()) {
+// Update for loop structure based on this TensorView, if there's an allocation
+// stmt, send it in so we can make sure that we insert this initialization after
+// it
+void LoopNestGenerator::initReduction(
+    TensorView* tv,
+    Val* init_val,
+    Expr* alloc_expr) {
+  // This logic was taken from pushAlloc, as the initialization loop nest will
+  // go at the same place.
+
+  // First figure out which loop nest this allocation needs to be placed in
+  // Do we need to place the allocation at the root?
+  size_t alloc_pos = 0;
+  // If there's no computeAt, then we want to be allocated at the root
+  while (alloc_pos <= tv->nDims() && tv->hasComputeAt()) {
+    // If we have a computeAt and we reached computeAt pos that's where it  goes
     if (tv->hasComputeAt() && alloc_pos == tv->getThisComputeAtAxis()) {
-      reset = false;
       break;
     }
+
+    // If we found an unroll, we want to place the allocation outside the unroll
     if (alloc_pos < tv->nDims() &&
         tv->getComputeAtAxis(alloc_pos).first->parallel_method() ==
             ParallelType::Unroll) {
-      reset = false;
       break;
     }
     alloc_pos++;
   }
-  alloc_pos = reset ? 0 : alloc_pos;
 
+  // Grab the IDs that will be involved in the initialization, ignore reduction
+  // dimensions. Everything else will be iterated over to cover the entire
+  // buffer. Index compute will ignore [block, grid]Dims depending on buffer
+  // memory location
   std::vector<IterDomain*> ids;
   for (auto i = alloc_pos; i < tv->nDims(); i++) {
     IterDomain* dim = tv->getComputeAtAxis(i).first;
@@ -360,45 +390,88 @@ void LoopNestGenerator::initReduction(TensorView* tv, Val* init_val) {
     ids.push_back(dim);
   }
 
+  // Unsafe clone, as we want an exact replica of tv so we can create a UnaryOp
+  // to set the buffer to the init_val.
   auto clone = tv->unsafeClone();
+  // The initilization stmt that will be located inside the loop nest (if there
+  // is one)
   auto init_stmt = new UnaryOp(UnaryOpType::Set, clone, init_val);
 
-  Expr* init = nullptr;
+  // Init a pointer that will become the entirety of the initialization
+  Expr* init_loop_nest = nullptr;
+
+  // The for loop that we will place the initialization within (alloc_pos - 1),
+  // if one exists. Once we're done this inner_fl will be the inner most loop
+  // containing the init_stmt
   ForLoop* inner_fl = nullptr;
   if (alloc_pos >= 1)
     inner_fl = for_loops[alloc_pos - 1];
+
+  // Work through the iter domains that we need to initialize on, outside to
+  // inside, to construct the loop nest for the initialization.
   for (auto id : ids) {
     ForLoop* new_fl;
+
     if (id->isThread()) {
+      // If based on a thread, make sure we get the named Int right
       std::stringstream ss;
       ss << id->parallel_method();
       new_fl = new ForLoop(
           new NamedScalar(ss.str(), DataType::Int), id, {}, inner_fl);
     } else {
+      // Otherwise it's just a new int-
       new_fl = new ForLoop(new Int(), id, {}, inner_fl);
     }
 
-    if (init == nullptr) {
-      init = new_fl;
-      inner_fl = new_fl;
+    if (init_loop_nest == nullptr) {
+      // If this is our first generated loop, then it will be our outer most
+      // loop nest
+      init_loop_nest = new_fl;
     } else {
+      // Otherwise place it inside the last generated loop
       inner_fl->body().push_back(new_fl);
-      inner_fl = new_fl;
     }
+    // Increment the inner most for loop
+    inner_fl = new_fl;
   }
-  if (init == nullptr) {
-    init = init_stmt;
+
+  if (init_loop_nest == nullptr) {
+    // If no loops were generated, than our init_stmt is all we need
+    init_loop_nest = init_stmt;
   } else {
+    // If there were for loops generated, place the init_stmt in the inner most
+    // for loop.
     inner_fl->body().push_back(init_stmt);
   }
 
+  // Place the allocation
   if (alloc_pos == 0) {
-    lowered_exprs.insert(lowered_exprs.begin(), init);
+    // If we allocate at the root, look for the provided allocatoin if it
+    // exists, and place after it.
+    if (alloc_expr != nullptr) {
+      bool found = false;
+      for (auto it = lowered_exprs.begin(); it != lowered_exprs.end(); it++) {
+        if ((*it) == alloc_expr) {
+          lowered_exprs.insert(it + 1, init_loop_nest);
+          found = true;
+          break;
+        }
+      }
+      TORCH_INTERNAL_ASSERT(
+          found,
+          "Could not figure out where to initialize the buffer for ",
+          tv);
+    } else {
+      lowered_exprs.insert(lowered_exprs.begin(), init_loop_nest);
+    }
   } else if (alloc_pos == for_loops.size()) {
-    scope_utils::pushBack(for_loops[alloc_pos - 1], init);
+    // If we allocate inline, push to the back of the last for loop
+    scope_utils::pushBack(for_loops[for_loops.size() - 1], init_loop_nest);
   } else {
+    // Otherwise we allocate in some loop nest that is not inline, or root, so
+    // insert right before the loop we're just outside of
     scope_utils::insertBefore(
-        for_loops[alloc_pos - 1], for_loops[alloc_pos], init);
+        for_loops[alloc_pos - 1], for_loops[alloc_pos], init_loop_nest);
   }
 }
 
@@ -437,15 +510,17 @@ void LoopNestGenerator::handle(Expr* expr) {
     openFor(out->getComputeAtAxis((int)compute_at_scope.size()));
   }
 
+  Expr* alloc_stmt = nullptr;
   //  3) Allocate the output.
   if (!FusionGuard::getCurFusion()->hasInput(out) &&
       !FusionGuard::getCurFusion()->hasOutput(out))
-    pushAlloc(out);
+    alloc_stmt = pushAlloc(out);
 
   //  4) If this is a reduction, initialize the output (open for loops to inner
-  //  most, predicate, initialize, F predicate, close to computeAt)
+  //  most, predicate, initialize, place next after allocation if exists, close
+  //  to computeAt)
   if (out->hasReduction())
-    initReduction(out, static_cast<ReductionOp*>(expr)->init());
+    initReduction(out, static_cast<ReductionOp*>(expr)->init(), alloc_stmt);
 
   //  5) Open to inner most loop
   for (decltype(out->nDims()) i = for_loops.size(); i < out->nDims(); i++)

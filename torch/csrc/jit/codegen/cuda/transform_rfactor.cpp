@@ -258,7 +258,7 @@ TensorDomain* TransformRFactor::runReplay(
             id->extent(),
             id->parallel_method(),
             false,
-            true,
+            false,
             false);
       } else {
         new_root[i] = id->clone();

@@ -48,8 +48,8 @@ struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // belongs to (the final TensorView when following the computeAt path)
   std::vector<std::pair<IterDomain*, TensorView*>> compute_at_scope;
 
-  // Get Register allocation statement for tensorview
-  void pushAlloc(TensorView*);
+  // Create, place, and return the allocation for tv
+  Expr* pushAlloc(TensorView*);
 
   // Open a new inner most for loop
   void openFor(std::pair<IterDomain*, TensorView*>);
@@ -62,8 +62,10 @@ struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Update for loop structure based on this TensorView
   void updateLoopNest(TensorView*);
 
-  // Update for loop structure based on this TensorView
-  void initReduction(TensorView* tv, Val* init_val);
+  // Update for loop structure based on this TensorView, if there's an
+  // allocation stmt, send it in so we can make sure that we insert this
+  // initialization after it
+  void initReduction(TensorView* tv, Val* init_val, Expr* alloc_expr = nullptr);
 
   // Check if a TV op, generate for loop nest around it
   void handle(Expr*) final;
