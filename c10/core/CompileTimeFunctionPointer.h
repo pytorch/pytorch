@@ -1,6 +1,6 @@
 #pragma once
 
-#include <type_traits>
+#include <c10/util/TypeTraits.h>
 
 namespace c10 {
 
@@ -31,6 +31,7 @@ namespace c10 {
  */
 template<class FuncType_, FuncType_* func_ptr_>
 struct CompileTimeFunctionPointer final {
+  static_assert(guts::is_function_type<FuncType_>::value, "TORCH_FN can only wrap function types.");
   using FuncType = FuncType_;
 
   static constexpr FuncType* func_ptr() {

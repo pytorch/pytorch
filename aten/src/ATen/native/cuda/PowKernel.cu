@@ -160,7 +160,8 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
   if (isComplexType(iter.dtype()) || exp_scalar.isComplex()) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      const auto exp = thrust_t(exp_scalar.to<scalar_t>());
+      auto cuda101_bug = exp_scalar.to<scalar_t>();
+      const auto exp = thrust_t(c10_internal::cuda101bug_cast_c10_complex_to_thrust_complex(cuda101_bug));
       gpu_kernel(iter, [=]GPU_LAMBDA(thrust_t base) -> thrust_t {
         return complex_pow_(base, exp);
       });
