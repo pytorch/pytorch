@@ -689,10 +689,10 @@ class TestDataParallel(TestCase):
             def __init__(self, layouts, dtypes):
                 super(ConvNet, self).__init__()
                 self.dtypes = dtypes
-                self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(memory_format=layouts[0]).to(dtypes[0])
-                self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(memory_format=layouts[1]).to(dtypes[1])
-                self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(memory_format=layouts[2]).to(dtypes[2])
-                self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(memory_format=layouts[3]).to(dtypes[3])
+                self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(memory_format=layouts[0], dtype=dtypes[0])
+                self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(memory_format=layouts[1], dtype=dtypes[1])
+                self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(memory_format=layouts[2], dtype=dtypes[2])
+                self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(memory_format=layouts[3], dtype=dtypes[3])
 
             def forward(self, x):
                 x = x.to(self.dtypes[0])

@@ -8,8 +8,8 @@
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
+#include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
@@ -309,7 +309,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
                         "grad.sizes() = ", grad.sizes(),
                         ", strides() = ", grad.strides(), "\n",
                         "bucket_view.sizes() = ", bucket_view.sizes(),
-                        "bucket_view.strides() = ", bucket_view.strides());
+                        ", strides() = ", bucket_view.strides());
       }
       // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
       auto wrapped = c10::scalar_to_tensor(double(1.)/process_group_->getSize());

@@ -1892,16 +1892,16 @@ class ConvNet(nn.Module):
         super(ConvNet, self).__init__()
         self.gpus = gpus
         self.dtypes = dtypes
-        self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(gpus[0]).to(memory_format=layouts[0]).to(dtypes[0])
-        self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(gpus[1]).to(memory_format=layouts[1]).to(dtypes[1])
-        self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(gpus[2]).to(memory_format=layouts[2]).to(dtypes[2])
-        self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(gpus[3]).to(memory_format=layouts[3]).to(dtypes[3])
+        self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(device=gpus[0], memory_format=layouts[0], dtype=dtypes[0])
+        self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(device=gpus[1], memory_format=layouts[1], dtype=dtypes[1])
+        self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(device=gpus[2], memory_format=layouts[2], dtype=dtypes[2])
+        self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(device=gpus[3], memory_format=layouts[3], dtype=dtypes[3])
 
     def forward(self, x):
         x = x.to(self.dtypes[0])
-        x = self.conv0(x).to(self.gpus[1]).to(self.dtypes[1])
-        x = self.conv1(x).to(self.gpus[2]).to(self.dtypes[2])
-        x = self.conv2(x).to(self.gpus[3]).to(self.dtypes[3])
+        x = self.conv0(x).to(device=self.gpus[1], dtype=self.dtypes[1])
+        x = self.conv1(x).to(device=self.gpus[2], dtype=self.dtypes[2])
+        x = self.conv2(x).to(device=self.gpus[3], dtype=self.dtypes[3])
         return self.conv3(x)
 
 
