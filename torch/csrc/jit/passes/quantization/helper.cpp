@@ -416,7 +416,8 @@ bool userDefinedCallFunction(Node* n) {
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
 }
 
-bool nodeQuantizable(Node* n, bool is_dynamic) {
+bool nodeQuantizable(Node* n, QuantType quant_type) {
+  bool is_dynamic = quant_type == QuantType::DYNAMIC;
   return isFunctionNode(
       n,
       /* call_funcs = */
@@ -427,7 +428,7 @@ bool nodeQuantizable(Node* n, bool is_dynamic) {
                  : _static_quantizable_aten_funcs);
 }
 
-bool useQuantizable(const Use& use, bool is_dynamic) {
+bool useQuantizable(const Use& use, QuantType quant_type) {
   for (const auto& func_input : _observe_inputs_aten_func) {
     if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
       return use.offset == func_input.arg_index;
@@ -440,7 +441,7 @@ bool useQuantizable(const Use& use, bool is_dynamic) {
     }
   }
 
-  return nodeQuantizable(use.user, is_dynamic);
+  return nodeQuantizable(use.user, quant_type);
 }
 
 std::shared_ptr<Graph> getCallFunctionGraph(Node* n) {
