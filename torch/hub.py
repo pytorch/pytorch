@@ -9,7 +9,6 @@ import tempfile
 import torch
 import warnings
 import zipfile
-from copy import copy
 
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
