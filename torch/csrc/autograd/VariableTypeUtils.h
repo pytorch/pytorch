@@ -112,7 +112,7 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
   if (base_var.is_view()) {
     // Set `view_func` using the root base as input.
     // `view_func` is used to recover views in backward when either as_strided is not supported
-    // or the view function changes the dtype which is not recorded by as_strided
+    // or the view function changes the metadata which is not recorded by as_strided
     // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
     // for more details how we use this function in backward.
     auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base_var));

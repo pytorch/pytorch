@@ -17957,15 +17957,15 @@ class TestViewOps(TestCase):
 
         return True
 
-    @onlyOnCPUAndCUDA
-    def test_views_with_dtype_change(self, device):
-        def transpose_if_not_contig(x, contiguous=False, dim0=0, dim1=1):
-            if contiguous:
-                return x
-            else:
-                return x.transpose(dim0, dim1)
+    def transpose_if_not_contig(x, contiguous=False, dim0=0, dim1=1):
+        if contiguous:
+            return x
+        else:
+            return x.transpose(dim0, dim1)
 
-        def test_view_as_complex(contiguous_input=True, dim0=0, dim1=1):
+    @onlyOnCPUAndCUDA
+    def test_view_as_complex(self, device):
+        def fn(contiguous_input=True, dim0=0, dim1=1):
             t = torch.randn(3, 4, 2, device=device)
             c_t = t[:, :, 0] + 1j * t[:, :, 1]
 
@@ -17982,17 +17982,19 @@ class TestViewOps(TestCase):
             self.assertEqual(res, transpose_if_not_contig(c_t, contiguous_input, dim0, dim1))
             self.assertTrue(self.is_view_of(t, res))
 
-        def test_view_as_real(contiguous_input=True):
+        test_view_as_complex()
+        test_view_as_complex(contiguous_input=False)
+        test_view_as_complex(contiguous_input=False, dim0=0, dim1=2)
+
+    @onlyOnCPUAndCUDA
+    def test_view_as_real(self, device):
+        def fn(contiguous_input=True):
             t = torch.randn(3, 4, 2, device=device)
             c_t = t[:, :, 0] + 1j * t[:, :, 1]
 
             res = torch.view_as_real(transpose_if_not_contig(c_t, contiguous_input))
             self.assertEqual(res, transpose_if_not_contig(t, contiguous_input))
             self.assertTrue(self.is_view_of(c_t, res))
-
-        test_view_as_complex()
-        test_view_as_complex(contiguous_input=False)
-        test_view_as_complex(contiguous_input=False, dim0=0, dim1=2)
 
         test_view_as_real()
         test_view_as_real(contiguous_input=False)

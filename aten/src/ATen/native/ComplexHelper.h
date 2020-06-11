@@ -35,7 +35,7 @@ inline std::vector<int64_t> computeStrideForViewAsComplex(IntArrayRef oldstride)
   res.pop_back();
 
   for(size_t i = 0; i < res.size(); i++) {
-    TORCH_CHECK(res[i] % 2 == 0, "Tensor must a stride divisible by 2 for all but last dimension");
+    TORCH_CHECK(res[i] % 2 == 0, "Tensor must have a stride divisible by 2 for all but last dimension");
     res[i] = res[i] / 2;
   }
   return res;
@@ -53,9 +53,12 @@ Tensor view_as_complex(const Tensor& self) {
   new_sizes.pop_back();
 
   auto new_strides = computeStrideForViewAsComplex(self.strides());
-
   const auto complex_type = c10::toComplexType(self.scalar_type());
-  return at::empty({0}, self.options().dtype(complex_type)).set_(self.storage(), self.storage_offset(), new_sizes, new_strides);
+
+  TORCH_INTERNAL_ASSERT(self.storage_offset() % 2 == 0);
+  auto new_storage_offset = self.storage_offset() / 2;
+
+  return at::empty({0}, self.options().dtype(complex_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
 }
 
 }} // namespace at::native
