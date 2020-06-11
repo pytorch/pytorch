@@ -939,8 +939,10 @@ struct Subscript : public Expr {
       const SourceRange& range,
       const Expr& value,
       const List<Expr>& subscript_exprs) {
+    auto whole_range = SourceRange(
+        range.source(), range.start(), subscript_exprs.range().end() + 1);
     return Subscript(
-        Compound::create(TK_SUBSCRIPT, range, {value, subscript_exprs}));
+        Compound::create(TK_SUBSCRIPT, whole_range, {value, subscript_exprs}));
   }
 };
 
