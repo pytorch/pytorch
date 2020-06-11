@@ -126,33 +126,16 @@ struct uniform_real_distribution {
     T to_;
 };
 
-// https://en.wikibooks.org/wiki/More_C%2B%2B_Idioms/Member_Detector
-#define DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(member)                           \
-                                                                                  \
-template < class T >                                                              \
-class HasMember_##member                                                          \
-{                                                                                 \
-private:                                                                          \
-    using Yes = char[2];                                                          \
-    using  No = char[1];                                                          \
-                                                                                  \
-    struct Fallback { int member; };                                              \
-    struct Derived : T, Fallback { };                                             \
-                                                                                  \
-    template < class U >                                                          \
-    static No& test ( decltype(U::member)* );                                     \
-    template < typename U >                                                       \
-    static Yes& test ( U* );                                                      \
-                                                                                  \
-public:                                                                           \
-    static constexpr bool RESULT = sizeof(test<Derived>(nullptr)) == sizeof(Yes); \
-};                                                                                \
-                                                                                  \
-template < class T >                                                              \
-struct has_member_##member                                                        \
-: public std::integral_constant<bool, HasMember_##member<T>::RESULT>              \
-{                                                                                 \
-};
+#define DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(member)              \
+template <typename T>                                                \
+struct has_member_##member                                           \
+{                                                                    \
+    typedef char yes;                                                \
+    typedef long no;                                                 \
+    template <typename U> static yes test(decltype(&U::member));     \
+    template <typename U> static no test(...);                       \
+    static constexpr bool value = sizeof(test<T>(0)) == sizeof(yes); \
+}
 
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(next_double_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_double_normal_sample);
@@ -161,27 +144,27 @@ DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_float_normal_sample);
 
 #define DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(TYPE)                                          \
                                                                                                         \
-template <typename RNG,                                                                                 \
+template <typename RNG, typename ret_type,                                                              \
           typename std::enable_if<(                                                                     \
             has_member_next_##TYPE##_normal_sample<RNG>::value &&                                       \
             has_member_set_next_##TYPE##_normal_sample<RNG>::value                                      \
           ), int>::type = 0>                                                                            \
-c10::optional<TYPE> maybe_get_next_##TYPE##_normal_sample(RNG* generator, TYPE mean, TYPE stdv) {       \
+bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, TYPE mean, TYPE stdv, ret_type* ret) {       \
   if (generator->next_##TYPE##_normal_sample()) {                                                       \
     TYPE ret = *(generator->next_##TYPE##_normal_sample()) * stdv + mean;                               \
     generator->set_next_##TYPE##_normal_sample(c10::optional<TYPE>());                                  \
-    return ret;                                                                                         \
+    return true;                                                                                        \
   }                                                                                                     \
-  return c10::nullopt;                                                                                  \
+  return false;                                                                                         \
 }                                                                                                       \
                                                                                                         \
-template <typename RNG,                                                                                 \
+template <typename RNG, typename ret_type,                                                              \
           typename std::enable_if<(                                                                     \
             !has_member_next_##TYPE##_normal_sample<RNG>::value ||                                      \
             !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                     \
           ), int>::type = 0>                                                                            \
-c10::optional<TYPE> maybe_get_next_##TYPE##_normal_sample(RNG* generator, TYPE mean, TYPE stdv) {       \
-  return c10::nullopt;                                                                                  \
+bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, TYPE mean, TYPE stdv, ret_type* ret) {       \
+  return false;                                                                                         \
 }                                                                                                       \
                                                                                                         \
 template <typename RNG,                                                                                 \
@@ -224,14 +207,12 @@ struct normal_distribution {
     dist_acctype<T> ret;
     // return cached values if available
     if (std::is_same<T, double>::value) {
-      auto ret = maybe_get_next_double_normal_sample(generator, mean, stdv);
-      if (ret.has_value()) {
-        return *ret;
+      if (maybe_get_next_double_normal_sample(generator, mean, stdv, &ret)) {
+        return ret;
       }
     } else {
-      auto ret = maybe_get_next_float_normal_sample(generator, mean, stdv);
-      if (ret.has_value()) {
-        return *ret;
+      if (maybe_get_next_float_normal_sample(generator, mean, stdv, &ret)) {
+        return ret;
       }
     }
     // otherwise generate new normal values
@@ -254,31 +235,31 @@ struct normal_distribution {
     T stdv;
 };
 
+template <typename T>
+struct DiscreteDistributionType { using type = float; };
+
+template <> struct DiscreteDistributionType<double> { using type = double; };
+
 /**
  * Samples a bernoulli distribution given a probability input
  */
 template <typename T>
 struct bernoulli_distribution {
 
-  inline bernoulli_distribution(T p_in) {
-    TORCH_CHECK(p_in >= 0 && p_in <= 1);
+  C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
+    TORCH_CHECK_IF_NOT_ON_CUDA(p_in >= 0 && p_in <= 1);
     p = p_in;
   }
 
   template <typename RNG>
-  inline int operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    return uniform(generator) < p;
+    return transformation::bernoulli<T>(uniform(generator), p);
   }
 
   private:
     T p;
 };
-
-template <typename T>
-struct GeometricType { using type = float; };
-
-template <> struct GeometricType<double> { using type = double; };
 
 /**
  * Samples a geometric distribution given a probability input
