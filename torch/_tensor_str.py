@@ -365,6 +365,9 @@ def _str_intern(self):
     if self.has_names():
         suffixes.append('names={}'.format(self.names))
 
+    if self.fw_grad is not None:
+        suffixes.append('fw_grad={}'.format(self.fw_grad))
+
     return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
 
 def _str(self):

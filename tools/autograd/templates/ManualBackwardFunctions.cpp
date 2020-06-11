@@ -2882,10 +2882,22 @@ Tensor _log_softmax_foward(const Tensor& self_fw_grad, const Tensor& result, int
 }
 
 Tensor stack_forward(TensorList tensors, int64_t dim) {
-  std::vector<Tensor> fw_grads;
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
   for (auto& t: tensors) {
-    fw_grads.push_back(t.fw_grad().defined()? t.fw_grad(): at::zeros_like(t));
+    any_defined |= t.fw_grad().defined();
   }
 
-  return at::stack(fw_grads, dim);
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+
+    for (auto& t: tensors) {
+      fw_grads.push_back(t.fw_grad().defined()? t.fw_grad(): at::zeros_like(t));
+    }
+
+    out_fw_grad = at::stack(fw_grads, dim);
+  }
+
+  return out_fw_grad;
 }
