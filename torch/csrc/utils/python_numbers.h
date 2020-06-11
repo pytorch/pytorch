@@ -119,7 +119,7 @@ inline std::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
     throw python_error();
   }
 
-  return std::complex<double>(value.real, value.imag);
+  return c10::complex<double>(value.real, value.imag);
 }
 
 inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
