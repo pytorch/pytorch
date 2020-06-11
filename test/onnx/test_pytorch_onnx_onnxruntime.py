@@ -2857,6 +2857,30 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, batch1, batch2, alpha, beta))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_linspace(self):
+        class LinSpace(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.linspace(x, y, steps=11), \
+                    torch.linspace(-x, -y, steps=11), \
+                    torch.linspace(x, y * 100, steps=1991), \
+                    torch.linspace(0, x / 10, steps=1), \
+                    torch.linspace(0, x / 10, steps=0), \
+                    torch.linspace(0, x * 100 - 1, steps=1001), \
+                    torch.linspace(x * -100, x * 100, steps=4001)
+
+        x = torch.tensor(10, dtype=torch.float)
+        y = torch.tensor(20, dtype=torch.float)
+        self.run_test(LinSpace(), (x, y))
+
+        x = torch.tensor(10, dtype=torch.int)
+        y = torch.tensor(20, dtype=torch.int)
+        self.run_test(LinSpace(), (x, y))
+
+        x = torch.tensor(10, dtype=torch.float64)
+        y = torch.tensor(20, dtype=torch.float64)
+        self.run_test(LinSpace(), (x, y))
+
     def test_numel(self):
         class MyModule(torch.jit.ScriptModule):
             @torch.jit.script_method
