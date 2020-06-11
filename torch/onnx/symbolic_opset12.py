@@ -69,5 +69,10 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
     nllloss = g.op("Div", nllloss, denominator)
     return nllloss
 
+
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
+
+
+def pow(g, self, exponent):
+    return g.op("Pow", self, exponent)
