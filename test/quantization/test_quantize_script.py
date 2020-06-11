@@ -2621,6 +2621,7 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
 class TestQuantizeQATScript(QuantizationTestCase):
 
     def test_prepare_qat(self):
+
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -2631,6 +2632,15 @@ class TestQuantizeQATScript(QuantizationTestCase):
                 x = self.conv1(x)
                 x = self.bn1(x)
                 return x
+
+        # debug only - eager mode
+        eager = M()
+        torch.quantization.fuse_modules(eager, [['conv1', 'bn1']], inplace=True)
+        eager.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        torch.quantization.prepare_qat(eager, inplace=True)
+        print(eager)
+        eager_scripted = torch.jit.script(eager)
+        print(eager_scripted)
 
         m = torch.jit.script(M())
         m = prepare_qat_script(m, {'': default_qat_qconfig})
