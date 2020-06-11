@@ -25,7 +25,6 @@ from . import (
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
     _set_and_start_rpc_agent,
-    _collect_all,
     backend_registry,
 )
 
@@ -490,6 +489,11 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
         is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
 
+        if is_async_exec:
+            wrapped = func._wrapped_async_rpc_function
+            if isinstance(wrapped, torch.jit.ScriptFunction):
+                func = wrapped
+
         if qualified_name is not None:
             rref = _invoke_remote_builtin(dst_worker_info, qualified_name, timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
@@ -497,6 +501,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                 dst_worker_info.name,
                 torch._jit_internal._qualified_name(func),
                 timeout,
+                is_async_exec,
                 *args,
                 **kwargs,
             )
@@ -781,7 +786,7 @@ def collect_all(futures):
     Returns:
         Returns a Future object to a list of the passed in Futures.
     """
-    return _collect_all(futures)
+    return torch._C._collect_all(futures)
 
 def wait_all(futures):
     r"""
@@ -794,4 +799,4 @@ def wait_all(futures):
     Returns:
         A list of the completed Future results
     """
-    return [fut.wait() for fut in _collect_all(futures).wait()]
+    return [fut.wait() for fut in torch._C._collect_all(futures).wait()]

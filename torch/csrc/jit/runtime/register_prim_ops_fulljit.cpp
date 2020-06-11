@@ -1319,16 +1319,16 @@ Function* checkSortSchema(const c10::TypePtr& list_element_type) {
         return method;
       }
     }
-    error_str << "To sort a list of " << class_type->python_str()
+    error_str << "To sort a list of " << class_type->repr_str()
               << " it must define a "
               << "__lt__ method with two inputs of type "
-              << class_type->python_str() << " that "
+              << class_type->repr_str() << " that "
               << "returns a bool";
   } else {
-    error_str << "To sort a list of " << list_element_type->python_str()
+    error_str << "To sort a list of " << list_element_type->repr_str()
               << " must be of Tensors, ints, floats, bools or "
               << "a User Defined Class that defines the __lt__ compare method"
-              << ", got list of " << list_element_type->python_str() << "\n";
+              << ", got list of " << list_element_type->repr_str() << "\n";
   }
   throw std::runtime_error(error_str.str());
 }

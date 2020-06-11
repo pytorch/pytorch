@@ -268,9 +268,9 @@ c10::optional<TypePtr> unifyTypeList(
     auto maybe_unified = unifyTypes(ret_type, elements.at(i));
     if (!maybe_unified) {
       why_not << "Could not unify type list since element " << i << " of type "
-              << elements.at(i)->python_str()
+              << elements.at(i)->repr_str()
               << " did not match the types before it ("
-              << ret_type->python_str() << ")";
+              << ret_type->repr_str() << ")";
       return c10::nullopt;
     }
     ret_type = maybe_unified.value();
@@ -300,8 +300,8 @@ MatchTypeReturn matchTypeVariables(
     }
     std::stringstream ss;
     ss << "Type variable '" << vt->name() << "' previously matched to type "
-       << it->second->python_str() << " is matched to type "
-       << actual->python_str();
+       << it->second->repr_str() << " is matched to type "
+       << actual->repr_str();
     return ss.str();
   } else if (auto lt_formal = formal->cast<ListType>()) {
     if (auto lt_actual = actual->cast<ListType>()) {
@@ -322,8 +322,8 @@ MatchTypeReturn matchTypeVariables(
     }
 
     std::stringstream ss;
-    ss << "Cannot match " << lt_formal->python_str() << " to "
-       << actual->python_str();
+    ss << "Cannot match " << lt_formal->repr_str() << " to "
+       << actual->repr_str();
     return ss.str();
   } else if (auto tp_formal = formal->cast<TupleType>()) {
     if (auto tp_actual = actual->cast<TupleType>()) {
@@ -340,7 +340,7 @@ MatchTypeReturn matchTypeVariables(
       return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
-      ss << "Cannot match a tuple to " << actual->python_str();
+      ss << "Cannot match a tuple to " << actual->repr_str();
       return MatchTypeReturn(ss.str());
     }
   } else if (auto lt_formal = formal->cast<FutureType>()) {
@@ -353,7 +353,7 @@ MatchTypeReturn matchTypeVariables(
       return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
-      ss << "Cannot match a future to " << actual->python_str();
+      ss << "Cannot match a future to " << actual->repr_str();
       return ss.str();
     }
   } else if (auto lt_formal = formal->cast<RRefType>()) {
@@ -366,7 +366,7 @@ MatchTypeReturn matchTypeVariables(
       return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
-      ss << "Cannot match a rref to " << actual->python_str();
+      ss << "Cannot match a rref to " << actual->repr_str();
       return ss.str();
     }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
@@ -403,12 +403,12 @@ MatchTypeReturn matchTypeVariables(
       return MatchTypeReturn::Success();
     } else {
       std::stringstream ss;
-      ss << "Cannot match a dict to " << actual->python_str();
+      ss << "Cannot match a dict to " << actual->repr_str();
       return ss.str();
     }
   }
 
-  AT_ERROR("Unhandled free variable container: ", formal->python_str());
+  AT_ERROR("Unhandled free variable container: ", formal->repr_str());
 }
 
 // change return types like List[List[t]] into List[List[int]]
@@ -761,7 +761,7 @@ std::string TupleType::str() const {
   }
   return ss.str();
 }
-std::string TupleType::python_str_impl(TypePrinter printer) const {
+std::string TupleType::annotation_str_impl(TypePrinter printer) const {
   std::stringstream ss;
   if (schema_ && name()) {
     ss << name()->qualifiedName();
@@ -770,7 +770,7 @@ std::string TupleType::python_str_impl(TypePrinter printer) const {
     for(size_t i = 0; i < elements().size(); ++i) {
       if(i > 0)
         ss << ", ";
-      ss << elements()[i]->python_str(printer);
+      ss << elements()[i]->annotation_str(printer);
     }
     ss << "]";
   }
@@ -978,7 +978,7 @@ void ClassType::addMethod(torch::jit::Function* method) {
       "Can't redefine method: ",
       method->name(),
       " on class: ",
-      python_str());
+      repr_str());
   methods_.push_back(method);
 }
 
@@ -997,7 +997,7 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
       "Couldn't find method: '",
       name,
       "' on class: '",
-      python_str(),
+      repr_str(),
       "'");
   return *method;
 }
@@ -1019,7 +1019,7 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
       "Can't delete undefined method ",
       name,
       " on class: ",
-      python_str());
+      repr_str());
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
@@ -1047,8 +1047,8 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
     // Module Interface Type but the Class Type is not a Module Class Type
     if (!is_module() && iface->is_module()) {
       if (why_not) {
-        *why_not << "Class '" << python_str() << "' is not a subtype of "
-                 << "the module interface '" << rhs->python_str()
+        *why_not << "Class '" << repr_str() << "' is not a subtype of "
+                 << "the module interface '" << rhs->repr_str()
                  << "' , only ScriptModule class can be subtype of module"
                  << " interface.\n";
       }
@@ -1058,8 +1058,8 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
       auto self_method = findMethod(schema.name());
       if (!self_method) {
         if (why_not) {
-          *why_not << "Class '" << python_str() << "' does not have method '"
-                   << schema.name() << "' but '" << rhs->python_str()
+          *why_not << "Class '" << repr_str() << "' does not have method '"
+                   << schema.name() << "' but '" << rhs->repr_str()
                    << "' does.\n";
         }
         return false;
@@ -1067,9 +1067,9 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
       if (!self_method->getSchema().isSubtypeOf(
               schema, /*is_method=*/true, why_not)) {
         if (why_not) {
-          *why_not << "Method on class '" << python_str()
+          *why_not << "Method on class '" << repr_str()
                    << "' (1) is not compatible with interface '"
-                   << rhs->python_str() << "' (2)\n"
+                   << rhs->repr_str() << "' (2)\n"
                    << "  (1) " << self_method->getSchema() << "\n"
                    << "  (2) " << schema << "\n";
         }
@@ -1091,8 +1091,8 @@ bool InterfaceType::isSubTypeImpl(
     std::ostream* why_not) {
   if (!lhs.is_module() && rhs.is_module()) {
     if (why_not) {
-      *why_not << "Interface '" << lhs.python_str() << "' is not a subtype of "
-               << "the module interface '" << rhs.python_str() << "'.\n";
+      *why_not << "Interface '" << lhs.repr_str() << "' is not a subtype of "
+               << "the module interface '" << rhs.repr_str() << "'.\n";
     }
     return false;
   }
@@ -1100,17 +1100,17 @@ bool InterfaceType::isSubTypeImpl(
       auto self_schema = lhs.getMethod(schema.name());
       if (!self_schema) {
         if (why_not) {
-          *why_not << "Interface '" << lhs.python_str()
+          *why_not << "Interface '" << lhs.repr_str()
                    << "' does not have method '" << schema.name() << "' but interface '"
-                   << rhs.python_str() << "' does.\n";
+                   << rhs.repr_str() << "' does.\n";
         }
         return false;
       }
       if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
         if (why_not) {
-          *why_not << "Method on interface '" << lhs.python_str()
+          *why_not << "Method on interface '" << lhs.repr_str()
                    << "' (1) is not compatible with interface '"
-                   << rhs.python_str() << "' (2)\n"
+                   << rhs.repr_str() << "' (2)\n"
                    << "  (1) " << *self_schema << "\n"
                    << "  (2) " << schema << "\n";
           return false;
@@ -1178,7 +1178,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         " '",
         name,
         "' to ",
-        python_str(),
+        repr_str(),
         " but a constant field of the same name already exists with value ",
         constantValues_[i]);
   }
@@ -1192,9 +1192,9 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         " '",
         name,
         "' to ",
-        python_str(),
+        repr_str(),
         " but an attribute field of the same name already exists with type ",
-        attributes_[i].getType()->python_str());
+        attributes_[i].getType()->repr_str());
   }
 }
 
@@ -1264,7 +1264,7 @@ IValue ClassType::getConstant(const std::string& name) const {
   const auto& v = findConstant(name);
   TORCH_CHECK(
       v.has_value(),
-      python_str(),
+      repr_str(),
       " does not have a constant field with name '",
       name,
       "'");
@@ -1275,7 +1275,7 @@ IValue ClassType::getConstant(size_t slot) const {
   TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
   TORCH_CHECK(
       slot < constantValues_.size(),
-      python_str(),
+      repr_str(),
       " does not have a constant slot of index ",
       slot);
   return constantValues_[slot];
@@ -1336,9 +1336,9 @@ void checkNoAny(const Type& base, const char* what, const std::string& attrname,
       " '",
       attrname,
       "' of type ",
-      attrtype->python_str(),
+      attrtype->repr_str(),
       " to '",
-      base.python_str(),
+      base.repr_str(),
       "' but it contains an Any type. Any types cannot be members of modules, classes, or named tuples.");
 }
 

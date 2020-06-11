@@ -1129,9 +1129,9 @@ class TestCase(expecttest.TestCase):
         self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
-                       atol: Optional[float] = None, rtol: Optional[float] = None) -> None:
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
-            self.assertEqual(x, y, atol=atol, rtol=rtol)
+            self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
     def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() == y.type()

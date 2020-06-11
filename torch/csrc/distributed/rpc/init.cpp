@@ -406,7 +406,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>>     world_size=2,
               >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
               >>>         num_send_recv_threads=16,
-              >>>         20 # 20 second timeout
+              >>>         rpc_timeout=20 # 20 second timeout
               >>>     )
               >>> )
               >>>
@@ -640,21 +640,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "_invoke_remote_torchscript",
       &pyRemoteTorchscript,
       py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_collect_all",
-      [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
-          -> std::shared_ptr<jit::PythonFutureWrapper> {
-        auto typePtr =
-            futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
-        List<intrusive_ptr<ivalue::Future>> asList(FutureType::create(typePtr));
-        asList.reserve(futures.size());
-        for (const auto& f : futures) {
-          asList.push_back(f->fut);
-        }
-        return std::make_shared<jit::PythonFutureWrapper>(
-            c10::collectAll(asList));
-      });
 
   module.def(
       "get_rpc_timeout",
