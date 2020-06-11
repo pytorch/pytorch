@@ -81,7 +81,6 @@ def reduce(inputs, op=ReduceOp.SUM, destination=None, *, out=None):
             :attr:`tensors` along :attr:`dim`.
     """
     if out is None:
-        destination = torch.cuda._utils._get_device_index(destination, optional=True)
         return torch._C._reduce(inputs, op, destination)
     else:
         if destination is not None:
