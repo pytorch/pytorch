@@ -41,11 +41,11 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
-#include <torch/csrc/jit/passes/quantization/qat_combine_conv_bn.h>
 #include <torch/csrc/jit/passes/quantization/finalize.h>
 #include <torch/csrc/jit/passes/quantization/fusion_passes.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
+#include <torch/csrc/jit/passes/quantization/qat_combine_conv_bn.h>
 #include <torch/csrc/jit/passes/quantization/quantization_type.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>

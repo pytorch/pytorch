@@ -28,7 +28,6 @@ class QATCombineConvBatchNorm2dHelper {
   void transform();
 
  private:
-
   // map from graph to vector of matched conv-bn names
   //
   // example:
@@ -82,7 +81,6 @@ graph(%self, %x):
 
     // Process all method of the current module
     for (auto& method : current.get_methods()) {
-
       // TODO: remove
       if (module_name != "BatchNorm2d" && module_name != "Conv2d") {
         GRAPH_DUMP(
@@ -98,7 +96,6 @@ graph(%self, %x):
         // This is to make sure we don't visit one graph multiple times
         conv_bn_names_[g] = {};
         for (const Match& match : matches) {
-
           GRAPH_DEBUG("Checking next match...");
           Node* matched_conv = match.nodes_map.at(pattern_conv);
           GRAPH_DEBUG("matched_conv ", *matched_conv);
@@ -126,17 +123,13 @@ graph(%self, %x):
 
           // TODO: finish
         }
-
       }
-
     }
 
   } // while
 }
 
-void QATCombineConvBatchNorm2dHelper::transform() {
-
-}
+void QATCombineConvBatchNorm2dHelper::transform() {}
 
 } // namespace
 
