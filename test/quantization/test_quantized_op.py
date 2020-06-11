@@ -2185,8 +2185,8 @@ class TestDynamicQuantizedRNNOp(TestCase):
         num_directions=st.integers(1, 2),
         per_channel_quant=st.booleans())
     @override_qengines
-    def test_qlstm(self, num_batches, input_size, hidden_size,
-                   num_directions, per_channel_quant):
+    def test_qlstmGRU(self, num_batches, input_size, hidden_size,
+                      num_directions, per_channel_quant):
         # We test only for seq length of 1 and num layers of 1 as dynamic quantization occurs multiple times
         # within the LSTM op and we do not model the quantization between multiple calls of the linear op within the
         # lstm op

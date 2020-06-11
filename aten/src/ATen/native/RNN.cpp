@@ -1249,68 +1249,9 @@ bool _use_cudnn_rnn_flatten_weight() {
         std::move(packed_output.data), std::move(std::get<1>(result)));     \
   }
 
-#define ONE_HIDDEN_QRNN(NAME, CELL)                                         \
-  std::tuple<Tensor, Tensor> NAME##_input(                                  \
-      const Tensor& _input,                                                 \
-      const Tensor& hx,                                                     \
-      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,                \
-      bool has_biases,                                                      \
-      int64_t num_layers,                                                   \
-      double dropout_p,                                                     \
-      bool train,                                                           \
-      bool bidirectional,                                                   \
-      bool batch_first) {                                                   \
-    std::vector<QRNNCellParamsWrapper> params;                              \
-    for (c10::intrusive_ptr<CellParamsBase> x : _params) {                  \
-      params.emplace_back(std::move(x));                                    \
-    }                                                                       \
-    auto input = batch_first ? _input.transpose(0, 1) : _input;             \
-    auto results =                                                          \
-        _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>(     \
-            input,                                                          \
-            params,                                                         \
-            hx.unbind(0),                                                   \
-            num_layers,                                                     \
-            dropout_p,                                                      \
-            train,                                                          \
-            bidirectional);                                                 \
-    if (batch_first) {                                                      \
-      std::get<0>(results).transpose_(0, 1);                                \
-    }                                                                       \
-    return results;                                                         \
-  }                                                                         \
-                                                                            \
-  std::tuple<Tensor, Tensor> NAME##_data(                                   \
-      const Tensor& data,                                                   \
-      const Tensor& batch_sizes,                                            \
-      const Tensor& hx,                                                     \
-      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,                \
-      bool has_biases,                                                      \
-      int64_t num_layers,                                                   \
-      double dropout_p,                                                     \
-      bool train,                                                           \
-      bool bidirectional) {                                                 \
-    std::vector<QRNNCellParamsWrapper> params;                              \
-    for (c10::intrusive_ptr<CellParamsBase> x : _params) {                  \
-      params.emplace_back(std::move(x));                                    \
-    }                                                                       \
-    PackedSequence input{data, batch_sizes};                                \
-    auto result =                                                           \
-        _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
-            input,                                                          \
-            params,                                                         \
-            hx.unbind(0),                                                   \
-            num_layers,                                                     \
-            dropout_p,                                                      \
-            train,                                                          \
-            bidirectional);                                                 \
-    auto& packed_output = std::get<0>(result);                              \
-    return std::make_tuple(                                                 \
-        std::move(packed_output.data), std::move(std::get<1>(result)));     \
-  }
+
 
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
-//ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 
 // scenarios where runtime is dominated by memory fetches of the weight matrix.
  std::tuple<Tensor, Tensor> quantized_gru_input(
