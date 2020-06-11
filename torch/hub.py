@@ -9,6 +9,7 @@ import tempfile
 import torch
 import warnings
 import zipfile
+from copy import copy
 
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
@@ -60,6 +61,7 @@ VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 8192
 _hub_dir = None
+REQ_HEADERS = {}
 
 
 # Copied from tools/shared/module_loader to be included in torch package
@@ -112,7 +114,7 @@ def _parse_repo_info(github):
     return repo_owner, repo_name, branch
 
 
-def _get_cache_or_reload(github, force_reload, verbose=True, **headers):
+def _get_cache_or_reload(github, force_reload, verbose=True):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
     if not os.path.exists(hub_dir):
@@ -141,7 +143,7 @@ def _get_cache_or_reload(github, force_reload, verbose=True, **headers):
 
         url = _git_archive_link(repo_owner, repo_name, branch)
         sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, cached_file))
-        download_url_to_file(url, cached_file, progress=False, **headers)
+        download_url_to_file(url, cached_file, progress=False)
 
         with zipfile.ZipFile(cached_file) as cached_zipfile:
             extraced_repo_name = cached_zipfile.infolist()[0].filename
@@ -253,7 +255,7 @@ def set_dir(d):
     _hub_dir = d
 
 
-def list(github, force_reload=False, **headers):
+def list(github, force_reload=False):
     r"""
     List all entrypoints available in `github` hubconf.
 
@@ -263,14 +265,13 @@ def list(github, force_reload=False, **headers):
             Example: 'pytorch/vision[:hub]'
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is `False`.
-        **headers: Additional HTTP headers included in the request.
     Returns:
         entrypoints: a list of available entrypoint names
 
     Example:
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, True, **headers)
+    repo_dir = _get_cache_or_reload(github, force_reload, True)
 
     sys.path.insert(0, repo_dir)
 
@@ -284,7 +285,7 @@ def list(github, force_reload=False, **headers):
     return entrypoints
 
 
-def help(github, model, force_reload=False, **headers):
+def help(github, model, force_reload=False):
     r"""
     Show the docstring of entrypoint `model`.
 
@@ -295,11 +296,10 @@ def help(github, model, force_reload=False, **headers):
         model (string): a string of entrypoint name defined in repo's hubconf.py
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is `False`.
-        **headers: Additional HTTP headers included in the request.
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, True, **headers)
+    repo_dir = _get_cache_or_reload(github, force_reload, True)
 
     sys.path.insert(0, repo_dir)
 
@@ -359,7 +359,31 @@ def load(github, model, *args, **kwargs):
     return model
 
 
-def download_url_to_file(url, dst, hash_prefix=None, progress=True, **headers):
+def set_headers(headers):
+    r"""Set optional HTTP headers included in all requests by :module:`torch.hub` .
+
+    Args:
+        headers (dict): HTTP headers as (key, value) pairs. See
+            :class:`urllib.request.Request` for details.
+    """
+    if not isinstance(headers, dict):
+        msg = ""
+        raise TypeError(msg)
+
+    global REQ_HEADERS
+    REQ_HEADERS = copy(headers)
+
+
+def get_headers():
+    r"""Get the currently set HTTP headers. See :func:`.set_headers` for details.
+
+    Returns:
+        dict: HTTP headers as (key, value) pairs.
+    """
+    return copy(REQ_HEADERS)
+
+
+def download_url_to_file(url, dst, hash_prefix=None, progress=True):
     r"""Download object at the given URL to a local path.
 
     Args:
@@ -369,7 +393,6 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True, **headers):
             Default: None
         progress (bool, optional): whether or not to display a progress bar to stderr
             Default: True
-        **headers: Additional HTTP headers included in the request.
 
     Example:
         >>> torch.hub.download_url_to_file('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth', '/tmp/temporary_file')
@@ -378,7 +401,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True, **headers):
     file_size = None
     # We use a different API for python2 since urllib(2) doesn't recognize the CA
     # certificates in older Python
-    req = Request(url, headers=headers)
+    req = Request(url, headers=REQ_HEADERS)
     u = urlopen(req)
     meta = u.info()
     if hasattr(meta, 'getheaders'):
@@ -427,7 +450,7 @@ def _download_url_to_file(url, dst, hash_prefix=None, progress=True):
             _download_url_to_file will be removed in after 1.3 release')
     download_url_to_file(url, dst, hash_prefix, progress)
 
-def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False, **headers):
+def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False):
     r"""Loads the Torch serialized object at the given URL.
 
     If downloaded file is a zip file, it will be automatically
@@ -449,7 +472,6 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
             digits of the SHA256 hash of the contents of the file. The hash is used to
             ensure unique names and to verify the contents of the file.
             Default: False
-        **headers: Additional HTTP headers included in the request.
 
     Example:
         >>> state_dict = torch.hub.load_state_dict_from_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')
@@ -479,7 +501,7 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
     if not os.path.exists(cached_file):
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = HASH_REGEX.search(filename).group(1) if check_hash else None
-        download_url_to_file(url, cached_file, hash_prefix, progress=progress, **headers)
+        download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
     # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
     #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
