@@ -166,8 +166,12 @@ void unpackQuantizedWeightsHelper(
     const int64_t padding_idx = 3;
     const int64_t dilation_idx = 4;
     const int64_t groups_idx = 5;
+    const int64_t transpose_idx = 6;
+    const int64_t output_padding_idx = 7;
     c10::optional<torch::List<int64_t>> stride, padding, dilation;
     c10::optional<int64_t> groups;
+    c10::optional<uint8_t> transpose;
+    c10::optional<torch::List<int64_t>> output_padding;
 
     if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Conv/Linear weights which are

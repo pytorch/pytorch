@@ -126,7 +126,7 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      bool transpose,
+      uint8_t transpose,
       std::vector<int32_t> col_offsets,
       std::vector<int64_t> kernel,
       std::vector<float> w_scale,
@@ -139,6 +139,7 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
     output_padding_(std::move(output_padding)),
     dilation_(std::move(dilation)),
     groups_(groups),
+    transpose_(transpose),
     col_offsets(std::move(col_offsets)),
     kernel(std::move(kernel)),
     w_scale(std::move(w_scale)),
@@ -152,7 +153,7 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
   torch::List<int64_t> output_padding_;
   torch::List<int64_t> dilation_;
   int64_t groups_;
-  bool transpose_;
+  uint8_t transpose_;
   std::vector<int32_t> col_offsets;
   std::vector<int64_t> kernel;
   std::vector<float> w_scale;
@@ -210,7 +211,7 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
   }
 
   bool transpose() const override {
-    return transpose_;
+    return (bool)transpose_;
   }
 
  private:
