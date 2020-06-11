@@ -25,10 +25,7 @@ from torch.quantization.quantize_script import quantize_dynamic_script
 
 # Testing utils
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
-from torch.testing._internal.common_quantized import (
-    override_qengines,
-    qengine_is_fbgemm,
-)
+from torch.testing._internal.common_quantized import override_qengines
 
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
@@ -1251,8 +1248,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                       2 : self.img_data,
                       3 : self.img_data_3d}
         for dim, tracing in options:
-            if dim == 3 and not qengine_is_fbgemm():
-                continue
             model = self._test_op_impl(
                 Conv(dim), input_data[dim], "quantized::conv{}d".format(dim), tracing)
             # make sure there is only one quantize_per_tensor for input
@@ -1300,8 +1295,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                            ConvNdRelu(dim, False),
                            ConvNdFunctionalRelu(dim),
                            ConvNdInplaceFunctionalRelu(dim)]:
-                if dim == 3 and not qengine_is_fbgemm():
-                    continue
                 conv_name = "conv{}d".format(dim)
                 data = input_data[dim]
                 m = self._test_op_impl(
@@ -1511,7 +1504,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                     FileCheck().check_not("quantized::add") \
                                .run(m.graph)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_quantized_add_scalar(self):
         class QuantizedAddScalar(torch.nn.Module):
             def __init__(self):
@@ -2234,10 +2227,12 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.conv(x)
                 return x
 
+        data = torch.rand(1, 3, 10, 10)
+        # This model is not executable since we just put all ops
+        # in the same forward, therefore we only test scripting
         m = torch.jit.script(M())
         qconfig = script_qconfig(default_qconfig)
         # dummy data to suppress warning
-        data = torch.rand((1, 3, 10, 10))
         get_forward(qconfig.activation)(data)
         get_forward(qconfig.weight)(data)
 
@@ -2319,10 +2314,12 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.conv(x)
                 return x
 
+        # This model is not executable since we just put all ops
+        # in the same forward, therefore we only test scripting
         m = torch.jit.script(M())
         qconfig = script_qconfig(default_qconfig)
         # dummy data to suppress warning
-        data = torch.rand((1, 3, 10, 10))
+        data = torch.rand(1, 3, 10, 10)
         get_forward(qconfig.activation)(data)
         get_forward(qconfig.weight)(data)
 
