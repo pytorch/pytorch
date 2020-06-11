@@ -15,6 +15,7 @@ struct QuantFusionInfo {
   std::string quantized_op_name;
   std::string pattern;
   std::string replacement;
+  // TODO: extend this to a list of filters
   std::function<
       bool(const Match&, const std::unordered_map<std::string, Value*>&)>
       filter =
@@ -457,6 +458,7 @@ graph(%a_quant, %b_scalar, %alpha):
         bool input_is_scalar =
           b_scalar->type()->isSubtypeOf(NumberType::get()) ||
           (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
+           b_scalar_value &&
            b_scalar_value->isTensor() &&
            b_scalar_value->toTensor().dim() == 0);
         return alpha_is_one && input_is_scalar;
@@ -603,6 +605,7 @@ graph(%a_quant, %b_scalar):
         bool input_is_scalar =
           b_scalar->type()->isSubtypeOf(NumberType::get()) ||
           (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
+           b_scalar_value &&
            b_scalar_value->isTensor() &&
            b_scalar_value->toTensor().dim() == 0);
         return input_is_scalar;
