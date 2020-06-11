@@ -2047,10 +2047,6 @@ class TestDynamicQuantizedLinear(TestCase):
         if reduce_range:
             X_value_max = 127
         X_q0 = np.round(np.random.rand(batch_size, input_channels) *
-                        (X_value_max - X_value_min)
-                        + X_value_min
-                        ).astype(np.uint8)
-        X_q0 = np.round(np.random.rand(batch_size, input_channels) *
                         (X_value_max - X_value_min) + X_value_min).astype(np.uint8)
         X_q0[0, 0] = X_value_min
         X_q0[0, 1] = X_value_max
@@ -2256,6 +2252,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                                                               use_dynamic=True)
 
                 self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_lstm results are off")
+
     @skipIfNoFBGEMM
     @given(
         batch_size=st.integers(1, 4),
