@@ -34,6 +34,54 @@ typedef void (
 typedef bool (
     *MergeQueryFuncPtr)(const Node* const);
 
+// TODO: temporary hack, need to do this properly, at least reduction_ops should
+// be registered instead.
+bool hasReduction(const Block* block) {
+  static OperatorSet reduction_ops {
+      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)",
+  };
+  for (auto node : block->nodes()) {
+    if (node->isMemberOf(reduction_ops)) {
+      return true;
+    }
+    for (auto block : node->blocks()) {
+      if (hasReduction(block)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+std::vector<int> reductionAxes(TensorView* tv) {
+  size_t n_dims = tv->nDims();
+  std::vector<int> reduction_axes(n_dims);
+  for (int i = 0; i < n_dims; i++) {
+    if (tv->axis(i)->isReduction()) {
+      reduction_axes.emplace_back(i);
+    }
+  }
+  return reduction_axes;
+}
+
+// coalesces all reduction to the right side and returns total number of
+// reduction axes
+size_t coalescReduction(TensorView* tv) {
+  auto reduction_axes = reductionAxes(tv);
+  size_t n_dims = tv->nDims();
+  std::unordered_map<int, int> coalesc_permute;
+  for (size_t i = 0; i < reduction_axes.size(); i++) {
+    size_t new_pos = i + n_dims - reduction_axes.size();
+    if (new_pos == i) {
+      break;
+    } else {
+      coalesc_permute[reduction_axes[i]] = new_pos;
+    }
+  }
+  tv->reorder(coalesc_permute);
+  return reduction_axes.size();
+}
+
 // TODO: add a mutex to make it thread safe.
 class IrParser {
   class RegistrationEntry {
@@ -81,8 +129,7 @@ class IrParser {
     // partition, that we only merge nodes with identical output shapes.
     int broadcast_dim = -1;
     // broadcast support hack is disabled to reduction.
-    if (false) {
-    //if (!cuda_kernel_->fusion_->hasReduction()) {
+    if (!hasReduction(graph_->block())) {
       broadcast_dim =
           block->outputs()[0]->type()->cast<TensorType>()->dim().value();
     }
@@ -108,6 +155,7 @@ class IrParser {
     // with eager mode
     bool disable_unroll = false;
     bool has_reduction = false;
+    bool fcd_reduction= false;
     // compose nodes in topo order;
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);
@@ -136,6 +184,44 @@ class IrParser {
       cuda_kernel_->fusion_->addOutput(out);
 
       if (has_reduction) {
+        // TODO: this scheduling only works for a single reduction operation in
+        //       the fusion, in this case we can coalesc all reduction axes and
+        //       merge them together. (same applies to iteration axes)
+        // TODO: does this work for multiple outputs?
+
+        // query if fastest changing dimension (FCD) is a reduction
+        fcd_reduction = out->axis(out->nDims())->isReduction();
+
+        // TODO: could really use evaluation here. Launch configuration is
+        //       imposed by transformation and the information should be
+        //       embedded in codegen IR.
+        cuda_kernel_->reduction_axes_ = reductionAxes(out);
+
+        // We coalesc all reduction axes to the right;
+        size_t num_reduction_axes = coalescReduction(out);
+
+        // Merge all iteration dimensions
+        while (out->nDims() > num_reduction_axes+1) {
+          out->merge(0, 1);
+        }
+        // Merge all reduction dimensions
+        while (out->nDims() > 2) {
+          out->merge(1, 2);
+        }
+
+        // fcd_reduction could be queried later via 
+        // cuda_kernel_->reduction_axes_, which would ensure we have proper
+        // launch configuratoin.
+        if (fcd_reduction) {
+          out->split(1, nthreads);
+          // necessary to avoid dynamic allocation on intermediates;
+          TensorView* intermediate = out->rFactor({-2});
+        } else {
+          out->split(0, 32);
+          out->split(-1, nthreads/32);
+          // necessary to avoid dynamic allocation on intermediates;
+          TensorView* intermediate = out->rFactor({-2});
+        }
       } else {
         // Merge all dimensions because we're only supporting pointwise
         while (out->nDims() > 1)

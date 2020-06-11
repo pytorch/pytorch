@@ -59,6 +59,8 @@ struct CudaKernel {
   CUfunction function_;
   int max_blocks_;
   int unroll_factor_ = 1;
+  // mark reduction axes;
+  std::vector<int> reduction_axes_;
 
   // WARNING:
   // Block and Grid dimension setting is here for testing purposes only
