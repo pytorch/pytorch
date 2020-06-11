@@ -251,10 +251,10 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
+        KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
-        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncType, kernel_func>::type>()
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<CompileTimeFunctionPointer<FuncType, kernel_func>>::type>()
       );
     }
 
@@ -274,16 +274,16 @@ public:
      */
     template<class FuncPtr>
     // enable_if: only enable it if FuncType is actually a function
-    std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, Options&&> kernel(DispatchKey dispatch_key, FuncPtr) && {
+    std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, Options&&> kernel(DispatchKey dispatch_key, FuncPtr func_ptr) && {
       static_assert(!std::is_same<typename FuncPtr::FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunction<typename FuncPtr::FuncType, FuncPtr::func_ptr()>(),
+        KernelFunction::makeFromUnboxedFunction(func_ptr),
         impl::CppSignature::make<typename FuncPtr::FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
-        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<typename FuncPtr::FuncType, FuncPtr::func_ptr()>::type>()
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
       );
     }
 
@@ -309,10 +309,10 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
+        KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
-        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncType, kernel_func>::type>()
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<CompileTimeFunctionPointer<FuncType, kernel_func>>::type>()
       );
     }
 
@@ -332,16 +332,16 @@ public:
      */
     template<class FuncPtr>
     // enable_if: only enable it if FuncType is actually a function
-    std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, Options&&> catchAllKernel(FuncPtr) && {
+    std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, Options&&> catchAllKernel(FuncPtr func_ptr) && {
       static_assert(!std::is_same<typename FuncPtr::FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunction<typename FuncPtr::FuncType, FuncPtr::func_ptr()>(),
+        KernelFunction::makeFromUnboxedFunction(func_ptr),
         impl::CppSignature::make<typename FuncPtr::FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
-        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<typename FuncPtr::FuncType, FuncPtr::func_ptr()>::type>()
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
       );
     }
 

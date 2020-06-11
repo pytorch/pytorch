@@ -737,17 +737,18 @@ class TestCase(expecttest.TestCase):
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
 
-        test_method = getattr(self, method_name)
-        # Wraps the tested method if we should do CUDA memory check.
-        self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
-        # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-        if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-            self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
+        test_method = getattr(self, method_name, None)
+        if test_method is not None:
+            # Wraps the tested method if we should do CUDA memory check.
+            self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+            # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+            if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+                self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
 
-        # Wraps the tested method if we should enforce non default CUDA stream.
-        self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
-        if self._do_cuda_non_default_stream and not IS_WINDOWS and not TEST_WITH_ROCM:
-            self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
+            # Wraps the tested method if we should enforce non default CUDA stream.
+            self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
+            if self._do_cuda_non_default_stream and not IS_WINDOWS and not TEST_WITH_ROCM:
+                self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
@@ -1128,9 +1129,9 @@ class TestCase(expecttest.TestCase):
         self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
-                       atol: Optional[float] = None, rtol: Optional[float] = None) -> None:
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
-            self.assertEqual(x, y, atol=atol, rtol=rtol)
+            self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
     def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() == y.type()
