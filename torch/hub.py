@@ -367,7 +367,7 @@ def set_headers(headers):
             :class:`urllib.request.Request` for details.
     """
     if not isinstance(headers, dict):
-        msg = ""
+        msg = "headers should be a dictionary, but got type {} instead.".format(type(headers))
         raise TypeError(msg)
 
     global REQ_HEADERS
