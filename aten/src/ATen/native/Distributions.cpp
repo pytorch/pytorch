@@ -457,6 +457,30 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   } else {
     result.resize_({n_sample});
   }
+
+  // Fast-path based on RobertoLat example.
+  // Reference:
+  // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
+  // Half is not supported on CPU.
+  if (!with_replacement &&
+      !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half)) {
+    // Sanity checks on `self`.
+    auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
+    TORCH_CHECK(is_valid.to<bool>(), "probability tensor contains either `inf`, `nan` or element < 0");
+    bool zero_prob_condition;
+    if (self.dim() == 1){
+      zero_prob_condition = (self.sum() == 0).item().to<bool>();
+    } else {
+      zero_prob_condition = (self.sum(1) == 0).sum().item().to<bool>();
+    }
+    TORCH_CHECK(!zero_prob_condition, "invalid multinomial distribution (sum of probabilities <= 0)");
+
+    auto rand = at::empty_like(self).uniform_(0, 1, gen);
+    rand.log_().div_(self); //save memory with inplace operations
+    auto vals = at::empty(result.sizes(), self.options());
+    at::topk_out(vals, result, rand, n_sample);
+    return result;
+  }
   multinomial_stub(result.device().type(), result, self, n_sample, with_replacement, gen);
   return result;
 }
