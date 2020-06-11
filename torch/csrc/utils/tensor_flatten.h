@@ -47,18 +47,19 @@ struct TensorGroup {
 // Imagine the size_limit is 256 and the list of input tensors are:
 // tensor_a(fp16 - 128 bytes),
 // tensor_b(fp32 - 256 bytes),
-// tensor_c(fp16 - 128 bytes),
+// tensor_c(fp16 - 64 bytes),
+// tensor_d(fp16 - 64 bytes),
 //
 // when fine_grained == false:
 // The function will read the list of tensors sequentially and accumulate
-// enough tensors for each data type until the size_limit, therefore:
-// it will output: {{tensor_a, tensor_c}, {tensor_b}}
+// enough tensors for *each* data type until the size_limit, therefore:
+// it will output: {{tensor_a, tensor_c, tensor_d}, {tensor_b}}
 //
 // when fine_grained == true:
-// The function will read the list of tensors sequentially and  accumulate
-// enough tensors for all data types until the size_limit, and then split
+// The function will read the list of tensors sequentially and accumulate
+// enough tensors for *all* data types until the size_limit, and then split
 // the accumulated tensors into different groups by data types, therefore:
-// it will output: {{tensor_a}, {tensor_b}, {tensor_c}}
+// it will output: {{tensor_a}, {tensor_b}, {tensor_c, tensor_d}}
 TORCH_API std::vector<TensorGroup> take_tensors(
     at::TensorList tensors,
     size_t size_limit,
