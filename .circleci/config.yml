@@ -482,9 +482,9 @@ jobs:
           elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-libtorch
           elif [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-            export COMMIT_DOCKER_IMAGE=$output_image-libtorch
+            export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
-            export COMMIT_DOCKER_IMAGE=$output_image-libtorch
+            export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
