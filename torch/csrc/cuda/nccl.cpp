@@ -342,7 +342,7 @@ void reduce(
         : streams[i]->stream();
 
     NCCL_CHECK(
-        static_cast < torchNcclResult_t(ncclReduce(
+        static_cast<torchNcclResult_t>(ncclReduce(
         inputs[i].data_ptr(),
         outputs[i].data_ptr(),
         count,
