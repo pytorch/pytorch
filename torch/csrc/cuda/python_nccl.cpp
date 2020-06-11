@@ -30,7 +30,7 @@ PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  ncclUniqueId id;
+  torchNcclUniqueId id;
   get_unique_id(id);
   return PyBytes_FromStringAndSize((char*)&id, NCCL_UNIQUE_ID_BYTES);
   END_HANDLE_TH_ERRORS
@@ -109,7 +109,7 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
       NCCL_UNIQUE_ID_BYTES,
       id_len);
 
-  ncclUniqueId commId;
+  torchNcclUniqueId commId;
   memcpy(&commId, id, NCCL_UNIQUE_ID_BYTES);
   ncclComm_t comm;
   {
