@@ -26,7 +26,8 @@ namespace detail {
 
 void throw_nccl_error(torchNcclResult_t status) {
   std::ostringstream err;
-  err << "NCCL Error " << status << ": " << ncclGetErrorString(status);
+  ncclResult_t nccl_status = static_cast<ncclResult_t>(status);
+  err << "NCCL Error " << status << ": " << ncclGetErrorString(nccl_status);
   throw std::runtime_error(err.str());
 }
 
