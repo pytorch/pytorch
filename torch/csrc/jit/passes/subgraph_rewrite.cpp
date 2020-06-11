@@ -37,7 +37,7 @@ Module SubgraphRewriter::runOnModule(const Module& module) {
 
 void SubgraphRewriter::runOnGraph(
     std::shared_ptr<Graph>& graph,
-    const std::vector<MatchFilter>& filters = {}) {
+    const std::vector<MatchFilter>& filters) {
   for (const RewritePatternDescr& pattern : patterns_) {
     rewriteSinglePatternOnGraph(graph, pattern, filters);
   }
@@ -46,7 +46,7 @@ void SubgraphRewriter::runOnGraph(
 void SubgraphRewriter::rewriteSinglePatternOnGraph(
     std::shared_ptr<Graph>& graph,
     const RewritePatternDescr& pattern,
-    const std::vector<MatchFilter>& filters = {}) {
+    const std::vector<MatchFilter>& filters) {
   std::unordered_map<Value*, Value*> rewrite_map;
   std::vector<Value*> values_to_rewrite;
 

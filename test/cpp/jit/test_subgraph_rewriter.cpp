@@ -118,7 +118,7 @@ graph(%a, %b):
 
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(pattern, replacement);
-  rewriter.runOnGraph(graph, {filter});
+  rewriter.runOnGraph(graph, filter);
 
   FileCheck().check("c::ccc")->check_not("d::ddd")->run(*graph);
 }

@@ -60,7 +60,7 @@ class TORCH_API SubgraphRewriter {
   // graph.
   void runOnGraph(
       std::shared_ptr<Graph>& graph,
-      const std::vector<MatchFilter>& filters = {});
+      const std::vector<MatchFilter>& filters);
 
   void runOnGraph(
       std::shared_ptr<Graph>& graph,
@@ -70,7 +70,7 @@ class TORCH_API SubgraphRewriter {
       }) {
     runOnGraph(graph, {filter});
   }
-);
+
 
   // Register standard rewrite patterns.
   void RegisterDefaultPatterns();
@@ -94,7 +94,7 @@ class TORCH_API SubgraphRewriter {
   void rewriteSinglePatternOnGraph(
       std::shared_ptr<Graph>& graph,
       const RewritePatternDescr& pattern,
-      const std::vector<MatchFilter>& filters = {});
+      const std::vector<MatchFilter>& filters);
 
  bool overlapsWithPreviousMatches(const Match* match);
 };
