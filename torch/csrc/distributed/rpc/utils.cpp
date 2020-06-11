@@ -172,7 +172,6 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
           " profiler was not propagated.");
       std::vector<torch::autograd::profiler::Event> events =
           rpcWithProfilingResp.getProfiledEvents();
-      auto fromWorker = rpcWithProfilingResp.fromWorkerId();
       wrappedMsgType = rpcWithProfilingResp.wrappedMessageType();
 
       torch::autograd::profiler::addEventList(std::move(events));
