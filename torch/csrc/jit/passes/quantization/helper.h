@@ -131,5 +131,9 @@ bool is_conv3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
+bool is_batchnorm2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
 } // namespace jit
 } // namespace torch
