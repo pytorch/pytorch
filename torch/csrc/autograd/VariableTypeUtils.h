@@ -128,11 +128,11 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
       } else {
         // current_view has a view_func and but it's parent doesn't have one
         if(base_var.unsafeGetTensorImpl()->support_as_strided()) {
+          auto size = tensor.sizes().vec();
+          auto stride = tensor.strides().vec();
+          auto storage_offset = tensor.storage_offset();
           view_func = [=](const at::Tensor& root_base) {
-            auto sizes = root_base.sizes();
-            auto strides = root_base.strides();
-            auto storage_offset = root_base.storage_offset();
-            auto temp = root_base.as_strided(sizes, strides, storage_offset);
+            auto temp = root_base.as_strided(size, stride, storage_offset);
             return fn(temp);
           };
         } else {
@@ -154,12 +154,12 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
     } else if(diff_view_meta->has_view_fn()) {
       // if current_view doesn't have a view_func but it's parent has one
       auto prev_view_fn = diff_view_meta->view_fn();
+      auto size = tensor.sizes().vec();
+      auto stride = tensor.strides().vec();
+      auto storage_offset = tensor.storage_offset();
       view_func = [=](const at::Tensor& root_base) {
         auto temp = prev_view_fn(root_base);
-        auto sizes = temp.sizes();
-        auto strides = temp.strides();
-        auto storage_offset = temp.storage_offset();
-        return temp.as_strided(sizes, strides, storage_offset);
+        return temp.as_strided(size, stride, storage_offset);
       };
     }
     base_var = base_var._base();
