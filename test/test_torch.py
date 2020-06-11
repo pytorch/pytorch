@@ -17941,6 +17941,7 @@ class TestViewOps(TestCase):
                 self.assertRaisesRegex(
                     RuntimeError, "Tensor must have a last dimension of size 2",
                     lambda: torch.view_as_complex(input))
+                return
 
             res = torch.view_as_complex(input)
             self.assertEqual(res, transpose_if_not_contig(c_t, contiguous_input, dim0, dim1))
