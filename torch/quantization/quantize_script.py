@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import enum
+
 import torch
 from .qconfig import QConfig
 from torch.jit._recursive import wrap_cpp_module
@@ -27,7 +29,7 @@ def script_qconfig(qconfig):
 def script_qconfig_dict(qconfig_dict):
     return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
 
-def _prepare_script(model, qconfig_dict, inplace=False, is_dynamic=False):
+def _prepare_script(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC):
     assert not inplace, "The inplace support is still in development"
     _check_is_script_module(model)
     _check_forward_method(model)
@@ -44,13 +46,13 @@ def _prepare_script(model, qconfig_dict, inplace=False, is_dynamic=False):
                                                                'forward',
                                                                scripted_qconfig_dict,
                                                                inplace,
-                                                               is_dynamic))
+                                                               quant_type))
 
 def prepare_script(model, qconfig_dict, inplace=False):
-    return _prepare_script(model, qconfig_dict, inplace, is_dynamic=False)
+    return _prepare_script(model, qconfig_dict, inplace, quant_type=QuantType.STATIC)
 
 def prepare_dynamic_script(model, qconfig_dict, inplace=False):
-    return _prepare_script(model, qconfig_dict, inplace, is_dynamic=True)
+    return _prepare_script(model, qconfig_dict, inplace, quant_type=QuantType.DYNAMIC)
 
 # Note: in development, not ready for use
 def prepare_qat_script(model, qconfig_dict, inplace=False):
@@ -60,22 +62,22 @@ def _convert_script(model, inplace=False, debug=False, quant_type=QuantType.STAT
     assert not inplace, "The inplace support is still in development"
     _check_is_script_module(model)
     model.eval()
-    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', inplace, is_dynamic))
+    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', inplace, quant_type))
     if not debug:
-        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, is_dynamic))
+        model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, quant_type))
     return model
 
 def convert_script(model, inplace=False, debug=False):
-    return _convert_script(model, inplace, debug, False)
+    return _convert_script(model, inplace, debug, quant_type=QuantType.STATIC)
 
 def convert_dynamic_script(model, inplace=False, debug=False):
-    return _convert_script(model, inplace, debug, True)
+    return _convert_script(model, inplace, debug, quant_type=QuantType.DYNAMIC)
 
-def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=False, debug=False, is_dynamic=False):
+def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=False, debug=False, quant_type=QuantType.STATIC):
     assert not inplace, "We don't support inplace right now"
     # Always do inplace convert because the Tensor is already
     # copied in prepare_script when inplace is False
-    if is_dynamic:
+    if quant_type == QuantType.DYNAMIC:
         model = prepare_dynamic_script(model, qconfig_dict, inplace)
         # TODO: change inplace to True
         model = convert_dynamic_script(model, False, debug)
@@ -90,7 +92,7 @@ def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=Fa
     return model
 
 def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
-    return _quantize_script(model, qconfig_dict, run_fn, run_args, inplace, debug, False)
+    return _quantize_script(model, qconfig_dict, run_fn, run_args, inplace, debug, quant_type=QuantType.STATIC)
 
 def quantize_dynamic_script(model, qconfig_dict, inplace=False, debug=False):
-    return _quantize_script(model, qconfig_dict, inplace=inplace, debug=debug, is_dynamic=True)
+    return _quantize_script(model, qconfig_dict, inplace=inplace, debug=debug, quant_type=QuantType.DYNAMIC)
