@@ -25,6 +25,7 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
 from jit.test_op_normalization import TestOpNormalization  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -8059,8 +8060,7 @@ a")
                 FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
 
         @torch.jit.script
-        def test_dtype(inp_dtype):
-            # type: (int) -> Tuple[Tensor, Tensor]
+        def test_dtype(inp_dtype: torch.dtype):
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
             return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
@@ -17623,7 +17623,8 @@ a")
         def foo(a):
             return a
 
-        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+        with self.assertRaisesRegex(RuntimeError, (r"Expected a value of type \'Tensor \(inferred\)\'"
+                                                   r"[\S\s]*Inferred \'a\' to be of type \'Tensor\'")):
             foo(1)
 
     def test_type_comments_in_body(self):

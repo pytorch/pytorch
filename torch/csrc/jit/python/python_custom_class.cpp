@@ -18,7 +18,7 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
       fmt::format(
           "Custom C++ class: '{}' does not have an '__init__' method bound. "
           "Did you forget to add '.def(torch::init<...>)' to its registration?",
-          instance.type()->python_str()));
+          instance.type()->repr_str()));
   Method init_method(instance._ivalue(), init_fn);
   invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
   return py::cast(instance);

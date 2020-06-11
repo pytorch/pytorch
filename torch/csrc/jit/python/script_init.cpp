@@ -260,7 +260,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
       c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
       if (!value) {
         ErrorReport error(range);
-        error << "Expected a default value of type " << arg.type()->python_str()
+        error << "Expected a default value of type " << arg.type()->repr_str()
               << " on parameter \"" << arg.name() << "\".";
         if (arg.is_inferred_type()) {
           error << "Because \"" << arg.name()
@@ -799,7 +799,7 @@ void initJitScriptBindings(PyObject* module) {
                   TORCH_INTERNAL_ASSERT(
                       setstate_schema.arguments().size() == 2,
                       "__setstate__ method for class ",
-                      class_type->python_str(),
+                      class_type->repr_str(),
                       " must have exactly 2 arguments!");
                   auto state_type = setstate_schema.arguments().at(1).type();
                   (*setstate_method)(Stack{toIValue(state, state_type)});

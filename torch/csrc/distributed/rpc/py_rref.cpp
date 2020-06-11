@@ -70,7 +70,7 @@ TypePtr tryInferTypeWithTypeHint(
         type_hint_ptr != nullptr &&
             module.value().type()->isSubtypeOfExt(
                 type_hint_ptr, &subtype_check_msg),
-        module.value().type()->python_str(),
+        module.value().type()->repr_str(),
         " is not a subtype of the type hint: ",
         type_qualified_name.qualifiedName(),
         ", did you pass a valid interface type?\n",
