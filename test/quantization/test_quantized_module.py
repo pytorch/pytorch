@@ -900,7 +900,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                     continue
                     # Test default instantiation
 
-                kwargs ={'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias, 'dtype': dtype}
+                kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias, 'dtype': dtype}
                 if rnn_type == 'RNNReLU':
                     kwargs['nonlinearity'] = "relu"
                 elif rnn_type == 'RNNTanh':

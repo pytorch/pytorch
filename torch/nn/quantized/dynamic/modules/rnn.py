@@ -514,11 +514,25 @@ class GRU(RNNBase):
 
         _all_params = ([m.param for m in self._all_weight_values])
         if batch_sizes is None:
-            result = torch.ops.quantized.quantized_gru_input(input, hx, _all_params, self.bias, self.num_layers,
-                                         self.dropout, self.training, self.bidirectional, self.batch_first)
+            result = torch.ops.quantized.quantized_gru_input(input,
+                                                             hx,
+                                                             _all_params,
+                                                             self.bias,
+                                                             self.num_layers,
+                                                             self.dropout,
+                                                             self.training,
+                                                             self.bidirectional,
+                                                             self.batch_first)
         else:
-            result = torch.ops.quantized.quantized_gru_data(input, batch_sizes, hx,  _all_params, self.bias,
-                                         self.num_layers, self.dropout, self.training, self.bidirectional)
+            result = torch.ops.quantized.quantized_gru_data(input,
+                                                            batch_sizes,
+                                                            hx,
+                                                            _all_params,
+                                                            self.bias,
+                                                            self.num_layers,
+                                                            self.dropout,
+                                                            self.training,
+                                                            self.bidirectional)
         output = result[0]
         hidden = result[1]
 
@@ -556,6 +570,7 @@ class GRU(RNNBase):
         if permutation is None:
             return hx
         return apply_permutation(hx, permutation)
+
     @torch.jit.ignore
     def forward(self, input, hx=None):
         if isinstance(input, PackedSequence):
