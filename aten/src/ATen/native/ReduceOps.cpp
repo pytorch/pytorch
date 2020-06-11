@@ -773,7 +773,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     }
     at::add_out(result1, real_out_var, imag_out_var);
     take_sqrt ? at::sqrt_out(result1, result1) : result1;
-    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, std::complex<double>{0.0, 1.0}));
+    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, c10::complex<double>{0.0, 1.0}));
   } else {
     ScalarType dtype = get_dtype(result1, self, {}, true);
     auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
