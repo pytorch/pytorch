@@ -2,10 +2,10 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/OpaqueTensorImpl.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/Vulkan.h>
+#include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <ATen/native/vulkan/VulkanOps.h>
 
 namespace at {
@@ -16,18 +16,20 @@ bool is_vulkan_available() {
 }
 
 using vulkan::detail::VulkanTensor;
-using VulkanTensorImpl = OpaqueTensorImpl<VulkanTensor>;
+using VulkanTensorImpl = VulkanOpaqueTensorImpl<VulkanTensor>;
 
 at::Tensor new_with_vtensor_vulkan(
     VulkanTensor&& vt,
     const TensorOptions& options) {
-  auto dims = vt.sizes();
+  auto sizes = vt.sizes();
+  auto strides = vt.strides();
   return detail::make_tensor<VulkanTensorImpl>(
       DispatchKeySet(DispatchKey::Vulkan),
       options.dtype(),
       at::Device(at::kVulkan),
       std::move(vt),
-      std::vector<int64_t>(dims.begin(), dims.end()));
+      std::vector<int64_t>(sizes.begin(), sizes.end()),
+      std::vector<int64_t>(strides.begin(), strides.end()));
 }
 
 VulkanTensor& vtensor_from_vulkan(const at::Tensor& tensor) {
@@ -211,7 +213,9 @@ at::Tensor vulkan_convolution_prepacked(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    const float output_min,
+    const float output_max) {
   TORCH_INTERNAL_ASSERT(
       input.dim() == 4, "vulkan_convolution: Expected 4-dimensional input");
   TORCH_INTERNAL_ASSERT(
@@ -231,14 +235,17 @@ at::Tensor vulkan_convolution_prepacked(
   const bool vulkanBias = (*bias).is_vulkan();
   if (hasBias && vulkanBias) {
     const VulkanTensor& vbias = vtensor_from_vulkan(*bias);
-    vulkan::detail::conv2d(voutput, vinput, vweight, vbias, params);
+    vulkan::detail::conv2d(
+        voutput, vinput, vweight, vbias, params, output_min, output_max);
   } else {
     vulkan::detail::conv2d(
         voutput,
         vinput,
         vweight,
         hasBias ? c10::make_optional((*bias).data_ptr<float>()) : c10::nullopt,
-        params);
+        params,
+        output_min,
+        output_max);
   }
   return new_with_vtensor_vulkan(std::move(voutput), input.options());
 }
@@ -249,9 +256,12 @@ Tensor vulkan_addmm(
     const Tensor& mat2,
     Scalar beta,
     Scalar alpha) {
-  VulkanTensor& t = vtensor_from_vulkan(self);
-  VulkanTensor& m1 = vtensor_from_vulkan(mat1);
-  VulkanTensor& m2 = vtensor_from_vulkan(mat2);
+  const VulkanTensor t =
+      vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
+  const VulkanTensor m1 =
+      vtensor_from_vulkan(mat1.is_vulkan() ? mat1 : mat1.vulkan());
+  const VulkanTensor m2 =
+      vtensor_from_vulkan(mat2.is_vulkan() ? mat2 : mat2.vulkan());
   float b = beta.to<float>();
   float a = alpha.to<float>();
 

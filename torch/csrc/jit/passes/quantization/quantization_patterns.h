@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <string>
@@ -15,12 +15,7 @@ struct QuantFusionInfo {
   std::string quantized_op_name;
   std::string pattern;
   std::string replacement;
-  std::function<
-      bool(const Match&, const std::unordered_map<std::string, Value*>&)>
-      filter =
-          [](const Match&, const std::unordered_map<std::string, Value*>&) {
-            return true;
-          };
+  std::vector<MatchFilter> filters = {};
 };
 
 namespace {
@@ -201,6 +196,15 @@ QuantFusionInfo getFixedQParamOpFusionInfo(
       getAtenOpPattern(graph_header, op_name, extra_op_args);
 
   return {op_name, op_pattern, aten_op_pattern};
+}
+
+// filter that checks %b_scalar is a scalar
+bool input_b_is_scalar(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+  auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
+  return isScalar(b_scalar);
 }
 
 } // namespace
@@ -445,17 +449,6 @@ graph(%a_quant, %b_scalar, %alpha):
          %r = quantized::add_scalar(%a_quant, %b_scalar)
          return (%r) )";
 
-  // filter that checks %alpha is constant 1 and %b_scalar is a scalar
-  auto add_scalar_filter =
-      [](const Match& match,
-         const std::unordered_map<std::string, Value*>& vmap) {
-        const auto& match_vmap = match.values_map;
-        auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
-        auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-        return alpha && alpha->isInt() && alpha->toInt() == 1 &&
-            b_scalar->type()->isSubtypeOf(NumberType::get());
-      };
-
   // quantized::add_scalar_out
   std::string inplace_add_scalar = R"(
 graph(%a_quant, %b_scalar, %alpha):
@@ -586,15 +579,6 @@ graph(%a_quant, %b_scalar):
 graph(%a_quant, %b_scalar):
          %r = quantized::mul_scalar_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
-
-  // filter that checks %b_scalar is a scalar
-  auto mul_scalar_filter =
-      [](const Match& match,
-         const std::unordered_map<std::string, Value*>& vmap) {
-        const auto& match_vmap = match.values_map;
-        auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-        return b_scalar->type()->isSubtypeOf(NumberType::get());
-      };
 
   // quantized::mul_relu
   std::string mul_relu = R"(
@@ -843,46 +827,46 @@ graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %
       {"quantized::add_relu",
        add_relu,
        quantized_add_relu,
-       aten_add_alpha_is_one},
+       {aten_add_alpha_is_one}},
       {"quantized::add_relu",
        add_inplace_relu,
        quantized_add_relu,
-       aten_add_alpha_is_one},
+       {aten_add_alpha_is_one}},
       {"quantized::add_relu",
        inplace_add_relu,
        quantized_add_relu,
-       aten_add_alpha_is_one},
+       {aten_add_alpha_is_one}},
       {"quantized::add_relu",
        inplace_add_inplace_relu,
        quantized_add_relu,
-       aten_add_alpha_is_one},
+       {aten_add_alpha_is_one}},
       // note that this must come before quantized::add_scalar
       {"quantized::add_scalar_relu",
        add_scalar_relu,
        quantized_add_scalar_relu,
-       add_scalar_filter},
+       {aten_add_alpha_is_one, input_b_is_scalar}},
       {"quantized::add_scalar_relu",
        add_scalar_inplace_relu,
        quantized_add_scalar_relu,
-       add_scalar_filter},
+       {aten_add_alpha_is_one, input_b_is_scalar}},
       {"quantized::add_scalar_relu_out",
        inplace_add_scalar_relu,
        quantized_add_scalar_relu_out,
-       add_scalar_filter},
+       {aten_add_alpha_is_one, input_b_is_scalar}},
       {"quantized::add_scalar_relu_out",
        inplace_add_scalar_inplace_relu,
        quantized_add_scalar_relu_out,
-       add_scalar_filter},
+       {aten_add_alpha_is_one, input_b_is_scalar}},
       {"quantized::add_scalar",
        add_scalar,
        quantized_add_scalar,
-       add_scalar_filter},
+       {aten_add_alpha_is_one, input_b_is_scalar}},
       {"quantized::add_scalar_out",
        inplace_add_scalar,
        quantized_add_scalar_out,
-       add_scalar_filter},
-      {"quantized::add", add, quantized_add, aten_add_alpha_is_one},
-      {"quantized::add", inplace_add, quantized_add, aten_add_alpha_is_one},
+       {aten_add_alpha_is_one, input_b_is_scalar}},
+      {"quantized::add", add, quantized_add, {aten_add_alpha_is_one}},
+      {"quantized::add", inplace_add, quantized_add, {aten_add_alpha_is_one}},
       {"quantized::cat", cat, quantized_cat},
       {"quantized::batch_norm2d", batch_norm2d, quantized_batch_norm2d},
       {"quantized::batch_norm2d_relu",
@@ -894,27 +878,27 @@ graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %
       {"quantized::mul_scalar_relu",
        mul_scalar_relu,
        quantized_mul_scalar_relu,
-       mul_scalar_filter},
+       {input_b_is_scalar}},
       {"quantized::mul_scalar_relu",
        mul_scalar_inplace_relu,
        quantized_mul_scalar_relu,
-       mul_scalar_filter},
+       {input_b_is_scalar}},
       {"quantized::mul_scalar_relu_out",
        inplace_mul_scalar_relu,
        quantized_mul_scalar_relu_out,
-       mul_scalar_filter},
+       {input_b_is_scalar}},
       {"quantized::mul_scalar_relu_out",
        inplace_mul_scalar_inplace_relu,
        quantized_mul_scalar_relu_out,
-       mul_scalar_filter},
+       {input_b_is_scalar}},
       {"quantized::mul_scalar",
        mul_scalar,
        quantized_mul_scalar,
-       mul_scalar_filter},
+       {input_b_is_scalar}},
       {"quantized::mul_scalar",
        inplace_mul_scalar,
        quantized_mul_scalar_out,
-       mul_scalar_filter},
+       {input_b_is_scalar}},
       {"quantized::mul_relu", mul_relu, quantized_mul_relu},
       {"quantized::mul_relu", mul_inplace_relu, quantized_mul_relu},
       {"quantized::mul_relu", inplace_mul_relu, quantized_mul_relu},
