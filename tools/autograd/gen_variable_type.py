@@ -26,7 +26,7 @@ from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
-from .gen_autograd_functions import uses_single_grad
+from .gen_autograd_functions import uses_single_grad, get_manual_backward_functions
 
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue
@@ -734,6 +734,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         'wrapper_registrations': wrapper_registrations,
         'trace_method_definitions': trace_method_definitions,
         'trace_wrapper_registrations': trace_wrapper_registrations,
+        'manual_backward_functions': get_manual_backward_functions(template_path),
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
@@ -1179,14 +1180,6 @@ def emit_body(declaration):
             return []
         return ['increment_version({});'.format(arg['name']) for arg in returns]
 
-    def check_record_function_input_type(simple_type):
-        return simple_type in ['Tensor', 'Scalar']
-
-    def record_function_input_names():
-        return ', '.join([
-            arg['name'] for arg in declaration['arguments']
-            if check_record_function_input_type(arg['simple_type'])])
-
     def emit_fw_derivatives():
         content = []
         for derivative in fw_derivatives:
@@ -1262,9 +1255,6 @@ def emit_body(declaration):
         elif not undifferentiable:
             body.append(emit_forbid_fw_derivatives())
 
-    # post_record_trace must appear before save_outputs so that saved outputs
-    # have their tracing state saved (that is setup by recordTrace)
-    body.append(post_record_trace)
     if requires_derivative:
         body.append(emit_save_outputs())
     if base_name in RESET_GRAD_ACCUMULATOR:
