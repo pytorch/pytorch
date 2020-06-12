@@ -670,60 +670,60 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
     const Tensor& b, bool check_mem_overlap) {
-  auto iter = TensorIteratorConfig();
-  iter.set_check_mem_overlap(check_mem_overlap);
-  iter.add_output(out);
-  iter.add_input(a);
-  iter.add_input(b);
-  iter.allow_cpu_scalars_ = true;
-  iter.promote_inputs_to_common_dtype(true);
-  iter.cast_common_dtype_to_outputs(true);
-  iter.enforce_safe_casting_to_output(true);
-  return TensorIterator(iter);
+  TensorIteratorConfig config;
+  config.set_check_mem_overlap(check_mem_overlap);
+  config.add_output(out);
+  config.add_input(a);
+  config.add_input(b);
+  config.allow_cpu_scalars_ = true;
+  config.promote_inputs_to_common_dtype(true);
+  config.cast_common_dtype_to_outputs(true);
+  config.enforce_safe_casting_to_output(true);
+  return config.build();
 }
 
 TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     const Tensor& b, bool check_mem_overlap) {
-  auto iter = TensorIteratorConfig();
-  iter.set_check_mem_overlap(check_mem_overlap);
-  iter.add_output(out);
-  iter.add_input(a);
-  iter.add_input(b);
-  iter.allow_cpu_scalars_ = true;
-  iter.promote_inputs_to_common_dtype(true);
-  return TensorIterator(iter);
+  TensorIteratorConfig config;
+  config.set_check_mem_overlap(check_mem_overlap);
+  config.add_output(out);
+  config.add_input(a);
+  config.add_input(b);
+  config.allow_cpu_scalars_ = true;
+  config.promote_inputs_to_common_dtype(true);
+  return config.build();
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
     bool check_mem_overlap) {
-  auto iter = TensorIteratorConfig();
-  iter.set_check_mem_overlap(check_mem_overlap);
-  iter.add_output(out);
-  iter.add_input(a);
-  iter.cast_common_dtype_to_outputs(true);
-  iter.enforce_safe_casting_to_output(true);
-  return TensorIterator(iter);
+  TensorIteratorConfig config;
+  config.set_check_mem_overlap(check_mem_overlap);
+  config.add_output(out);
+  config.add_input(a);
+  config.cast_common_dtype_to_outputs(true);
+  config.enforce_safe_casting_to_output(true);
+  return config.build();
 }
 
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
-  auto iter = TensorIteratorConfig();
-  iter.check_all_same_dtype(false);
-  iter.add_output(out);
+  TensorIteratorConfig config;
+  config.check_all_same_dtype(false);
+  config.add_output(out);
   // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
-  iter.dont_resize_outputs();
-  return TensorIterator(iter);
+  config.dont_resize_outputs();
+  return config.build();
 }
 
 TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out.defined());
-  auto iter = TensorIteratorConfig();
-  iter.add_output(out);
-  iter.add_input(a);
-  iter.dont_resize_outputs();
-  iter.is_reduction(true);
+  TensorIteratorConfig config;
+  config.add_output(out);
+  config.add_input(a);
+  config.dont_resize_outputs();
+  config.is_reduction(true);
   // TODO: not supporting casting to outputs is only really necessary for arg{min,max}
-  iter.promote_inputs_to_common_dtype(true);
-  return TensorIterator(iter);
+  config.promote_inputs_to_common_dtype(true);
+  return config.build();
 }
 
 TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
@@ -738,14 +738,14 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
       " and output2 has ", out2.sizes());
   TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
       " and output2 has ", out2.strides());
-  auto iter = TensorIteratorConfig();
-  iter.add_output(out1);
-  iter.add_output(out2);
-  iter.add_input(a);
-  iter.dont_resize_outputs();
-  iter.is_reduction(true);
-  iter.check_all_same_dtype(false);
-  return TensorIterator(iter);
+  TensorIteratorConfig config;
+  config.add_output(out1);
+  config.add_output(out2);
+  config.add_input(a);
+  config.dont_resize_outputs();
+  config.is_reduction(true);
+  config.check_all_same_dtype(false);
+  return config.build();
 }
 
 void TensorIterator::populate_operands(const TensorIteratorConfig& config) {

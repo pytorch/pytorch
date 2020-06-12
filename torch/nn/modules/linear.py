@@ -1,6 +1,7 @@
 import math
 
 import torch
+from torch import Tensor
 from torch.nn.parameter import Parameter
 from .. import functional as F
 from .. import init
@@ -26,7 +27,7 @@ class Identity(Module):
     def __init__(self, *args, **kwargs):
         super(Identity, self).__init__()
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return input
 
 
@@ -64,8 +65,11 @@ class Linear(Module):
         torch.Size([128, 30])
     """
     __constants__ = ['in_features', 'out_features']
+    in_features: int
+    out_features: int
+    weight: Tensor
 
-    def __init__(self, in_features, out_features, bias=True):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -76,20 +80,29 @@ class Linear(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.linear(input, self.weight, self.bias)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={}'.format(
             self.in_features, self.out_features, self.bias is not None
         )
+
+
+# This class exists soley for Transformer; it has an annotation stating
+# that bias is never None, which appeases TorchScript
+class _LinearWithBias(Linear):
+    bias: Tensor
+
+    def __init__(self, in_features: int, out_features: int) -> None:
+        super().__init__(in_features, out_features, bias=True)
 
 
 class Bilinear(Module):
@@ -131,8 +144,12 @@ class Bilinear(Module):
         torch.Size([128, 40])
     """
     __constants__ = ['in1_features', 'in2_features', 'out_features']
+    in1_features: int
+    in2_features: int
+    out_features: int
+    weight: Tensor
 
-    def __init__(self, in1_features, in2_features, out_features, bias=True):
+    def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True) -> None:
         super(Bilinear, self).__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
@@ -145,16 +162,16 @@ class Bilinear(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         bound = 1 / math.sqrt(self.weight.size(1))
         init.uniform_(self.weight, -bound, bound)
         if self.bias is not None:
             init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, input1, input2):
+    def forward(self, input1: Tensor, input2: Tensor) -> Tensor:
         return F.bilinear(input1, input2, self.weight, self.bias)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'in1_features={}, in2_features={}, out_features={}, bias={}'.format(
             self.in1_features, self.in2_features, self.out_features, self.bias is not None
         )
