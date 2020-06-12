@@ -148,6 +148,28 @@ class DistributedDataParallel(Module):
         (e.g. BatchNorm stats) are broadcast from the module in process of rank
         0, to all other replicas in the system in every iteration.
 
+    .. note::
+        If you are using DistributedDataParallel in conjuction with the
+        :ref:`distributed-rpc-framework`, you should always use
+        :meth:`torch.distributed.autograd.backward` to compute gradients.
+
+    Example::
+        >>> import torch.distributed.autograd as dist_autograd
+        >>> from torch.nn.parallel import DistributedDataParallel as DDP
+        >>>
+        >>> ddp_model = DDP(my_model)
+        >>> with dist_autograd.context() as context_id:
+        >>>     t1 = torch.rand((3, 3), requires_grad=True)
+        >>>     t2 = torch.rand((3, 3), requires_grad=True)
+        >>>     t3 = rpc.rpc_sync("worker1", torch.add, args=(t1, t2))
+        >>>     pred = ddp_model(t3)
+        >>>     loss = loss_func(pred, loss)
+        >>>     dist_autograd.backward(context_id, loss)
+
+    .. warning::
+        Using DistributedDataParallel in conjuction with the
+        :ref:`distributed-rpc-framework` is experimental and subject to change.
+
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices. This should
