@@ -183,7 +183,9 @@ class TensorPipeAgent : public RpcAgent {
   // Map to store the expiration times for each message.
   std::map<
       steady_clock_time_point,
-      std::vector<std::shared_ptr<AtomicFutureMessage>>>
+      std::vector<std::pair<
+          std::shared_ptr<AtomicFutureMessage>,
+          std::chrono::milliseconds>>>
       timeoutMap_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them

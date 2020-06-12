@@ -34,6 +34,7 @@ namespace jit {
   _(IRPrinterBasicValueTest)                \
   _(IRPrinterBasicValueTest02)              \
   _(IRPrinterCastTest)                      \
+  _(IRPrinterFunctionName)                  \
   _(ExprSimple01)                           \
   _(ExprLower01)                            \
   _(ExprSimple02)                           \
@@ -156,6 +157,7 @@ namespace jit {
   _(SimplifyDivisionScalarFactorization)    \
   _(SimplifyConstantBranches)               \
   _(SimplifyConstantCond)                   \
+  _(SimplifyEliminateEmptyCond)             \
   _(SimplifyEliminateZeroLengthFor)         \
   _(SimplifyOneLoopFor)                     \
   _(SimplifyForWontLoseLoopOptions)         \
