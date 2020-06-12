@@ -5,9 +5,9 @@
 #include <thrust/complex.h>
 
 namespace c10 {
-  // Specialization of is_complex_t() in c10/util/Half.h for thrust::complex types
+  // Specialization of is_complex() in c10/util/Half.h for thrust::complex types
   template <typename T>
-  struct is_complex_t<thrust::complex<T>> : public std::true_type {};
+  struct is_complex<thrust::complex<T>> : public std::true_type {};
 
   // Specialization of static_cast_with_inter_type in c10/util/TypeCast.h to cast
   // from std::complex<src_value_t> to thrust::complex<dest_value_t>
