@@ -216,6 +216,7 @@ void cpu_upsample_nearest_channels_last(
     }
   };
 
+  TORCH_INTERNAL_ASSERT(channels > 0);
   if (ndim == 4) {
     // upsample nearest 2d
     at::parallel_for(0, numel / channels, at::internal::GRAIN_SIZE / channels, loop2d);
@@ -325,7 +326,7 @@ void upsample_nearest1d_kernel_impl(
     Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest1d", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest1d", [&] {
     cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_w});
   });
 }
@@ -336,11 +337,11 @@ void upsample_nearest2d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d", [&] {
       cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_h, scales_w});
     });
   }
@@ -353,11 +354,11 @@ void upsample_nearest3d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d", [&] {
       cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
     });
   }
@@ -367,7 +368,7 @@ void upsample_nearest1d_backward_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_w});
   });
 }
@@ -377,7 +378,7 @@ void upsample_nearest2d_backward_kernel_impl(
     const Tensor& grad_output,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_h, scales_w});
   });
 }
@@ -388,7 +389,7 @@ void upsample_nearest3d_backward_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_d, scales_h, scales_w});
   });
 }
