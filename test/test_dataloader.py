@@ -770,8 +770,9 @@ class TestDataLoader(TestCase):
         found_data = {i: 0 for i in range(self.data.size(0))}
         found_labels = {i: 0 for i in range(self.labels.size(0))}
         batch_size = loader.batch_size
-        for i, (batch_samples, batch_targets) in enumerate(loader):
-            for sample, target in zip(batch_samples, batch_targets):
+        if batch_size is None:
+            for i, (batch_samples, batch_targets) in enumerate(loader):
+                sample, target = (batch_samples, batch_targets)
                 for data_point_idx, data_point in enumerate(self.data):
                     if data_point.eq(sample).all():
                         self.assertFalse(found_data[data_point_idx])
@@ -779,9 +780,22 @@ class TestDataLoader(TestCase):
                         break
                 self.assertEqual(target, self.labels[data_point_idx])
                 found_labels[data_point_idx] += 1
-            self.assertEqual(sum(found_data.values()), (i + 1) * batch_size)
-            self.assertEqual(sum(found_labels.values()), (i + 1) * batch_size)
-        self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
+                self.assertEqual(sum(found_data.values()), (i + 1))
+                self.assertEqual(sum(found_labels.values()), (i + 1))
+            self.assertEqual(i, (len(self.dataset) - 1))
+        else:
+            for i, (batch_samples, batch_targets) in enumerate(loader):
+                for sample, target in zip(batch_samples, batch_targets):
+                    for data_point_idx, data_point in enumerate(self.data):
+                        if data_point.eq(sample).all():
+                            self.assertFalse(found_data[data_point_idx])
+                            found_data[data_point_idx] += 1
+                            break
+                    self.assertEqual(target, self.labels[data_point_idx])
+                    found_labels[data_point_idx] += 1
+                self.assertEqual(sum(found_data.values()), (i + 1) * batch_size)
+                self.assertEqual(sum(found_labels.values()), (i + 1) * batch_size)
+            self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_error(self, loader):
         it = iter(loader)
@@ -942,9 +956,6 @@ except RuntimeError as e:
             DataLoader(self.dataset, timeout=-1)
 
         # disable auto-batching
-        with self.assertRaisesRegex(ValueError,
-                                    "batch_size=None option disables auto-batching and is mutually exclusive"):
-            DataLoader(self.dataset, batch_size=None, shuffle=True)
         with self.assertRaisesRegex(ValueError,
                                     "batch_size=None option disables auto-batching and is mutually exclusive"):
             DataLoader(self.dataset, batch_size=None, drop_last=True)
@@ -1223,6 +1234,9 @@ except RuntimeError as e:
 
     def test_shuffle(self):
         self._test_shuffle(DataLoader(self.dataset, shuffle=True))
+
+    def test_shuffle_batch_none(self):
+        self._test_shuffle(DataLoader(self.dataset, batch_size=None, shuffle=True))
 
     def test_shuffle_batch(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True))

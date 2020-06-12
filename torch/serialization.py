@@ -243,7 +243,7 @@ class _open_zipfile_reader(_opener):
 
 class _open_zipfile_writer_file(_opener):
     def __init__(self, name):
-        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(name))
+        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(str(name)))
 
     def __exit__(self, *args):
         self.file_like.write_end_of_file()
@@ -327,7 +327,7 @@ def _check_dill_version(pickle_module):
                 pickle_module.__version__
             ))
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
@@ -338,6 +338,9 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
            containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
+
+    .. note::
+        A common PyTorch convention is to save tensors using .pt file extension.
 
     .. warning::
         If you are using Python 2, :func:`torch.save` does NOT support :class:`StringIO.StringIO`

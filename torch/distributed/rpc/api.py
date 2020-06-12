@@ -100,7 +100,7 @@ class WaitAllWorkersStates(object):
 # States used by `def _wait_all_workers()`.
 # `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
 _ALL_WORKER_NAMES = None
-_wait_all_workers_dict_lock = threading.Lock()
+_wait_all_workers_dict_lock = threading.RLock()
 _wait_all_workers_sequence_id = 0
 _wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkersStates)
 
@@ -124,7 +124,10 @@ def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
 
 
 def _set_proceed_shutdown_signal(sequence_id):
-    proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
+    with _wait_all_workers_dict_lock:
+        proceed_signal = _wait_all_workers_sequence_id_to_states[
+            sequence_id
+        ].proceed_signal
     assert (
         not proceed_signal.is_set()
     ), "Termination signal sequence id {} got set twice.".format(sequence_id)
@@ -168,9 +171,10 @@ def _wait_all_workers():
             timeout=timeout,
         )
 
-    proceed_signal = _wait_all_workers_sequence_id_to_states[
-        sequence_id
-    ].proceed_signal
+    with _wait_all_workers_dict_lock:
+        proceed_signal = _wait_all_workers_sequence_id_to_states[
+            sequence_id
+        ].proceed_signal
     proceed_signal.wait()
 
     # Phase 2: Leader asks followers to proceed.
@@ -485,6 +489,11 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
         is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
 
+        if is_async_exec:
+            wrapped = func._wrapped_async_rpc_function
+            if isinstance(wrapped, torch.jit.ScriptFunction):
+                func = wrapped
+
         if qualified_name is not None:
             rref = _invoke_remote_builtin(dst_worker_info, qualified_name, timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
@@ -492,6 +501,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                 dst_worker_info.name,
                 torch._jit_internal._qualified_name(func),
                 timeout,
+                is_async_exec,
                 *args,
                 **kwargs,
             )

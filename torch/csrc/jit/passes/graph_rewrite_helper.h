@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 
 namespace torch {
 namespace jit {
@@ -18,6 +19,9 @@ c10::optional<IValue> getIValue(
     const std::unordered_map<std::string, Value*>& vmap);
 void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph);
 
+using MatchFilter = std::function<
+    bool(const Match&, const std::unordered_map<std::string, Value*>&)>;
+
 // This struct contains a compiled IR patterns slated for use in the
 // findPatternMatches function. The struct encapsulates the common
 // information from parseIR that is used in conjunction with the
@@ -28,10 +32,15 @@ struct PatternInfo {
   std::string pattern_string;
   std::unique_ptr<Graph> pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
+  std::vector<MatchFilter> filters;
 
-  static PatternInfo parse_from_str(std::string pattern_string) {
-    PatternInfo rv{
-        std::move(pattern_string), std::make_unique<Graph>(), decltype(vmap){}};
+  static PatternInfo parse_from_str(
+      std::string pattern_string,
+      const std::vector<MatchFilter>& filters = {}) {
+    PatternInfo rv{std::move(pattern_string),
+                   std::make_unique<Graph>(),
+                   decltype(vmap){},
+                   filters};
     parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
     return rv;
   }
