@@ -1,11 +1,14 @@
 from __future__ import division
 
 import torch
+from torch import Tensor
 from ._functions import SyncBatchNorm as sync_batch_norm
 from .module import Module
 from torch.nn.parameter import Parameter
 from .. import functional as F
 from .. import init
+
+from typing import Optional, Any
 
 
 class _NormBase(Module):
@@ -13,9 +16,22 @@ class _NormBase(Module):
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps',
                      'num_features', 'affine']
+    num_features: int
+    eps: float
+    momentum: float
+    affine: bool
+    track_running_stats: bool
+    # WARNING: weight and bias purposely not defined here.
+    # See https://github.com/pytorch/pytorch/issues/39670
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
-                 track_running_stats=True):
+    def __init__(
+        self,
+        num_features: int,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = True,
+        track_running_stats: bool = True
+    ) -> None:
         super(_NormBase, self).__init__()
         self.num_features = num_features
         self.eps = eps
@@ -38,13 +54,13 @@ class _NormBase(Module):
             self.register_parameter('num_batches_tracked', None)
         self.reset_parameters()
 
-    def reset_running_stats(self):
+    def reset_running_stats(self) -> None:
         if self.track_running_stats:
             self.running_mean.zero_()
             self.running_var.fill_(1)
             self.num_batches_tracked.zero_()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         self.reset_running_stats()
         if self.affine:
             init.ones_(self.weight)
@@ -80,7 +96,7 @@ class _BatchNorm(_NormBase):
         super(_BatchNorm, self).__init__(
             num_features, eps, momentum, affine, track_running_stats)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
 
         # exponential_average_factor is set to self.momentum
@@ -408,8 +424,15 @@ class SyncBatchNorm(_BatchNorm):
         >>>                         output_device=args.local_rank)
     """
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
-                 track_running_stats=True, process_group=None):
+    def __init__(
+        self,
+        num_features: int,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = True,
+        track_running_stats: bool = True,
+        process_group: Optional[Any] = None
+    ) -> None:
         super(SyncBatchNorm, self).__init__(num_features, eps, momentum, affine, track_running_stats)
         self.process_group = process_group
         # gpu_size is set through DistributedDataParallel initialization. This is to ensure that SyncBatchNorm is used
@@ -426,7 +449,7 @@ class SyncBatchNorm(_BatchNorm):
             raise ValueError('SyncBatchNorm is only supported for DDP with single GPU per process')
         self.ddp_gpu_size = gpu_size
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         # currently only GPU input is supported
         if not input.is_cuda:
             raise ValueError('SyncBatchNorm expected input tensor to be on GPU')
