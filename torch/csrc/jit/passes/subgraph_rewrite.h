@@ -23,9 +23,8 @@ namespace jit {
 struct RewritePatternDescr;
 struct Match;
 
-using MatchFilter =
-  std::function<bool(const Match&,
-                     const std::unordered_map<std::string, Value*>&)>;
+using MatchFilter = std::function<
+    bool(const Match&, const std::unordered_map<std::string, Value*>&)>;
 
 /** Run pattern-based subgraph rewrites on all methods in the module.
  *
@@ -65,12 +64,11 @@ class TORCH_API SubgraphRewriter {
   void runOnGraph(
       std::shared_ptr<Graph>& graph,
       const MatchFilter& filter =
-      [](const Match&, const std::unordered_map<std::string, Value*>&) {
-        return true;
-      }) {
+          [](const Match&, const std::unordered_map<std::string, Value*>&) {
+            return true;
+          }) {
     runOnGraph(graph, std::vector<MatchFilter>({filter}));
   }
-
 
   // Register standard rewrite patterns.
   void RegisterDefaultPatterns();
@@ -96,7 +94,7 @@ class TORCH_API SubgraphRewriter {
       const RewritePatternDescr& pattern,
       const std::vector<MatchFilter>& filters);
 
- bool overlapsWithPreviousMatches(const Match* match);
+  bool overlapsWithPreviousMatches(const Match* match);
 };
 
 /** Rewrite pattern descriptor.

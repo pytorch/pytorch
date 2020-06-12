@@ -29,25 +29,22 @@ graph(%a, %b):
 
   parseIR(pattern, &pattern_graph, vmap);
 
-  auto b_is_constant =
-    [](const Match& match,
-       const std::unordered_map<std::string, Value*>& vmap) {
+  auto b_is_constant = [](const Match& match,
+                          const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
     auto b_node = match_vmap.at(vmap.at("b"))->node();
     return b_node->kind() == prim::Constant;
   };
 
-  auto b_is_one =
-    [](const Match& match,
-       const std::unordered_map<std::string, Value*>& vmap) {
+  auto b_is_one = [](const Match& match,
+                     const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
     auto b_val = toIValue(match_vmap.at(vmap.at("b")));
     return b_val && b_val->isInt() && b_val->toInt() == 1;
   };
 
-  auto b_is_two =
-    [](const Match& match,
-       const std::unordered_map<std::string, Value*>& vmap) {
+  auto b_is_two = [](const Match& match,
+                     const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
     auto b_val = toIValue(match_vmap.at(vmap.at("b")));
     return b_val && b_val->isInt() && b_val->toInt() == 2;
@@ -107,7 +104,8 @@ graph(%a, %b):
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
     auto b_node = match_vmap.at(vmap.at("b"))->node();
-    // b_node is not prim::Assign, so this won't match and we'll skip the rewrite
+    // b_node is not prim::Assign, so this won't match and we'll skip the
+    // rewrite
     return b_node->kind() == prim::Assign;
   };
 
