@@ -213,7 +213,9 @@ at::Tensor vulkan_convolution_prepacked(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    const float output_min,
+    const float output_max) {
   TORCH_INTERNAL_ASSERT(
       input.dim() == 4, "vulkan_convolution: Expected 4-dimensional input");
   TORCH_INTERNAL_ASSERT(
@@ -233,14 +235,17 @@ at::Tensor vulkan_convolution_prepacked(
   const bool vulkanBias = (*bias).is_vulkan();
   if (hasBias && vulkanBias) {
     const VulkanTensor& vbias = vtensor_from_vulkan(*bias);
-    vulkan::detail::conv2d(voutput, vinput, vweight, vbias, params);
+    vulkan::detail::conv2d(
+        voutput, vinput, vweight, vbias, params, output_min, output_max);
   } else {
     vulkan::detail::conv2d(
         voutput,
         vinput,
         vweight,
         hasBias ? c10::make_optional((*bias).data_ptr<float>()) : c10::nullopt,
-        params);
+        params,
+        output_min,
+        output_max);
   }
   return new_with_vtensor_vulkan(std::move(voutput), input.options());
 }
