@@ -38,7 +38,7 @@ static TensorView* makeDummyTensor(
 
 static void checkIntValue(
     const EvaluationContext* eval_context,
-    const Val* val,
+    Val* val,
     Int::ScalarType expected_value) {
   TORCH_CHECK(val->isAnInt());
   const auto actual_value = ExpressionEvaluator::evaluate(val, eval_context);
@@ -148,10 +148,21 @@ void testGPU_FusionExprEvalBindings() {
   auto* a = new Int();
   auto* b = new Int();
   auto* c = add(a, b);
-  auto* d = neg(ceilDiv(add(a, b), b));
+  auto* d = neg(ceilDiv(c, b));
+  auto* e = new Int(0);
+
+  // trying to evaluate before binding should give empty results
+  TORCH_CHECK(!ExpressionEvaluator::evaluate(a, &eval_context).has_value());
+  TORCH_CHECK(!ExpressionEvaluator::evaluate(d, &eval_context).has_value());
 
   eval_context.bind(a, 7);
   eval_context.bind(b, 3);
+
+  // can't bind to the results of expressions
+  ASSERT_ANY_THROW(eval_context.bind(c, 100));
+
+  // can't bind to concrete values
+  ASSERT_ANY_THROW(eval_context.bind(e, 100));
 
   checkIntValue(&eval_context, c, 10);
   checkIntValue(&eval_context, sub(a, b), 4);
