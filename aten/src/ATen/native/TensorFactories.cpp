@@ -501,7 +501,7 @@ Tensor rand_like(
 
 Tensor rand_like(
     const Tensor& self,
-    c10::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat>& optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -579,7 +579,7 @@ Tensor randint_like(
 Tensor randint_like(
     const Tensor& self,
     int64_t high,
-    c10::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat>& optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -600,7 +600,7 @@ Tensor randint_like(
     const Tensor& self,
     int64_t low,
     int64_t high,
-    c10::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat>& optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -649,7 +649,7 @@ Tensor randn_like(
 
 Tensor randn_like(
     const Tensor& self,
-    c10::optional<Generator>& generator,
+    c10::optional<Generator> generator,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat>& optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
