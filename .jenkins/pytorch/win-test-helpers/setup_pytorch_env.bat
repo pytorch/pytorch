@@ -23,10 +23,6 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0
     call conda install -y -q -c conda-forge cmake
 )
-:: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting
-:: No need to install faulthandler since we only test Python >= 3.6 on Windows
-:: faulthandler is builtin since Python 3.3
 
 pushd .
 if "%VC_VERSION%" == "" (
@@ -36,6 +32,11 @@ if "%VC_VERSION%" == "" (
 )
 @echo on
 popd
+
+:: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+pip install ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting
+:: No need to install faulthandler since we only test Python >= 3.6 on Windows
+:: faulthandler is builtin since Python 3.3
 
 set DISTUTILS_USE_SDK=1
 
