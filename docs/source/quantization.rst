@@ -3,6 +3,9 @@
 Quantization
 ============
 
+.. warning ::
+     Quantization is in beta and subject to change.
+
 Introduction to Quantization
 ----------------------------
 
