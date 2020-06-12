@@ -175,7 +175,7 @@ VBuffer kernelNCHW_OCHW_repack_O4C4HWi4o4(
 }
 
 VBuffer bufferFromOptionalHostData(
-    c10::optional<float*> data,
+    c10::optional<const float*> data,
     const uint32_t size) {
   const auto sizeAligned =
       ROUND_UP(size, context().limits().minStorageBufferOffsetAlignment);
@@ -275,7 +275,7 @@ void conv2d_depthwise(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VulkanTensor& weight,
-    const c10::optional<float*> bias,
+    const c10::optional<const float*> bias,
     const Conv2DParams params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
@@ -293,7 +293,7 @@ void conv2d_depthwise(
     VulkanTensor& output,
     const VulkanTensor& input,
     const float* weight,
-    const c10::optional<float*> bias,
+    const c10::optional<const float*> bias,
     const Conv2DParams params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
@@ -491,7 +491,7 @@ void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VImage& kernelImage,
-    const c10::optional<float*> bias,
+    const c10::optional<const float*> bias,
     const Conv2DParams& params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
@@ -511,7 +511,7 @@ void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VulkanTensor& weight_prepacked,
-    c10::optional<float*> bias,
+    c10::optional<const float*> bias,
     const Conv2DParams params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
@@ -571,7 +571,7 @@ void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const float* weight,
-    const c10::optional<float*> bias,
+    const c10::optional<const float*> bias,
     const Conv2DParams params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
