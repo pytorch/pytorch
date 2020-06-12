@@ -3,6 +3,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/Parallel.h>
+#include <unordered_map>
 
 namespace at { namespace native {
 
@@ -12,11 +13,11 @@ namespace {
 class ReduceMultiply {
 public:
   template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data *= *src_data;
   };
 
-  void operator()(bool * self_data, bool * src_data) {
+  constexpr void operator() (bool * self_data, bool * src_data) const {
     *self_data = *self_data && *src_data;
   };
 };
@@ -25,7 +26,7 @@ ReduceMultiply reduce_multiply;
 class ReduceAdd {
 public:
   template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data += *src_data;
   };
 };
@@ -34,7 +35,7 @@ ReduceAdd reduce_add;
 class ReduceSubtract {
 public:
   template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data -= *src_data;
   };  
 };
@@ -43,7 +44,7 @@ ReduceSubtract reduce_subtract;
 class ReduceDivide {
 public:
   template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data /= *src_data;
   };  
 };
@@ -52,7 +53,7 @@ ReduceDivide reduce_divide;
 class TensorAssign {
 public:
   template <typename scalar_t>
-  void operator()(scalar_t * self_data, scalar_t * src_data) {
+  constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data = *src_data;
   };    
 };
@@ -166,6 +167,13 @@ struct cpu_scatter_gather_base_kernel {
       method_name, [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
+        
+        using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
+        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_add;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_SUBTRACT] = reduce_subtract;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_MULTIPLY] = reduce_multiply;
+        binary_funcs[SCATTER_GATHER_OP::REDUCE_DIVIDE] = reduce_divide;
         
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
