@@ -212,10 +212,7 @@ void blockReduce(T& out, const T inp_val, Func reduction_op) {
     // Transpose Z and Y in the shared memory so Z and X dims are contiguous in smem
     reduction_stride = 1;
     linear_tid = threadIdx.y * blockDim.z * blockDim.x + threadIdx.z * blockDim.x + threadIdx.x;
-    reduction_tid
-    = threadIdx.y * blockDim.z * blockDim.x
-    + threadIdx.z              * blockDim.x
-    + threadIdx.x;
+    reduction_tid = threadIdx.z * blockDim.x + threadIdx.x;
   } else {
     // Normal reduction in order
     reduction_stride 

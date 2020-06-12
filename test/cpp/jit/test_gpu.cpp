@@ -2580,6 +2580,67 @@ void testGPU_FusionReduction4() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
+void testGPU_FusionReductionTFT() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  // tv1[I0, R1] = tv0[I0, I1]
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+
+  fusion.addOutput(tv1);
+
+  int numel_x = 1025;
+  int numel_y = 129;
+  int tidx = 16;
+  int tidy = 8;
+  int tidz = 8;
+
+  tv1->split(1, tidx);
+  // tv1[I0, R1o, R1i{tidx}]
+
+  tv1->split(1, tidz);
+  // tv1[I0, R1oo, R1Oi{tidz}, R1R1i{tidx}]
+
+  tv1->split(0, tidy);
+  // tv1[I0o, I0i, R1oo, R1Oi{tidz}, R1R1i{tidx}]
+
+  TensorView* tv2 = tv1->rFactor({2});
+  // tv2[I0o, I0i, R1oo, I1Oi{tidz}, I11i{tidx}]
+  // tv1[I0o, I0i,       R1Oi{tidz}, R1R1i{tidx}]
+
+  tv2->computeAt(tv1, 2);
+
+  tv1->axis(1)->parallelize(ParallelType::TIDy);
+
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv1->axis(-2)->parallelize(ParallelType::TIDz);
+  tv2->axis(-2)->parallelize(ParallelType::TIDz);
+
+  prog.device_ = 0;
+  prog.grid(1);
+  prog.block(tidx, tidy, tidz);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+  at::Tensor cg_output = at::empty({numel_x}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  c10::cuda::CUDAStream stream = c10::cuda::getCurrentCUDAStream();
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+
+  auto aten_output = input.sum({1});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
 void testGPU_FusionSimpleBCast() {
   {
     Fusion fusion;
