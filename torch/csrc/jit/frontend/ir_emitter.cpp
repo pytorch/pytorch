@@ -374,9 +374,9 @@ struct Environment {
       if (!as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
         auto error = ErrorReport(loc);
         error << "Variable '" << name << "' previously has type "
-              << simple_parent->type()->python_str()
+              << simple_parent->type()->repr_str()
               << " but is now being assigned to a value of type "
-              << as_simple_value->type()->python_str();
+              << as_simple_value->type()->repr_str();
 
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
@@ -397,9 +397,9 @@ struct Environment {
       if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
         throw ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
-            << annotated_type->python_str()
+            << annotated_type->repr_str()
             << " but is being assigned to a value of type "
-            << as_simple_value->type()->python_str();
+            << as_simple_value->type()->repr_str();
       }
       insertStore(name, loc, std::move(as_simple_value), annotated_type);
     } else {
@@ -972,8 +972,8 @@ struct to_ir {
       if (!result->type()->isSubtypeOf(result_type)) {
         throw ErrorReport(stmt.range())
             << "Return value was annotated as having type "
-            << result_type->python_str() << " but is actually of type "
-            << result->type()->python_str();
+            << result_type->repr_str() << " but is actually of type "
+            << result->type()->repr_str();
       }
     } else {
       result_type = def_stack_.back().merged_return_type_;
@@ -984,9 +984,9 @@ struct to_ir {
       if (!merged_result_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
-            << result_type->python_str()
+            << result_type->repr_str()
             << " but this return statement returns a value of type "
-            << result->type()->python_str();
+            << result->type()->repr_str();
       }
       result_type = merged_result_type.value();
     }
@@ -1208,7 +1208,7 @@ struct to_ir {
         throw ErrorReport(loc)
             << "Expected list type annotation for list comprehension"
                ", found "
-            << type_hint->python_str();
+            << type_hint->repr_str();
       }
       list_value->setType(type_hint);
       type_set = true;
@@ -1326,8 +1326,8 @@ struct to_ir {
     auto unified = unifyTypes(true_type, false_type);
     if (!unified) {
       throw ErrorReport(range)
-          << "if-expression's true branch has type " << true_type->python_str()
-          << " but false branch has type " << false_type->python_str();
+          << "if-expression's true branch has type " << true_type->repr_str()
+          << " but false branch has type " << false_type->repr_str();
     }
 
     // Add op outputs
@@ -1342,13 +1342,13 @@ struct to_ir {
       out = asSimple(bool_cast->call(loc, method, {v}, {}, 0));
     } catch (...) {
       throw ErrorReport(loc) << "Could not cast value of type "
-                             << v->type()->python_str() << " to bool";
+                             << v->type()->repr_str() << " to bool";
     }
     // cast value not response for checking output type
     if (!out->type()->isSubtypeOf(BoolType::get())) {
       throw ErrorReport(loc)
           << "expected a bool expression for condition but found "
-          << out->type()->python_str();
+          << out->type()->repr_str();
     }
     return out;
   }
@@ -1507,8 +1507,8 @@ struct to_ir {
       if (!unified) {
         ErrorReport error(loc);
         error << "Type mismatch: " << x << " is set to type "
-              << tv->type()->python_str() << " in the true branch"
-              << " and type " << fv->type()->python_str()
+              << tv->type()->repr_str() << " in the true branch"
+              << " and type " << fv->type()->repr_str()
               << " in the false branch";
         if (save_true->findInParentFrame(x) ||
             save_false->findInParentFrame(x)) {
@@ -1922,7 +1922,7 @@ struct to_ir {
         magic_method_name = out_of_place_method_name;
       } else {
         throw ErrorReport(stmt.range())
-            << "Cannot emit inplace op on " << type->python_str()
+            << "Cannot emit inplace op on " << type->repr_str()
             << " since it does not define an " << in_place_method_name << " or "
             << out_of_place_method_name << " method";
       }
@@ -1954,7 +1954,7 @@ struct to_ir {
     const TypePtr type = sliceable->type();
     if (subscriptExprs.size() != 1) {
       throw ErrorReport(subscriptExprs)
-          << "Sliced expression not yet supported for " << type->python_str()
+          << "Sliced expression not yet supported for " << type->repr_str()
           << " augmented assignment. "
           << "File a bug if you want this";
     }
@@ -1968,7 +1968,7 @@ struct to_ir {
 
     if (elemType == nullptr) {
       throw ErrorReport(lhs)
-          << type->python_str() << " does not support augmented assignment.";
+          << type->repr_str() << " does not support augmented assignment.";
     }
     const auto idxValue = emitExpr(subscriptExprs[0]);
     const auto containerArg =
@@ -2541,8 +2541,8 @@ struct to_ir {
         std::stringstream why_not;
         if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
           throw ErrorReport(apply.inputs())
-              << "expected an expression of type " << type->python_str()
-              << " but found " << expr->type()->python_str() << "\n"
+              << "expected an expression of type " << type->repr_str()
+              << " but found " << expr->type()->repr_str() << "\n"
               << why_not.str();
         }
 
@@ -3050,7 +3050,7 @@ struct to_ir {
             // If the type hint was not a List[T] throw an error
             throw ErrorReport(tree)
                 << "Expected a List type hint but instead got "
-                << type_hint->python_str();
+                << type_hint->repr_str();
           }
         } else if (!values.empty()) {
           std::stringstream ss;
@@ -3068,8 +3068,8 @@ struct to_ir {
           if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
-                << elem_type->python_str() << " but found "
-                << v->type()->python_str() << " instead.\n"
+                << elem_type->repr_str() << " but found "
+                << v->type()->repr_str() << " instead.\n"
                 << ss.str();
           }
         }
@@ -3120,8 +3120,8 @@ struct to_ir {
               throw ErrorReport(trees[i])
                   << "Dict " << what
                   << " must contain only a single type, expected: "
-                  << type->python_str() << " but found "
-                  << values[i]->type()->python_str() << " instead.\n"
+                  << type->repr_str() << " but found "
+                  << values[i]->type()->repr_str() << " instead.\n"
                   << ss.str();
             }
           }
@@ -3329,7 +3329,7 @@ struct to_ir {
       } else {
         throw ErrorReport(loc)
             << "Unsupported operation: indexing tensor with unsupported index type '"
-            << index->type()->python_str()
+            << index->type()->repr_str()
             << "'. Only ints, slices, lists and tensors are supported";
       }
     };
@@ -3485,7 +3485,7 @@ struct to_ir {
       if (elems.size() == 0 ||
           !convertibleToList(tuple_typ, ListType::create(elems[0]))) {
         throw ErrorReport(loc)
-            << "Cannot index into a " << tuple_typ->python_str()
+            << "Cannot index into a " << tuple_typ->repr_str()
             << " with a non-integer literal because we cannot resolve the output type";
       }
       output_type = elems[0];
