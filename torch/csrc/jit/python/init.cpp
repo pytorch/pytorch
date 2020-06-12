@@ -209,9 +209,10 @@ void initJITBindings(PyObject* module) {
           [](Module& module,
              const std::string& method_name,
              bool inplace,
+             bool debug,
              int quant_type_int) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertQuantDeQuant(module, method_name, inplace, quant_type);
+            return InsertQuantDeQuant(module, method_name, inplace, debug, quant_type);
           },
           py::arg("module"),
           py::arg("method_name"),
