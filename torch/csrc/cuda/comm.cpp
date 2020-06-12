@@ -72,10 +72,6 @@ std::vector<Tensor>& broadcast_out(const Tensor& tensor, std::vector<Tensor> &ou
       out_tensors[i].sizes() == tensor.sizes(),
       "Output tensor at index ", i, " has incorrect shape. Expected same "
       "shape as the source tensor: ", tensor.sizes());
-    TORCH_CHECK(
-      out_tensors[i].scalar_type() == tensor.scalar_type(),
-      "Output tensor at index ", i, " has incorrect dtype. Expected same "
-      "dtype as the source tensor: ", tensor.scalar_type());
   }
   return _broadcast_out_impl(tensor, out_tensors);
 }
@@ -326,20 +322,22 @@ at::Tensor& gather_out(
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
-  for (const auto& tensor : tensors) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    const auto& tensor = tensors[i];
     TORCH_CHECK(
-        tensor.is_cuda(), "Gather expects all inputs to have CUDA type, but "
-        "got tensor with device ", tensor.device());
+        tensor.is_cuda(), "Expected all input tensors to have CUDA type, but "
+        "got tensor at index ", i, " with device ", tensor.device());
     TORCH_CHECK(
         tensor.ndimension() == static_cast<int64_t>(expected_size.size()),
-        "Gather input tensors must have the same number of dimensions: got ",
-        tensor.ndimension(), ", but expected ", expected_size.size());
+        "Expected all input tensors to have the same number of dimensions: got ",
+        "tensor at index ", i, "with ", tensor.ndimension(), " dimensions, ",
+        "but expected ", expected_size.size());
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
-          "Gather got an input of invalid size: got ",
-          tensor.sizes(), ", but expected ", at::IntArrayRef(expected_size));
+          "Input tensor at index ", i, " has invalid size ", tensor.sizes(),
+          ", but expected ", at::IntArrayRef(expected_size));
     }
     total_size += tensor.size(dim);
   }
@@ -362,35 +360,33 @@ at::Tensor gather(
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
-  bool all_channels_last = true;
-  for (const auto& tensor : tensors) {
+  auto memory_format = first.suggest_memory_format();
+  for (size_t i = 0; i < tensors.size(); i++) {
+    const auto& tensor = tensors[i];
     TORCH_CHECK(
-        tensor.is_cuda(), "Gather expects all inputs to have CUDA type, but "
-        "got tensor with device ", tensor.device());
+        tensor.is_cuda(), "Expected all input tensors to have CUDA type, but "
+        "got tensor at index ", i, " with device ", tensor.device());
     TORCH_CHECK(
         tensor.ndimension() == static_cast<int64_t>(expected_size.size()),
-        "Gather input tensors must have the same number of dimensions: got ",
-        tensor.ndimension(), ", but expected ", expected_size.size());
+        "Expected all input tensors to have the same number of dimensions: got ",
+        "tensor at index ", i, "with ", tensor.ndimension(), " dimensions, ",
+        "but expected ", expected_size.size());
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
-          "Gather got an input of invalid size: got ",
-          tensor.sizes(), ", but expected ", at::IntArrayRef(expected_size));
+          "Input tensor at index ", i, " has invalid size ", tensor.sizes(),
+          ", but expected ", at::IntArrayRef(expected_size));
     }
     total_size += tensor.size(dim);
-    all_channels_last = all_channels_last &&
-        tensor.suggest_memory_format() == MemoryFormat::ChannelsLast;
+    if (memory_format != MemoryFormat::Contiguous && tensor.suggest_memory_format() != memory_format) {
+      memory_format = MemoryFormat::Contiguous;
+    }
   }
   expected_size[dim] = total_size;
   at::Device device(DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
     device = at::Device(DeviceType::CUDA, destination_index ? *destination_index : -1);
-  }
-
-  auto memory_format = MemoryFormat::Contiguous;
-  if (all_channels_last) {
-    memory_format = MemoryFormat::ChannelsLast;
   }
 
   at::Tensor result = at::empty(expected_size, first.options().device(device), memory_format);
