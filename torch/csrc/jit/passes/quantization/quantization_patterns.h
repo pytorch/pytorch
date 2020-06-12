@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <string>
@@ -15,6 +15,7 @@ struct QuantFusionInfo {
   std::string quantized_op_name;
   std::string pattern;
   std::string replacement;
+  // TODO: extend this to a list of filters
   std::function<
       bool(const Match&, const std::unordered_map<std::string, Value*>&)>
       filter =
@@ -452,8 +453,14 @@ graph(%a_quant, %b_scalar, %alpha):
         const auto& match_vmap = match.values_map;
         auto alpha = toIValue(match_vmap.at(vmap.at("alpha")));
         auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-        return alpha && alpha->isInt() && alpha->toInt() == 1 &&
-            b_scalar->type()->isSubtypeOf(NumberType::get());
+        auto b_scalar_value = toIValue(b_scalar);
+        bool alpha_is_one = alpha && alpha->isInt() && alpha->toInt() == 1;
+        bool input_is_scalar =
+            b_scalar->type()->isSubtypeOf(NumberType::get()) ||
+            (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
+             b_scalar_value && b_scalar_value->isTensor() &&
+             b_scalar_value->toTensor().dim() == 0);
+        return alpha_is_one && input_is_scalar;
       };
 
   // quantized::add_scalar_out
@@ -593,7 +600,13 @@ graph(%a_quant, %b_scalar):
          const std::unordered_map<std::string, Value*>& vmap) {
         const auto& match_vmap = match.values_map;
         auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-        return b_scalar->type()->isSubtypeOf(NumberType::get());
+        auto b_scalar_value = toIValue(b_scalar);
+        bool input_is_scalar =
+            b_scalar->type()->isSubtypeOf(NumberType::get()) ||
+            (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
+             b_scalar_value && b_scalar_value->isTensor() &&
+             b_scalar_value->toTensor().dim() == 0);
+        return input_is_scalar;
       };
 
   // quantized::mul_relu
