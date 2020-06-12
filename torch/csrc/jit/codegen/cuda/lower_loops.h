@@ -38,6 +38,10 @@ struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Track the active computeAt scope, and what view we're "computeAt-ing" into
   std::vector<std::pair<IterDomain*, TensorView*>> compute_at_scope;
 
+  // Predicates from ThreadPredicates that we will extend to reduction buffer
+  // initialization
+  std::unordered_map<const TensorView*, Bool*>& thread_predicates_;
+
   // Create, place, and return the allocation for tv
   Expr* pushAlloc(TensorView*);
 
@@ -67,14 +71,18 @@ struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Run the pass and accumulate output in lowered_exprs
   void generate(const std::vector<Expr*>& exprs);
 
-  LoopNestGenerator(Fusion* _fusion) : fusion_(_fusion) {}
+  LoopNestGenerator(
+      Fusion* _fusion,
+      std::unordered_map<const TensorView*, Bool*>& _thread_predicates)
+      : fusion_(_fusion), thread_predicates_(_thread_predicates) {}
 
  public:
   static std::vector<Expr*> getLoopNest(
       Fusion* fusion,
-      std::vector<Expr*> exprs) {
+      std::vector<Expr*> exprs,
+      std::unordered_map<const TensorView*, Bool*>& thread_predicates) {
     FusionGuard fg(fusion);
-    LoopNestGenerator lng(fusion);
+    LoopNestGenerator lng(fusion, thread_predicates);
     lng.generate(exprs);
     return lng.lowered_exprs;
   }

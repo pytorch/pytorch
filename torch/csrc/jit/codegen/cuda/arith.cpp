@@ -311,6 +311,19 @@ TORCH_CUDA_API TensorView* lt(Val* v1, TensorView* v2) {
 TORCH_CUDA_API TensorView* lt(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(lt, v1, v2);
 }
+// eq
+TORCH_CUDA_API Val* eq(Val* v1, Val* v2) {
+  return binaryOp(BinaryOpType::Eq, v1, v2);
+}
+TORCH_CUDA_API TensorView* eq(TensorView* v1, Val* v2) {
+  return arithOpOverloads(eq, v1, v2);
+}
+TORCH_CUDA_API TensorView* eq(Val* v1, TensorView* v2) {
+  return arithOpOverloads(eq, v1, v2);
+}
+TORCH_CUDA_API TensorView* eq(TensorView* v1, TensorView* v2) {
+  return arithOpOverloads(eq, v1, v2);
+}
 // ceilDiv
 TORCH_CUDA_API Val* ceilDiv(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::CeilDiv, v1, v2);

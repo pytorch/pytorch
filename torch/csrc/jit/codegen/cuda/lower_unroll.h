@@ -2,13 +2,19 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
-
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+
+#include <bitset>
+
 namespace torch {
 namespace jit {
 namespace fuser {
 
 /*
+ * A bit deceptively: UnrollPass adds all predicates, so it needs to be run even
+ * if we don't unroll any loops.
+ *
  * Unrolling pass will get IR that looks something like:
  * for( i : I0o{ceil(I0/4)} ) {
  *   for( j : I1o{ceil(I1/128)} ) {
@@ -44,6 +50,9 @@ namespace fuser {
 
 struct TORCH_CUDA_API UnrollPass : public OptOutDispatch {
  private:
+  // Wrapper to access thread_predicates_
+  Bool* getThreadPredicate(const TensorView*);
+
   // We will track which loops in the incomming IR will be replaced and by what
   std::unordered_map<Expr*, Expr*> loop_replacement_map;
   // Hold on to a reference to the fusion for convenience
@@ -55,6 +64,9 @@ struct TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   // Keep all for loops conveniently to make unrolling easier
   std::vector<ForLoop*> for_loops;
 
+  // Map from TensorView
+  std::unordered_map<const TensorView*, Bool*>& thread_predicates_;
+
   // keep track if we're within an unrolled loop
   bool within_unroll = false;
 
@@ -65,8 +77,13 @@ struct TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   void handle(ForLoop*) final;
 
   // Constructor
-  UnrollPass(Fusion* _fusion, const std::vector<Expr*>& _incoming_exprs)
-      : fusion_(_fusion), incoming_exprs_(_incoming_exprs) {}
+  UnrollPass(
+      Fusion* _fusion,
+      const std::vector<Expr*>& _incoming_exprs,
+      std::unordered_map<const TensorView*, Bool*>& _thread_predicates)
+      : fusion_(_fusion),
+        incoming_exprs_(_incoming_exprs),
+        thread_predicates_(_thread_predicates) {}
 
   // Generate the for Expr replacement map
   void computeMap();
@@ -76,7 +93,8 @@ struct TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   // new IR.
   static std::vector<Expr*> runPass(
       Fusion* fusion,
-      const std::vector<Expr*>& exprs);
+      const std::vector<Expr*>& exprs,
+      std::unordered_map<const TensorView*, Bool*>& thread_predicates);
 };
 
 } // namespace fuser

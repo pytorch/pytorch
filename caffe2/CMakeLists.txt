@@ -441,6 +441,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_unroll.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_validation.cpp

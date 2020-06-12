@@ -267,10 +267,7 @@ TORCH_CUDA_API std::ostream& operator<<(
 TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& out,
     const ParallelType ptype) {
-  TORCH_INTERNAL_ASSERT(
-      parallel_type_string_map.count(ptype) != 0,
-      "No string found for provided parallel type.");
-  return out << parallel_type_string_map[ptype];
+  return out << stringifyThread(ptype);
 }
 
 TORCH_CUDA_API std::ostream& operator<<(
@@ -308,6 +305,13 @@ std::string stringifyThreadSize(const ParallelType ptype) {
       "Could not find size of the thread type ",
       ptype);
   return thread_size_string_map[ptype];
+}
+
+std::string stringifyThread(const ParallelType ptype) {
+  TORCH_INTERNAL_ASSERT(
+      parallel_type_string_map.count(ptype) != 0,
+      "No string found for provided parallel type.");
+  return parallel_type_string_map[ptype];
 }
 
 TORCH_CUDA_API c10::optional<std::string> cast_func_str(

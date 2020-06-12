@@ -19,12 +19,18 @@ void IRValidate(Fusion* fusion) {
       for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
         IterDomain* id = tv->getComputeAtAxis(i).first;
 
-        if (id->isBlockDim())
+        if (id->isBlockDim()) {
           TORCH_CHECK(
               !id->isReduction(),
-              "Parallelization across blocks on reduction axes not support at the moment but found on, ",
+              "Parallelization across blocks on reduction axes is not support at the moment but found on, ",
               tv,
               ".");
+          TORCH_CHECK(
+              !id->isBroadcast(),
+              "Parallelization across blocks on broadcast axes is not supported, but found on, ",
+              tv,
+              ".");
+        }
       }
     } // if ir_utils::isTV
   } // for(Val* val : fusion->vals())

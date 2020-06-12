@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
 
@@ -9,13 +10,21 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+Bool* UnrollPass::getThreadPredicate(const TensorView* tv) {
+  TORCH_INTERNAL_ASSERT(
+      thread_predicates_.find(tv) != thread_predicates_.end(),
+      "Invalid predicate initialization, couldn't find ",
+      tv);
+  return thread_predicates_[tv];
+}
+
 // Custom dispatch for Expr, want to find out of it's a TV op
 void UnrollPass::handle(Expr* expr) {
   OptOutDispatch::handle(expr);
 }
 
 namespace {
-Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_) {
+Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
   TORCH_INTERNAL_ASSERT(
       inds_.size() == tv->nDims() ||
       inds_.size() == tv->domain()->noReductions().size());
@@ -40,6 +49,8 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_) {
   }
   std::vector<Bool*> all_preds = PredicateCompute::computePredicates(
       new TensorIndex(tv, IndexCompute::get(tv->domain(), inds)));
+
+  all_preds.push_back(thread_pred);
 
   std::vector<Bool*> preds;
 
@@ -127,7 +138,8 @@ void UnrollPass::handle(ForLoop* fl) {
     }
 
     // Make predicates for the unrolling, and the epilogue
-    Bool* unroll_predicate = getPredicate(out, unroll_pred_inds);
+    Bool* unroll_predicate =
+        getPredicate(out, unroll_pred_inds, getThreadPredicate(out));
     // Make the IfThenElse controlling the unrolling
     IfThenElse* unroll_ite =
         new IfThenElse(unroll_predicate, {}, {}, first_unroll->parentScope());
@@ -153,7 +165,8 @@ void UnrollPass::handle(ForLoop* fl) {
         continue;
 
       // Setup the expressions that need predicates around them.
-      Bool* inline_predicate = getPredicate(out, ir_utils::indices(for_loops));
+      Bool* inline_predicate = getPredicate(
+          out, ir_utils::indices(for_loops), getThreadPredicate(out));
 
       IfThenElse* inline_ite =
           new IfThenElse(inline_predicate, {expr}, {}, inner_most_inlined_loop);
@@ -174,7 +187,8 @@ void UnrollPass::handle(ForLoop* fl) {
 
       TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
 
-      Bool* pred = getPredicate(out, ir_utils::indices(for_loops));
+      Bool* pred = getPredicate(
+          out, ir_utils::indices(for_loops), getThreadPredicate(out));
 
       // If we need a predicate, put expr inside an if then else
       if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {
@@ -202,9 +216,10 @@ void UnrollPass::computeMap() {
 
 std::vector<Expr*> UnrollPass::runPass(
     Fusion* fusion,
-    const std::vector<Expr*>& exprs) {
+    const std::vector<Expr*>& exprs,
+    std::unordered_map<const TensorView*, Bool*>& thread_predicates) {
   FusionGuard fg(fusion);
-  UnrollPass up(fusion, exprs);
+  UnrollPass up(fusion, exprs, thread_predicates);
   up.computeMap();
   std::vector<Expr*> mutated_exprs;
   for (Expr* expr : exprs) {
