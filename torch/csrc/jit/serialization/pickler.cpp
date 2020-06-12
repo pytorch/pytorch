@@ -296,7 +296,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
 
   // TODO: Skip this if not writing tensors
   memoized_storage_map_[addr] = pushNextBinPut();
-  tensor_data_.push_back(getWriteableTensorData(tensor));
+  tensor_data_.push_back(tensor);
 }
 
 void Pickler::pushBytes(const std::string& string) {
@@ -497,7 +497,7 @@ void Pickler::endTypeTag(const IValue& ivalue) {
 
   // Push the dict type
   TORCH_INTERNAL_ASSERT(ivalue.type());
-  pushString(ivalue.type()->python_str());
+  pushString(ivalue.type()->annotation_str());
 
   // Pop the dict and type into a tuple
   push<PickleOpCode>(PickleOpCode::TUPLE2);
@@ -658,7 +658,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   TORCH_CHECK(
       set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
       "'__setstate__' must return None, but found value of type",
-      set_schema.returns().at(0).type()->python_str());
+      set_schema.returns().at(0).type()->annotation_str());
 
   // Check that the return type of __getstate__ matches the input to
   // __setstate__
@@ -668,9 +668,9 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   TORCH_CHECK(
       get_type->isSubtypeOf(set_type),
       "'__getstate__'s return type (",
-      get_type->python_str(),
+      get_type->annotation_str(),
       ") does not match '__setstate__'s argument type (",
-      set_type->python_str(),
+      set_type->annotation_str(),
       ")");
 
   return true;

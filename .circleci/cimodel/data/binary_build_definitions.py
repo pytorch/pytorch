@@ -1,9 +1,9 @@
 from collections import OrderedDict
 
+import cimodel.data.simple.util.branch_filters as branch_filters
 import cimodel.data.binary_build_data as binary_build_data
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-
 
 class Conf(object):
     def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, gcc_config_variant, libtorch_config_variant):
@@ -66,22 +66,21 @@ class Conf(object):
         job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
         if self.smoke:
             job_def["requires"] = [
-                "update_s3_htmls_for_nightlies",
-                "update_s3_htmls_for_nightlies_devtoolset7"
+                "update_s3_htmls",
             ]
-            job_def["filters"] = {"branches": {"only": "postnightly"}}
+            job_def["filters"] = branch_filters.gen_filter_dict(
+                branches_list=["nightly"],
+                tags_list=[branch_filters.RC_PATTERN],
+            )
         else:
-            job_def["filters"] = {
-                "branches": {
-                    "only": "nightly"
-                },
-                # Will run on tags like v1.5.0-rc1, etc.
-                "tags": {
-                    # Using a raw string here to avoid having to escape
-                    # anything
-                    "only": r"/v[0-9]+(\.[0-9]+)*-rc[0-9]+/"
-                }
-            }
+            if phase in ["upload"]:
+                filter_branch = "nightly"
+            else:
+                filter_branch = r"/.*/"
+            job_def["filters"] = branch_filters.gen_filter_dict(
+                branches_list=[filter_branch],
+                tags_list=[branch_filters.RC_PATTERN],
+            )
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
@@ -160,6 +159,32 @@ def get_nightly_uploads():
         mylist.append(conf.gen_workflow_job("upload", phase_dependency, nightly=True))
 
     return mylist
+
+def get_post_upload_jobs():
+    """Generate jobs to update HTML indices and report binary sizes"""
+    configs = gen_build_env_list(False)
+    common_job_def = {
+        "context": "org-member",
+        "filters": branch_filters.gen_filter_dict(
+            branches_list=["nightly"],
+            tags_list=[branch_filters.RC_PATTERN],
+        ),
+        "requires": [],
+    }
+    for conf in configs:
+        upload_job_name = conf.gen_build_name(
+            build_or_test="upload",
+            nightly=True
+        )
+        common_job_def["requires"].append(upload_job_name)
+    return [
+        {
+            "update_s3_htmls": {
+                "name": "update_s3_htmls",
+                **common_job_def,
+            },
+        },
+    ]
 
 def get_nightly_tests():
 

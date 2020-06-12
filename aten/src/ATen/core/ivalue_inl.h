@@ -230,7 +230,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
-  Future(TypePtr type) : type_(type) {}
+  explicit Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
@@ -259,7 +259,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   void markCompleted(IValue value) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
+    TORCH_CHECK(
+        !completed(),
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
     completed_ = true;
     value_ = std::move(value);
 
@@ -377,7 +380,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       std::ostream& out,
       const Future& v);
 
-  TypePtr type() const {
+  TypePtr elementType() const {
     return type_;
   }
 
@@ -408,6 +411,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   std::vector<std::function<void(void)>> callbacks_;
   c10::optional<FutureError> error_;
 };
+
+// Input is a list of Futures with the same target type.
+// Output is a Future to the List of completed Futures.
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
+// Input is a List of Futures with the same target type.
+// Output is a Future that will be updated with a seen value.
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {

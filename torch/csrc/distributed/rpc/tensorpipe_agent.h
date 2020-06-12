@@ -37,10 +37,10 @@ struct AggregatedNetworkData {
   uint64_t totalErrors{0};
 };
 
-// TensorPipeAgent leverages tensorpipe (https://github.com/pytorch/tensorpipe)
-// to move tensors and payload through fatested transport and channel
-// transparently. We can see it as a hybrid RPC transport, providing
-// shared memory (linux) and tcp (linux & mac). CUDA will be supported next.
+// TensorPipeAgent leverages TensorPipe (https://github.com/pytorch/tensorpipe)
+// to transparently move tensors and payloads through the fastest available
+// transport or channel. It acts like a hybrid RPC transport, providing shared
+// memory (linux) and TCP (linux & mac) support. CUDA support is in progress.
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
@@ -79,10 +79,13 @@ class TensorPipeAgent : public RpcAgent {
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
 
+  // Returns metrics tracked by the NetworkDataDict
   NetworkDataDict getNetworkData();
+  // Returns NetworkSourceInfo struct
   NetworkSourceInfo getNetworkSourceInfo();
 
  private:
+  // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void collectNames();
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
@@ -90,11 +93,6 @@ class TensorPipeAgent : public RpcAgent {
 #ifdef TP_ENABLE_SHM
   std::string createUniqueShmAddr();
 #endif
-
-  // Retrieve IP address for a given network device for corss-hosts
-  // to set up tensorpipe connection. For now we default the device
-  // name eth0.
-  static std::string getDefaultIPAddress();
 
   // TensorPipe read function that could be used to read response messages
   // by client, and read request messages by server.
@@ -144,15 +142,16 @@ class TensorPipeAgent : public RpcAgent {
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
   };
 
-  // State per client pipe to keep tracking of pending response message
-  // and error sate. pendingResponseMessage_ should be protected by
-  // mutex since it can be raced with user send() call.
+  // Maintains state per client pipe to track pending response messages and
+  // error states. pendingResponseMessage_ should be protected by a mutex since
+  // it can be raced with user send() call.
   // TODO: To achieve better performance we can have a pipe pool per
-  // client and work together with RpcBackendOptions to configure.
+  // client that can be configured using RpcBackendOptions.
   struct ClientPipe {
     explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     bool readError_{false};
+    // Map from Message Request ID's to corresponding futures.
     std::unordered_map<uint64_t, std::shared_ptr<AtomicFutureMessage>>
         pendingResponseMessage_;
   };
@@ -163,7 +162,7 @@ class TensorPipeAgent : public RpcAgent {
   std::shared_ptr<tensorpipe::Listener> listener_;
   std::unordered_map<worker_id_t, ClientPipe> connectedPipes_;
 
-  // We need map one keyed on name and one on id for easy lookup.
+  // Maps keyed on name and id for easy WorkerInfo lookup.
   std::unordered_map<worker_id_t, WorkerInfo> workerIdToInfo_;
   std::unordered_map<std::string, WorkerInfo> workerNameToInfo_;
   std::unordered_map<std::string, std::string> workerNameToURL_;
@@ -184,7 +183,9 @@ class TensorPipeAgent : public RpcAgent {
   // Map to store the expiration times for each message.
   std::map<
       steady_clock_time_point,
-      std::vector<std::shared_ptr<AtomicFutureMessage>>>
+      std::vector<std::pair<
+          std::shared_ptr<AtomicFutureMessage>,
+          std::chrono::milliseconds>>>
       timeoutMap_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
@@ -237,7 +238,7 @@ class TensorPipeAgent : public RpcAgent {
 
   // Map to Track Network Data
   NetworkDataDict networkData_;
-  // Mutex to guarg networkData_
+  // Mutex to guard networkData_
   std::mutex networkDataMutex_;
 
   // A mutex and a cv to guard access to the call counts and watch for changes.

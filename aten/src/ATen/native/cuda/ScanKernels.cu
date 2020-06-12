@@ -3,6 +3,12 @@
 #include <ATen/cuda/NumericLimits.cuh>
 #include <THC/THCNumerics.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCThrustAllocator.cuh>
+#include <thrust/execution_policy.h>
+#include <thrust/device_ptr.h>
+#include <thrust/scan.h>
+
 
 namespace at { namespace native {
 
@@ -162,9 +168,8 @@ __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Te
   int num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int>());
 
   dim3 threads(std::min(512, int(num_irows)));
-  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int(threads.x))));
-
   tensor_kernel_scan_outer_dim_with_indices<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
     num_orows, num_irows, row_size, init, binary_op);
@@ -408,7 +413,7 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
   int64_t num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int64_t>());
 
   dim3 threads(std::min(512, int(num_irows)));
-  int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
 
   check_fits_in_unsigned(num_irows, "num_irows");
@@ -441,13 +446,51 @@ void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, Binar
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+template<typename T>
+struct ROCm_Bug {
+  char bytes[sizeof(T)];
+};
+#endif
+
+template<typename scalar_t, typename BinaryFunction>
+void scan_thrust(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  #ifdef __HIP_PLATFORM_HCC__
+  using rocm_bug_t = ROCm_Bug<scalar_t>;
+  thrust::device_ptr<rocm_bug_t> src_data(reinterpret_cast<rocm_bug_t *>(self.data_ptr<scalar_t>()));
+  thrust::device_ptr<rocm_bug_t> dst_data(reinterpret_cast<rocm_bug_t *>(result.data_ptr<scalar_t>()));
+  ptrdiff_t size = self.numel();
+  auto rocm_bug_binary_op = [=]C10_HOST_DEVICE(const rocm_bug_t a, const rocm_bug_t b) -> rocm_bug_t {
+    auto result = binary_op((*reinterpret_cast<const scalar_t*>(&a)),
+    (*reinterpret_cast<const scalar_t*>(&b)));
+    return *reinterpret_cast<rocm_bug_t *>(&result);
+  };
+  thrust::inclusive_scan(
+      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
+      src_data, src_data + size, dst_data,
+      rocm_bug_binary_op);
+  #else
+  thrust::device_ptr<scalar_t> src_data(self.data_ptr<scalar_t>());
+  thrust::device_ptr<scalar_t> dst_data(result.data_ptr<scalar_t>());
+  ptrdiff_t size = self.numel();
+  thrust::inclusive_scan(
+      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
+      src_data, src_data + size, dst_data,
+      binary_op);
+  #endif
+}
+
 template<typename scalar_t, typename BinaryFunction>
 void scan_dim(const Tensor& self, Tensor& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   Tensor self_ = self.contiguous();
   result = result.contiguous();
-  if (dim == ndim - 1) {
+
+  if (self.numel() == self.size(dim)) {
+    scan_thrust<scalar_t>(self_, result, init, binary_op);
+  } else if (dim == ndim - 1) {
     scan_innermost_dim<scalar_t>(self_, result, init, binary_op);
   } else {
     scan_outer_dim<scalar_t>(self_, result, dim, init, binary_op);
@@ -473,7 +516,7 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
     self.scalar_type(), "logcumsumexp_cuda", [&]() {
     scalar_t init = -std::numeric_limits<scalar_t>::infinity();
-    auto log_add_exp = [] __device__ (scalar_t x, scalar_t y) -> scalar_t {
+    auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
       return ::log1p(std::exp(std::min(x, y) - std::max(x, y))) +
           std::max(x, y);
     };

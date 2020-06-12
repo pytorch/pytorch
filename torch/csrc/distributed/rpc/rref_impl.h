@@ -232,6 +232,14 @@ class TORCH_API RRef : public RRefInterface {
     return ownerCreationFuture_;
   }
 
+  // Check if creation of this RRef on owner node has timed out.
+  inline bool getTimedOut() const {
+    return timedOut_.load();
+  }
+
+  // Dispatches an error to the correct handler based on its RPCErrorType.
+  void handleError(RPCErrorType errorType, const FutureMessage& futMessage);
+
   // Send delete UserRRef request to Owner,
   // if the request hasn't been sent yet.
   // There are 2 cases to call it,
@@ -241,6 +249,10 @@ class TORCH_API RRef : public RRefInterface {
   virtual void tryDel() {}
 
  protected:
+  // Indicates that the creation of this RRef on owner node has timed out.
+  inline void setTimedOut() {
+    timedOut_ = true;
+  }
   friend class RRefContext;
 
   RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type);
@@ -249,6 +261,7 @@ class TORCH_API RRef : public RRefInterface {
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
+  std::atomic<bool> timedOut_{false};
 
   // type field to denote the type of the element that the RRef is holding
   // it could be any TypePtr that JIT support, including PyObjectType
@@ -287,7 +300,9 @@ class TORCH_API UserRRef final : public RRef {
 
   // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
   // yet, this call will block.
-  IValue toHere() const;
+  IValue toHere(
+      const float timeoutSeconds =
+          torch::distributed::rpc::kUnsetRpcTimeout) const;
 
   void tryDel() override;
 

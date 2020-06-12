@@ -13,7 +13,7 @@ from . import (
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
-    _delete_all_user_rrefs,
+    _delete_all_user_and_unforked_owner_rrefs,
     _destroy_rref_context,
     _get_current_rpc_agent,
     _invoke_remote_builtin,
@@ -27,6 +27,7 @@ from . import (
     _set_and_start_rpc_agent,
     backend_registry,
 )
+
 from .internal import (
     PythonUDF,
     RPCExecMode,
@@ -99,7 +100,7 @@ class WaitAllWorkersStates(object):
 # States used by `def _wait_all_workers()`.
 # `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
 _ALL_WORKER_NAMES = None
-_wait_all_workers_dict_lock = threading.Lock()
+_wait_all_workers_dict_lock = threading.RLock()
 _wait_all_workers_sequence_id = 0
 _wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkersStates)
 
@@ -123,7 +124,10 @@ def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
 
 
 def _set_proceed_shutdown_signal(sequence_id):
-    proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
+    with _wait_all_workers_dict_lock:
+        proceed_signal = _wait_all_workers_sequence_id_to_states[
+            sequence_id
+        ].proceed_signal
     assert (
         not proceed_signal.is_set()
     ), "Termination signal sequence id {} got set twice.".format(sequence_id)
@@ -152,6 +156,8 @@ def _wait_all_workers():
         _wait_all_workers_sequence_id += 1
 
     is_leader_worker = leader_worker_name == self_worker_name
+    # Set a long enough timeout for all shutdown messages to be processed.
+    timeout = 5  # seconds
 
     # Phase 1: Followers send intents.
     # All followers report intents to the leader.
@@ -162,11 +168,13 @@ def _wait_all_workers():
             leader_worker_name,
             _on_leader_follower_report_shutdown_intent,
             args=(sequence_id, self_worker_name,),
+            timeout=timeout,
         )
 
-    proceed_signal = _wait_all_workers_sequence_id_to_states[
-        sequence_id
-    ].proceed_signal
+    with _wait_all_workers_dict_lock:
+        proceed_signal = _wait_all_workers_sequence_id_to_states[
+            sequence_id
+        ].proceed_signal
     proceed_signal.wait()
 
     # Phase 2: Leader asks followers to proceed.
@@ -174,7 +182,6 @@ def _wait_all_workers():
     # after receiving all followers' intents.
     if is_leader_worker:
         # The leader sends out proceeed signals to all followers.
-        timeout = 5  # seconds
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
             fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal,
@@ -240,7 +247,7 @@ def shutdown(graceful=True):
     """
     if graceful:
         _wait_all_workers()
-        _delete_all_user_rrefs()
+        _delete_all_user_and_unforked_owner_rrefs()
         _get_current_rpc_agent().join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
@@ -344,7 +351,7 @@ def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_optio
 
 
 @_require_initialized
-def remote(to, func, args=None, kwargs=None):
+def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
     Make a remote call to run ``func`` on worker ``to`` and return an
     :class:`~torch.distributed.rpc.RRef` to the result value immediately.
@@ -364,6 +371,19 @@ def remote(to, func, args=None, kwargs=None):
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
 
+        timeout (float, optional): timeout in seconds for this remote call. If the
+                                   creation of this
+                                   :class:`~torch.distributed.rpc.RRef` on worker
+                                   ``to`` is not successfully processed on this
+                                   worker within this timeout, then the next time
+                                   there is an attempt to use the RRef (such as
+                                   ``to_here()``), a timeout will be raised
+                                   indicating this failure. A value of 0 indicates
+                                   an infinite timeout, i.e. a timeout error will
+                                   never be raised. If not provided, the default
+                                   value set during initialization or with
+                                   ``_set_rpc_timeout`` is used.
+
     Returns:
         A user :class:`~torch.distributed.rpc.RRef` instance to the result
         value. Use the blocking API :meth:`torch.distributed.rpc.RRef.to_here`
@@ -382,6 +402,18 @@ def remote(to, func, args=None, kwargs=None):
         contents of those tensors stay intact until the returned RRef is
         confirmed by the owner, which can be checked using the
         :meth:`torch.distributed.rpc.RRef.confirmed_by_owner` API.
+
+    .. warning ::
+        Errors such as timeouts for the ``remote`` API are handled on a
+        best-effort basis. This means that when remote calls initiated by
+        ``remote`` fail, such as with a timeout error, we take a best-effort
+        approach to error handling. This means that errors are handled and set
+        on the resulting RRef on an asynchronous basis. If the RRef has not been
+        used by the application before this handling (such as ``to_here`` or
+        fork call), then future uses of the ``RRef`` will appropriately raise
+        errors. However, it is possible that the user application will use the
+        ``RRef`` before the errors are handled. In this case, errors may not be
+        raised as they have not yet been handled.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -454,20 +486,36 @@ def remote(to, func, args=None, kwargs=None):
     with ctx_manager as rf:
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+
+        is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
+
+        if is_async_exec:
+            wrapped = func._wrapped_async_rpc_function
+            if isinstance(wrapped, torch.jit.ScriptFunction):
+                func = wrapped
+
         if qualified_name is not None:
-            rref = _invoke_remote_builtin(dst_worker_info, qualified_name, *args, **kwargs)
+            rref = _invoke_remote_builtin(dst_worker_info, qualified_name, timeout, *args, **kwargs)
         elif isinstance(func, torch.jit.ScriptFunction):
             rref = _invoke_remote_torchscript(
                 dst_worker_info.name,
                 torch._jit_internal._qualified_name(func),
+                timeout,
+                is_async_exec,
                 *args,
-                **kwargs
+                **kwargs,
             )
         else:
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
-            rref = _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors)
+            rref = _invoke_remote_python_udf(
+                dst_worker_info,
+                pickled_python_udf,
+                tensors,
+                timeout,
+                is_async_exec
+            )
         # attach profiling information
         if should_profile:
             assert torch.autograd._profiler_enabled()
@@ -513,17 +561,41 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
 
+        is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
+
+        if is_async_exec:
+            wrapped = func._wrapped_async_rpc_function
+            if isinstance(wrapped, torch.jit.ScriptFunction):
+                func = wrapped
+
         if qualified_name is not None:
-            fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rpc_timeout, *args, **kwargs)
+            fut = _invoke_rpc_builtin(
+                dst_worker_info,
+                qualified_name,
+                rpc_timeout,
+                *args,
+                **kwargs
+            )
         elif isinstance(func, torch.jit.ScriptFunction):
             fut = _invoke_rpc_torchscript(
-                dst_worker_info.name, torch.jit._qualified_name(func), args, kwargs, rpc_timeout
+                dst_worker_info.name,
+                torch.jit._qualified_name(func),
+                args,
+                kwargs,
+                rpc_timeout,
+                is_async_exec
             )
         else:
             (pickled_python_udf, tensors) = _default_pickler.serialize(
                 PythonUDF(func, args, kwargs)
             )
-            fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rpc_timeout)
+            fut = _invoke_rpc_python_udf(
+                dst_worker_info,
+                pickled_python_udf,
+                tensors,
+                rpc_timeout,
+                is_async_exec
+            )
         if should_profile:
             assert torch.autograd._profiler_enabled()
             assert rf is not None
