@@ -14174,7 +14174,7 @@ class TestTorchDeviceType(TestCase):
     def test_binary_op_scalar_device_unspecified(self, devices):
         scalar_val = torch.tensor(1.)
         for default_device in devices:
-            with torch.cuda.set_device(default_device):
+            with torch.cuda.device(default_device):
                 for device in devices:
                     device_obj = torch.device(device)
                     x = torch.rand(3, device=device)
