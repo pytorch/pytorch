@@ -9,7 +9,7 @@ from model_defs.squeezenet import SqueezeNet
 from model_defs.super_resolution import SuperResolutionNet
 from model_defs.srresnet import SRResNet
 from model_defs.dcgan import _netD, _netG, weights_init, bsz, imgsz, nz
-from model_defs.op_test import DummyNet, ConcatNet, PermuteNet, PReluNet
+from model_defs.op_test import DummyNet, ConcatNet, PermuteNet, PReluNet, FakeQuantNet
 
 from test_pytorch_common import TestCase, run_tests, skipIfNoLapack
 
@@ -149,6 +149,11 @@ class TestModels(TestCase):
         netG.apply(weights_init)
         input = Variable(torch.Tensor(bsz, nz, 1, 1).normal_(0, 1))
         self.exportTest(toC(netG), toC(input))
+
+    def test_fake_quant(self):
+        fake_quant_net = FakeQuantNet()
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        self.exportTest(fake_quant_net(), x)
 
 if __name__ == '__main__':
     run_tests()
