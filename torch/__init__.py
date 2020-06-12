@@ -94,6 +94,15 @@ if sys.platform == 'win32':
                 err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
                 raise err
 
+    try:
+        ctypes.CDLL('vcruntime140.dll')
+        ctypes.CDLL('msvcp140.dll')
+        if cuda_version not in ('9.2', '10.0'):
+            ctypes.CDLL('vcruntime140_1.dll')
+    except OSError:
+        print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+                 It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
+
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
     path_patched = False
     for dll in dlls:

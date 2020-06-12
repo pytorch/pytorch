@@ -1102,6 +1102,9 @@ class TestCase(expecttest.TestCase):
                                  [y[k] for k in key_list],
                                  atol=atol, rtol=rtol, msg=msg,
                                  exact_dtype=exact_dtype, exact_device=exact_device)
+        elif isinstance(x, type) and isinstance(y, type):
+            # See TestTorch.test_assert_equal_generic_meta
+            super().assertEqual(x, y, msg=msg)
         elif is_iterable(x) and is_iterable(y):
             super().assertEqual(len(x), len(y), msg=msg)
             for x_, y_ in zip(x, y):
