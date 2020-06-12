@@ -94,30 +94,3 @@ class Future(torch._C.Future):
             >>> t.join()
         """
         super(Future, self).set_result(result)
-
-
-def collect_all(futures):
-    r"""
-    Collects the Futures into a single combined Future that is completed
-    when all of the sub-futures are completed.
-
-    Arguments:
-        futures: a list of Futures
-
-    Returns:
-        Returns a Future object to a list of the passed in Futures.
-    """
-    return torch._C._collect_all(futures)
-
-def wait_all(futures):
-    r"""
-    Waits for all provided futures to be complete, and returns
-    the list of completed values.
-
-    Arguments:
-        futures: a list of Futures
-
-    Returns:
-        A list of the completed Future results
-    """
-    return [fut.wait() for fut in torch._C._collect_all(futures).wait()]

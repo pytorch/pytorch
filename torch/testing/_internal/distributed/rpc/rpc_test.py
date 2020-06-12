@@ -822,7 +822,8 @@ class RpcTest(RpcAgentTestFixture):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
 
-            for fut in torch.futures.collect_all(futs).wait():
+            for fut in futs:
+                fut.wait()
                 self.assertEqual(fut.wait(), 0)
 
             # Phase 2: Only worker2 has workload.
@@ -834,8 +835,9 @@ class RpcTest(RpcAgentTestFixture):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
 
-            for val in torch.futures.wait_all(futs):
-                self.assertEqual(val, 0)
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
 
     def test_wait_all_workers(self):
         rpc.init_rpc(
@@ -1240,9 +1242,9 @@ class RpcTest(RpcAgentTestFixture):
             futs.append(fut)
 
         j = 0
-        for val in torch.futures.wait_all(futs):
+        for fut in futs:
             self.assertEqual(
-                val, my_tensor_function(torch.ones(j, j), torch.ones(j, j))
+                fut.wait(), my_tensor_function(torch.ones(j, j), torch.ones(j, j))
             )
             j += 1
 
@@ -1308,8 +1310,8 @@ class RpcTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(worker_name(dst_rank), f, args=args)
             futs.append(fut)
 
-        for val in torch.futures.wait_all(futs):
-            self.assertEqual(val, 0)
+        for fut in futs:
+            self.assertEqual(fut.wait(), 0)
         tok = time.time()
         print(
             "Rank {} finished testing {} times in {} seconds.".format(
