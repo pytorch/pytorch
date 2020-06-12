@@ -712,7 +712,7 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
 
 accreal THTensor_(var_all)(THTensor *tensor, bool unbiased)
 {
-  accreal mean = THTensor_wrap(self).mean().item<accreal>();
+  accreal mean = THTensor_wrap(tensor).mean().item<accreal>();
   accreal sum = 0;
   TH_TENSOR_APPLY(scalar_t, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
   sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (unbiased ? 1 : 0));
