@@ -43,6 +43,18 @@ inline double zabs <std::complex<double>, double> (std::complex<double> z) {
   return std::abs(z);
 }
 
+// template<>
+// inline std::complex<float> sgn_impl (std::complex<float> z) {
+//   auto angle = std::arg(z);
+//   return std::complex<float>(std::cos(angle), std::sin(angle));
+// }
+
+// template<>
+// inline std::complex<double> sgn_impl (std::complex<double> z) {
+//   auto angle = std::arg(z);
+//   return std::complex<double>(std::cos(angle), std::sin(angle));
+// }
+
 template<>
 inline std::complex<float> angle_impl <std::complex<float>> (std::complex<float> z) {
   return std::complex<float>(std::arg(z), 0.0);

@@ -138,6 +138,16 @@ inline c10::complex<double> ceil_impl (c10::complex<double> z) {
   return c10::complex<double>(std::ceil(z.real()), std::ceil(z.imag()));
 }
 
+inline c10::complex<float> sgn_impl (c10::complex<float> z) {
+  auto angle = std::arg(z);
+  return c10::complex<float>(std::cos(angle), std::sin(angle));
+}
+
+inline c10::complex<double> sgn_impl (c10::complex<double> z) {
+  auto angle = std::arg(z);
+  return c10::complex<double>(std::cos(angle), std::sin(angle));
+}
+
 template <typename TYPE>
 inline TYPE floor_impl (TYPE z) {
   return std::floor(z);

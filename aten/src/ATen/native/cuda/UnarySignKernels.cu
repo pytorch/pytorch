@@ -45,8 +45,22 @@ void sign_kernel_cuda(TensorIterator& iter){
   }
 }
 
+template<typename T>
+__host__ __device__ static inline c10::complex<T> sgn_wrapper(c10::complex<T> v) {
+  return v.sgn();
+}
+
+void sign_kernel_cuda(TensorIterator& iter){
+  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sgn_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return sgn_wrapper(a);
+      });
+  });
+}
+
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
+REGISTER_DISPATCH(sgn_stub, &sgn_kernel_cuda);
 
 }} // namespace at::native

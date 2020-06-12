@@ -5376,6 +5376,28 @@ Example::
     tensor([ 1., -1.,  0.,  1.])
 """.format(**common_args))
 
+add_docstr(torch.sgn,
+           r"""
+sgn(input, out=None) -> Tensor
+
+Returns a new complex tensor with the same angle as that of the elements of :attr:`input` and absolute value 1.
+
+.. math::
+    \text{out}_{i} = \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|}
+""" + r"""
+Args:
+    {input}
+    {out}
+
+.. warning:: :func:`sgn` is only supported for tensors with complex dtypes.
+
+Example::
+
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x.sgn()
+    tensor([(0.1997-0.9799j), (0.9720+0.2350j), (0.6222+0.7829j), (-0.7117+0.7025j)])
+""".format(**common_args))
+
 add_docstr(torch.sin,
            r"""
 sin(input, out=None) -> Tensor
@@ -5636,8 +5658,8 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
 
-.. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)` 
-          will also remove the batch dimension, which can lead to unexpected 
+.. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)`
+          will also remove the batch dimension, which can lead to unexpected
           errors.
 
 Args:
@@ -6028,7 +6050,7 @@ fliplr(input) -> Tensor
 
 Flip array in the left/right direction, returning a new tensor.
 
-Flip the entries in each row in the left/right direction. 
+Flip the entries in each row in the left/right direction.
 Columns are preserved, but appear in a different order than before.
 
 Note:

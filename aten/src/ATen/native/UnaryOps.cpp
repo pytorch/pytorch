@@ -158,6 +158,10 @@ Tensor angle(const Tensor& self) {
   return unary_op_impl_with_complex_to_float(self, at::angle_out);
 }
 
+Tensor& sgn_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sgn_stub); }
+Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
+Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
+
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
     auto float_tensor = at::native::view_complex_as_float(self);
@@ -521,6 +525,7 @@ DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);
 DEFINE_DISPATCH(sign_stub);
+DEFINE_DISPATCH(sgn_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);

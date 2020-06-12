@@ -9535,7 +9535,7 @@ class TestTorchDeviceType(TestCase):
             M, N = input_.shape
             input_.zero_()
             for i in range(min(M, N)):
-                input_[i][i] = 1    
+                input_[i][i] = 1
             output1 = input_.argmax(dim=0)
             output2 = input_.sum(dim=0)
             for i in range(min(M, N)):
@@ -11127,6 +11127,19 @@ class TestTorchDeviceType(TestCase):
 
         a_bool.sign_()
         self.assertEqual(a_bool, a_bool_target, msg='sign_ device={} dtype=bool'.format(device))
+
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_sgn(self, device, dtype):
+        x = torch.randn(100, dtype=dtype)
+        angle = x.angle()
+        cos_angle = angle.cos()
+        sin_angle = angle.sin()
+        expected = cos_angle + 1j * sin_angle
+        self.assertEqual(x.sgn(), expected)
+
+        x_out = torch.empty_like(x)
+        torch.sgn(x, out=x_out)
+        self.assertEqual(x_out, expected)
 
     def test_logical_any(self, device):
         x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)

@@ -171,6 +171,16 @@ public:
     auto angle = _mm256_permute_ps(angle_(), 0xB1); // angle    90-angle
     return _mm256_and_ps(angle, real_mask);         // angle    0
   }
+  Vec256<c10::complex<float>> sgn() const {
+    const __m256 imag_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF,
+                                                                   0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF));
+    auto angle = _mm256_and_ps(angle_(), imag_mask); // 0     angle
+
+    auto sin_cos = Sleef_sincosf8_u10(angle);                        //[sin(0), cos(0)] [sin(angle), cos(angle)]
+    auto cos_sin = _mm256_blend_ps(_mm256_permute_ps(sin_cos.y, 0xB1),
+                                   sin_cos.x, 0xAA);                  //cos(angle)           sin(angle)
+    return cos_sin;
+  }
   __m256 real_() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
                                                                    0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000));

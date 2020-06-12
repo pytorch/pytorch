@@ -168,18 +168,27 @@ static void sign_kernel(TensorIterator& iter){
         auto one_vec = Vec256<scalar_t>(static_cast<scalar_t>(1));
 
         cpu_kernel_vec(
-            iter,
-            [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
-            [=](Vec256<scalar_t> self_vec){
+          iter,
+          [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
+          [=](Vec256<scalar_t> self_vec){
 
-                // Comparision operators returns bitmask.
-                auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
-                auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
+              // Comparision operators returns bitmask.
+              auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
+              auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
 
-                return left - right;
-            });
+              return left - right;
+          });
     });
   }
+}
+
+static void sgn_kernel(TensorIterator& iter){
+  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), 'sgn_cpu', [&]() {
+    cpu_kernel_vec(
+      iter,
+      [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
+      [=](Vec256<scalar_t> a) { return a.sgn(); });
+  });
 }
 
 static void sinh_kernel(TensorIterator& iter) {
@@ -499,6 +508,7 @@ REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
+REGISTER_DISPATCH(sgn_stub, &sgn_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
