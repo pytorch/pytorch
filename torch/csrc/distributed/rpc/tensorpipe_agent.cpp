@@ -268,13 +268,14 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     uint64_t messageId) {
   if (!rpcAgentRunning_.load()) {
     LOG(WARNING) << "RPC agent for " << workerInfo_.name_
-                 << " won't send response #" << messageId << " to "
+                 << " won't send response to request #" << messageId << " to "
                  << pipe->getRemoteName() << ", as the agent is shutting down";
     return;
   }
 
-  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending response #"
-          << messageId << " to " << pipe->getRemoteName();
+  VLOG(1) << "RPC agent for " << workerInfo_.name_
+          << " is sending response to request #" << messageId << " to "
+          << pipe->getRemoteName();
 
   const c10::optional<utils::FutureError> error =
       futureResponseMessage->error();
@@ -286,16 +287,17 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         std::move(responseMessage),
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
-            LOG(WARNING) << "RPC agent for " << workerInfo_.name_
-                         << " encountered error when sending response #"
-                         << messageId << " to " << pipe->getRemoteName() << ": "
-                         << error.what();
+            LOG(WARNING)
+                << "RPC agent for " << workerInfo_.name_
+                << " encountered error when sending response to request #"
+                << messageId << " to " << pipe->getRemoteName() << ": "
+                << error.what();
             return;
           }
 
           VLOG(1) << "RPC agent for " << workerInfo_.name_
-                  << " done sending response #" << messageId << " to "
-                  << pipe->getRemoteName();
+                  << " done sending response to request #" << messageId
+                  << " to " << pipe->getRemoteName();
         });
   } else {
     pipeWrite(
@@ -303,16 +305,17 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         createExceptionResponse(error->what(), responseMessage.id()),
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
-            LOG(WARNING) << "RPC agent for " << workerInfo_.name_
-                         << " encountered error when sending response #"
-                         << messageId << " to " << pipe->getRemoteName() << ": "
-                         << error.what();
+            LOG(WARNING)
+                << "RPC agent for " << workerInfo_.name_
+                << " encountered error when sending response to request #"
+                << messageId << " to " << pipe->getRemoteName() << ": "
+                << error.what();
             return;
           }
 
           VLOG(1) << "RPC agent for " << workerInfo_.name_
-                  << " done sending response #" << messageId << " to "
-                  << pipe->getRemoteName();
+                  << " done sending response to request #" << messageId
+                  << " to " << pipe->getRemoteName();
         });
   }
 }
@@ -658,7 +661,8 @@ void TensorPipeAgent::join() {
 }
 
 void TensorPipeAgent::shutdownImpl() {
-  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is shutting down";
+  // FIXME Isn't it too verbose for a library to print logs in normal operation?
+  LOG(INFO) << "RPC agent for " << workerInfo_.name_ << " is shutting down";
 
   threadPool_.waitWorkComplete();
   VLOG(1) << "RPC agent for " << workerInfo_.name_

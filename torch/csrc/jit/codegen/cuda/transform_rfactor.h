@@ -19,6 +19,7 @@ struct TORCH_CUDA_API TransformRFactor {
   // Create a copy of td, change its history by presrving axes so they appear in
   // the root domain
   static TensorDomain* runReplay(TensorDomain*, std::vector<int> axes);
+
   static TensorDomain* runReplay2(TensorDomain*, std::vector<int> axes);
 };
 
