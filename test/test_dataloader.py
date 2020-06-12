@@ -1204,10 +1204,12 @@ except RuntimeError as e:
         self.assertEqual(len(seeds), num_workers)
 
     def test_worker_seed_reproducibility(self):
+        def get_dataloader():
+            return DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, generator=torch.Generator().manual_seed(42))
+
         num_workers = 6
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
-        get_dataloader = lambda: DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, generator=torch.Generator().manual_seed(42))
         self.assertEqual(set(int(batch) for batch in get_dataloader()), set(int(batch) for batch in get_dataloader()))
 
     def test_worker_init_fn(self):
