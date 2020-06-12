@@ -250,16 +250,16 @@ Tensor qadd_scalar_out(Tensor qa, Scalar b, Tensor out) {
 }
 
 // `torch.jit.trace` will trace Scalar as Tensor
-// This can be removed after broadcast is support and
-// `quantized::add_scalar` is merged into `quantized::add`
+// This can be removed after broadcast is supported and
+// all variations of `quantized::add` is merged into `quantized::add`
 template <bool ReLUFused = false>
 Tensor qadd_scalar_tensor(Tensor qa, Tensor b) {
   return qadd_scalar(qa, b.item());
 }
 
 // `torch.jit.trace` will trace Scalar as Tensor
-// This can be removed after broadcast is support and
-// `quantized::add_scalar` is merged into `quantized::add`
+// This can be removed after broadcast is supported and
+// all variations of `quantized::add` is merged into `quantized::add`
 template <bool ReLUFused = false>
 Tensor qadd_scalar_tensor_out(Tensor qa, Tensor b, Tensor out) {
   return qadd_scalar_out(qa, b.item(), out);
