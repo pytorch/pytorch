@@ -130,7 +130,7 @@ class QMulScalar final {
   static Tensor run(Tensor qa, Scalar b) {
     TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is suuported in Mul.");
+              "Only per tensor quantization is supported in Mul.");
     auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _mul_scalar_out<ReLUFused>(qc, qa, b);
   }
@@ -145,18 +145,24 @@ class QMulScalarOut final {
   }
 };
 
+// `torch.jit.trace` will trace Scalar as Tensor
+// This can be removed after broadcast is support and
+// `quantized::mul_scalar` is merged into `quantized::mul`
 template <bool ReLUFused = false>
 class QMulScalarTensor final {
  public:
   static Tensor run(Tensor qa, Tensor b) {
     TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is suuported in Mul.");
+              "Only per tensor quantization is suported in Mul.");
     auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _mul_scalar_out<ReLUFused>(qc, qa, b.item());
   }
 };
 
+// `torch.jit.trace` will trace Scalar as Tensor
+// This can be removed after broadcast is support and
+// `quantized::mul_scalar` is merged into `quantized::mul`
 template <bool ReLUFused = false>
 class QMulScalarTensorOut final {
  public:
