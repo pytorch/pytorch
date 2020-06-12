@@ -183,7 +183,7 @@ py::object PyRRef::localValue() const {
   TORCH_CHECK(
       rref_->isOwner(),
       "Cannot call localValue() on a non-local reference. Call it on ",
-      owner().name_);
+      owner());
 
   py::object res;
   auto value = c10::static_intrusive_pointer_cast<OwnerRRef>(rref_)->getValue();
