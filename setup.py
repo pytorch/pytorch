@@ -166,6 +166,9 @@ import sys
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
+if sys.maxsize < 2**32:
+    raise Exception("PyTorch requires 64-bit version of Python. Upgrade Python to 64-bit version.")
+
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
 from distutils import core
