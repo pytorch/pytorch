@@ -69,6 +69,30 @@ static inline void reduction128(char** data, int64_t n, int64_t stride, func_t o
   }
 }
 
+template <typename func_t>
+static inline void reduction(char** data, int64_t start, int64_t n, int64_t stride, func_t op) {
+
+  using scalar_t = typename function_traits<func_t>::result_type;
+
+  char* out_ptr = data[0];
+  const char* in1_ptr = data[1];
+
+  scalar_t acc = 0;
+  uint64_t block_size = 256;
+
+  // Batch the reduction to avoid precission issues in some routines
+  for (; start < n; start += block_size) {
+    acc = *((scalar_t*)(in1_ptr + stride * start));
+    int64_t end = (start + block_size > n ? n : start + block_size);
+    for (int64_t i = start + 1; i < end; i++) {
+      const char* ptr = in1_ptr + stride * i;
+      acc = op(acc, *((scalar_t*)ptr));
+    }
+    auto dst = (scalar_t*)out_ptr;
+    *dst = op(*dst, acc);
+  }
+}
+
 template <typename F>
 static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
   for (int j = 0; j < n; j++) {
@@ -87,9 +111,7 @@ static inline void vectorized_inner_reduction(char** data, int64_t n, func_t op,
   if (count > 0) {
     reduction128(data, count, vector_stride, op, vop, /*reduce=*/true);
   }
-  char* ptrs[3] = { data[0], data[0], data[1] };
-  int64_t strides[] = { 0, 0, sizeof(scalar_t) };
-  basic_loop(ptrs, strides, count * 4 * Vec::size(), n, op);
+  reduction(data, count * 4 * Vec::size(), n, sizeof(scalar_t), op);
 }
 
 // computes the reduction out = op(out, in)
@@ -107,14 +129,7 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
   int64_t step[] = { sizeof(scalar_t), sizeof(scalar_t) };
   int64_t remaining = size1 % (4 * Vec::size());
   UNARY_OUTER_LOOP(data, step, remaining, [&] {
-    char* ptrs[3] = { data[0], data[0], data[1] };
-    int64_t strides[] = { 0, 0, inner_stride };
-    // Batch the reduction to avoid precission issues in some routines
-    int64_t block_size = 256;
-    for (int64_t start = 0; start < size0; start += block_size) {
-      int64_t end = (start + block_size > size0 ? size0 : start + block_size);
-      basic_loop(ptrs, strides, start, end, op);
-    }
+    reduction(data, 0, size0, inner_stride, op);
   });
 }
 
@@ -256,6 +271,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
 template <typename func_t, typename vec_func_t>
 void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, double ident = 0) {
   using traits = binary_function_traits<func_t>;
+  using scalar_t = typename function_traits<func_t>::result_type;
   static_assert(
     all_same<
       typename traits::result_type,
@@ -277,9 +293,7 @@ void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, d
       vectorized_outer_reduction(data, inner_stride, size0, size1, op, vop);
     } else {
       UNARY_OUTER_LOOP(data, outer_strides, size1, [&] {
-        char* ptrs[3] = { data[0], data[0], data[1] };
-        int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
-        basic_loop(ptrs, inner_strides, 0, size0, op);
+        reduction(data, 0, size0, strides[1], op);
       });
     }
   });
