@@ -42,13 +42,18 @@ void compute_fused_params(
 template <bool ReluFused>
 Tensor q_batch_norm2d_impl(
     Tensor qx,
-    Tensor weight,
-    Tensor bias,
+    c10::optional<Tensor> mb_weight,
+    c10::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
     double output_scale,
     int64_t output_zero_point) {
+
+  TORCH_CHECK(mb_weight.has_value(), "Weight must be provided");
+  TORCH_CHECK(mb_bias.has_value(), "Bias must be provided");
+  const auto& weight = *mb_weight;
+  const auto& bias = *mb_bias;
 
   if (qx.numel() == 0) {
     auto out = qx.clone();
@@ -131,13 +136,19 @@ Tensor q_batch_norm2d_impl(
 template <bool ReluFused>
 Tensor q_batch_norm3d_impl(
     Tensor qx,
-    Tensor weight,
-    Tensor bias,
+    c10::optional<Tensor> mb_weight,
+    c10::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
     double output_scale,
     int64_t output_zero_point) {
+
+  TORCH_CHECK(mb_weight.has_value(), "Weight must be provided")
+  TORCH_CHECK(mb_bias.has_value(), "Bias must be provided")
+
+  const auto& weight = *mb_weight;
+  const auto& bias = *mb_bias;
 
   if (qx.numel() == 0) {
     auto out = qx.clone();
@@ -231,8 +242,12 @@ Tensor quantized_batch_norm(
     double output_scale,
     int64_t output_zero_point) {
   Tensor qy;
+  // TODO: this should arguably support 3d as well
   qy = q_batch_norm2d_impl<false>(
-      qx, weight, bias, mean, var, eps, output_scale, output_zero_point);
+      qx,
+      weight.defined() ? c10::make_optional(weight) : c10::nullopt,
+      bias.defined() ? c10::make_optional(bias) : c10::nullopt,
+      mean, var, eps, output_scale, output_zero_point);
   return qy;
 }
 
