@@ -73,6 +73,7 @@ DEFAULT_QAT_MODULE_MAPPING = {
 DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
+    nn.GRU: nnqd.GRU,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
     nn.GRUCell: nnqd.GRUCell

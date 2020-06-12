@@ -681,7 +681,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
     def test_quantized_rnn(self):
         r"""Test dynamic quantization, scriptability and serialization for dynamic quantized lstm modules on int8 and fp16
         """
-        for module_type in ['LSTM']:
+        for module_type in ['LSTM', 'GRU']:
             model = RNNDynamicModel(module_type).eval()
             niter = 10
             x = torch.tensor([[100, -155],
@@ -697,8 +697,10 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                 model_quantized = quantize_dynamic(model=model, dtype=dtype)
 
                 def checkQuantized(model, module_type):
-                    mod_type_map = {'LSTM': torch.nn.quantized.dynamic.LSTM}
-                    mod_repr_map = {'LSTM': 'DynamicQuantizedLSTM'}
+                    mod_type_map = {'LSTM': torch.nn.quantized.dynamic.LSTM,
+                                    'GRU': torch.nn.quantized.dynamic.GRU}
+                    mod_repr_map = {'LSTM': 'DynamicQuantizedLSTM',
+                                    'GRU': 'DynamicQuantizedGRU'}
                     self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
                     self.checkDynamicQuantizedModule(model_quantized.mod, mod_type_map[module_type], dtype)
 
@@ -728,7 +730,8 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                         # type: (...) -> Tuple[PackedSequence, torch.Tensor]
                         return self.cell(x)
 
-                script_wrapper_map = {'LSTM': ScriptWrapperPacked}
+                script_wrapper_map = {'LSTM': ScriptWrapperPacked,
+                                        'GRU': ScriptWrapperPackedGRU}
                 packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
                 model_with_packed_input = script_wrapper_map[module_type](model_quantized.mod)
                 model_with_packed_input(packed_input)
