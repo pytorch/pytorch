@@ -304,6 +304,7 @@ void cpu_upsample_nearest_backward(
     }
   };
 
+  TORCH_INTERNAL_ASSERT(output_slice_size > 0);
   if (ndim == 3) {
     // upsample nearest 1d
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop1d);

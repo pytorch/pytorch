@@ -162,6 +162,7 @@ void cpu_upsample_linear(
 
   // compared to "nearest" mode, lower the grain size:
   // "linear", "bilinear", "trilinear" mode are more computational expensive
+  TORCH_INTERNAL_ASSERT(output_slice_size > 0);
   if (ndim == 3) {
     // upsample linear 1d
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 2, loop1d);
@@ -283,50 +284,50 @@ void cpu_upsample_linear_channels_last(
         compute_source_index_and_lambda(
             id0, id1, d0lambda, d1lambda, depth_scale, od, input_depth, output_depth, align_corners);
         for (int64_t oh = 0; oh < output_height; oh++) {
-           compute_source_index_and_lambda(
-               ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
-           for (int64_t ow = 0; ow < output_width; ow++) {
-              compute_source_index_and_lambda(
-                  iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
+          compute_source_index_and_lambda(
+              ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
+          for (int64_t ow = 0; ow < output_width; ow++) {
+            compute_source_index_and_lambda(
+                iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
 
-              scalar_t* out = output_data + n * output_slice_size +
-                  od * output_height * output_width * channels +
-                  oh * output_width * channels + ow * channels;
-              scalar_t* i000 = input_indexr(n, id0, ih0, iw0);
-              scalar_t* i001 = input_indexr(n, id0, ih0, iw1);
-              scalar_t* i010 = input_indexr(n, id0, ih1, iw0);
-              scalar_t* i011 = input_indexr(n, id0, ih1, iw1);
-              scalar_t* i100 = input_indexr(n, id1, ih0, iw0);
-              scalar_t* i101 = input_indexr(n, id1, ih0, iw1);
-              scalar_t* i110 = input_indexr(n, id1, ih1, iw0);
-              scalar_t* i111 = input_indexr(n, id1, ih1, iw1);
+            scalar_t* out = output_data + n * output_slice_size +
+                od * output_height * output_width * channels +
+                oh * output_width * channels + ow * channels;
+            scalar_t* i000 = input_indexr(n, id0, ih0, iw0);
+            scalar_t* i001 = input_indexr(n, id0, ih0, iw1);
+            scalar_t* i010 = input_indexr(n, id0, ih1, iw0);
+            scalar_t* i011 = input_indexr(n, id0, ih1, iw1);
+            scalar_t* i100 = input_indexr(n, id1, ih0, iw0);
+            scalar_t* i101 = input_indexr(n, id1, ih0, iw1);
+            scalar_t* i110 = input_indexr(n, id1, ih1, iw0);
+            scalar_t* i111 = input_indexr(n, id1, ih1, iw1);
 
-              int64_t size = channels;
-              int64_t d = 0;
-              for (; d < size - (size % Vec::size()); d += Vec::size()) {
-                Vec out_vec =
-                    Vec(d0lambda * h0lambda * w0lambda) * Vec::loadu(i000 + d) + /* d0 * h0 * w0 * i000 */
-                    Vec(d0lambda * h0lambda * w1lambda) * Vec::loadu(i001 + d) + /* d0 * h0 * w1 * i001 */
-                    Vec(d0lambda * h1lambda * w0lambda) * Vec::loadu(i010 + d) + /* d0 * h1 * w0 * i010 */
-                    Vec(d0lambda * h1lambda * w1lambda) * Vec::loadu(i011 + d) + /* d0 * h1 * w1 * i011 */
-                    Vec(d1lambda * h0lambda * w0lambda) * Vec::loadu(i100 + d) + /* d1 * h0 * w0 * i100 */
-                    Vec(d1lambda * h0lambda * w1lambda) * Vec::loadu(i101 + d) + /* d1 * h0 * w1 * i101 */
-                    Vec(d1lambda * h1lambda * w0lambda) * Vec::loadu(i110 + d) + /* d1 * h1 * w0 * i110 */
-                    Vec(d1lambda * h1lambda * w1lambda) * Vec::loadu(i111 + d);  /* d1 * h1 * w1 * i111 */
-                out_vec.store(out + d);
-              }
-              for (; d < size; d++) {
-                out[d] =
-                    d0lambda * h0lambda * w0lambda * i000[d] + /* d0 * h0 * w0 * i000 */
-                    d0lambda * h0lambda * w1lambda * i001[d] + /* d0 * h0 * w1 * i001 */
-                    d0lambda * h1lambda * w0lambda * i010[d] + /* d0 * h1 * w0 * i010 */
-                    d0lambda * h1lambda * w1lambda * i011[d] + /* d0 * h1 * w1 * i011 */
-                    d1lambda * h0lambda * w0lambda * i100[d] + /* d1 * h0 * w0 * i100 */
-                    d1lambda * h0lambda * w1lambda * i101[d] + /* d1 * h0 * w1 * i101 */
-                    d1lambda * h1lambda * w0lambda * i110[d] + /* d1 * h1 * w0 * i110 */
-                    d1lambda * h1lambda * w1lambda * i111[d];  /* d1 * h1 * w1 * i111 */
-              }
-           }
+            int64_t size = channels;
+            int64_t d = 0;
+            for (; d < size - (size % Vec::size()); d += Vec::size()) {
+              Vec out_vec =
+                  Vec(d0lambda * h0lambda * w0lambda) * Vec::loadu(i000 + d) + /* d0 * h0 * w0 * i000 */
+                  Vec(d0lambda * h0lambda * w1lambda) * Vec::loadu(i001 + d) + /* d0 * h0 * w1 * i001 */
+                  Vec(d0lambda * h1lambda * w0lambda) * Vec::loadu(i010 + d) + /* d0 * h1 * w0 * i010 */
+                  Vec(d0lambda * h1lambda * w1lambda) * Vec::loadu(i011 + d) + /* d0 * h1 * w1 * i011 */
+                  Vec(d1lambda * h0lambda * w0lambda) * Vec::loadu(i100 + d) + /* d1 * h0 * w0 * i100 */
+                  Vec(d1lambda * h0lambda * w1lambda) * Vec::loadu(i101 + d) + /* d1 * h0 * w1 * i101 */
+                  Vec(d1lambda * h1lambda * w0lambda) * Vec::loadu(i110 + d) + /* d1 * h1 * w0 * i110 */
+                  Vec(d1lambda * h1lambda * w1lambda) * Vec::loadu(i111 + d);  /* d1 * h1 * w1 * i111 */
+              out_vec.store(out + d);
+            }
+            for (; d < size; d++) {
+              out[d] =
+                  d0lambda * h0lambda * w0lambda * i000[d] + /* d0 * h0 * w0 * i000 */
+                  d0lambda * h0lambda * w1lambda * i001[d] + /* d0 * h0 * w1 * i001 */
+                  d0lambda * h1lambda * w0lambda * i010[d] + /* d0 * h1 * w0 * i010 */
+                  d0lambda * h1lambda * w1lambda * i011[d] + /* d0 * h1 * w1 * i011 */
+                  d1lambda * h0lambda * w0lambda * i100[d] + /* d1 * h0 * w0 * i100 */
+                  d1lambda * h0lambda * w1lambda * i101[d] + /* d1 * h0 * w1 * i101 */
+                  d1lambda * h1lambda * w0lambda * i110[d] + /* d1 * h1 * w0 * i110 */
+                  d1lambda * h1lambda * w1lambda * i111[d];  /* d1 * h1 * w1 * i111 */
+            }
+          }
         }
       }
     }
@@ -467,6 +468,7 @@ void cpu_upsample_linear_backward(
     }
   };
 
+  TORCH_INTERNAL_ASSERT(output_slice_size > 0);
   if (ndim == 3) {
     // upsample linear 1d
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 2, loop1d);
