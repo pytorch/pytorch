@@ -6,6 +6,7 @@ from copy import deepcopy
 import torch
 from torch._six import inf
 import torch.optim as optim
+import torch.multiprocessing as mp
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
@@ -241,6 +242,29 @@ class TestOptim(TestCase):
             constructor,
             scheduler_constructors
         )
+
+    def _test_multi_processing(self, constructor):
+        def _update(optimizer, x):
+            optimizer.zero_grad()
+            val = x.sum().backward()
+            optimizer.step()
+            return val.item()
+
+        # multi-processing
+        p_multi = torch.zeros(10).requires_grad_(True).share_memory_()
+        opt_multi = constructor([p_multi])
+        opt_multi.share_memory()
+        pool = mp.Pool(1)
+        res_multi = pool.apply(_update, args=(opt_multi, p_multi))
+
+        # reference solution
+        p_ref = torch.zeros_like(p_multi).requires_grad_(True)
+        opt_ref = constructor([p_ref])
+        res_ref = _update(opt_ref, p_ref)
+
+        self.assertEqual(res_ref, res_multi, "test set-up problem!")
+        self.assertDictEqual(opt_ref.state[p_ref], opt_multi.state[p_multi])
+
 
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
