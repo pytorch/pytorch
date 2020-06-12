@@ -37,6 +37,15 @@ void store_result(char * C10_RESTRICT data, int64_t stride, int64_t index, scala
   *ptr += value;
 }
 
+template <typename scalar_t, size_t numel>
+void store_result(char * C10_RESTRICT data, int64_t stride, int64_t index,
+    const std::array<scalar_t, numel> &values) {
+  auto *base_ptr = data + stride * index;
+  for (int64_t k = 0; k < numel; ++k) {
+    store_result(base_ptr, stride, k, values[k]);
+  }
+}
+
 // Simultaneously sum over n rows at once
 template <typename scalar_t, int64_t nrows>
 std::array<scalar_t, nrows> multi_row_sum(
@@ -150,6 +159,17 @@ void vectorized_inner_sum(
 }
 
 template <typename scalar_t>
+void scalar_inner_sum(
+    char * C10_RESTRICT data[2], int64_t in_strides[2], int64_t out_stride,
+    int64_t size0, int64_t size1) {
+  for (int64_t j = 0; j < size1; ++j) {
+    const auto *row_in = data[1] + j * in_strides[1];
+    scalar_t ans = row_sum<scalar_t>(row_in, in_strides[0], size0);
+    store_result(data[0], out_stride, j, ans);
+  }
+}
+
+template <typename scalar_t>
 void vectorized_outer_sum(
     char * C10_RESTRICT data[2], int64_t inner_stride, int64_t out_stride,
     int64_t size0, int64_t size1) {
@@ -166,11 +186,9 @@ void vectorized_outer_sum(
     for (int64_t i = 0; i < nrows; ++i) {
       const int64_t base_idx = j + i * vec_t::size();
 
-      scalar_t ans[vec_t::size()];
-      sums[i].store(ans);
-      for (int64_t k = 0; k < vec_t::size(); ++k) {
-        store_result(data[0], out_stride, base_idx + k, ans[k]);
-      }
+      std::array<scalar_t, vec_t::size()> ans;
+      sums[i].store(ans.data());
+      store_result(data[0], out_stride, base_idx, ans);
     }
   }
 
@@ -178,16 +196,35 @@ void vectorized_outer_sum(
     const auto *row_in = data[1] + j * sizeof(scalar_t);
     const vec_t sums = row_sum<vec_t>(row_in, inner_stride, size0);
 
-    scalar_t ans[vec_t::size()];
-    sums.store(ans);
-    for (int64_t k = 0; k < vec_t::size(); ++k) {
-      store_result(data[0], out_stride, j + k, ans[k]);
-    }
+    std::array<scalar_t, vec_t::size()> ans;
+    sums.store(ans.data());
+    store_result(data[0], out_stride, j, ans);
   }
 
   for (; j < size1; ++j) {
     const auto *row_in = data[1] + j * sizeof(scalar_t);
     scalar_t ans = row_sum<scalar_t>(row_in, inner_stride, size0);
+    store_result(data[0], out_stride, j, ans);
+  }
+}
+
+template <typename scalar_t>
+void scalar_outer_sum(
+    char * C10_RESTRICT data[2], int64_t in_strides[2], int64_t out_stride,
+    int64_t size0, int64_t size1) {
+
+  constexpr int64_t nrows = 4;
+  int64_t j = 0;
+  for (; j + (nrows - 1) < size1; j += nrows) {
+    const auto *row_in = data[1] + j * in_strides[1];
+    auto sums = multi_row_sum<scalar_t, nrows>(
+        row_in, in_strides[0], in_strides[1], size0);
+    store_result(data[0], out_stride, j, sums);
+  }
+
+  for (; j < size1; ++j) {
+    const auto *row_in = data[1] + j * in_strides[1];
+    scalar_t ans = row_sum<scalar_t>(row_in, in_strides[0], size0);
     store_result(data[0], out_stride, j, ans);
   }
 }
@@ -240,12 +277,10 @@ void sum_kernel_impl(TensorIterator &iter) {
           } else if (in_strides[1] == sizeof(scalar_t) && size1 >= Vec256<scalar_t>::size()) {
             // Contiguous outer reduction
             vectorized_outer_sum<scalar_t>(data, in_strides[0], out_stride, size0, size1);
+          } else if (in_strides[0] < in_strides[1]) {
+            scalar_inner_sum<scalar_t>(data, in_strides, out_stride, size0, size1);
           } else {
-            // Generic reduction
-            for (int64_t j = 0; j < size1; ++j) {
-              auto ans = row_sum<scalar_t>(data[1] + j * in_strides[1], in_strides[0], size0);
-              store_result(data[0], out_stride, j, ans);
-            }
+            scalar_outer_sum<scalar_t>(data, in_strides, out_stride, size0, size1);
           }
         });
     });
