@@ -1312,7 +1312,6 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
             linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
             qconfig_dict = {'': qconfig}
             model_eager = quantize_dynamic(annotated_linear_model, qconfig_dict)
-            print(model_eager)
             model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
             model_script = torch.jit.script(linear_model)
             result_eager = model_eager(self.calib_data[0][0])
