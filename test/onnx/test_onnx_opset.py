@@ -377,24 +377,6 @@ class TestONNXOpset(TestCase):
         x = torch.randn(2, 3, 4)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
-    def test_fake_quantize_per_tensor(self):
-        class MyModule(Module):
-            def forward(self, input):
-                scale = 1. / 127
-                zero_point = 0
-                quant_min = -128
-                quant_max = 127
-                return torch.fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max)
-
-        x = torch.randn(6, 4, 3, 3)
-        f = io.BytesIO()
-        torch.onnx.export(MyModule(), x, f, opset_version=10)
-        model = onnx.load(io.BytesIO(f.getvalue()))
-
-        # Use check_model directly. check_onnx_opsets_operator checks nodes count, which will fail
-        # because fake quantization ops are broken into QuantizeLinear and DequantizeLinear pair
-        onnx.checker.check_model(model)
-
 
 if __name__ == '__main__':
     run_tests()
