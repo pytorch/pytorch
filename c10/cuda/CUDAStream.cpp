@@ -382,20 +382,22 @@ CUDAStream registerCustomCUDAStream(DeviceIndex device_index, cudaStream_t strea
 
   // Make sure the device is valid
   cudaDeviceProp prop;
-  auto deviceQueryResult = cudaGetDeviceProperties(&prop, i);
+  auto deviceQueryResult = cudaGetDeviceProperties(&prop, device_index);
   TORCH_CHECK(deviceQueryResult == cudaSuccess);
 
   // Make sure the stream is good before we increase the counter
   auto queryResult = cudaStreamQuery(stream);
-  TORCH_CHECK(queryResult == cudaSuccess);
-  // Stream is good just still working
-  TORCH_CHECK(queryResult == cudaErrorNotReady);
+  TORCH_CHECK(queryResult == cudaSuccess || queryResult == cudaErrorNotReady);
 
-  uint32_t stream_id = custom_counter[device_index]++;
+  uint32_t stream_id = custom_counters[device_index]++;
   // make sure the pool is not overflowing
   TORCH_CHECK(stream_id < kStreamsPerPool);
 
-  LeakyStreamInternals* newStream = &custom_stream[device_index][stream_id]
+  LeakyStreamInternals* newStream = &custom_streams[device_index][stream_id];
+
+  newStream->stream_id = stream_id;
+  newStream->device_index = device_index;
+  newStream->stream = stream;
 
   return CUDAStream(
     CUDAStream::UNCHECKED,
