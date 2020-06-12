@@ -25,6 +25,15 @@ class Rprop(Optimizer):
         defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes)
         super(Rprop, self).__init__(params, defaults)
 
+    def reset_state(self):
+        for group in self.param_groups:
+            lr = group['lr']
+            for p in group['params']:
+                state = self.state[p]
+                state['step'] = 0
+                state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                state['step_size'] = torch.full_like(p, lr, memory_format=torch.preserve_format)
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -49,9 +58,7 @@ class Rprop(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
-                    state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
+                    self.reset_state()
 
                 etaminus, etaplus = group['etas']
                 step_size_min, step_size_max = group['step_sizes']

@@ -32,6 +32,15 @@ class ASGD(Optimizer):
                         weight_decay=weight_decay)
         super(ASGD, self).__init__(params, defaults)
 
+    def reset_state(self):
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['step'] = 0
+                state['eta'] = group['lr']
+                state['mu'] = 1
+                state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -56,10 +65,7 @@ class ASGD(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
-                    state['eta'] = group['lr']
-                    state['mu'] = 1
-                    state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    self.reset_state()
 
                 state['step'] += 1
 

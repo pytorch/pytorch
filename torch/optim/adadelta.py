@@ -35,6 +35,14 @@ class Adadelta(Optimizer):
         defaults = dict(lr=lr, rho=rho, eps=eps, weight_decay=weight_decay)
         super(Adadelta, self).__init__(params, defaults)
 
+    def reset_state(self):
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['step'] = 0
+                state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                state['acc_delta'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -59,9 +67,7 @@ class Adadelta(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
-                    state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['acc_delta'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    self.reset_state()
 
                 square_avg, acc_delta = state['square_avg'], state['acc_delta']
                 rho, eps = group['rho'], group['eps']

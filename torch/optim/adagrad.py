@@ -36,12 +36,15 @@ class Adagrad(Optimizer):
         defaults = dict(lr=lr, lr_decay=lr_decay, eps=eps, weight_decay=weight_decay,
                         initial_accumulator_value=initial_accumulator_value)
         super(Adagrad, self).__init__(params, defaults)
+        self.reset_state()
 
+    def reset_state(self):
         for group in self.param_groups:
+            acc_init = group['initial_accumulator_value']
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
-                state['sum'] = torch.full_like(p, initial_accumulator_value, memory_format=torch.preserve_format)
+                state['sum'] = torch.full_like(p, acc_init, memory_format=torch.preserve_format)
 
     def share_memory(self):
         for group in self.param_groups:

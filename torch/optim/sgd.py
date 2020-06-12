@@ -72,6 +72,13 @@ class SGD(Optimizer):
         for group in self.param_groups:
             group.setdefault('nesterov', False)
 
+    def reset_state(self):
+        for group in self.param_groups:
+            if group['momentum'] > 0:
+                for p in group['params']:
+                    state = self.state[p]
+                    state['momentum_buffer'] = torch.zeros_like(p)
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -98,12 +105,12 @@ class SGD(Optimizer):
                 if weight_decay != 0:
                     d_p = d_p.add(p, alpha=weight_decay)
                 if momentum != 0:
-                    param_state = self.state[p]
-                    if 'momentum_buffer' not in param_state:
-                        buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
-                    else:
-                        buf = param_state['momentum_buffer']
-                        buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+                    state = self.state[p]
+                    if len(state) == 0:
+                        self.reset_state()
+
+                    buf = state['momentum_buffer']
+                    buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
                     if nesterov:
                         d_p = d_p.add(buf, alpha=momentum)
                     else:

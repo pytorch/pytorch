@@ -52,6 +52,19 @@ class RMSprop(Optimizer):
             group.setdefault('momentum', 0)
             group.setdefault('centered', False)
 
+    def reset_state(self):
+        for group in self.param_groups:
+            momentum = group['momentum']
+            centered = group['centered']
+            for p in group['params']:
+                state = self.state[p]
+                state['step'] = 0
+                state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                if momentum > 0:
+                    state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                if centered:
+                    state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -76,12 +89,7 @@ class RMSprop(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
-                    state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    if group['momentum'] > 0:
-                        state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    if group['centered']:
-                        state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    self.reset_state()
 
                 square_avg = state['square_avg']
                 alpha = group['alpha']

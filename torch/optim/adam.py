@@ -48,6 +48,20 @@ class Adam(Optimizer):
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
+    def reset_state(self):
+        for group in self.param_groups:
+            amsgrad = group['amsgrad']
+            for p in group['params']:
+                state = self.state[p]
+                state['step'] = 0
+                # Exponential moving average of gradient values
+                state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                # Exponential moving average of squared gradient values
+                state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                if amsgrad:
+                    # Maintains max of all exp. moving avg. of sq. grad. values
+                    state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -74,14 +88,7 @@ class Adam(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
-                    # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    if amsgrad:
-                        # Maintains max of all exp. moving avg. of sq. grad. values
-                        state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    self.reset_state()
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 if amsgrad:

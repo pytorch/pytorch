@@ -71,6 +71,10 @@ class Optimizer(object):
         format_string += ')'
         return format_string
 
+    def reset_state(self):
+        """ Reset this optimiser to its initial state. """
+        pass
+
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
