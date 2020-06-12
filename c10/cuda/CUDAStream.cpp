@@ -16,7 +16,6 @@ namespace cuda {
 
 namespace {
 
-
 // Internal implementation that leaks the stream. It's not intended to be used
 // outside of this file.
 struct LeakyStreamInternals {
@@ -181,6 +180,13 @@ static StreamId CUDAStream_getStreamId(const LeakyStreamInternals* ptr) {
           ptr, high_priority_streams[device_index])) {
     return makeStreamId(
         StreamIdType::HIGH, ptr - high_priority_streams[device_index].data());
+  }
+
+  // Check if it's a custom stream
+  if (pointer_within<LeakyStreamInternals>(
+          ptr, custom_streams[device_index])) {
+    return makeStreamId(
+        StreamIdType::CUSTOM, ptr - custom_streams[device_index].data());
   }
 
   AT_ASSERTM(
@@ -382,27 +388,26 @@ CUDAStream registerCustomCUDAStream(DeviceIndex device_index, cudaStream_t strea
 
   // Make sure the device is valid
   cudaDeviceProp prop;
-  auto deviceQueryResult = cudaGetDeviceProperties(&prop, device_index);
-  TORCH_CHECK(deviceQueryResult == cudaSuccess);
+  
+  auto device_query_result = cudaGetDeviceProperties(&prop, device_index);
+  TORCH_CHECK(device_query_result == cudaSuccess);
 
   // Make sure the stream is good before we increase the counter
-  auto queryResult = cudaStreamQuery(stream);
-  TORCH_CHECK(queryResult == cudaSuccess || queryResult == cudaErrorNotReady);
+  uint32_t flags;
+  auto query_result = cudaStreamGetFlags(stream, &flags);
+  TORCH_CHECK(query_result == cudaSuccess);
 
   uint32_t stream_id = custom_counters[device_index]++;
   // make sure the pool is not overflowing
   TORCH_CHECK(stream_id < kStreamsPerPool);
 
-  LeakyStreamInternals* newStream = &custom_streams[device_index][stream_id];
+  LeakyStreamInternals* new_stream = &custom_streams[device_index][stream_id];
 
-  newStream->stream_id = stream_id;
-  newStream->device_index = device_index;
-  newStream->stream = stream;
+  new_stream->stream_id = stream_id;
+  new_stream->device_index = device_index;
+  new_stream->stream = stream;
 
-  return CUDAStream(
-    CUDAStream::UNCHECKED,
-    Stream(Stream::UNSAFE, Device(kCUDA, device_index), makeStreamId(StreamIdType::CUSTOM, stream_id))
-  );
+  return CUDAStream_fromInternals(new_stream);
 }
 
 

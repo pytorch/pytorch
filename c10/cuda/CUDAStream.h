@@ -213,6 +213,15 @@ CAFFE2_API CUDAStream getCurrentCUDAStream(DeviceIndex device_index = -1);
  */
 CAFFE2_API void setCurrentCUDAStream(CUDAStream stream);
 
+/**
+ * Register an external CUDA stream. This will return you a CUDAStream
+ * that points to the stream you registered. This is here because in the
+ * current scheme, CUDAStream does not contain the actual stream. Hence
+ * preventing users from just wrapper their own cudaStream_t into a CUDAStream
+ * type. This API is compatiable with 'CUDAStreamGuard'.
+ */
+CAFFE2_API CUDAStream registerCustomCUDAStream(DeviceIndex device_index, cudaStream_t stream);
+
 C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 
 } // namespace cuda
