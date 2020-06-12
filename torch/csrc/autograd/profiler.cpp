@@ -161,11 +161,14 @@ struct ProfilerThreadLocalState
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxMarkA(name.c_str());
     } else {
-      getEventList().record(
-          EventKind::Mark,
-          at::StringView(std::move(name)),
-          at::RecordFunction::currentThreadId(),
-          include_cuda && config_.state == ProfilerState::CUDA);
+      Event evt(
+        EventKind::Mark,
+        at::StringView(std::move(name)),
+        at::RecordFunction::currentThreadId(),
+        include_cuda && config_.state == ProfilerState::CUDA
+      );
+      evt.setNodeId(at::RecordFunction::getDefaultNodeId());
+      getEventList().record(std::move(evt));
     }
   }
 

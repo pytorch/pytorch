@@ -7,16 +7,14 @@ namespace distributed {
 namespace autograd {
 using rpc::RpcCommandBase;
 
-constexpr auto kProfileEventsStartIdx = 3;
+constexpr auto kProfileEventsStartIdx = 2;
 // This constructor is called when creating the RpcProfilingResp before sending
 // it as a message over the wire.
 RpcWithProfilingResp::RpcWithProfilingResp(
-    rpc::worker_id_t fromWorkerId,
     rpc::MessageType messageType,
     rpc::Message&& wrappedMessage,
     std::vector<torch::autograd::profiler::Event> profiledEvents)
-    : fromWorkerId_(fromWorkerId),
-      messageType_(messageType),
+    : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
       profiledEvents_(std::move(profiledEvents)) {
   tensors_ = wrappedMessage_.tensors();
@@ -28,14 +26,12 @@ RpcWithProfilingResp::RpcWithProfilingResp(
 // this constructor is called in fromMessage() which is called when
 // reconstructing this RPC command when processing a message of this type
 RpcWithProfilingResp::RpcWithProfilingResp(
-    rpc::worker_id_t fromWorkerId,
     rpc::MessageType messageType,
     std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
     rpc::MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
     std::vector<torch::autograd::profiler::Event> profiledEvents)
-    : fromWorkerId_(fromWorkerId),
-      messageType_(messageType),
+    : messageType_(messageType),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
       tensors_(std::move(tensors)),
@@ -50,10 +46,6 @@ std::unique_ptr<RpcCommandBase> RpcWithProfilingResp::moveWrappedRpc() && {
 
 rpc::MessageType RpcWithProfilingResp::wrappedMessageType() const {
   return wrappedMessageType_;
-}
-
-rpc::worker_id_t RpcWithProfilingResp::fromWorkerId() const {
-  return fromWorkerId_;
 }
 
 std::vector<torch::autograd::profiler::Event> RpcWithProfilingResp::
@@ -74,10 +66,8 @@ rpc::Message RpcWithProfilingResp::toMessageImpl() && {
   TORCH_INTERNAL_ASSERT(
       !wrappedPayload.empty(), "Wrapped payload cannot be empty");
   // Create ivalues to send over
-  std::vector<at::IValue> ivalues{wrappedMsgType, fromWorkerId_};
+  std::vector<at::IValue> ivalues{wrappedMsgType};
   // Attach the serialized events.
-  // TODO: Don't add this payload if there are no meaningful profiling events
-  // (i.e. there is only _start and _stop profile.)
   ivalues.emplace_back(
       at::IValue(static_cast<int32_t>(profiledEvents_.size())));
   for (const auto& e : profiledEvents_) {
@@ -101,6 +91,7 @@ RpcCommandBase& RpcWithProfilingResp::wrappedRpc() {
   return *wrappedRpc_;
 }
 
+// Runs on client when deserializing this message.
 std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
     const rpc::Message& message) {
   rpc::MessageType origMsgType = message.type();
@@ -118,8 +109,7 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
           tupleElements.size()));
   rpc::MessageType wrappedMsgType =
       static_cast<rpc::MessageType>(tupleElements[0].toInt());
-  int fromWorkerId = tupleElements[1].toInt();
-  int profiledEventsSize = tupleElements[2].toInt();
+  int profiledEventsSize = tupleElements[1].toInt();
   std::vector<torch::autograd::profiler::Event> remoteEvents;
   remoteEvents.reserve(profiledEventsSize);
   for (int i = kProfileEventsStartIdx;
@@ -129,7 +119,6 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
     // Reconstruct remote event from the ivalues.
     torch::autograd::profiler::Event fromIvalueEvent =
         torch::autograd::profiler::Event::fromIValue(tupleElements[i]);
-    fromIvalueEvent.setNodeId(fromWorkerId);
     remoteEvents.push_back(std::move(fromIvalueEvent));
   }
 
@@ -141,7 +130,6 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   std::unique_ptr<RpcCommandBase> wrappedRpc =
       deserializeResponse(wrappedMessage, wrappedMsgType);
   return std::make_unique<RpcWithProfilingResp>(
-      fromWorkerId,
       origMsgType,
       std::move(wrappedRpc),
       wrappedMsgType,

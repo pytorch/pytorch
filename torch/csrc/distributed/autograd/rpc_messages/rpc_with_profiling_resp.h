@@ -12,7 +12,6 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
  public:
   // For sending RPCs over the wire
   RpcWithProfilingResp(
-      rpc::worker_id_t fromWorkerId,
       rpc::MessageType messageType,
       rpc::Message&& wrappedMessage,
       std::vector<torch::autograd::profiler::Event> profiledEvents);
@@ -20,7 +19,6 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
   // For receving RPCs. Used in from message when converting a message received
   // over the wire.
   RpcWithProfilingResp(
-      rpc::worker_id_t fromWorkerId,
       rpc::MessageType messageType,
       std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
       rpc::MessageType wrappedMessageType,
@@ -37,13 +35,10 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
   std::unique_ptr<RpcCommandBase> moveWrappedRpc() &&;
   // Message type of the wrapped RPC
   rpc::MessageType wrappedMessageType() const;
-  // retrieve the WID from which the rpc came from
-  rpc::worker_id_t fromWorkerId() const;
+  // Set the wrapped RPC for this RPC.
   void setWrappedRpc(std::unique_ptr<RpcCommandBase> wrappedRpc);
 
  private:
-  // the worker id
-  const rpc::worker_id_t fromWorkerId_;
   // message type
   const rpc::MessageType messageType_;
   // wrapped message

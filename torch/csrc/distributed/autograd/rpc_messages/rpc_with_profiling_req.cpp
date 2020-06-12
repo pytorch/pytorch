@@ -7,25 +7,25 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-constexpr auto kProfilingResponseElementExpectedSize = 3;
+constexpr auto kProfilingResponseElementExpectedSize = 2;
 
 using rpc::RpcCommandBase;
 
 // This constructor is called when creating the RpcWithProfilingReq on the
 // client.
 RpcWithProfilingReq::RpcWithProfilingReq(
-    rpc::worker_id_t fromWorkerId,
     rpc::MessageType messageType,
     rpc::Message&& wrappedMessage,
-    const torch::autograd::profiler::ProfilerConfig& profilerConfig)
-    : fromWorkerId_(fromWorkerId),
-      messageType_(messageType),
+    torch::autograd::profiler::ProfilerConfig&& profilerConfig)
+    : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
       profilerConfig_(std::move(profilerConfig)) {
   tensors_ = wrappedMessage_.tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_REQ,
-      "Incorrect message type");
+      c10::str(
+          "Incorrect message type, expected message type ",
+          rpc::MessageType::RUN_WITH_PROFILING_REQ));
   wrappedMessageType_ = wrappedMessage_.type();
 }
 
@@ -33,14 +33,12 @@ RpcWithProfilingReq::RpcWithProfilingReq(
 // deserializeRequest(). It is called when reconstructing the
 // RpcWithProfilingReq on the remote end.
 RpcWithProfilingReq::RpcWithProfilingReq(
-    rpc::worker_id_t fromWorkerId,
     rpc::MessageType messageType,
     std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
     rpc::MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
-    torch::autograd::profiler::ProfilerConfig profilerConfig)
-    : fromWorkerId_(fromWorkerId),
-      messageType_(messageType),
+    torch::autograd::profiler::ProfilerConfig&& profilerConfig)
+    : messageType_(messageType),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
       tensors_(std::move(tensors)),
@@ -69,9 +67,7 @@ rpc::Message RpcWithProfilingReq::toMessageImpl() && {
       !wrappedPayload.empty(), "Wrapped payload should not be empty.");
   // Create the ivalues to send over. We need to send the original message type
   // and id, as well as some profiling metadata.
-  std::vector<at::IValue> ivalues{wrappedMsgType, fromWorkerId_};
-  // Attach serialized profilerConfig.
-  ivalues.emplace_back(profilerConfig_.toIValue());
+  std::vector<at::IValue> ivalues{wrappedMsgType, profilerConfig_.toIValue()};
   // Pickle it into a char payload to be sent over the wire.
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> profilingPayload =
@@ -98,10 +94,6 @@ torch::autograd::profiler::ProfilerConfig RpcWithProfilingReq::
   return profilerConfig_;
 }
 
-rpc::worker_id_t RpcWithProfilingReq::fromWorkerId() const {
-  return fromWorkerId_;
-}
-
 std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
     const rpc::Message& message) {
   rpc::MessageType origMsgType = message.type();
@@ -119,11 +111,10 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
           tupleElements.size()));
   rpc::MessageType wrappedMsgType =
       static_cast<rpc::MessageType>(tupleElements[0].toInt());
-  int fromWorkerId = tupleElements[1].toInt();
   // Create a config to be enabled on this node that is a replica of the
   // state on the requesting node.
   torch::autograd::profiler::ProfilerConfig cfg =
-      torch::autograd::profiler::ProfilerConfig::fromIValue(tupleElements[2]);
+      torch::autograd::profiler::ProfilerConfig::fromIValue(tupleElements[1]);
 
   // Create new message type and build wrapped RPC
   rpc::Message wrappedMessage(
@@ -135,7 +126,6 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
       deserializeRequest(wrappedMessage);
 
   return std::make_unique<RpcWithProfilingReq>(
-      fromWorkerId,
       origMsgType,
       std::move(wrappedRpc),
       wrappedMsgType,

@@ -693,6 +693,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "_disable_server_process_global_profiler",
       &profiler::processglobal::disableServer);
 
+  module.def("_set_profiler_node_id", [](const int nodeId) {
+    at::RecordFunction::setDefaultNodeId(nodeId);
+  });
+
   Py_RETURN_TRUE;
 }
 

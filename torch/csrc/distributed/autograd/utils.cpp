@@ -75,12 +75,11 @@ ContextPtr addRecvRpcBackward(
 }
 
 Message getMessageWithProfiling(
-    const rpc::worker_id_t dstId,
     torch::distributed::rpc::Message&& wrappedRpcMessage,
     MessageType msgType,
-    const torch::autograd::profiler::ProfilerConfig& profilerConfig) {
+    torch::autograd::profiler::ProfilerConfig&& profilerConfig) {
   auto wrappedProfilingMsg = RpcWithProfilingReq(
-      dstId, msgType, std::move(wrappedRpcMessage), profilerConfig);
+      msgType, std::move(wrappedRpcMessage), std::move(profilerConfig));
 
   return std::move(wrappedProfilingMsg).toMessage();
 }
@@ -143,10 +142,9 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
   if (torch::autograd::profiler::profilerEnabled()) {
     auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
     auto msgWithProfiling = getMessageWithProfiling(
-        dst.id_,
         std::move(msg),
         rpc::MessageType::RUN_WITH_PROFILING_REQ,
-        profilerConfig);
+        std::move(profilerConfig));
     fut = agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
   } else {
     fut = agent.send(dst, std::move(msg), rpcTimeoutSeconds);

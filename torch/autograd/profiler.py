@@ -411,14 +411,13 @@ class record_function(ContextDecorator):
         CUDA time total: 0.000us
 
     """
-    def __init__(self, name, node_id=-1):
+    def __init__(self, name):
         self.name = name
-        self.node_id = node_id
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit = True
 
     def __enter__(self):
-        self.handle = torch.ops.profiler._record_function_enter(self.name, self.node_id)
+        self.handle = torch.ops.profiler._record_function_enter(self.name)
         return self
 
     def __exit__(self, *args):
