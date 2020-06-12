@@ -231,7 +231,7 @@ Tensor q_batch_norm3d_impl(
 }
 
 template <bool ReluFused>
-Tensor q_batch_norm2d_impl(
+Tensor q_batch_norm_impl(
     Tensor qx,
     c10::optional<Tensor> mb_weight,
     c10::optional<Tensor> mb_bias,
