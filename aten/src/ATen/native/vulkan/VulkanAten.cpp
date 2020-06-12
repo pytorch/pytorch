@@ -2,10 +2,10 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/OpaqueTensorImpl.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/Vulkan.h>
+#include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <ATen/native/vulkan/VulkanOps.h>
 
 namespace at {
@@ -16,18 +16,20 @@ bool is_vulkan_available() {
 }
 
 using vulkan::detail::VulkanTensor;
-using VulkanTensorImpl = OpaqueTensorImpl<VulkanTensor>;
+using VulkanTensorImpl = VulkanOpaqueTensorImpl<VulkanTensor>;
 
 at::Tensor new_with_vtensor_vulkan(
     VulkanTensor&& vt,
     const TensorOptions& options) {
-  auto dims = vt.sizes();
+  auto sizes = vt.sizes();
+  auto strides = vt.strides();
   return detail::make_tensor<VulkanTensorImpl>(
       DispatchKeySet(DispatchKey::Vulkan),
       options.dtype(),
       at::Device(at::kVulkan),
       std::move(vt),
-      std::vector<int64_t>(dims.begin(), dims.end()));
+      std::vector<int64_t>(sizes.begin(), sizes.end()),
+      std::vector<int64_t>(strides.begin(), strides.end()));
 }
 
 VulkanTensor& vtensor_from_vulkan(const at::Tensor& tensor) {

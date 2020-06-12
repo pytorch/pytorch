@@ -277,7 +277,7 @@ Tensor quantized_batch_norm(
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("batch_norm",        q_batch_norm_impl<false>);
-  m.impl("batch_norm_relu",   q_batch_norm_impl<false>);
+  m.impl("batch_norm_relu",   q_batch_norm_impl<true>);
   m.impl("batch_norm2d",      q_batch_norm2d_impl<false>);
   m.impl("batch_norm2d_relu", q_batch_norm2d_impl<true>);
   m.impl("batch_norm3d",      q_batch_norm3d_impl<false>);
