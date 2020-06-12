@@ -100,7 +100,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 // AT_DISPATCH_ALL_TYPES) are floating point types (float, double),
 // and integral types (int32_t, int64_t, int16_t, int8_t, uint8_t),
 // but NOT booleans (bool), half-precision floats (Half) or
-// complex number (std::complex<float>, std::complex<double>).
+// complex number (c10::complex<float>, c10::complex<double>).
 // This "cut" is somewhat historical (the default types are the
 // ones that TH historically supported), but it also reflects the
 // fact that the non-default types are "poorly" behaved (booleans

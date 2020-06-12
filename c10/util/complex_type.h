@@ -136,7 +136,9 @@ struct alignas(sizeof(T) * 2) complex {
   explicit constexpr complex(const std::complex<U> &other): complex(other.real(), other.imag()) {}
 #if defined(__CUDACC__) || defined(__HIPCC__)
   template<typename U>
-  explicit C10_HOST_DEVICE complex(const thrust::complex<U> &other): complex(other.real(), other.imag()) {}
+  explicit C10_HOST_DEVICE complex(const thrust::complex<U> &other): real_(other.real()), imag_(other.imag()) {}
+// NOTE can not be implemented as follow due to ROCm bug:
+//   explicit C10_HOST_DEVICE complex(const thrust::complex<U> &other): complex(other.real(), other.imag()) {}
 #endif
 
   // Use SFINAE to specialize casting constructor for c10::complex<float> and c10::complex<double>
