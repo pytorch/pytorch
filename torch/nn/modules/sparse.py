@@ -80,9 +80,18 @@ class Embedding(Module):
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
                      'norm_type', 'scale_grad_by_freq', 'sparse']
 
-    def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
-                 max_norm=None, norm_type=2., scale_grad_by_freq=False,
-                 sparse=False, _weight=None):
+    num_embeddings: int
+    embedding_dim: int
+    padding_idx: int
+    max_norm: float
+    norm_type: float
+    scale_grad_by_freq: bool
+    weight: Tensor
+    sparse: bool
+
+    def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
+                 max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
+                 sparse: bool = False, _weight: Optional[Tensor] = None) -> None:
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -105,18 +114,18 @@ class Embedding(Module):
             self.weight = Parameter(_weight)
         self.sparse = sparse
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         init.normal_(self.weight)
         if self.padding_idx is not None:
             with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.embedding(
             input, self.weight, self.padding_idx, self.max_norm,
             self.norm_type, self.scale_grad_by_freq, self.sparse)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         s = '{num_embeddings}, {embedding_dim}'
         if self.padding_idx is not None:
             s += ', padding_idx={padding_idx}'
@@ -257,9 +266,20 @@ class EmbeddingBag(Module):
     __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
                      'scale_grad_by_freq', 'mode', 'sparse', 'include_last_offset']
 
-    def __init__(self, num_embeddings, embedding_dim,
-                 max_norm=None, norm_type=2., scale_grad_by_freq=False,
-                 mode='mean', sparse=False, _weight=None, include_last_offset=False):
+    num_embeddings: int
+    embedding_dim: int
+    max_norm: float
+    norm_type: float
+    scale_grad_by_freq: bool
+    weight: Tensor
+    mode: str
+    sparse: bool
+    include_last_offset: bool
+
+    def __init__(self, num_embeddings: int, embedding_dim: int,
+                 max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
+                 mode: str = 'mean', sparse: bool = False, _weight: Optional[Tensor] = None,
+                 include_last_offset: bool = False) -> None:
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -277,17 +297,16 @@ class EmbeddingBag(Module):
         self.sparse = sparse
         self.include_last_offset = include_last_offset
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         init.normal_(self.weight)
 
-    def forward(self, input, offsets=None, per_sample_weights=None):
-        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
+    def forward(self, input: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None) -> Tensor:
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse,
                                per_sample_weights, self.include_last_offset)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         s = '{num_embeddings}, {embedding_dim}'
         if self.max_norm is not None:
             s += ', max_norm={max_norm}'
@@ -299,9 +318,9 @@ class EmbeddingBag(Module):
         return s.format(**self.__dict__)
 
     @classmethod
-    def from_pretrained(cls, embeddings, freeze=True, max_norm=None,
-                        norm_type=2., scale_grad_by_freq=False,
-                        mode='mean', sparse=False, include_last_offset=False):
+    def from_pretrained(cls, embeddings: Tensor, freeze: bool = True, max_norm: Optional[float] = None,
+                        norm_type: float = 2., scale_grad_by_freq: bool = False,
+                        mode: str = 'mean', sparse: bool = False, include_last_offset: bool = False) -> 'EmbeddingBag':
         r"""Creates EmbeddingBag instance from given 2-dimensional FloatTensor.
 
         Args:

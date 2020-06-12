@@ -238,7 +238,7 @@ template <bool ReLUFused = false>
 Tensor qadd_scalar(Tensor qa, Scalar b) {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is suuported in Add.");
+              "Only per tensor quantization is supported in Add.");
   auto qc = at::empty_like(qa, qa.suggest_memory_format());
   return _add_scalar_out<ReLUFused>(qc, qa, b);
 }
@@ -249,11 +249,17 @@ Tensor qadd_scalar_out(Tensor qa, Scalar b, Tensor out) {
   return _add_scalar_out<ReLUFused>(out, qa, b);
 }
 
+// `torch.jit.trace` will trace Scalar as Tensor
+// This can be removed after broadcast is support and
+// `quantized::add_scalar` is merged into `quantized::add`
 template <bool ReLUFused = false>
 Tensor qadd_scalar_tensor(Tensor qa, Tensor b) {
   return qadd_scalar(qa, b.item());
 }
 
+// `torch.jit.trace` will trace Scalar as Tensor
+// This can be removed after broadcast is support and
+// `quantized::add_scalar` is merged into `quantized::add`
 template <bool ReLUFused = false>
 Tensor qadd_scalar_tensor_out(Tensor qa, Tensor b, Tensor out) {
   return qadd_scalar_out(qa, b.item(), out);

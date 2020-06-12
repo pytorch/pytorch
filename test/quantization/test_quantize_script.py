@@ -1235,6 +1235,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_quantized_conv(self):
         conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         class Conv(torch.nn.Module):
             def __init__(self, dim):
                 super(Conv, self).__init__()

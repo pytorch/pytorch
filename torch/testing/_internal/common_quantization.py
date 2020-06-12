@@ -131,10 +131,7 @@ def skipIfNoFBGEMM(fn):
     return wrapper
 
 def get_script_module(model, tracing, data):
-    if tracing:
-        return torch.jit.trace(model, data)
-    else:
-        return torch.jit.script(model)
+    return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
