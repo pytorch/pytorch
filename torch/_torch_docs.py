@@ -73,7 +73,7 @@ factory_common_args = merge_dicts(common_args, parse_kwargs("""
         returned Tensor. Default: ``torch.contiguous_format``.
 """))
 
-factory_like_common_args = parse_kwargs("""
+factory_like_common_args = merge_dicts(common_args, parse_kwargs("""
     input (Tensor): the size of :attr:`input` will determine size of the output tensor.
     layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
         Default: if ``None``, defaults to the layout of :attr:`input`.
@@ -87,7 +87,7 @@ factory_like_common_args = parse_kwargs("""
         the pinned memory. Works only for CPU tensors. Default: ``False``.
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
         returned Tensor. Default: ``torch.preserve_format``.
-""")
+"""))
 
 factory_data_common_args = parse_kwargs("""
     data (array_like): Initial data for the tensor. Can be a list, tuple,
