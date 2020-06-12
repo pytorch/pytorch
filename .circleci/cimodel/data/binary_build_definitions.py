@@ -184,12 +184,6 @@ def get_post_upload_jobs():
                 **common_job_def,
             },
         },
-        {
-            "upload_binary_sizes": {
-                "name": "upload_binary_sizes",
-                **common_job_def,
-            },
-        }
     ]
 
 def get_nightly_tests():
