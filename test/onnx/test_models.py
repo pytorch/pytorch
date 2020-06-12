@@ -151,9 +151,8 @@ class TestModels(TestCase):
         self.exportTest(toC(netG), toC(input))
 
     def test_fake_quant(self):
-        fake_quant_net = FakeQuantNet()
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
-        self.exportTest(toC(fake_quant_net(x)), toC(x))
+        self.exportTest(toC(FakeQuantNet()), toC(x))
 
 if __name__ == '__main__':
     run_tests()
