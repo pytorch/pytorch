@@ -21,6 +21,13 @@ if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
 fi
 
+if [[ "$CIRCLECI" == 'true' && -d "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages\\_Instances" ]]; then
+  mv "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages\\_Instances" .
+  rm -rf "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
+  mkdir -p "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
+  mv _Instances "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
+fi
+
 export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR="/c/w/build-results"
