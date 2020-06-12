@@ -956,6 +956,21 @@ void initJITBindings(PyObject* module) {
     return fut->wait();
   });
 
+  m.def(
+      "_collect_all",
+      [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
+          -> std::shared_ptr<jit::PythonFutureWrapper> {
+        auto typePtr =
+            futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
+        c10::List<c10::intrusive_ptr<ivalue::Future>> asList(FutureType::create(typePtr));
+        asList.reserve(futures.size());
+        for (const auto& f : futures) {
+          asList.push_back(f->fut);
+        }
+        return std::make_shared<jit::PythonFutureWrapper>(
+            c10::collectAll(asList));
+      });
+
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);
   });
