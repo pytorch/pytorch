@@ -34,7 +34,7 @@ if "%VC_VERSION%" == "" (
 popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting
+pip install "ninja==1.9.0" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
 
