@@ -94,6 +94,14 @@ white_list = [
     ('aten::pow', datetime.date(2020, 6, 30)),
     ('prim::min', datetime.date(2020, 6, 30)),
     ('prim::max', datetime.date(2020, 6, 30)),
+    ('aten::view_as', datetime.date(2020, 6, 15)),
+    ('aten::reshape_as', datetime.date(2020, 6, 15)),
+    ('aten::pin_memory', datetime.date(2020, 6, 15)),
+    ('aten::reshape', datetime.date(2020, 6, 15)),
+    ('aten::detach', datetime.date(2020, 6, 15)),
+    ('aten::expand_as', datetime.date(2020, 6, 15)),
+    ('aten::flatten.*', datetime.date(2020, 6, 15)),
+    ('aten::contiguous', datetime.date(2020, 6, 15)),
 ]
 
 
