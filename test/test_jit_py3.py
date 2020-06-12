@@ -2,7 +2,8 @@ from collections import namedtuple
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional, Dict, Tuple
+from torch import jit
+from typing import NamedTuple, List, Optional, Dict, Tuple, Any
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
@@ -412,6 +413,22 @@ class TestScriptPy3(JitTestCase):
             return x[0]
 
         FileCheck().check('Future[int]').check('Future[int]').run(fn.graph)
+
+    def test_subexpression_Future_annotate(self):
+        @torch.jit.script
+        def fn() -> torch.jit.Future[int]:
+            x: List[torch.jit.Future[int]] = []
+            return x[0]
+
+        FileCheck().check("Future[int][]").run(fn.graph)
+
+    def test_future_isinstance(self):
+        @torch.jit.script
+        def fn(x: Any) -> torch.jit.Future[int]:
+            assert isinstance(x, jit.Future[int])
+            return x
+
+        FileCheck().check("Future[int]").run(fn.graph)
 
     def test_subexpression_Tuple_int_int_Future(self):
 

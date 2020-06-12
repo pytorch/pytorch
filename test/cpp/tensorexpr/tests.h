@@ -157,6 +157,7 @@ namespace jit {
   _(SimplifyDivisionScalarFactorization)    \
   _(SimplifyConstantBranches)               \
   _(SimplifyConstantCond)                   \
+  _(SimplifyEliminateEmptyCond)             \
   _(SimplifyEliminateZeroLengthFor)         \
   _(SimplifyOneLoopFor)                     \
   _(SimplifyForWontLoseLoopOptions)         \
