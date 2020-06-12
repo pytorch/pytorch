@@ -138,10 +138,10 @@ DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_float_normal_sample);
 #define DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(TYPE)                                      \
                                                                                                     \
 template <typename RNG, typename ret_type,                                                          \
-          typename std::enable_if<(                                                                 \
+          typename std::enable_if_t<(                                                               \
             has_member_next_##TYPE##_normal_sample<RNG>::value &&                                   \
             has_member_set_next_##TYPE##_normal_sample<RNG>::value                                  \
-          ), int>::type = 0>                                                                        \
+          ), int> = 0>                                                                              \
 C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, ret_type* ret) {  \
   if (generator->next_##TYPE##_normal_sample()) {                                                   \
     *ret = *(generator->next_##TYPE##_normal_sample());                                             \
@@ -152,26 +152,26 @@ C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* generator
 }                                                                                                   \
                                                                                                     \
 template <typename RNG, typename ret_type,                                                          \
-          typename std::enable_if<(                                                                 \
+          typename std::enable_if_t<(                                                               \
             !has_member_next_##TYPE##_normal_sample<RNG>::value ||                                  \
             !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
-          ), int>::type = 0>                                                                        \
+          ), int> = 0>                                                                              \
 C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, ret_type* ret) {  \
   return false;                                                                                     \
 }                                                                                                   \
                                                                                                     \
 template <typename RNG, typename ret_type,                                                          \
-          typename std::enable_if<(                                                                 \
+          typename std::enable_if_t<(                                                               \
             has_member_set_next_##TYPE##_normal_sample<RNG>::value                                  \
-          ), int>::type = 0>                                                                        \
+          ), int> = 0>                                                                              \
 C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* generator, ret_type cache) { \
   generator->set_next_##TYPE##_normal_sample(cache);                                                \
 }                                                                                                   \
                                                                                                     \
 template <typename RNG, typename ret_type,                                                          \
-          typename std::enable_if<(                                                                 \
+          typename std::enable_if_t<(                                                               \
             !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
-          ), int>::type = 0>                                                                        \
+          ), int> = 0>                                                                              \
 C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* generator, ret_type cache) { \
 }
 
