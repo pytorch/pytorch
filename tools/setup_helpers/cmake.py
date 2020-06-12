@@ -115,13 +115,17 @@ class CMake:
         if IS_WINDOWS:
             return cmake_command
         cmake3 = which('cmake3')
+        cmake = which('cmake')
         if cmake3 is not None:
-            cmake = which('cmake')
             if cmake is not None:
                 bare_version = CMake._get_version(cmake)
                 if (bare_version < LooseVersion("3.5.0") and
                         CMake._get_version(cmake3) > bare_version):
                     cmake_command = 'cmake3'
+            else:
+                cmake_command = 'cmake3'
+        elif cmake is None:
+            raise RuntimeError('no cmake or cmake3 found')
         return cmake_command
 
     @staticmethod
