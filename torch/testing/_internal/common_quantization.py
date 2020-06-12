@@ -149,6 +149,9 @@ class QuantizationTestCase(TestCase):
         self.img_data_3d = [(torch.rand(1, 3, 5, 5, 5, dtype=torch.float),
                              torch.randint(0, 1, (1,), dtype=torch.long))
                             for _ in range(2)]
+        self.img_data_dict = {1 : self.img_data_1d,
+                              2 : self.img_data,
+                              3 : self.img_data_3d}
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
