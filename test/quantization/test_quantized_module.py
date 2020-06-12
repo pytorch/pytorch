@@ -811,9 +811,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
 
             y, (h, c) = cell_dq(x, (h, c))
-            self.assertEqual(result[0], y, msg="LSTM module API failed")
-            self.assertEqual(result[1], h, msg="LSTM module API failed")
-            self.assertEqual(result[2], c, msg="LSTM module API failed")
+            self.assertEqual(result[0], y)
+            self.assertEqual(result[1], h)
+            self.assertEqual(result[2], c)
 
     @override_qengines
     def test_cell_api(self):
