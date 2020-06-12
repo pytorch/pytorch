@@ -216,6 +216,7 @@ void initJITBindings(PyObject* module) {
           py::arg("module"),
           py::arg("method_name"),
           py::arg("inplace"),
+          py::arg("debug"),
           py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_insert_prepack_unpack",
