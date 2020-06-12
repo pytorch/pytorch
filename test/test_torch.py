@@ -17535,6 +17535,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             test(y, True)
             test(z, True)
 
+    def test_multinomial_empty(self, device):
+        probs = torch.ones(0, 3)
+        num_samples = 1
+        expected = torch.empty(0, num_samples, dtype=torch.int64)
+        for replacement in (True, False):
+            out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
+            self.assertEqual(out, expected)
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
