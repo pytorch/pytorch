@@ -1914,11 +1914,6 @@ void testFutures() {
     } catch (const std::exception& e) {
       ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
     }
-    try {
-      (void)f1->constValue();
-    } catch (const std::exception& e) {
-      ASSERT_TRUE(false); // Not supposed to throw.
-    }
     f1->addCallback([&]() { ++sat2; });
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(sat2, 1);
