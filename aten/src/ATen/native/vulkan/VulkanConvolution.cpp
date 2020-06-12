@@ -70,7 +70,7 @@ ContextConv2D create(
   auto ws = weight_nchw.sizes();
   return ContextConv2D{
       groups == 1 ? at::native::vulkan_convolution_prepack_weights(weight_nchw)
-                  : std::move(weight_nchw.vulkan()),
+                  : weight_nchw.vulkan(),
       bias.has_value() ? c10::make_optional((*bias).vulkan()) : c10::nullopt,
       {{ws[0], ws[1], ws[2], ws[3]}},
       {padding_expanded[0], padding_expanded[1]},

@@ -204,7 +204,7 @@ void conv2d_depthwise(
     const VulkanTensor& input,
     const VulkanTensor& weight,
     const VBuffer& biasBuffer,
-    const Conv2DParams params,
+    const Conv2DParams& params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
   TORCH_INTERNAL_ASSERT(params.G == params.C);
