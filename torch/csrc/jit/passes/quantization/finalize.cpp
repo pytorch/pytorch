@@ -96,7 +96,7 @@ void QuantFusion(std::shared_ptr<Graph>& graph, QuantType quant_type) {
   for (const auto& info : patterns) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(info.pattern, info.replacement);
-    rewriter.runOnGraph(graph, info.filter);
+    rewriter.runOnGraph(graph, info.filters);
   }
 }
 
