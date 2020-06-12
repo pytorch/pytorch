@@ -1207,10 +1207,8 @@ except RuntimeError as e:
         num_workers = 6
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
-        dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, generator=torch.Generator().manual_seed(42))
-        actual_seeds = set(int(batch) for batch in dataloader)
-        expected_seeds = set(6909045637428952499 + i for i in range(num_workers))
-        self.assertEqual(actual_seeds, expected_seeds)
+        get_dataloader = lambda: DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, generator=torch.Generator().manual_seed(42))
+        self.assertEqual(set(int(batch) for batch in get_dataloader()), set(int(batch) for batch in get_dataloader()))
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
