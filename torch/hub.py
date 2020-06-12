@@ -10,7 +10,7 @@ import torch
 import warnings
 import zipfile
 
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 
 try:
@@ -375,7 +375,8 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
     file_size = None
     # We use a different API for python2 since urllib(2) doesn't recognize the CA
     # certificates in older Python
-    u = urlopen(url)
+    req = Request(url, headers={"User-Agent": "torch.hub"})
+    u = urlopen(req)
     meta = u.info()
     if hasattr(meta, 'getheaders'):
         content_length = meta.getheaders("Content-Length")
