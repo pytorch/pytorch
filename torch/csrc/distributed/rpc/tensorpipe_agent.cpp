@@ -27,7 +27,14 @@ const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 const std::string kRpcTimeoutErrorStr =
     "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
 
-std::string guessAddress(tensorpipe::transport::uv::Context& uvContext) {
+} // namespace
+
+C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+
+C10_DEFINE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+
+std::string TensorPipeAgent::guessUvAddress(
+    tensorpipe::transport::uv::Context& uvContext) {
   tensorpipe::Error error;
   std::string uvAddress;
   char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
@@ -49,6 +56,50 @@ std::string guessAddress(tensorpipe::transport::uv::Context& uvContext) {
   }
   return uvAddress;
 }
+
+namespace {
+
+std::unique_ptr<TransportRegistration> makeUvTransport() {
+  auto context = std::make_shared<tensorpipe::transport::uv::Context>();
+  std::string address = TensorPipeAgent::guessUvAddress(*context);
+  return std::make_unique<TransportRegistration>(
+      TransportRegistration{std::move(context), 1, std::move(address)});
+}
+
+C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
+
+#ifdef TP_ENABLE_SHM
+
+std::unique_ptr<TransportRegistration> makeShmTransport() {
+  auto context = std::make_shared<tensorpipe::transport::shm::Context>();
+  std::string address = TensorPipeAgent::createUniqueShmAddr();
+  return std::make_unique<TransportRegistration>(
+      TransportRegistration{std::move(context), 0, std::move(address)});
+}
+
+C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
+
+#endif
+
+std::unique_ptr<ChannelRegistration> makeBasicChannel() {
+  auto context = std::make_shared<tensorpipe::channel::basic::Context>();
+  return std::make_unique<ChannelRegistration>(
+      ChannelRegistration{std::move(context), 1});
+}
+
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel);
+
+#ifdef TP_ENABLE_CMA
+
+std::unique_ptr<ChannelRegistration> makeCmaChannel() {
+  auto context = std::make_shared<tensorpipe::channel::cma::Context>();
+  return std::make_unique<ChannelRegistration>(
+      ChannelRegistration{std::move(context), 0});
+}
+
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cma, makeCmaChannel);
+
+#endif
 
 } // namespace
 
@@ -133,35 +184,39 @@ TensorPipeAgent::~TensorPipeAgent() {
 
 void TensorPipeAgent::startImpl() {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is starting";
-  auto uvContext = std::make_shared<tensorpipe::transport::uv::Context>();
 
-  std::string uvAddress = guessAddress(*uvContext);
-  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is using address "
-          << uvAddress;
+  std::vector<std::string> addresses;
+  int lowestPriority = -1;
+  std::string lowestPriorityTransport;
 
-  context_->registerTransport(1, "tcp", std::move(uvContext));
-#ifdef TP_ENABLE_SHM
-  context_->registerTransport(
-      0, "shm", std::make_shared<tensorpipe::transport::shm::Context>());
-#endif
-  context_->registerChannel(
-      1, "basic", std::make_shared<tensorpipe::channel::basic::Context>());
-#ifdef TP_ENABLE_CMA
-  context_->registerChannel(
-      0, "cma", std::make_shared<tensorpipe::channel::cma::Context>());
-#endif
+  for (auto& key : TensorPipeTransportRegistry()->Keys()) {
+    std::unique_ptr<TransportRegistration> reg =
+        TensorPipeTransportRegistry()->Create(key);
+    if (reg->priority > lowestPriority) {
+      lowestPriority = reg->priority;
+      lowestPriorityTransport = key;
+    }
+    addresses.push_back(c10::str(key, "://", reg->address));
+    context_->registerTransport(
+        reg->priority, std::move(key), std::move(reg->transport));
+  }
 
-  std::vector<std::string> addresses = {"tcp://" + uvAddress};
-#ifdef TP_ENABLE_SHM
-  addresses.push_back(createUniqueShmAddr());
-#endif
+  for (auto& key : TensorPipeChannelRegistry()->Keys()) {
+    std::unique_ptr<ChannelRegistration> reg =
+        TensorPipeChannelRegistry()->Create(key);
+    context_->registerChannel(
+        reg->priority, std::move(key), std::move(reg->channel));
+  }
 
   listener_ = context_->listen(addresses);
 
   // Store our own url.
-  const auto address = listener_->url("tcp");
+  const auto address = listener_->url(lowestPriorityTransport);
   const std::vector<uint8_t> selfAddrData(address.begin(), address.end());
   nameToAddressStore_.set(workerInfo_.name_, selfAddrData);
+
+  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is using address "
+          << address;
 
   for (const auto& p : workerNameToInfo_) {
     const auto& name = p.first;
