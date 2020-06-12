@@ -10963,6 +10963,17 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
+    @onlyCUDA   # TODO: fix CPU fractional_maxpool_2d
+    def test_fractional_max_pool_nan(self, device, dtype):
+        for num_dim in [2, 3]:
+            fn_name = 'FractionalMaxPool{}d'.format(num_dim)
+            fn = getattr(nn, fn_name)(kernel_size=2, output_size=1)
+            x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype)
+            res = fn(x)
+            self.assertTrue(math.isnan(res.item()))
+
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
