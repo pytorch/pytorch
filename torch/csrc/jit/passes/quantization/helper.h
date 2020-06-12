@@ -75,7 +75,8 @@ TORCH_API bool userDefinedCallFunction(Node* n);
 TORCH_API bool hasScalarInput(Node* n);
 
 // Check if a node is quantizable
-TORCH_API bool nodeQuantizable(Node* n,
+TORCH_API bool nodeQuantizable(
+    Node* n,
     QuantType quant_type = QuantType::STATIC);
 
 // Check if a use of the value is quantizable, this depends on
@@ -103,7 +104,7 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // ==================== filter functions for matches ==============
-// filter to check if the alpha argument of aten::add is constant 1
+// filter to check if the %alpha argument of aten::add is constant 1
 bool aten_add_alpha_is_one(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
