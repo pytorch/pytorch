@@ -97,8 +97,8 @@ void sigmoid_kernel_cuda(TensorIterator& iter) {
 }
 
 void sinc_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sigmoid_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sigmoid_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sinc_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sinc_cuda", [&] {
       auto eps = scalar_t(1.0e-20);
       gpu_kernel(iter, [eps]GPU_LAMBDA(scalar_t x) -> scalar_t {
         auto y = M_PI * (x == 0 ? eps : x);
