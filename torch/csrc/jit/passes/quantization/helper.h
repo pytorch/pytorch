@@ -78,7 +78,8 @@ TORCH_API bool userDefinedCallFunction(Node* n);
 TORCH_API bool hasScalarInput(Node* n);
 
 // Check if a node is quantizable
-TORCH_API bool nodeQuantizable(Node* n,
+TORCH_API bool nodeQuantizable(
+    Node* n,
     QuantType quant_type = QuantType::STATIC);
 
 // Check if a use of the value is quantizable, this depends on
@@ -135,6 +136,10 @@ bool is_conv3d_module(
     const std::unordered_map<std::string, Value*>& vmap);
 
 bool is_batchnorm2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 

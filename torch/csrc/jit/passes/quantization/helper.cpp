@@ -87,6 +87,10 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "repeat_interleave",
     "relu",
     "relu_",
+    "squeeze",
+    "squeeze_",
+    "unsqueeze",
+    "unsqueeze_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -297,8 +301,8 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     return inputs;
   } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
     return {n->input(0)};
-  } else if (n->kind() == prim::ListConstruct ||
-             n->kind() == prim::TupleConstruct) {
+  } else if (
+      n->kind() == prim::ListConstruct || n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -477,8 +481,8 @@ bool alwaysRaisesException(Block* block) {
 bool isScalar(Value* v) {
   auto iv = toIValue(v);
   return v->type()->isSubtypeOf(NumberType::get()) ||
-    (v->type()->isSubtypeOf(TensorType::get()) &&
-     iv && iv->isTensor() && iv->toTensor().dim() == 0);
+      (v->type()->isSubtypeOf(TensorType::get()) && iv && iv->isTensor() &&
+       iv->toTensor().dim() == 0);
 }
 
 // =================== Graph/Module analysis helper functions ============
@@ -614,10 +618,21 @@ bool is_conv3d_module(
 bool is_batchnorm2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "batchnorm",
-                   "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
+  return is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
+}
+
+bool is_batchnorm3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
 }
 
 } // namespace jit
