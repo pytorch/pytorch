@@ -1972,7 +1972,7 @@ class AbstractTestCases:
                 lambda: torch.rand_like(torch.empty(1), generator=get_gen()),
                 lambda: torch.randn(1, generator=get_gen()),
                 lambda: torch.randn_like(torch.empty(1), generator=get_gen()),
-                lambda: torch.randint(1, 100, (1,),
+                lambda: torch.randint(1, 100, (1,)),
                 lambda: torch.randperm(10, generator=get_gen()),
             ):
                 self.assertEqual(fn(), fn())
