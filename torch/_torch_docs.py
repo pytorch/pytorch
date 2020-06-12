@@ -4827,7 +4827,7 @@ The shape of the tensor is defined by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
-        
+
 Keyword arguments:
     {generator}
     {out}
@@ -4846,9 +4846,10 @@ Example::
 """.format(**factory_common_args))
 
 add_docstr(torch.rand_like,
-           r"""
-rand_like(input, generator=None, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
-
+           """
+rand_like(input, generator=None, dtype=None, layout=None, device=None, \
+requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+""" + r"""
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a uniform distribution on the interval :math:`[0, 1)`.
 ``torch.rand_like(input)`` is equivalent to
@@ -4885,7 +4886,7 @@ Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
     size (tuple): a tuple defining the shape of the output tensor.
-    
+
 Keyword arguments:
     {generator}
     {out}
@@ -4929,7 +4930,7 @@ Args:
     {input}
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
-    
+
 Keyword arguments:
     {generator}
     {dtype}
@@ -4986,7 +4987,7 @@ random numbers from a normal distribution with mean 0 and variance 1.
 
 Args:
     {input}
-    
+
 Keyword arguments:
     {generator}
     {dtype}
@@ -5006,7 +5007,7 @@ Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
     n (int): the upper bound (exclusive)
-    
+
 Keyword arguments:
     {generator}
     {out}
