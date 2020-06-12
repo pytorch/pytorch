@@ -480,7 +480,8 @@ void RequestCallbackImpl::processRpc(
 
       auto futureOwner = ctx.getOwnerRRef(srf.rrefId());
 
-      if (futureOwner->completed()) { // optional fast-path
+      if (futureOwner->completed() &&
+          !futureOwner->hasError()) { // optional fast-path
         // the OwnerRRef has been created
         const auto& rref = futureOwner->constValue();
         if (rref->hasValue()) {
@@ -490,6 +491,10 @@ void RequestCallbackImpl::processRpc(
       }
 
       futureOwner->addCallback([responseFuture, messageId, futureOwner]() {
+        if (futureOwner->hasError()) {
+          responseFuture->setError(futureOwner->error()->what());
+          return;
+        }
         const auto& rref = futureOwner->constValue();
         auto whenValueSet = rref->getFuture();
 
@@ -553,7 +558,8 @@ void RequestCallbackImpl::processRpc(
 
       auto futureOwner = ctx.getOwnerRRef(prf.rrefId());
 
-      if (futureOwner->completed() && futureOwner->constValue()->hasValue()) {
+      if (futureOwner->completed() && !futureOwner->hasError() &&
+          futureOwner->constValue()->hasValue()) {
         // optional fast-path, the OwnerRRef has been created
         postProcessing(futureOwner->constValue(), messageId);
         return;
@@ -562,7 +568,12 @@ void RequestCallbackImpl::processRpc(
       futureOwner->addCallback(
           [messageId,
            futureOwner,
+           responseFuture,
            postProcessing{std::move(postProcessing)}]() mutable {
+            if (futureOwner->hasError()) {
+              responseFuture->setError(futureOwner->error()->what());
+              return;
+            }
             const auto& rref = futureOwner->constValue();
 
             // Our response is satisfied when the the rpc.remote() request
