@@ -30,6 +30,7 @@ from torch.testing._internal.common_quantized import override_qengines
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skipIfNoFBGEMM,
+    get_script_module,
 )
 
 from torch.testing import FileCheck
@@ -1207,10 +1208,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         if eval_mode:
             module = module.eval()
         *inputs, target = data[0]
-        if tracing:
-            model = torch.jit.trace(module, inputs).eval()
-        else:
-            model = torch.jit.script(module).eval()
+        model = get_script_module(module, tracing, inputs).eval()
         models = {}
         outputs = {}
         for d in [True, False]:
@@ -1221,9 +1219,10 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             outputs[d] = models[d](*inputs)
 
         if debug:
-            print('debug graph:', model[True].graph)
-            print('non debug graph:', model[False].graph)
-        elif check:
+            print('debug graph:', models[True].graph)
+            print('non debug graph:', models[False].graph)
+
+        if check:
             # debug and non-debug option should have the same numerics
             self.assertEqual(outputs[True], outputs[False])
 
@@ -1233,80 +1232,42 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         return models[False]
 
-    @override_qengines
-    def test_quantized_conv1d(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv1d(3, 3, 3).float()
+    @skipIfNoFBGEMM
+    def test_quantized_conv(self):
+        conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
+        class Conv(torch.nn.Module):
+            def __init__(self, dim):
+                super(Conv, self).__init__()
+                self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
                 return self.conv(x)
 
-        data = [(torch.rand((1, 3, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv1d")
-        # make sure there is only one quantize_per_tensor for input
-        # and conv2d_prepack is folded
-        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .run(model.graph)
+        options = itertools.product([1, 2, 3], [True, False])
+        input_data = {1 : self.img_data_1d,
+                      2 : self.img_data,
+                      3 : self.img_data_3d}
+        for dim, tracing in options:
+            model = self._test_op_impl(
+                Conv(dim), input_data[dim], "quantized::conv{}d".format(dim), tracing)
+            # make sure there is only one quantize_per_tensor for input
+            # and conv2d_prepack is folded
+            FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                       .run(model.graph)
 
-        FileCheck().check_not("quantized::conv1d_prepack") \
-                   .run(model.graph)
+            FileCheck().check_not("quantized::conv{}d_prepack".format(dim)) \
+                       .run(model.graph)
 
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
-        " with instruction set support avx2 or newer.",
-    )
-    def test_quantized_conv2d(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
-
-            def forward(self, x):
-                return self.conv(x)
-
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv2d")
-        # make sure there is only one quantize_per_tensor for input
-        # and conv2d_prepack is folded
-        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .run(model.graph)
-
-        FileCheck().check_not("quantized::conv2d_prepack") \
-                   .run(model.graph)
-
-
-    @unittest.skipUnless(
-        'fbgemm' in torch.backends.quantized.supported_engines,
-        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-        " with instruction set support avx2 or newer.",
-    )
-    def test_quantized_conv3d(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv3d(3, 3, 3).float()
-
-            def forward(self, x):
-                return self.conv(x)
-
-        data = [(torch.rand((1, 3, 10, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::conv3d")
-        # make sure there is only one quantize_per_tensor for input
-        # and conv3d_prepack is folded
-        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .run(model.graph)
-
-    @override_qengines
-    def test_quantized_convnd_relu(self):
+    @skipIfNoFBGEMM
+    def test_quantized_conv_relu(self):
         """tests for conv1d_relu/conv2d_relu/conv3d_relu"""
         conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
 
         class ConvNdRelu(torch.nn.Module):
             def __init__(self, dim, inplace):
                 super(ConvNdRelu, self).__init__()
-                self.conv = conv_module[dim](1, 4, 2, 3).float()
+                self.conv = conv_module[dim](3, 3, 3).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x):
@@ -1315,7 +1276,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class ConvNdFunctionalRelu(torch.nn.Module):
             def __init__(self, dim):
                 super(ConvNdFunctionalRelu, self).__init__()
-                self.conv = conv_module[dim](1, 4, 2, 3).float()
+                self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
                 return F.relu(self.conv(x))
@@ -1323,32 +1284,26 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class ConvNdInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self, dim):
                 super(ConvNdInplaceFunctionalRelu, self).__init__()
-                self.conv = conv_module[dim](1, 4, 2, 3).float()
+                self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
                 return F.relu(self.conv(x), True)
 
-        data1d = [(torch.randn(1, 1, 10, dtype=torch.float),
-                   torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        data2d = [(torch.randn(1, 1, 10, 10, dtype=torch.float),
-                   torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        data3d = [(torch.randn(1, 1, 5, 5, 5, dtype=torch.float),
-                   torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        input_data = {1 : self.img_data_1d, 2 : self.img_data, 3 : self.img_data_3d}
+        options = itertools.product([1, 2, 3], [True, False])
+        for dim, tracing in options:
+            for orig_m in [ConvNdRelu(dim, True),
+                           ConvNdRelu(dim, False),
+                           ConvNdFunctionalRelu(dim),
+                           ConvNdInplaceFunctionalRelu(dim)]:
+                conv_name = "conv{}d".format(dim)
+                data = input_data[dim]
+                m = self._test_op_impl(
+                    orig_m, data, "quantized::conv{}d_relu(".format(dim), tracing=tracing)
 
-        input_data = {1 : data1d, 2 : data2d, 3 : data3d}
-        for dim in [1, 2, 3]:
-            if dim == 3 and not torch.backends.quantized.engine == 'fbgemm':
-                continue
-            conv_name = "conv" + str(dim) + "d"
-            data = input_data[dim]
-            for orig_m in [ConvNdRelu(dim, True), ConvNdRelu(dim, False),
-                           ConvNdFunctionalRelu(dim), ConvNdInplaceFunctionalRelu(dim)]:
-                for tracing in [True, False]:
-                    m = self._test_op_impl(orig_m, data, "quantized::" + conv_name + "_relu(", tracing=tracing)
-
-                FileCheck().check_not("aten::" + conv_name + "(") \
+                FileCheck().check_not("aten::conv{}d(".format(dim)) \
                            .check_not("aten::relu") \
-                           .check_not("quantized::" + conv_name + "(") \
+                           .check_not("quantized::conv{}d(".format(dim)) \
                            .check_not("quantized::relu(") \
                            .run(m.graph)
 
@@ -1360,8 +1315,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class QuantizedAdd(torch.nn.Module):
             def __init__(self):
                 super(QuantizedAdd, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1370,16 +1325,16 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 w = y + z
                 return z + w
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
-                 torch.randn(1, 3, 10, 10, dtype=torch.float),
+        data = [(torch.randn(1, 2, 5, 5, dtype=torch.float),
+                 torch.randn(1, 2, 5, 5, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        m = QuantizedAdd()
-        m = self._test_op_impl(m, data, "quantized::add")
-        FileCheck().check_count("quantized::add", 3, exactly=True) \
-                   .run(m.graph)
-        FileCheck().check_not("aten::add") \
-                   .check_not("aten::add_") \
-                   .run(m.graph)
+        for tracing in [True, False]:
+            m = self._test_op_impl(QuantizedAdd(), data, "quantized::add", tracing)
+            FileCheck().check_count("quantized::add", 3, exactly=True) \
+                       .run(m.graph)
+            FileCheck().check_not("aten::add") \
+                       .check_not("aten::add_") \
+                       .run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add_relu_alpha(self):
@@ -1389,8 +1344,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class AddRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(AddRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x, y):
@@ -1404,8 +1359,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceAddRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(InplaceAddRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x, y):
@@ -1419,8 +1374,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class AddFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(AddFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1433,8 +1388,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceAddFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceAddFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1447,8 +1402,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class AddInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(AddInplaceFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1461,8 +1416,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceAddInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceAddInplaceFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1472,8 +1427,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += y
                 return F.relu(x, True)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
-                 torch.rand((1, 3, 10, 10), dtype=torch.float),
+        data = [(torch.rand((1, 2, 5, 5), dtype=torch.float),
+                 torch.rand((1, 2, 5, 5), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m_orig in [AddRelu(True), AddRelu(False),
                        InplaceAddRelu(True), InplaceAddRelu(False),
@@ -1496,8 +1451,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class QuantizedAdd(torch.nn.Module):
             def __init__(self):
                 super(QuantizedAdd, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1507,8 +1462,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class QuantizedInplaceAdd(torch.nn.Module):
             def __init__(self):
                 super(QuantizedInplaceAdd, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1531,32 +1486,31 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += y
                 return x
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
-                 torch.randn(1, 3, 10, 10, dtype=torch.float),
+        data = [(torch.randn(1, 2, 5, 5, dtype=torch.float),
+                 torch.randn(1, 2, 5, 5, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m, quantized in [(QuantizedAdd(), True),
                              (QuantizedInplaceAdd(), True),
                              (NonQuantizedAdd(), False),
                              (NonQuantizedInplaceAdd(), False)]:
-            op = "quantized::add" if quantized else "aten::add"
-            m = self._test_op_impl(m, data, op)
-            # TODO: remove after refactor of _test_op_impl
-            if quantized:
-                FileCheck().check_not("aten::add") \
-                           .check_not("aten::add_") \
-                           .run(m.graph)
-            else:
-                FileCheck().check_not("quantized::add") \
-                           .run(m.graph)
+            for tracing in [True, False]:
+                op = "quantized::add" if quantized else "aten::add"
+                m = self._test_op_impl(m, data, op, tracing)
+                # TODO: remove after refactor of _test_op_impl
+                if quantized:
+                    FileCheck().check_not("aten::add") \
+                               .check_not("aten::add_") \
+                               .run(m.graph)
+                else:
+                    FileCheck().check_not("quantized::add") \
+                               .run(m.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     def test_quantized_add_scalar(self):
         class QuantizedAddScalar(torch.nn.Module):
             def __init__(self):
                 super(QuantizedAddScalar, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1565,7 +1519,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class QuantizedInplaceAddScalar(torch.nn.Module):
             def __init__(self):
                 super(QuantizedInplaceAddScalar, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1587,31 +1541,32 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += 3
                 return x
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
+        data = [(torch.randn(1, 2, 5, 5, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m, quantized in [(QuantizedAddScalar(), True),
                              (QuantizedInplaceAddScalar(), True),
                              (NonQuantizedAddScalar(), False),
                              (NonQuantizedInplaceAddScalar(), False)]:
-            op = "quantized::add_scalar" if quantized else "aten::add"
-            # TODO: fix debug=True numerics
-            m = self._test_op_impl(m, data, op, check=False)
-            # TODO: remove after refactor of _test_op_impl
-            if quantized:
-                FileCheck().check_not("aten::add") \
-                           .check_not("aten::add_") \
-                           .run(m.graph)
-            else:
-                FileCheck().check_not("quantized::add_scalar") \
-                           .run(m.graph)
+            for tracing in [True, False]:
+                op = "quantized::add_scalar" if quantized else "aten::add"
+                # TODO: fix debug=True numerics
+                m = self._test_op_impl(m, data, op, tracing, check=False)
+                # TODO: remove after refactor of _test_op_impl
+                if quantized:
+                    FileCheck().check_not("aten::add") \
+                               .check_not("aten::add_") \
+                               .run(m.graph)
+                else:
+                    FileCheck().check_not("quantized::add_scalar") \
+                               .run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add_relu(self):
         class AddRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(AddRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x, y):
@@ -1623,8 +1578,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceAddRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(InplaceAddRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x, y):
@@ -1636,8 +1591,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class AddFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(AddFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1648,8 +1603,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceAddFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceAddFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1660,8 +1615,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class AddInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(AddInplaceFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1672,8 +1627,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceAddInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceAddInplaceFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1681,30 +1636,29 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x += y
                 return F.relu(x, True)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
-                 torch.rand((1, 3, 10, 10), dtype=torch.float),
+        data = [(torch.rand((1, 2, 5, 5), dtype=torch.float),
+                 torch.rand((1, 2, 5, 5), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m in [AddRelu(True), AddRelu(False),
                   InplaceAddRelu(True), InplaceAddRelu(False),
                   AddFunctionalRelu(), InplaceAddFunctionalRelu(),
                   AddInplaceFunctionalRelu(), InplaceAddInplaceFunctionalRelu()]:
-            m = self._test_op_impl(m, data, "quantized::add_relu(")
-            FileCheck().check_not("aten::add(") \
-                       .check_not("aten::add_(") \
-                       .check_not("aten::relu(") \
-                       .check_not("aten::relu_(") \
-                       .check_not("quantized::add(") \
-                       .check_not("quantized::relu(") \
-                       .run(m.graph)
+            for tracing in [True, False]:
+                m = self._test_op_impl(m, data, "quantized::add_relu(", tracing)
+                FileCheck().check_not("aten::add(") \
+                           .check_not("aten::add_(") \
+                           .check_not("aten::relu(") \
+                           .check_not("aten::relu_(") \
+                           .check_not("quantized::add(") \
+                           .check_not("quantized::relu(") \
+                           .run(m.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     def test_quantized_add_scalar_relu(self):
         class AddScalarRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(AddScalarRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x):
@@ -1714,7 +1668,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceAddScalarRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(InplaceAddScalarRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x):
@@ -1725,7 +1679,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class AddScalarFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(AddScalarFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1734,7 +1688,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceAddScalarFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceAddScalarFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1744,7 +1698,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class AddScalarInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(AddScalarInplaceFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1753,14 +1707,14 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceAddScalarInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceAddScalarInplaceFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
                 x += 3
                 return F.relu(x, True)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float),
+        data = [(torch.rand((1, 2, 5, 5), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m in [AddScalarRelu(True), AddScalarRelu(False),
                   InplaceAddScalarRelu(True), InplaceAddScalarRelu(False),
@@ -1768,21 +1722,20 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                   InplaceAddScalarFunctionalRelu(),
                   AddScalarInplaceFunctionalRelu(),
                   InplaceAddScalarInplaceFunctionalRelu()]:
-            # quantized::add_scalar_relu or quantized::add_scalar_relu_out
-            # TODO: split this after refactor of _test_op_impl
-            # TODO: fix debug=True numerics
-            m = self._test_op_impl(m, data, "quantized::add_scalar_relu", check=False)
-            FileCheck().check_not("aten::add(") \
-                       .check_not("aten::add_(") \
-                       .check_not("aten::relu(") \
-                       .check_not("aten::relu_(") \
-                       .check_not("quantized::add_scalar(") \
-                       .check_not("quantized::relu(") \
-                       .run(m.graph)
+            for tracing in [True, False]:
+                # quantized::add_scalar_relu or quantized::add_scalar_relu_out
+                # TODO: split this after refactor of _test_op_impl
+                # TODO: fix debug=True numerics
+                m = self._test_op_impl(m, data, "quantized::add_scalar_relu", tracing, check=False)
+                FileCheck().check_not("aten::add(") \
+                           .check_not("aten::add_(") \
+                           .check_not("aten::relu(") \
+                           .check_not("aten::relu_(") \
+                           .check_not("quantized::add_scalar(") \
+                           .check_not("quantized::relu(") \
+                           .run(m.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     def test_quantized_cat(self):
         """ quantization of the output of cat will be depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
@@ -1790,8 +1743,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class QuantizedCat(torch.nn.Module):
             def __init__(self):
                 super(QuantizedCat, self).__init__()
-                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
-                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1805,34 +1758,19 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             def forward(self, x, y):
                 return torch.cat([x, y], 1)
 
-        # quantized cat
-        m = torch.jit.script(QuantizedCat()).eval()
-        m = prepare_script(m, {'': default_qconfig})
-        # four for input and output of conv and one for output of cat
-        # this also tests the ListConstruct can preserve the observed property so that
-        # torch.cat knows that inputs are observed
-        assert len(attrs_with_prefix(m, '_observer_')) == 5
-        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
-        m(data, data)
-        m = convert_script(m)
+        data = [(torch.randn(1, 2, 5, 5, dtype=torch.float),
+                 torch.randn(1, 2, 5, 5, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        for tracing in [True, False]:
+            m = self._test_op_impl(QuantizedCat(), data, "quantized::cat", tracing)
+            FileCheck().check_not("aten::cat") \
+                       .run(m.graph)
 
-        FileCheck().check_not("aten::cat") \
-                   .check("quantized::cat") \
-                   .run(m.graph)
+            m = self._test_op_impl(NonQuantizedCat(), data, "aten::cat", tracing)
+            FileCheck().check_not("quantized::cat") \
+                       .run(m.graph)
 
-        # non quantized cat
-        m = torch.jit.script(NonQuantizedCat()).eval()
-        m = prepare_script(m, {'': default_qconfig})
-        assert len(attrs_with_prefix(m, '_observer_')) == 0
-        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
-        m(data, data)
-        m = convert_script(m)
-
-        FileCheck().check_not("quantized::cat") \
-                   .check("aten::cat") \
-                   .run(m.graph)
-
-
+    @skipIfNoFBGEMM
     def test_qbatch_norm(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1843,10 +1781,11 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 return self.bn(x)
 
         data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        model = self._test_op_impl(M(), data, "quantized::batch_norm2d")
+        for tracing in [True, False]:
+            model = self._test_op_impl(M(), data, "quantized::batch_norm2d", tracing)
 
-        FileCheck().check_not("aten::batch_norm") \
-                   .run(model.graph)
+            FileCheck().check_not("aten::batch_norm") \
+                       .run(model.graph)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
@@ -1884,15 +1823,13 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                            .check_not("aten::relu_") \
                            .run(model.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     def test_quantized_mul(self):
         class QuantizedMul(torch.nn.Module):
             def __init__(self):
                 super(QuantizedMul, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1902,8 +1839,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class QuantizedInplaceMul(torch.nn.Module):
             def __init__(self):
                 super(QuantizedInplaceMul, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -1926,32 +1863,31 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x *= y
                 return x
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float),
-                 torch.randn(1, 3, 10, 10, dtype=torch.float),
+        data = [(torch.randn(1, 2, 10, 10, dtype=torch.float),
+                 torch.randn(1, 2, 10, 10, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m, quantized in [(QuantizedMul(), True),
                              (QuantizedInplaceMul(), True),
                              (NonQuantizedMul(), False),
                              (NonQuantizedInplaceMul(), False)]:
-            op = "quantized::mul" if quantized else "aten::mul"
-            m = self._test_op_impl(m, data, op)
-            # TODO: remove after refactor of _test_op_impl
-            if quantized:
-                FileCheck().check_not("aten::mul") \
-                           .check_not("aten::mul_") \
-                           .run(m.graph)
-            else:
-                FileCheck().check_not("quantized::mul") \
-                           .run(m.graph)
+            for tracing in [True, False]:
+                op = "quantized::mul" if quantized else "aten::mul"
+                m = self._test_op_impl(m, data, op, tracing)
+                # TODO: remove after refactor of _test_op_impl
+                if quantized:
+                    FileCheck().check_not("aten::mul") \
+                               .check_not("aten::mul_") \
+                               .run(m.graph)
+                else:
+                    FileCheck().check_not("quantized::mul") \
+                               .run(m.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     def test_quantized_mul_scalar(self):
         class QuantizedMulScalar(torch.nn.Module):
             def __init__(self):
                 super(QuantizedMulScalar, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1960,7 +1896,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class QuantizedInplaceMulScalar(torch.nn.Module):
             def __init__(self):
                 super(QuantizedInplaceMulScalar, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1982,32 +1918,31 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x *= 3
                 return x
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [(torch.randn(1, 2, 5, 5, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m, quantized in [(QuantizedMulScalar(), True),
                              (QuantizedInplaceMulScalar(), True),
                              (NonQuantizedMulScalar(), False),
                              (NonQuantizedInplaceMulScalar(), False)]:
-            op = "quantized::mul_scalar" if quantized else "aten::mul"
-            # TODO: fix debug=True numerics
-            m = self._test_op_impl(m, data, op, check=False)
-            # TODO: remove after refactor of _test_op_impl
-            if quantized:
-                FileCheck().check_not("aten::mul") \
-                           .check_not("aten::mul_") \
-                           .run(m.graph)
-            else:
-                FileCheck().check_not("quantized::mul_scalar") \
-                           .run(m.graph)
+            for tracing in [True, False]:
+                op = "quantized::mul_scalar" if quantized else "aten::mul"
+                # TODO: fix debug=True numerics
+                m = self._test_op_impl(m, data, op, tracing, check=False)
+                # TODO: remove after refactor of _test_op_impl
+                if quantized:
+                    FileCheck().check_not("aten::mul") \
+                               .check_not("aten::mul_") \
+                               .run(m.graph)
+                else:
+                    FileCheck().check_not("quantized::mul_scalar") \
+                               .run(m.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     def test_quantized_mul_relu(self):
         class MulRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(MulRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x, y):
@@ -2019,8 +1954,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceMulRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(InplaceMulRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x, y):
@@ -2032,8 +1967,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class MulFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(MulFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -2044,8 +1979,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceMulFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceMulFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -2056,8 +1991,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class MulInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(MulInplaceFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -2068,8 +2003,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceMulInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceMulInplaceFunctionalRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
-                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -2077,29 +2012,29 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x *= y
                 return F.relu(x, True)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.rand((1, 3, 10, 10), dtype=torch.float),
+        data = [(torch.rand((1, 2, 5, 5), dtype=torch.float),
+                 torch.rand((1, 2, 5, 5), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m in [MulRelu(True), MulRelu(False),
                   InplaceMulRelu(True), InplaceMulRelu(False),
                   MulFunctionalRelu(), InplaceMulFunctionalRelu(),
                   MulInplaceFunctionalRelu(), InplaceMulInplaceFunctionalRelu()]:
-            m = self._test_op_impl(m, data, "quantized::mul_relu(")
-            FileCheck().check_not("aten::mul(") \
-                       .check_not("aten::mul_(") \
-                       .check_not("aten::relu(") \
-                       .check_not("aten::relu_(") \
-                       .check_not("quantized::mul(") \
-                       .check_not("quantized::relu(") \
-                       .run(m.graph)
+            for tracing in [True, False]:
+                m = self._test_op_impl(m, data, "quantized::mul_relu(", tracing)
+                FileCheck().check_not("aten::mul(") \
+                           .check_not("aten::mul_(") \
+                           .check_not("aten::relu(") \
+                           .check_not("aten::relu_(") \
+                           .check_not("quantized::mul(") \
+                           .check_not("quantized::relu(") \
+                           .run(m.graph)
 
-    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
-                         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
-                         " with instruction set support avx2 or newer.")
+    @skipIfNoFBGEMM
     def test_quantized_mul_scalar_relu(self):
         class MulScalarRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(MulScalarRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x):
@@ -2109,7 +2044,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceMulScalarRelu(torch.nn.Module):
             def __init__(self, inplace):
                 super(InplaceMulScalarRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
             def forward(self, x):
@@ -2120,7 +2055,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class MulScalarFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(MulScalarFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -2129,7 +2064,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceMulScalarFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceMulScalarFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -2139,7 +2074,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class MulScalarInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(MulScalarInplaceFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -2148,78 +2083,81 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         class InplaceMulScalarInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
                 super(InplaceMulScalarInplaceFunctionalRelu, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
                 x = self.conv(x)
                 x *= 3
                 return F.relu(x, True)
 
-        data = [(torch.randn(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [(torch.randn(1, 2, 5, 5, dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for m in [MulScalarRelu(True), MulScalarRelu(False),
                   InplaceMulScalarRelu(True), InplaceMulScalarRelu(False),
                   MulScalarFunctionalRelu(),
                   InplaceMulScalarFunctionalRelu(),
                   MulScalarInplaceFunctionalRelu(),
                   InplaceMulScalarInplaceFunctionalRelu()]:
-            # quantized::mul_scalar_relu or quantized::mul_scalar_relu_out
-            # TODO: split this after refactor of _test_op_impl
-            # TODO: fix debug=True numerics
-            m = self._test_op_impl(m, data, "quantized::mul_scalar_relu", check=False)
-            FileCheck().check_not("aten::mul(") \
-                       .check_not("aten::mul_(") \
-                       .check_not("aten::relu(") \
-                       .check_not("aten::relu_(") \
-                       .check_not("quantized::mul_scalar(") \
-                       .check_not("quantized::relu(") \
-                       .run(m.graph)
+            for tracing in [True, False]:
+                # quantized::mul_scalar_relu or quantized::mul_scalar_relu_out
+                # TODO: fix debug=True numerics
+                m = self._test_op_impl(m, data, "quantized::mul_scalar_relu", tracing, check=False)
+                FileCheck().check_not("aten::mul(") \
+                           .check_not("aten::mul_(") \
+                           .check_not("aten::relu(") \
+                           .check_not("aten::relu_(") \
+                           .check_not("quantized::mul_scalar(") \
+                           .check_not("quantized::relu(") \
+                           .run(m.graph)
 
     def test_hardswish(self):
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        m = self._test_op_impl(torch.nn.Hardswish(), data, "quantized::hardswish")
-        FileCheck().check_not("aten::hardswish") \
-                   .run(m.graph)
+        data = [(torch.rand((1, 2, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        hardswish = torch.nn.Hardswish()
+        for tracing in [True, False]:
+            m = self._test_op_impl(hardswish, data, "quantized::hardswish", tracing)
+            FileCheck().check_not("aten::hardswish") \
+                       .run(m.graph)
 
     def test_layer_norm(self):
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        layer_norm = torch.nn.LayerNorm([3, 10, 10])
-        m = self._test_op_impl(layer_norm, data, "quantized::layer_norm")
-        FileCheck().check_not("aten::layer_norm") \
-                   .run(m.graph)
+        data = [(torch.rand((1, 2, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        layer_norm = torch.nn.LayerNorm([2, 5, 5])
+        for tracing in [True, False]:
+            m = self._test_op_impl(layer_norm, data, "quantized::layer_norm", tracing)
+            FileCheck().check_not("aten::layer_norm") \
+                       .run(m.graph)
 
     def test_group_norm(self):
-        data = [(torch.rand((1, 4, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = [(torch.rand((1, 4, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         group_norm = torch.nn.GroupNorm(2, 4)
-        m = self._test_op_impl(group_norm, data, "quantized::group_norm")
-        FileCheck().check_not("aten::group_norm") \
-                   .run(m.graph)
+        for tracing in [True, False]:
+            m = self._test_op_impl(group_norm, data, "quantized::group_norm", tracing)
+            FileCheck().check_not("aten::group_norm") \
+                       .run(m.graph)
 
     def test_instance_norm(self):
-        data = [(torch.rand((1, 4, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        # TODO: handle affine == False (separate PR)
-        instance_norm1d = torch.nn.InstanceNorm1d(4, affine=True)
-        m = self._test_op_impl(instance_norm1d, data, "quantized::instance_norm")
-        FileCheck().check_not("aten::instance_norm") \
-                   .run(m.graph)
+        data_1d = [(torch.rand((1, 4, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data_2d = [(torch.rand((1, 4, 5, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data_3d = [(torch.rand((1, 4, 5, 1, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        data = {1 : data_1d, 2 : data_2d, 3 : data_3d}
+        instance_norm_modules = {1 : torch.nn.InstanceNorm1d,
+                                 2 : torch.nn.InstanceNorm2d,
+                                 3 : torch.nn.InstanceNorm3d}
 
-        data = [(torch.rand((1, 4, 10, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        instance_norm2d = torch.nn.InstanceNorm2d(4, affine=True)
-        m = self._test_op_impl(instance_norm2d, data, "quantized::instance_norm")
-        FileCheck().check_not("aten::instance_norm") \
-                   .run(m.graph)
-
-        data = [(torch.rand((1, 4, 10, 1, 1), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        instance_norm3d = torch.nn.InstanceNorm3d(4, affine=True)
-        m = self._test_op_impl(instance_norm3d, data, "quantized::instance_norm")
-        FileCheck().check_not("aten::instance_norm") \
-                   .run(m.graph)
+        options = itertools.product([1, 2, 3], [True, False])
+        for dim, tracing in options:
+            # TODO: handle affine == False (separate PR)
+            instance_norm = instance_norm_modules[dim](4, affine=True)
+            m = self._test_op_impl(
+                instance_norm, data[dim], "quantized::instance_norm", tracing)
+            FileCheck().check_not("aten::instance_norm") \
+                       .run(m.graph)
 
     @skipIfNoFBGEMM
     def test_clamp(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu6 = torch.nn.ReLU6()
                 self.hardtanh = torch.nn.Hardtanh()
 
@@ -2232,12 +2170,13 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = self.hardtanh(x)
                 x = F.hardtanh(x)
-                x.hardtanh_()
+                F.hardtanh_(x)
                 return x
 
-        data = [(torch.rand((1, 3, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        for op in ["aten::clamp", "aten::hardtanh", "aten::hardtanh_"]:
-            m = self._test_op_impl(M(), data, op)
+        data = [(torch.rand((1, 2, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+        options = itertools.product(["aten::clamp", "aten::hardtanh", "aten::hardtanh_"], [True, False])
+        for op, tracing in options:
+            m = self._test_op_impl(M(), data, op, tracing)
             FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                        .run(m.graph)
 
@@ -2289,10 +2228,12 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.conv(x)
                 return x
 
+        data = torch.rand(1, 3, 10, 10)
+        # This model is not executable since we just put all ops
+        # in the same forward, therefore we only test scripting
         m = torch.jit.script(M())
         qconfig = script_qconfig(default_qconfig)
         # dummy data to suppress warning
-        data = torch.rand((1, 3, 10, 10))
         get_forward(qconfig.activation)(data)
         get_forward(qconfig.weight)(data)
 
@@ -2374,10 +2315,12 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.conv(x)
                 return x
 
+        # This model is not executable since we just put all ops
+        # in the same forward, therefore we only test scripting
         m = torch.jit.script(M())
         qconfig = script_qconfig(default_qconfig)
         # dummy data to suppress warning
-        data = torch.rand((1, 3, 10, 10))
+        data = torch.rand(1, 3, 10, 10)
         get_forward(qconfig.activation)(data)
         get_forward(qconfig.weight)(data)
 

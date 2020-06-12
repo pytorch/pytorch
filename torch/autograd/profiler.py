@@ -821,7 +821,6 @@ def parse_cpu_trace(thread_records):
 
     next_id = 0
     start_record = None
-    remote_start_cuda_records = {}
     cuda_records = {}
     functions = []
     record_stack = []
@@ -843,22 +842,22 @@ def parse_cpu_trace(thread_records):
     # and the CPU time of the cuda start event for the device
     def adjusted_time(cuda_record, cuda_records_map):
         assert cuda_record.device() != -1
-        cuda_time_0 = cuda_records_map[cuda_record.device()]
+        cuda_time_0 = cuda_records_map[(cuda_record.node_id(), cuda_record.device())]
         return cuda_time_0.cuda_elapsed_us(cuda_record) + start_record.cpu_elapsed_us(cuda_time_0)
 
     # '__start_profile' is not guaranteed to be first, so we must find it here
     for record in itertools.chain(*thread_records):
-        is_remote = record.is_remote()
-        if is_remote:
-            continue
         name = record.name()
         if start_record is None and name == '__start_profile':
             start_record = record
         elif name == '__cuda_start_event':
             # N.B.: Each CUDA device has its own __cuda_start_event.
             assert record.device() != -1
-            cuda_records[record.device()] = record
-    assert start_record is not None
+            # key for cuda_records is (node_id, device) in case of multiple nodes
+            # having the same device
+            cuda_records[(record.node_id(), record.device())] = record
+
+    assert start_record is not None and not start_record.is_remote()
 
     for thread_record_list in thread_records:
         # accumulated memory allocations per handle
@@ -922,24 +921,8 @@ def parse_cpu_trace(thread_records):
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():
-                    if is_remote_event:
-                        # Find remote cuda start indicators if we haven't already.
-                        if not remote_start_cuda_records:
-                            assert all([r.is_remote() for r in thread_record_list])
-                            # N.B.: There should be a __cuda_start_event for each
-                            # CUDA device.
-                            remote_start_cuda_records = {
-                                r.device() : r
-                                for r in thread_record_list
-                                if r.name() == '__cuda_start_event'
-                            }
-                        assert remote_start_cuda_records
-                        assert start.device() == record.device()
-                        cuda_start = adjusted_time(start, remote_start_cuda_records)
-                        cuda_end = adjusted_time(record, remote_start_cuda_records)
-                    else:
-                        cuda_start = adjusted_time(start, cuda_records)
-                        cuda_end = adjusted_time(record, cuda_records)
+                    cuda_start = adjusted_time(start, cuda_records)
+                    cuda_end = adjusted_time(record, cuda_records)
                     fe.append_kernel(
                         start.name(),
                         start.device(),

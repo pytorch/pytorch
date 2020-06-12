@@ -1,10 +1,10 @@
 import concurrent.futures
+import contextlib
 import json
 import sys
 import time
 import unittest
 from collections import namedtuple
-import contextlib
 from functools import partial
 from unittest import mock
 
@@ -49,11 +49,14 @@ from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture i
 def foo_add():
     return torch.add(torch.ones(1), torch.ones(1))
 
-def udf_with_torch_ops():
-    t = torch.add(torch.ones(1), torch.ones(1))
-    t = torch.mul(t, t)
-    t = t.relu()
-    t = t.sigmoid()
+def udf_with_torch_ops(device=-1):
+    device_ctx = contextlib.suppress() if device == -1 else torch.cuda.device(device)
+    with device_ctx:
+        t1, t2 = torch.ones(1), torch.ones(1)
+        t = torch.add(t1, t2)
+        t = torch.mul(t, t)
+        t = t.relu()
+        t = t.sigmoid()
 
 
 def requires_process_group_agent(message=""):
@@ -996,12 +999,18 @@ class RpcTest(RpcAgentTestFixture):
         if self.rank != 1:
             return
 
-        dst = (self.rank + 1) % self.world_size
-        dst_worker = worker_name(dst)
-        with torch.autograd.profiler.profile(use_cuda=True) as p:
-            fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
-            res = fut.wait()
+        dst_cuda_0 = (self.rank + 1) % self.world_size
+        dst_cuda_1 = (self.rank + 2) % self.world_size
+        dst_worker_cuda_0 = worker_name(dst_cuda_0)
+        dst_worker_cuda_1 = worker_name(dst_cuda_1)
 
+        with torch.autograd.profiler.profile(use_cuda=True) as p:
+            fut1 = rpc.rpc_async(dst_worker_cuda_0, udf_with_torch_ops, args=(0, ))
+            fut2 = rpc.rpc_async(dst_worker_cuda_1, udf_with_torch_ops, args=(1, ))
+            fut1.wait()
+            fut2.wait()
+
+        print(p.key_averages().table())
         function_events = p.function_events
         for event in function_events:
             if event.is_async:
@@ -1009,10 +1018,15 @@ class RpcTest(RpcAgentTestFixture):
                 self.assertEqual([], event.kernels)
                 self.assertEqual(0, event.cuda_time)
             else:
+                self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
                 self.assertGreater(event.cuda_time_total, 0)
                 self.assertEqual(1, len(event.kernels))
                 kernel = event.kernels[0]
-                self.assertEqual(kernel.device, 0)
+                if event.node_id == dst_cuda_0:
+                    self.assertEqual(kernel.device, 0)
+                if event.node_id == dst_cuda_1:
+                    self.assertEqual(kernel.device, 1)
+
                 self.assertGreater(event.cuda_time, 0)
 
     @dist_init

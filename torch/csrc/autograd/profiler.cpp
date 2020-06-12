@@ -174,7 +174,7 @@ struct ProfilerThreadLocalState
 
   void setOrAddRemoteProfiledEvents(std::vector<Event>&& remoteProfiledEvents) {
     // Lock to serialize access from multiple callback threads.
-    std::lock_guard<std::mutex> guard(remoteProfiledEventsMutex_);
+    std::lock_guard<std::mutex> guard(state_mutex_);
     if (remoteProfiledEvents_) {
       (*remoteProfiledEvents_).emplace_back(remoteProfiledEvents);
     } else {
@@ -315,8 +315,6 @@ struct ProfilerThreadLocalState
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false, false);
   at::CallbackHandle handle_ = 0;
   c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
-  // mutex to guard access to remoteProfiledEvents_
-  std::mutex remoteProfiledEventsMutex_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
@@ -383,7 +381,7 @@ ProfilerConfig::~ProfilerConfig() = default;
 
 at::IValue ProfilerConfig::toIValue() const {
   c10::impl::GenericList eventIValueList(at::AnyType::get());
-  eventIValueList.reserve(3);
+  eventIValueList.reserve(kProfilerConfigIValuesSize);
   eventIValueList.emplace_back(static_cast<int64_t>(state));
   eventIValueList.emplace_back(report_input_shapes);
   eventIValueList.emplace_back(profile_memory);
@@ -407,7 +405,6 @@ ProfilerConfig ProfilerConfig::fromIValue(
       ivalues.get(1).toBool(),
       ivalues.get(2).toBool());
 }
-
 
 ProfilerConfig getProfilerConfig() {
   auto state_ptr = getProfilerTLSState();
@@ -512,7 +509,7 @@ void Event::record(bool record_cuda) {
     ivalues.get(7).toBool(), // was cuda recorded
     ivalues.get(8).toInt(), // cuda memory usage
     ivalues.get(9).toInt(), // device
-    ivalues.get(10).toDouble() // cuda_us
+    ivalues.get(10).toInt() // cuda_us
   );
   return evt;
 }
@@ -537,13 +534,16 @@ at::IValue Event::toIValue() const {
 }
 
 double Event::cuda_elapsed_us(const Event & e) const {
+  TORCH_CHECK(e.has_cuda() && has_cuda(), "Events were not recorded for CUDA");
+  TORCH_CHECK(
+      e.device() == device(),
+      c10::str(
+          "Events are not on the same device: ", e.device(), " vs ", device()));
   if (isRemote() && e.isRemote()) {
     // validate that cuda_us_ has been set properly.
     TORCH_INTERNAL_ASSERT(cuda_us_ >= 0 && e.cuda_us_ >=0);
     return e.cuda_us_ - cuda_us_;
   }
-  TORCH_CHECK(e.has_cuda() && has_cuda(), "Events were not recorded for CUDA");
-  TORCH_CHECK(e.device() == device(), c10::str("Events are not on the same device: ", e.device(), " vs ", device()));
   return cuda_stubs->elapsed(cuda_event, e.cuda_event);
 }
 

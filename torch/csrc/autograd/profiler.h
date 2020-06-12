@@ -140,14 +140,14 @@ struct TORCH_API Event final {
       bool record_cuda,
       at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {},
-      int node_id = -1
-      )
+      int node_id = -1)
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes), node_id_(node_id) {
-          record(record_cuda);
+        shapes_(shapes),
+        node_id_(node_id) {
+    record(record_cuda);
   }
 
   // Constructor to be used in conjunction with Event::fromIValue.
@@ -272,7 +272,7 @@ struct TORCH_API Event final {
     return is_remote_;
   }
 
-  void setCudaUs(double cuda_us) {
+  void setCudaUs(int64_t cuda_us) {
     cuda_us_ = cuda_us;
 }
 
@@ -290,7 +290,7 @@ private:
   struct CUevent_st* cuda_event = nullptr;
   int node_id_ = 0;
   bool is_remote_ = false;
-  double cuda_us_ = -1;
+  int64_t cuda_us_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid

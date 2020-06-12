@@ -331,6 +331,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
 }
 
 /* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {
+  TORCH_CHECK(newDefaultNodeId >= 0, "setDefaultNodeId expects an id >= 0.");
   defaultNodeId = newDefaultNodeId;
 }
 

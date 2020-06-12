@@ -822,7 +822,7 @@ void RequestCallbackImpl::processRpc(
                     auto cudaProfilerStartEvent = it->second;
                     double cuda_elapsed_us =
                         cudaProfilerStartEvent->cuda_elapsed_us(e);
-                    double cuda_us =
+                    int64_t cuda_us =
                         cuda_elapsed_us + cudaProfilerStartEvent->cpu_us();
                     e.setCudaUs(cuda_us);
                   }

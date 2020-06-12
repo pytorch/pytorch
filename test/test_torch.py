@@ -115,6 +115,18 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_deterministic_flag(self):
+            deterministic_restore = torch.is_deterministic()
+
+            for deterministic in [True, False]:
+                torch.set_deterministic(deterministic)
+                self.assertEqual(deterministic, torch.is_deterministic())
+
+            with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
+                torch.set_deterministic(1)
+
+            torch.set_deterministic(deterministic_restore)
+
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
             self.assertEqual(x.byte().dtype, torch.uint8)
@@ -9432,7 +9444,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
-    def test_reduction_vectorized_corner(self, device, dtype):
+    def test_reduction_vectorize_along_input_corner(self, device, dtype):
         # 1D case: sum
         size = 1024 * 1024 * 64 + 3
         shift = 1
@@ -9528,6 +9540,29 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(xs1[j].item(), size[1] - i)
                 self.assertEqual(xs2[j].item(), size[1] - i)
 
+    @onlyCUDA
+    @dtypes(torch.half, torch.float, torch.double)
+    def test_reduction_vectorize_along_output(self, device, dtype):
+        def run_test(input_):
+            M, N = input_.shape
+            input_.zero_()
+            for i in range(min(M, N)):
+                input_[i][i] = 1    
+            output1 = input_.argmax(dim=0)
+            output2 = input_.sum(dim=0)
+            for i in range(min(M, N)):
+                self.assertEqual(output1[i], i)
+                self.assertEqual(output2[i], 1)
+        # vec 4
+        run_test(torch.zeros(64, 64, dtype=dtype, device=device))
+        # vec 2
+        run_test(torch.zeros(64 * 64 + 2, dtype=dtype, device=device)[2:].view(64, 64))
+        run_test(torch.zeros(64, 62, dtype=dtype, device=device))
+        run_test(torch.zeros(64, 2, dtype=dtype, device=device))
+        # vec 1
+        run_test(torch.zeros(64 * 64 + 1, dtype=dtype, device=device)[1:].view(64, 64))
+        run_test(torch.zeros(64, 61, dtype=dtype, device=device))
+        run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
     @slowTest
     def test_argminmax_large_axis(self, device):
@@ -17534,6 +17569,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             test(x, True)
             test(y, True)
             test(z, True)
+
+    def test_multinomial_empty(self, device):
+        probs = torch.ones(0, 3)
+        num_samples = 1
+        expected = torch.empty(0, num_samples, dtype=torch.int64)
+        for replacement in (True, False):
+            out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
+            self.assertEqual(out, expected)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
