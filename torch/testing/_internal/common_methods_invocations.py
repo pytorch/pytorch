@@ -275,6 +275,8 @@ def method_tests():
         ('sqrt', uniform_scalar(5e-4, requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('sin', (S, S, S), NO_ARGS, '', (True,)),
         ('sin', (), NO_ARGS, 'scalar', (True,)),
+        ('sinc', (S, S, S), NO_ARGS, '', (True,)),
+        ('sinc', (), NO_ARGS, 'scalar', (True,)),
         ('cos', (S, S, S), NO_ARGS, '', (True,)),
         ('cos', (), NO_ARGS, 'scalar', (True,)),
         ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS, '', (True,)),

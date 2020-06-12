@@ -5398,6 +5398,28 @@ Example::
     tensor([-0.5194,  0.1343, -0.4032, -0.2711])
 """.format(**common_args))
 
+add_docstr(torch.sinc,
+           r"""
+sin(input, out=None) -> Tensor
+
+Returns a new tensor with the sine of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \sin(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-0.5461,  0.1347, -2.7266, -0.2746])
+    >>> torch.sin(a)
+    tensor([-0.5194,  0.1343, -0.4032, -0.2711])
+""".format(**common_args))
+
 add_docstr(torch.sinh,
            r"""
 sinh(input, out=None) -> Tensor
