@@ -198,7 +198,9 @@ Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, co
       && self.scalar_type() == at::kFloat && mat1.scalar_type() == at::kFloat && mat2.scalar_type() == at::kFloat
       && !self.requires_grad() && !mat1.requires_grad() && !mat2.requires_grad()
       && mat1.ndimension() == 2 && mat2.ndimension() <= 2 && self.ndimension() == 1
-      && mat1.size(xnnpack::internal::Layout::Filter::output) == self.size(0)) {
+      && mat1.size(xnnpack::internal::Layout::Filter::output) == self.size(0)
+      && mat2.t().contiguous().size(xnnpack::internal::Layout::Filter::input) > 0
+      && mat2.t().contiguous().size(xnnpack::internal::Layout::Filter::output) > 0) {
     result.resize_({ mat1.size(0), mat2.size(1) });
     result.copy_(xnnpack::linear(mat1, mat2.t(), self));
     return result;
@@ -218,7 +220,9 @@ Tensor& mm_cpu_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
   #if defined(USE_XNNPACK) && !defined(USE_BLAS)
   if (self.scalar_type() == at::kFloat && mat2.scalar_type() == at::kFloat
       && !self.requires_grad() && !mat2.requires_grad()
-      && self.ndimension() == 2 && mat2.ndimension() <= 2) {
+      && self.ndimension() == 2 && mat2.ndimension() <= 2
+      && mat2.t().contiguous().size(xnnpack::internal::Layout::Filter::input) > 0
+      && mat2.t().contiguous().size(xnnpack::internal::Layout::Filter::output) > 0) {
     result.resize_({ self.size(0), mat2.size(1) });
     result.copy_(xnnpack::linear(self, mat2.t(), {}));
     return result;
