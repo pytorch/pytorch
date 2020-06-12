@@ -168,13 +168,6 @@ struct cpu_scatter_gather_base_kernel {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
         
-        using binary_func_t = std::function<void(scalar_t*, scalar_t*)>;
-        std::unordered_map<const SCATTER_GATHER_OP, binary_func_t> binary_funcs;
-        binary_funcs[SCATTER_GATHER_OP::REDUCE_ADD] = reduce_add;
-        binary_funcs[SCATTER_GATHER_OP::REDUCE_SUBTRACT] = reduce_subtract;
-        binary_funcs[SCATTER_GATHER_OP::REDUCE_MULTIPLY] = reduce_multiply;
-        binary_funcs[SCATTER_GATHER_OP::REDUCE_DIVIDE] = reduce_divide;
-        
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
