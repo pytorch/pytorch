@@ -427,6 +427,7 @@ class TestOptim(TestCase):
             [lambda opt: ReduceLROnPlateau(opt),
              lambda opt: ExponentialLR(opt, gamma=0.99)]
         )
+        self._test_multi_processing(optim.Adagrad)
         with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
             optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
 
