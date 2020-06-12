@@ -64,6 +64,17 @@ class TestSparseCSR(TestCase):
         # simple 5D tensor with shape inference
 
         # simple 1D tensor with explicit shape
+        pointers = torch.zeros(0)
+        indices = self.index_tensor([1, 2, 3, 22, 39])
+        values = self.values_tensor([33, 44, 55, 66, 77])
+        a = self.csr_sparse_tensor(pointers, indices, values, [50])
+
+        self.assertEqual(a.layout, torch.sparse_csr)
+        self.assertEqual(a.values(), values)
+        self.assertEqual(a.indices(), indices)
+        self.assertEqual(a.pointers(), pointers)
+        self.assertEqual(a.ndimension(), 1)
+        self.assertEqual(a.size(), torch.Size([50]))
 
         # simple 2D tensor with explicit shape
 
