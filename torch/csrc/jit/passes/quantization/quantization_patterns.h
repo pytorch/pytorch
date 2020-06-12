@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <string>
@@ -456,11 +456,10 @@ graph(%a_quant, %b_scalar, %alpha):
         auto b_scalar_value = toIValue(b_scalar);
         bool alpha_is_one = alpha && alpha->isInt() && alpha->toInt() == 1;
         bool input_is_scalar =
-          b_scalar->type()->isSubtypeOf(NumberType::get()) ||
-          (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
-           b_scalar_value &&
-           b_scalar_value->isTensor() &&
-           b_scalar_value->toTensor().dim() == 0);
+            b_scalar->type()->isSubtypeOf(NumberType::get()) ||
+            (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
+             b_scalar_value && b_scalar_value->isTensor() &&
+             b_scalar_value->toTensor().dim() == 0);
         return alpha_is_one && input_is_scalar;
       };
 
@@ -603,11 +602,10 @@ graph(%a_quant, %b_scalar):
         auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
         auto b_scalar_value = toIValue(b_scalar);
         bool input_is_scalar =
-          b_scalar->type()->isSubtypeOf(NumberType::get()) ||
-          (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
-           b_scalar_value &&
-           b_scalar_value->isTensor() &&
-           b_scalar_value->toTensor().dim() == 0);
+            b_scalar->type()->isSubtypeOf(NumberType::get()) ||
+            (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
+             b_scalar_value && b_scalar_value->isTensor() &&
+             b_scalar_value->toTensor().dim() == 0);
         return input_is_scalar;
       };
 
