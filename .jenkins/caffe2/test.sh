@@ -13,9 +13,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
 fi
 # These additional packages are needed for circleci ROCm builds.
 if [[ $BUILD_ENVIRONMENT == pytorch-linux-xenial-rocm* ]]; then
-    # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by	
-    # defaults installs the most recent networkx version, so we install this lower	
-    # version explicitly before scikit-image pulls it in as a dependency	
+    # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
+    # defaults installs the most recent networkx version, so we install this lower
+    # version explicitly before scikit-image pulls it in as a dependency
     pip install networkx==2.0
     # click - onnx
     pip install --progress-bar off click protobuf tabulate virtualenv mock typing-extensions
