@@ -33,6 +33,14 @@ def drosenbrock(tensor):
     return torch.Tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
+def _update(optimizer, x):
+    """ Simple update function for multi-processing test. """
+    optimizer.zero_grad()
+    val = x.sum().backward()
+    optimizer.step()
+    return val.item()
+
+
 class TestOptim(TestCase):
     exact_dtype = True
 
@@ -244,12 +252,6 @@ class TestOptim(TestCase):
         )
 
     def _test_multi_processing(self, constructor):
-        def _update(optimizer, x):
-            optimizer.zero_grad()
-            val = x.sum().backward()
-            optimizer.step()
-            return val.item()
-
         # multi-processing
         p_multi = torch.zeros(10).requires_grad_(True).share_memory_()
         opt_multi = constructor([p_multi])
