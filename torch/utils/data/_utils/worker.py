@@ -63,12 +63,21 @@ class WorkerInfo(object):
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+        self.__keys = tuple(kwargs.keys())
         self.__initialized = True
 
     def __setattr__(self, key, val):
         if self.__initialized:
             raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
         return super(WorkerInfo, self).__setattr__(key, val)
+    
+    def __repr__(self):
+        items = [self.__class__.__name__ + ':']
+        for k in self.__keys:
+            items.append('{}:\t{}'.format(k, getattr(self, k)))
+        if len(items) == 1:
+            items.append('<no values>')
+        return '\n\t'.join(items)
 
 
 def get_worker_info():
