@@ -251,9 +251,12 @@ Tensor vulkan_addmm(
     const Tensor& mat2,
     Scalar beta,
     Scalar alpha) {
-  VulkanTensor& t = vtensor_from_vulkan(self);
-  VulkanTensor& m1 = vtensor_from_vulkan(mat1);
-  VulkanTensor& m2 = vtensor_from_vulkan(mat2);
+  const VulkanTensor t =
+      vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
+  const VulkanTensor m1 =
+      vtensor_from_vulkan(mat1.is_vulkan() ? mat1 : mat1.vulkan());
+  const VulkanTensor m2 =
+      vtensor_from_vulkan(mat2.is_vulkan() ? mat2 : mat2.vulkan());
   float b = beta.to<float>();
   float a = alpha.to<float>();
 
