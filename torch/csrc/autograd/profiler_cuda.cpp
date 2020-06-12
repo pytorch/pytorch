@@ -6,8 +6,6 @@
 
 namespace torch { namespace autograd { namespace profiler {
 
-namespace {
-
 static inline void cudaCheck(cudaError_t result, const char * file, int line) {
   if(result != cudaSuccess) {
     std::stringstream ss;
@@ -34,16 +32,16 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
 struct CUDAMethods : public CUDAStubs {
   void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) override {
     TORCH_CUDA_CHECK(cudaGetDevice(device));
-    TORCH_CUDA_CHECK(cudaEventCreate(event));
+    TORCH_CUDA_CHECK(cudaEventCreate(&event->cuda_event_));
     auto stream = at::cuda::getCurrentCUDAStream();
     *cpu_ns = getTime();
-    TORCH_CUDA_CHECK(cudaEventRecord(*event, stream));
+    TORCH_CUDA_CHECK(cudaEventRecord(event->cuda_event_, stream));
   }
-  float elapsed(CUDAEventStub event, CUDAEventStub event2) override {
-    TORCH_CUDA_CHECK(cudaEventSynchronize(event));
-    TORCH_CUDA_CHECK(cudaEventSynchronize(event2));
+  float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) override {
+    TORCH_CUDA_CHECK(cudaEventSynchronize(event->cuda_event_));
+    TORCH_CUDA_CHECK(cudaEventSynchronize(event2->cuda_event_));
     float ms;
-    TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event, event2));
+    TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event->cuda_event_, event2->cuda_event_));
     return ms*1000.0;
   }
   void nvtxMarkA(const char* name) override {
@@ -70,6 +68,9 @@ struct CUDAMethods : public CUDAStubs {
     return true;
   }
 
+  void destroyEvent(CUDAEventStub* event) {
+    TORCH_CUDA_CHECK(cudaEventDestroy(event->cuda_event_));
+  }
 };
 
 struct RegisterCUDAMethods {
@@ -80,7 +81,6 @@ struct RegisterCUDAMethods {
 };
 RegisterCUDAMethods reg;
 
-} // namespaces
 } // namespace profiler
 } // namespace autograd
 } // namespace torch

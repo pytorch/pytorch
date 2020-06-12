@@ -20,7 +20,7 @@
 
 #include <ATen/record_function.h>
 
-typedef struct CUevent_st* CUDAEventStub;
+struct CUevent_st;
 
 namespace torch { namespace autograd {
 
@@ -28,11 +28,65 @@ struct Node;
 
 namespace profiler {
 
+struct CUDAMethods;
+
+// A simple wrapper for CUevent_st* to keep track of
+// copies and destroy the CUDA event, counter allocation
+// happens only in case CUDAEventStub/Event is copied
+// (during profiler execution we only move Events)
+struct TORCH_API CUDAEventStub {
+  CUDAEventStub() {}
+
+  CUDAEventStub(const CUDAEventStub& e) {
+    copy(e);
+  }
+
+  CUDAEventStub(CUDAEventStub&&) = default;
+
+  CUDAEventStub& operator=(const CUDAEventStub& e) {
+    reset();
+    copy(e);
+    return *this;
+  }
+
+  CUDAEventStub& operator=(CUDAEventStub&& e) {
+    reset();
+    cuda_event_ = e.cuda_event_;
+    counter = std::move(e.counter);
+    return *this;
+  }
+
+  ~CUDAEventStub() {
+    reset();
+  }
+
+  inline CUevent_st* cuda_event() const {
+    return cuda_event_;
+  }
+
+ private:
+  void reset();
+
+  void copy(const CUDAEventStub& e) {
+    cuda_event_ = e.cuda_event_;
+    if (!e.counter) {
+      e.counter = std::make_shared<std::atomic<int>>(2);
+    } else {
+      ++(*e.counter);
+    }
+    counter = e.counter;
+  }
+
+  CUevent_st* cuda_event_ = nullptr;
+  mutable std::shared_ptr<std::atomic<int>> counter = nullptr;
+  friend class CUDAMethods;
+};
+
 struct TORCH_API CUDAStubs {
   virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
     fail();
   }
-  virtual float elapsed(CUDAEventStub event, CUDAEventStub event2) {
+  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) {
     fail();
     return 0.f;
   }
@@ -52,6 +106,9 @@ struct TORCH_API CUDAStubs {
     fail();
   }
   virtual void synchronize() {
+    fail();
+  }
+  virtual void destroyEvent(CUDAEventStub* event) {
     fail();
   }
   virtual ~CUDAStubs();
@@ -164,7 +221,7 @@ struct TORCH_API Event final {
   }
   double cuda_elapsed_us(const Event & e);
   bool has_cuda() const {
-    return cuda_event != nullptr;
+    return cuda_event_stub_.cuda_event() != nullptr;
   }
   int device() const {
     return device_;
@@ -206,7 +263,7 @@ private:
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  struct CUevent_st* cuda_event = nullptr;
+  CUDAEventStub cuda_event_stub_;
 };
 
 // a linked-list of fixed sized vectors, to avoid

@@ -220,7 +220,7 @@ struct ProfilerThreadLocalState
           thread_id,
           config_.state == ProfilerState::CUDA);
       evt.updateMemoryStats(alloc_size, device);
-      getEventList(thread_id).record(evt);
+      getEventList(thread_id).record(std::move(evt));
     }
   }
 
@@ -347,6 +347,17 @@ thread_local std::vector<std::shared_ptr<at::RecordFunctionGuard>> g_;
 
 } // namespace
 
+void CUDAEventStub::reset() {
+  if (counter) {
+    --(*counter);
+  }
+  if (cuda_event_ && (!counter || *counter == 0)) {
+    cuda_stubs->destroyEvent(this);
+  }
+  cuda_event_ = nullptr;
+  counter = nullptr;
+}
+
 void registerCUDAMethods(CUDAStubs* stubs) {
   cuda_stubs = stubs;
 }
@@ -412,16 +423,16 @@ thread_event_lists disableProfiler() {
 
 void Event::record(bool record_cuda) {
   if (record_cuda) {
-    cuda_stubs->record(&device_, &cuda_event, &cpu_ns_);
+    cuda_stubs->record(&device_, &cuda_event_stub_, &cpu_ns_);
     return;
   }
   cpu_ns_ = getTime();
 }
 
-double Event::cuda_elapsed_us(const Event & e) {
+double Event::cuda_elapsed_us(const Event& e) {
   TORCH_CHECK(e.has_cuda() && has_cuda(), "Events were not recorded for CUDA");
   TORCH_CHECK(e.device() == device(), "Events are not on the same device");
-  return cuda_stubs->elapsed(cuda_event, e.cuda_event);
+  return cuda_stubs->elapsed(&cuda_event_stub_, &e.cuda_event_stub_);
 }
 
 CUDAStubs::~CUDAStubs() = default;
