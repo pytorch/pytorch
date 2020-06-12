@@ -1678,8 +1678,6 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     bool bidirectional,
     c10::optional<ScalarType> dtype,
     bool use_dynamic) {
-
-  std::cout << "In function quantized_lstm_Data" << dtype.value();
   auto hx = hx_.vec();
   std::vector<QRNNCellParamsWrapper> params;
   params.reserve(_params_.size());
