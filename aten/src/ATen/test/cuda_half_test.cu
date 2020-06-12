@@ -42,13 +42,13 @@ __device__ void test(){
   assert(::abs(::expm1(Half(1.0)) - ::expm1(1.0f)) <= threshold);
   assert(::abs(::cos(Half(0.0)) - ::cos(0.0f)) <= threshold);
   assert(::abs(::sin(Half(0.0)) - ::sin(0.0f)) <= threshold);
+  assert(::abs(::sinc(Half(0.0)) - ::sinc(0.0f)) <= threshold);
   assert(::abs(::sqrt(Half(100.0)) - ::sqrt(100.0f)) <= threshold);
   assert(::abs(::ceil(Half(2.4)) - ::ceil(2.4f)) <= threshold);
   assert(::abs(::floor(Half(2.7)) - ::floor(2.7f)) <= threshold);
   assert(::abs(::trunc(Half(2.7)) - ::trunc(2.7f)) <= threshold);
   assert(::abs(::acos(Half(-1.0)) - ::acos(-1.0f)) <= threshold);
   assert(::abs(::cosh(Half(1.0)) - ::cosh(1.0f)) <= threshold);
-  assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
   assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);
   assert(::abs(::atanh(Half(1.0)) - ::atanh(1.0f)) <= threshold);

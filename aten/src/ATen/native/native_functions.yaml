@@ -2450,6 +2450,15 @@
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: sinc(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: sinc_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+
+- func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 # Returns a copy of this `Variable` that is detached from its autograd graph.
 # This method is OK to call if the `Variable` is a view.
 #

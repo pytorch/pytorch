@@ -479,6 +479,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sinh_
    .. automethod:: asinh
    .. automethod:: asinh_
+   .. automethod:: sinc
+   .. automethod:: sinc_
    .. automethod:: size
    .. automethod:: slogdet
    .. automethod:: solve

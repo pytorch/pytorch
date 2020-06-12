@@ -304,6 +304,7 @@ Pointwise Ops
     sign
     sin
     sinh
+    sinc
     sqrt
     square
     tan
