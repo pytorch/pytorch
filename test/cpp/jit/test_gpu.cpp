@@ -2951,6 +2951,77 @@ void testGPU_FusionSimpleGemm() {
   }
 }
 
+void testGPU_FusionSoftmax() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* input_tv0 = makeDummyTensor(3);
+  fusion.addInput(input_tv0);
+
+  TensorView* max_val_tv1 =
+      reductionOp(BinaryOpType::Max, {2}, new Float(0), input_tv0);
+  TensorView* bcast_max_tv2 = broadcast(max_val_tv1, {false, false, true});
+  TensorView* exp_tv3 = sub(input_tv0, bcast_max_tv2);
+  TensorView* sum_exp_tv4 =
+      reductionOp(BinaryOpType::Add, {2}, new Float(0), exp_tv3);
+  TensorView* bcast_sum_tv5 = broadcast(sum_exp_tv4, {false, false, true});
+  TensorView* output_tv6 = div(exp_tv3, bcast_sum_tv5);
+
+  max_val_tv1->split(-1, 32);
+  TensorView* max_val_rf_tv7 = max_val_tv1->rFactor({-2});
+  sum_exp_tv4->split(-1, 32);
+  TensorView* sum_exp_rf_tv8 = sum_exp_tv4->rFactor({-2});
+
+  exp_tv3->computeAt(sum_exp_rf_tv8, {2});
+
+  max_val_rf_tv7->axis(0)->parallelize(ParallelType::BIDx);
+  max_val_tv1->axis(0)->parallelize(ParallelType::BIDx);
+  bcast_max_tv2->axis(0)->parallelize(ParallelType::BIDx);
+  sum_exp_rf_tv8->axis(0)->parallelize(ParallelType::BIDx);
+  sum_exp_tv4->axis(0)->parallelize(ParallelType::BIDx);
+  bcast_sum_tv5->axis(0)->parallelize(ParallelType::BIDx);
+  output_tv6->axis(0)->parallelize(ParallelType::BIDx);
+
+  max_val_rf_tv7->axis(1)->parallelize(ParallelType::BIDy);
+  max_val_tv1->axis(1)->parallelize(ParallelType::BIDy);
+  bcast_max_tv2->axis(1)->parallelize(ParallelType::BIDy);
+  sum_exp_rf_tv8->axis(1)->parallelize(ParallelType::BIDy);
+  sum_exp_tv4->axis(1)->parallelize(ParallelType::BIDy);
+  bcast_sum_tv5->axis(1)->parallelize(ParallelType::BIDy);
+  output_tv6->axis(1)->parallelize(ParallelType::BIDy);
+
+  max_val_rf_tv7->axis(-1)->parallelize(ParallelType::TIDx);
+  max_val_tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  bcast_max_tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  exp_tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  sum_exp_rf_tv8->axis(-1)->parallelize(ParallelType::TIDx);
+  sum_exp_tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  bcast_sum_tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  output_tv6->axis(-1)->parallelize(ParallelType::TIDx);
+
+  fusion.addOutput(output_tv6);
+
+  GPULower gpulw(&fusion);
+  // gpulw.printKernel(std::cout);
+
+  prog.device_ = 0;
+  prog.grid(32, 32);
+  prog.block(32);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({32, 32, 128}, options);
+  at::Tensor cg_output = at::empty({32, 32, 128}, options);
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {t0}, {cg_output});
+
+  auto t2 = at::_softmax(t0, -1, false);
+  TORCH_CHECK(
+      t2.allclose(cg_output, 1e-5, 1e-5),
+      "Error of: ",
+      t2.sub(cg_output).abs().max());
+}
+
 } // namespace jit
 } // namespace torch
 // #endif // #if defined(USE_CUDA)

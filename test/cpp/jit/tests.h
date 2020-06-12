@@ -144,7 +144,8 @@ namespace jit {
   _(GPU_FusionReduction5)        \
   _(GPU_FusionReductionTFT)      \
   _(GPU_FusionSimpleGemm)        \
-  _(GPU_FusionSimpleBCast)
+  _(GPU_FusionSimpleBCast)       \
+  _(GPU_FusionSoftmax)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

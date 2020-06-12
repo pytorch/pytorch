@@ -465,9 +465,9 @@ TORCH_CUDA_API TensorView* broadcast(
     if (ent)
       n_broadcasts++;
   TORCH_CHECK(
-      nBCastDims - n_broadcasts == inp->nDims(),
+      nBCastDims - n_broadcasts == inp->domain()->noReductions().size(),
       "Invalid broadcast, number of false entries in is_broadcast_dim expected to be ",
-      inp->nDims(),
+      inp->domain()->noReductions().size(),
       " but received ",
       nBCastDims - n_broadcasts);
 
