@@ -51,21 +51,23 @@ def all_reduce(inputs, outputs=None, op=SUM, streams=None, comms=None):
 # `output` used to be `outputs`, taking in a list of tensors. So we have two
 # arguments for BC reasons.
 def reduce(inputs, output=None, root=0, op=SUM, streams=None, comms=None, *, outputs=None):
-    if not isinstance(output, torch.Tensor) and isinstance(output, torch._six.container_abcs.Sequence):
-        # User called old API with positional arguments of list of output tensors.
-        if outputs is not None:
+    if outputs is not None:
+        if output is not None:
             raise ValueError(
-                "'output' and 'outputs' can not be both specified. "
-                "'outputs' is deprecated in favor of 'output'.")
+                "'output' and 'outputs' can not be both specified. 'outputs' is deprecated in "
+                "favor of 'output', taking in a single output tensor. The signature of reduce is: "
+                "reduce(inputs, output=None, root=0, op=SUM, streams=None, comms=None).")
+        else:
+            warnings.warn(
+                "nccl.reduce with an output tensor list is deprecated. "
+                "Please specify a single output tensor with argument 'output' instead instead.")
+            output = outputs[root]
+    elif not isinstance(output, torch.Tensor) and isinstance(output, torch._six.container_abcs.Sequence):
+        # User called old API with positional arguments of list of output tensors.
         warnings.warn(
             "nccl.reduce with an output tensor list is deprecated. "
             "Please specify a single output tensor.")
         output = output[root]
-    elif outputs is not None:
-        warnings.warn(
-            "nccl.reduce with an output tensor list is deprecated. "
-            "Please specify a single output tensor with argument 'output' instead instead.")
-        output = outputs[root]
     elif output is None:
         output = inputs[root]
     torch._C._nccl_reduce(inputs, output, root, op, streams, comms)

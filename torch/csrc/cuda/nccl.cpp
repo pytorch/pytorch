@@ -188,7 +188,6 @@ void check_inputs(
     int root,
     int input_multiplier,
     int output_multiplier) {
-  // len(inputs) == len(outputs)
   size_t len = inputs.size();
 
   if (len <= 0) {

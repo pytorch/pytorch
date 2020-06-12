@@ -76,14 +76,10 @@ def reduce_add(inputs, destination=None):
         result = torch.empty_like(inputs[root_index])
         nccl.reduce(inputs, output=result, root=root_index)
     else:
-        # clone inputs[root_index] and accuimulate into the copy
         nonroot = [t for i, t in enumerate(inputs) if i != root_index]
-        result = inputs[root_index]
-        for i, other in enumerate(nonroot):
-            if i == 0:
-                result = result.add(other.cuda(destination, non_blocking=True))  # make a new tensor
-            else:
-                result.add_(other.cuda(destination, non_blocking=True))
+        result = inputs[root_index] + nonroot[0].cuda(destination, non_blocking=True)  # make a new tensor w/o clone
+        for other in nonroot[1:]:
+            result.add_(other.cuda(destination, non_blocking=True))
     return result
 
 
