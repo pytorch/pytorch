@@ -804,6 +804,6 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
 
             y, (h, c) = cell_dq(x, (h, c))
-            self.assertEqual(result[0], y, message="LSTM module API failed")
-            self.assertEqual(result[1], h, message="LSTM module API failed")
-            self.assertEqual(result[2], c, message="LSTM module API failed")
+            self.assertEqual(result[0], y)
+            self.assertEqual(result[1], h)
+            self.assertEqual(result[2], c)
