@@ -22,15 +22,6 @@ struct TORCH_CUDA_API GPULower : public OptOutMutator {
   std::vector<Expr*> lowered_exprs;
   Expr* active_scope = nullptr;
 
-  // Track the last computeAt TensorView and axis
-  const TensorView* active_view;
-  unsigned int active_view_axis;
-
-  // Clear out the last recorded computeAtView
-  void clearActiveView();
-  // Set active views from computeAtView
-  void setActiveView(const TensorView* const);
-
   // Wrap pushBack in lower_utils if active_scope is null we want it to go
   // straight to lower_exprs
   void pushBack(Expr*);
@@ -49,6 +40,7 @@ struct TORCH_CUDA_API GPULower : public OptOutMutator {
   Statement* mutate(BinaryOp*) final;
   Statement* mutate(TernaryOp*) final;
   Statement* mutate(ReductionOp*) final;
+  Statement* mutate(BroadcastOp*) final;
 
   // TensorViews are all based on symbolic sizes. When we first initialize them
   // we don't know if they're inputs or outputs which would mean that they have
