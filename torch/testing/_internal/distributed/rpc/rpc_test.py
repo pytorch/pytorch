@@ -1572,6 +1572,7 @@ class RpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(
             RuntimeError, (
                 r"Cannot call localValue\(\) on a non-local reference. "
+                fr"Call it on WorkerInfo\(id={next_rank}, name={worker_name(next_rank)}\)"
             )
         ):
             rref.local_value()
