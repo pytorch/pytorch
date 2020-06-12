@@ -4,6 +4,8 @@ if "%DEBUG%" == "1" (
   set BUILD_TYPE=release
 )
 
+set REL_WITH_DEB_INFO=1
+
 set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
 
 :: This inflates our log size slightly, but it is REALLY useful to be
