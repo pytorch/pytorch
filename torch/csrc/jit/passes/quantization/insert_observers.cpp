@@ -355,14 +355,20 @@ class InsertObserversHelper {
       Value* output,
       std::unordered_set<Value*>& block_observed_values);
 
-  bool shouldPropagateQuant(
+  // for cat/add/mul we will only observe their output if their input
+  // are observed
+  bool shouldObserve(
       Node* n,
       const std::unordered_set<Value*>& block_observed_values) {
     if (isPropagateQuantSingleInputOp(n)) {
       return isObserved(n->input(0), block_observed_values);
     } else if (isPropagateQuantBinaryOp(n)) {
-      // either both of the tensor inputs are observed, or the first tensor
-      // tensor input is observed and second input is scalar
+      // This checks both of the input should be tensor and observed.
+      // There is one check that we didn't do here, which is
+      // !isScalar(isObserved(n->input(1), block_observed_values)
+      // to make sure input 1 is not a scalar, because scalar tensor input
+      // for add/mul won't be observed with current rule, we can omit
+      // this check here
       return isObserved(n->input(0), block_observed_values) &&
           isObserved(n->input(1), block_observed_values);
     }
@@ -1259,7 +1265,7 @@ InsertObserversHelper::insertObserversFor(
           // If the node is one of the propagate quant node, e.g.
           // aten::cat, we should observe its output only
           // if the input of the node is observed
-          if (observer_opt && shouldPropagateQuant(n, block_observed_values)) {
+          if (observer_opt && shouldObserve(n, block_observed_values)) {
             recordObserved(
                 v, *observer_opt, values_to_observe, block_observed_values);
           }
