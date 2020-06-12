@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include "jit/runtime/graph_executor.h"
 
 namespace torch {
 namespace jit {
@@ -27,6 +28,8 @@ bool isForLoop(Node* node) {
     return false;
   Value* start_cond = node->inputs().at(1);
   Value* continue_cond = node->blocks().at(0)->outputs().at(0);
+  GRAPH_DEBUG("loop ", getHeader(node), "isTrueConstant(start_cond) ", isTrueConstant(start_cond),
+  " isTrueConstant(continue_cond) ", isTrueConstant(continue_cond))
   return isTrueConstant(start_cond) && isTrueConstant(continue_cond);
 }
 
@@ -160,10 +163,19 @@ void replaceLoopCounter(Node* loop) {
 }
 
 void unroll(Node* loop) {
+
+  if( loop->hasAttribute(Symbol::attr("dont_optimize"))) {
+    GRAPH_DEBUG("loop ", getHeader(loop), " marked as dont optimize");
+    return;
+  }
+
   Graph* graph = loop->owningGraph();
   Block* body = loop->blocks().at(0);
-  if (!isSmallBlock(body))
+  if (!isSmallBlock(body)) {
+    GRAPH_DEBUG("loop ", getHeader(loop), "failed !isSmallBlock");
     return;
+  }
+    
 
   // We will be using a "mutable" counter outside of the loop instead of the
   // default one, because this will allow us to share it between the unrolled
@@ -317,6 +329,7 @@ Node* PeelLoop(Node* n, size_t times) {
 
   // make the peeled clone
   auto peeled_copy = graph->createClone(n, [](Value* v) { return v; });
+  peeled_copy->i_(Symbol::attr("dont_optimize"), 1);
   addCondAsOutput(peeled_copy);
 
   LoopView new_lv(peeled_copy);
@@ -331,7 +344,13 @@ Node* PeelLoop(Node* n, size_t times) {
   orig_loop.replaceMaxTripCount(new_max_trip_count);
   // update the termination condition
   auto cond_index = peeled_copy->outputs().size() - 1;
-  orig_loop.replaceInputCondition(peeled_copy->output(cond_index));
+  if (isForLoop(n)) {
+    orig_loop.replaceInputCondition(orig_loop.inputCond());
+  }
+  else {
+    orig_loop.replaceInputCondition(peeled_copy->output(cond_index));
+  }
+  
 
   static const size_t LOOP_DEPS_WITH_COND_OFFSET = 2;
   for (size_t i = 0; i < peeled_copy->outputs().size() -

@@ -176,7 +176,7 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return callback_(node);
+    return callback_(node) && node->owningBlock() == block_;
   }
 
   bool isFusableDevice(Value* v, bool strict_fuser_check) {
@@ -208,10 +208,6 @@ struct GraphFuser {
   }
 
   bool isFusableMap(Node* node) {
-    // We don't want to bother with cross-block node movements, as they
-    // are not necessarily correct.
-    if (node->owningBlock() != block_)
-      return false;
     return node->kind() == prim::FusionGroup || isSimpleMap(node);
   }
 
@@ -726,7 +722,7 @@ struct GraphFuser {
         chunk->inputs().begin(),
         chunk->inputs().end(),
         [&](Value* producer_for_chunk) {
-          return isFusableMap(producer_for_chunk->node()) &&
+          return isFusableMap(producer_for_chunk->node()) && producer_for_chunk->node()->owningBlock() == block_ &&
               allUsersAreThisConsumerOrCalcSizes(chunk, producer_for_chunk);
         });
     if (it == chunk->inputs().end()) {

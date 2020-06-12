@@ -23,6 +23,8 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/create_functional_graphs.h>
 
 C10_DECLARE_bool();
 
@@ -89,6 +91,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 
   InsertGuards(copy);
   LowerGradOf(*copy);
+  RemoveListMutation(copy);
   EliminateRedundantGuards(copy);
   InsertBailOuts(copy);
   GRAPH_DUMP("After InsertBailOuts: ", copy);
@@ -97,7 +100,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   runRequiredPasses(copy);
   PeepholeOptimize(copy);
   ConstantPropagation(copy);
-  runOptimization(copy);
+  runOptimization(copy, false);
 
   if (needsGradientInProfilingMode(copy->block())) {
     auto diff_nodes = CreateAutodiffSubgraphs(
@@ -106,7 +109,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     for (Node* dnode : diff_nodes) {
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
-      runOptimization(gradient.f);
+      runOptimization(gradient.f, false);
       // run non diff optimization on the forward graph
       runNondiffOptimization(gradient.f, true);
       packGradient(gradient, dnode);
@@ -176,9 +179,11 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   if (!pr_) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
+    //pre-fusion passes
     if (remaining_bailout_depth == getBailoutDepth()) {
       PeelProfilingLoops(copy);
     }
+    UnrollLoops(copy);
     pr_ = ProfilingRecord::instrumentGraph(copy);
     auto pr_copy = pr_->graph()->copy();
     GRAPH_DUMP("Profiled Graph: ", pr_copy);
