@@ -1762,6 +1762,17 @@ class AbstractTestCases:
                             k = random.randint(1, testTensor.size(dim))
                             compare(testTensor, k, dim, dir)
 
+            # topk for tensors with a large dimension size, see https://github.com/pytorch/pytorch/pull/39850
+            t2 = torch.randn(3, int(2e5))
+            t3 = torch.randn(int(2e5), 5)
+            t4 = torch.randn(2, int(2e5), 3)
+
+            for k in (1, 10, 100):
+                for dir in (True, False):
+                    compare(t2, k, -1, dir)
+                    compare(t3, k, 0, dir)
+                    compare(t4, k, 1, dir)
+
         def test_topk_arguments(self):
             q = torch.randn(10, 2, 10)
             # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
