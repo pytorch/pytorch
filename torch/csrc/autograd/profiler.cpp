@@ -220,7 +220,7 @@ struct ProfilerThreadLocalState
           thread_id,
           config_.state == ProfilerState::CUDA);
       evt.updateMemoryStats(alloc_size, device);
-      getEventList(thread_id).record(evt);
+      getEventList(thread_id).record(std::move(evt));
     }
   }
 
