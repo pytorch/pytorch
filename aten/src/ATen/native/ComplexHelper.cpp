@@ -1,65 +1,54 @@
 #include <ATen/native/ComplexHelper.h>
 
+#include <ATen/native/TensorIterator.h>
+
 namespace at {
 namespace native {
 
-Tensor& complex_out(Tensor& result, const Tensor& input1, const Tensor& input2, bool polar) {
-  TORCH_CHECK(!input1.is_complex(), "input1 should not be a complex tensor.");
-  TORCH_CHECK(!input2.is_complex(), "input2 should not be a complex tensor.");
+DEFINE_DISPATCH(complex_stub);
+DEFINE_DISPATCH(complex_polar_stub);
 
-  c10::Scalar i;
-  switch (result.scalar_type()) {
-    // case c10::kComplexHalf:
-    //   i = c10::complex<c10::Half>(0, 1);
-    case c10::kComplexFloat:
-      i = c10::complex<float>(0, 1);
-      break;
-    case c10::kComplexDouble:
-      i = c10::complex<double>(0, 1);
-      break;
-    default:
-      break;
-  }
-
-  if (!polar) {
-    at::add_out(result, input1, at::mul(input2, i));
-  } else {
-    Tensor real = at::mul(input1, at::cos(input2));
-    Tensor imag = at::mul(input1, at::sin(input2));
-    at::add_out(result, real, at::mul(imag, i));
-  }
+Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
+  TORCH_CHECK(real.scalar_type() == imag.scalar_type(),
+              "Expected object of scalar type ", real.scalar_type(), " but got "
+              "scalar type ", imag.scalar_type(), " for argument 'imag'");
+  // Sort of hacky, but necessary so that input dtypes don't get promoted.
+  auto iter = TensorIterator::comparison_op(result, real, imag,
+    /*check_mem_overlap=*/true);
+  complex_stub(iter.device_type(), iter);
   return result;
 }
 
-Tensor complex(const Tensor& input1, const Tensor& input2, bool polar) {
-
-  c10::ScalarType result_type = promote_types(input1.scalar_type(), input2.scalar_type());
-  c10::TensorOptions options = input1.options();
-  switch (result_type) {
-    case c10::kShort:
-      options = options.dtype(c10::kComplexHalf);
-      break;
-    case c10::kInt:
-      options = options.dtype(c10::kComplexFloat);
-      break;
-    case c10::kLong:
-      options = options.dtype(c10::kComplexDouble);
-      break;
-    case c10::kHalf:
-      options = options.dtype(c10::kComplexHalf);
-      break;
-    case c10::kFloat:
-      options = options.dtype(c10::kComplexFloat);
-      break;
-    case c10::kDouble:
-      options = options.dtype(c10::kComplexDouble);
-      break;
-    default:
-      options = options.dtype(c10::kComplexDouble);
-      break;
+Tensor complex(const Tensor& real, const Tensor& imag) {
+  c10::TensorOptions options = real.options();
+  switch (real.scalar_type()) {
+    case c10::kFloat: options = options.dtype(c10::kComplexFloat); break;
+    case c10::kDouble: options = options.dtype(c10::kComplexDouble); break;
+    default: break;
   }
   Tensor result = at::empty(0, options);
-  return at::complex_out(result, input1, input2, polar);
+  return at::complex_out(result, real, imag);
+}
+
+Tensor& complex_polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
+  TORCH_CHECK(abs.scalar_type() == angle.scalar_type(),
+              "Expected object of scalar type ", abs.scalar_type(), " but got "
+              "scalar type ", angle.scalar_type(), " for argument 'angle'");
+  auto iter = TensorIterator::comparison_op(result, abs, angle,
+    /*check_mem_overlap=*/true);
+  complex_polar_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor complex_polar(const Tensor& abs, const Tensor& angle) {
+  c10::TensorOptions options = abs.options();
+  switch (abs.scalar_type()) {
+    case c10::kFloat: options = options.dtype(c10::kComplexFloat); break;
+    case c10::kDouble: options = options.dtype(c10::kComplexDouble); break;
+    default: break;
+  }
+  Tensor result = at::empty(0, options);
+  return at::complex_polar_out(result, abs, angle);
 }
 
 }} // namespace at::native

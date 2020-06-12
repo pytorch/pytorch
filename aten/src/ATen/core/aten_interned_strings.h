@@ -243,6 +243,7 @@ _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
 _(aten, complex) \
+_(aten, complex_polar) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \

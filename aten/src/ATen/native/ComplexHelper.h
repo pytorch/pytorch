@@ -1,6 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/native/DispatchStub.h>
+
+namespace at { struct TensorIterator; }
 
 namespace at { namespace native {
 
@@ -25,5 +28,10 @@ inline Tensor view_complex_as_float(const Tensor& self) {
   const auto float_type = c10::toValueType(self.scalar_type());
   return at::empty({0}, self.options().dtype(float_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
 }
+
+using binary_fn = void(*)(TensorIterator&);
+
+DECLARE_DISPATCH(binary_fn, complex_stub);
+DECLARE_DISPATCH(binary_fn, complex_polar_stub);
 
 }} // namespace at::native
