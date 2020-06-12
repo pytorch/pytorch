@@ -14,9 +14,7 @@ fi
 # These additional packages are needed for circleci ROCm builds.
 if [[ $BUILD_ENVIRONMENT == pytorch-linux-xenial-rocm* ]]; then
     # click - onnx
-    # hypothesis - tests
-    # jupyter - for tutorials
-    pip install --progress-bar off click hypothesis jupyter protobuf tabulate virtualenv mock typing-extensions
+    pip install --progress-bar off click protobuf tabulate virtualenv mock typing-extensions
 fi
 
 # Find where cpp tests and Caffe2 itself are installed
