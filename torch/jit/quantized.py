@@ -169,8 +169,7 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
         self.nonlinearity = other.nonlinearity
 
     @torch.jit.script_method
-    def forward(self, input, hx=None):
-        # type: (Tensor, Optional[Tensor]) -> Tensor
+    def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         self.check_forward_input(input)
         if hx is None:
             hx = torch.zeros(input.size(0), self.hidden_size, dtype=input.dtype, device=input.device)
