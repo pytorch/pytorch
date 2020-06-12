@@ -71,7 +71,7 @@ __global__ void fractional_max_pool3d_out_frame(
         static_cast<accscalar_t>(samples[batch][plane][2]),
         outputW, input.size(4), output.size(4), poolSizeW);
 
-      scalar_t maxVal = at::numeric_limits<scalar_t>::lowest();
+      scalar_t maxVal = at::numeric_limits<scalar_t>::lower_bound();
       int64_t maxIndex = -1;
 
       for(int64_t t = poolT; t < poolT + poolSizeT; ++ t) {
