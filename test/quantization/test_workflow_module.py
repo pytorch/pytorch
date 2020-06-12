@@ -566,6 +566,27 @@ class TestFakeQuantizePerTensor(TestCase):
             zero_point_shape_before, zero_point_shape_after,
             msg="FakeQuant zero_point shape must stay consistent")
 
+    def fake_quant_scriptable(self):
+        observer = default_observer
+        quant_min = 0
+        quant_max = 255
+        fq_module = FakeQuantize(observer, quant_min, quant_max)
+        scripted_module = torch.jit.script(fq_module)
+
+        X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
+
+        fq_module(X)
+        scripted_module(X)
+        self.assertEqual(fq_module.calculate_qparams(),
+                         scripted_module.calculate_qparams())
+
+        buf = io.BytesIO()
+        torch.jit.save(scripted_module, buf)
+        buf.seek(0)
+        loaded_module = torch.jit.load(buf)
+        self.assertEqual(fq_module.calculate_qparams(),
+                         loaded_module.calculate_qparams())
+
 
 class TestFakeQuantizePerChannel(TestCase):
 
