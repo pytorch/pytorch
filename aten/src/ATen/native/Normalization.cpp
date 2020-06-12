@@ -330,7 +330,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
         // dot product of the Q(X) and gradOuput
         accscalar_t dotp = 0;
-        auto iter = TensorIteratorConfig()
+        iter = TensorIteratorConfig()
           .add_input(in)
           .add_input(grad_out)
           .build();

@@ -20,10 +20,10 @@
 //
 // Example:
 //
-//   auto iter = TensorIterator();
-//   iter.add_output(output);
-//   iter.add_input(input);
-//   iter.build()
+//   auto iter = TensorIteratorConfig()
+//     .add_output(output)
+//     .add_input(input)
+//     .build()
 //
 // [MyKernel.cpp / MyKernel.cu]
 //   cpu_kernel(iter, [](float a, float b) {
