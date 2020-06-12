@@ -90,6 +90,7 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
     using arg2_t = typename traits::template arg<1>::type;
     auto a = iter.scalar_value<arg1_t>(1);
     iter.remove_operand(1);
+    const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
     gpu_kernel(iter, [=]GPU_LAMBDA(arg2_t b) {
       return f(a, b);
     });
