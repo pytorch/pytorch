@@ -12,6 +12,12 @@ else
   export VC_YEAR=2019
 fi
 
+if [[ "$PACKAGE_TYPE" == wheel ]]; then
+  export DATE=20200610
+else
+  export DATE=20200615
+fi
+
 pushd "$BUILDER_ROOT"
 
 ./windows/internal/smoke_test.bat

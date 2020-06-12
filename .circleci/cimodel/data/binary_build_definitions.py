@@ -64,14 +64,16 @@ class Conf(object):
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase, nightly)
         job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
+
         if self.smoke:
-            job_def["requires"] = [
-                "update_s3_htmls",
-            ]
-            job_def["filters"] = branch_filters.gen_filter_dict(
-                branches_list=["nightly"],
-                tags_list=[branch_filters.RC_PATTERN],
-            )
+            if self.os != "windows":
+                job_def["requires"] = [
+                    "update_s3_htmls",
+                ]
+                job_def["filters"] = branch_filters.gen_filter_dict(
+                    branches_list=["nightly"],
+                    tags_list=[branch_filters.RC_PATTERN],
+                )
         else:
             if phase in ["upload"]:
                 filter_branch = "nightly"
