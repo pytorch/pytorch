@@ -59,10 +59,9 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
 
   const auto& matches = findPatternMatches(pattern_graph, *graph);
   for (const Match& match : matches) {
-    if (!std::all_of(
-            filters.begin(),
-            filters.end(),
-            [&](const MatchFilter& f) { return f(match, vmap); })) {
+    if (!std::all_of(filters.begin(), filters.end(), [&](const MatchFilter& f) {
+          return f(match, vmap);
+        })) {
       continue;
     }
     // Matches might overlap with each other, in that case some of the nodes in

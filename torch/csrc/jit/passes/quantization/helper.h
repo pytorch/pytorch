@@ -75,7 +75,8 @@ TORCH_API bool userDefinedCallFunction(Node* n);
 TORCH_API bool hasScalarInput(Node* n);
 
 // Check if a node is quantizable
-TORCH_API bool nodeQuantizable(Node* n,
+TORCH_API bool nodeQuantizable(
+    Node* n,
     QuantType quant_type = QuantType::STATIC);
 
 // Check if a use of the value is quantizable, this depends on
