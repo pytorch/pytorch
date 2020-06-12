@@ -10,7 +10,8 @@ from caffe2.python import core, workspace
 
 # This is a standalone test that doesn't use test_util as we're testing
 # initialization and thus we should be the ones calling GlobalInit
-@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+@unittest.skipIf(not workspace.has_cuda_support,
+                 "THC pool testing is obscure and doesn't work on HIP yet")
 class TestGPUInit(unittest.TestCase):
     def testTHCAllocator(self):
         core.GlobalInit(['caffe2', '--caffe2_cuda_memory_pool=thc'])
