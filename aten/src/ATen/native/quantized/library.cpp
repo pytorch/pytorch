@@ -25,6 +25,11 @@ TORCH_LIBRARY(quantized, m) {
   m.def("add_scalar_relu(Tensor qa, Scalar b) -> Tensor qc");
   m.def("add_scalar_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_scalar_relu_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
+  // TODO: remove after broadcasting is supported
+  m.def("add_scalar_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out) -> Tensor(a!) out");
+  m.def("add_scalar.Tensor(Tensor qa, Tensor b) -> Tensor qc");
+  m.def("add_scalar_relu.Tensor(Tensor qa, Tensor b) -> Tensor qc");
+  m.def("add_scalar_relu_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out) -> Tensor(a!) out");
   m.def("batch_norm2d(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm2d_relu(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm3d(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
@@ -100,6 +105,11 @@ TORCH_LIBRARY(quantized, m) {
   m.def("mul_scalar_relu(Tensor qa, Scalar b)-> Tensor qc");
   m.def("mul_scalar_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_scalar_relu_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
+  // TODO: remove after broadcasting is supported
+  m.def("mul_scalar.Tensor(Tensor qa, Tensor b)-> Tensor qc");
+  m.def("mul_scalar_relu.Tensor(Tensor qa, Tensor b)-> Tensor qc");
+  m.def("mul_scalar_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
+  m.def("mul_scalar_relu_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
   // NB: missing a space after comma here...
   m.def("max_pool2d(Tensor qx, int[] kernel_size, int[] stride, int[] padding, int[] dilation,bool ceil_mode) -> Tensor");
   m.def("relu6(Tensor qx, bool inplace=False) -> Tensor");
