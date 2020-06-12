@@ -10952,7 +10952,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
-    def test_max_pool_nan(self, device, dtype):
+    def test_max_pool_nan_inf(self, device, dtype):
         for adaptive in ['', 'adaptive_']:
             for num_dim in [1, 2, 3]:
                 fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
@@ -10961,16 +10961,27 @@ class TestNNDeviceType(NNTestCase):
                 res = fn(x, 1 if adaptive else 3)
                 self.assertTrue(math.isnan(res.item()))
 
+                x2 = torch.full([1, 1] + num_dim * [3], -inf, device=device, dtype=dtype)
+                res2 = fn(x2, 1 if adaptive else 3)
+
+                #TODO: fix CPU adaptive_maxpool_2d inf
+                if device != 'cpu' and adaptive != 'adaptive_':
+                    self.assertTrue(math.isinf(res2.item()))
+
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     @onlyCUDA   # TODO: fix CPU fractional_maxpool_2d
-    def test_fractional_max_pool_nan(self, device, dtype):
+    def test_fractional_max_pool_nan_inf(self, device, dtype):
         for num_dim in [2, 3]:
             fn_name = 'FractionalMaxPool{}d'.format(num_dim)
             fn = getattr(nn, fn_name)(kernel_size=2, output_size=1)
             x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype)
             res = fn(x)
             self.assertTrue(math.isnan(res.item()))
+
+            x2 = torch.full([1, 1] + num_dim * [3], -inf, device=device, dtype=dtype)
+            res2 = fn(x2)
+            self.assertTrue(math.isinf(res2.item()))
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
