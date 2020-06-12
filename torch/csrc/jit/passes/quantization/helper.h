@@ -104,7 +104,7 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // ==================== filter functions for matches ==============
-// filter to check if the alpha argument of aten::add is constant 1
+// filter to check if the %alpha argument of aten::add is constant 1
 bool aten_add_alpha_is_one(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
