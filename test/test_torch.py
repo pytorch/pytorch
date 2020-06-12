@@ -18767,6 +18767,7 @@ tensor_op_tests = [
     ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('sinc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2 + _complex_types, [torch.bfloat16]),
     ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
@@ -18954,6 +18955,7 @@ class _TorchMathTestMeta(object):
         self.replace_inf_with_nan = replace_inf_with_nan
 
 torch_op_tests = [_TorchMathTestMeta('sin'),
+                  _TorchMathTestMeta('sinc'),
                   _TorchMathTestMeta('asin', reffn='arcsin'),
                   _TorchMathTestMeta('asinh', reffn='arcsinh'),
                   _TorchMathTestMeta('sinh'),
