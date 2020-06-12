@@ -28,7 +28,7 @@ TypePtr ScriptTypeParser::subscriptToType(
   if (typeName == "Tuple") {
     std::vector<TypePtr> subscript_expr_types;
     for (auto expr : subscript.subscript_exprs()) {
-      subscript_expr_types.push_back(parseTypeFromExpr(expr));
+      subscript_expr_types.push_back(parseTypeFromExprImpl(expr));
     }
     return TupleType::create(subscript_expr_types);
   } else if (typeName == "List") {
@@ -37,7 +37,8 @@ TypePtr ScriptTypeParser::subscriptToType(
           << " expected exactly one element type but found "
           << subscript.subscript_exprs().size();
     }
-    auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+    auto elem_type =
+        parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return ListType::create(elem_type);
 
   } else if (typeName == "Optional") {
@@ -46,7 +47,8 @@ TypePtr ScriptTypeParser::subscriptToType(
           << " expected exactly one element type but found "
           << subscript.subscript_exprs().size();
     }
-    auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+    auto elem_type =
+        parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return OptionalType::create(elem_type);
 
   } else if (typeName == "Future") {
@@ -55,7 +57,8 @@ TypePtr ScriptTypeParser::subscriptToType(
           << " expected exactly one element type but found "
           << subscript.subscript_exprs().size();
     }
-    auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+    auto elem_type =
+        parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return FutureType::create(elem_type);
   } else if (typeName == "RRef") {
     if (subscript.subscript_exprs().size() != 1) {
@@ -63,7 +66,8 @@ TypePtr ScriptTypeParser::subscriptToType(
           << " expected exactly one element type but found "
           << subscript.subscript_exprs().size();
     }
-    auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+    auto elem_type =
+        parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return RRefType::create(elem_type);
   } else if (typeName == "Dict") {
     if (subscript.subscript_exprs().size() != 2) {
@@ -71,8 +75,8 @@ TypePtr ScriptTypeParser::subscriptToType(
           << " expected exactly 2 element types but found "
           << subscript.subscript_exprs().size();
     }
-    auto key_type = parseTypeFromExpr(subscript.subscript_exprs()[0]);
-    auto value_type = parseTypeFromExpr(subscript.subscript_exprs()[1]);
+    auto key_type = parseTypeFromExprImpl(subscript.subscript_exprs()[0]);
+    auto value_type = parseTypeFromExprImpl(subscript.subscript_exprs()[1]);
     return DictType::create(key_type, value_type);
   } else {
     throw ErrorReport(subscript.range())
@@ -161,6 +165,19 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
 }
 
 TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
+  // the resolver needs to recursively resolve the expression, so to avoid
+  // resolving all type expr subtrees we only use it for the top level
+  // expression and base type names.
+  if (resolver_) {
+    if (auto typePtr =
+            resolver_->resolveType(expr.range().text(), expr.range())) {
+      return typePtr;
+    }
+  }
+  return parseTypeFromExprImpl(expr);
+}
+
+TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
@@ -289,13 +306,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         type = maybe_broad_list->first;
         N = maybe_broad_list->second;
       } else {
-        if (resolver_) {
-          type = resolver_->resolveType(
-              type_expr.range().text(), type_expr.range());
-        }
-        if (!type) {
-          type = parseTypeFromExpr(decl_arg.type().get());
-        }
+        type = parseTypeFromExpr(decl_arg.type().get());
       }
     }
     c10::optional<IValue> default_value = c10::nullopt;
@@ -328,13 +339,7 @@ std::vector<Argument> ScriptTypeParser::parseReturnFromDecl(const Decl& decl) {
 
   TypePtr parsed_type;
   Expr type_expr = decl.return_type().get();
-  if (resolver_) {
-    parsed_type =
-        resolver_->resolveType(type_expr.range().text(), type_expr.range());
-  }
-  if (!parsed_type) {
-    parsed_type = parseTypeFromExpr(type_expr);
-  }
+  parsed_type = parseTypeFromExpr(type_expr);
   return {Argument(
       "",
       parsed_type,
