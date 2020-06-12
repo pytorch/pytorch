@@ -101,9 +101,6 @@ __global__ void fractional_max_pool3d_out_frame(
         }
       }
 
-      assert(maxVal != at::numeric_limits<scalar_t>::lowest());
-      assert(maxIndex != -1);
-
       indices[batch][plane][outputT][outputH][outputW] = maxIndex;
       output[batch][plane][outputT][outputH][outputW] = maxVal;
     }
