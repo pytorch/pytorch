@@ -2564,10 +2564,6 @@ void testGPU_FusionReduction4() {
   tv2->axis(-2)->parallelize(ParallelType::TIDy);
   tv1->axis(-2)->parallelize(ParallelType::TIDy);
 
-  fusion.printMath();
-  GPULower lower(&fusion);
-  lower.printKernel(std::cout);
-
   prog.device_ = 0;
   prog.grid(1, bidy);
   prog.block(tidx, tidy);
