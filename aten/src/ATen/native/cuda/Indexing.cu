@@ -815,7 +815,7 @@ Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, long dim,
 }
 
 Tensor index_select_cuda(const Tensor& self, long dim, const Tensor& index) {
-  Tensor out;
+  Tensor out = at::empty({0}, self.options());
   index_select_out_cuda(out, self, dim, index);
   return out;
 }
