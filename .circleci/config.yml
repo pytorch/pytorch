@@ -1192,6 +1192,8 @@ jobs:
     - persist_to_workspace:
         root: "C:/w"
         paths: final_pkgs
+    - store_artifacts:
+        path: C:/w/final_pkgs
 
   binary_windows_test:
     <<: *binary_windows_params
@@ -7233,20 +7235,14 @@ workflows:
                 - /release\/.*/
           name: binary_macos_libtorch_3_7_cpu_build
       - binary_windows_build:
-          build_environment: libtorch 3.7 cpu debug
-          name: binary_windows_libtorch_3_7_cpu_debug_build
-      - binary_windows_build:
-          build_environment: libtorch 3.7 cpu release
-          name: binary_windows_libtorch_3_7_cpu_release_build
+          build_environment: wheel 3.6 cu102
+          name: binary_windows_wheel_3_6_cu102_build
       - binary_windows_build:
           build_environment: wheel 3.7 cu102
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: binary_windows_wheel_3_7_cu102_build
+      - binary_windows_build:
+          build_environment: wheel 3.8 cu102
+          name: binary_windows_wheel_3_8_cu102_build
       - binary_windows_test:
           build_environment: libtorch 3.7 cpu debug
           name: binary_windows_libtorch_3_7_cpu_debug_test
