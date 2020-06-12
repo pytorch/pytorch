@@ -374,7 +374,8 @@ TRACE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
     .typed<${return_type} (${schema_order_arg_types})>();
-${assign_return_values}c10::Dispatcher::singleton().redispatch<${schema_order_ret_and_arg_types}>(${schema_order_trace_dispatch_args});
+${assign_return_values}c10::Dispatcher::singleton()
+    .redispatch<${schema_order_ret_and_arg_types}>(${schema_order_trace_dispatch_args});
 """)
 
 
