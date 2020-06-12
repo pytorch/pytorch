@@ -1963,6 +1963,17 @@ class AbstractTestCases:
                 self.assertTrue((res1 < 6).all().item())
                 self.assertTrue((res1 >= 0).all().item())
 
+        def test_rand_reproducibility_with_generator(self):
+            def get_gen():
+                return torch.Generator().manual_seed(42)
+
+            self.assertEqual(torch.rand(1, generator=get_gen()), 0.8823)
+            self.assertEqual(torch.rand_like(torch.empty(1), generator=get_gen()), 0.8823)
+            self.assertEqual(torch.randn(1, generator=get_gen()), 0.3367)
+            self.assertEqual(torch.randn_like(torch.empty(1), generator=get_gen()), 0.3367)
+            self.assertEqual(torch.randint(1, 100, (1,), generator=get_gen()), 7)
+            self.assertEqual(torch.randperm(10, generator=get_gen()), torch.tensor([2, 6, 1, 8, 4, 5, 0, 9, 3, 7]))
+
         def test_slice(self):
             empty = torch.empty(0, 4)
             x = torch.arange(0., 16).view(4, 4)
