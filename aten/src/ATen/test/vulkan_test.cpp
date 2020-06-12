@@ -31,15 +31,6 @@ TEST(VulkanTest, ToVulkanToCpu) {
   ASSERT_TRUE(almostEqual(t2, t));
 }
 
-TEST(VulkanTest, FailOnStrides) {
-  if (!at::vulkan::is_available())
-    return;
-  auto t = at::empty({1, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  auto tv = t.vulkan();
-  ASSERT_ANY_THROW(tv.strides());
-  ASSERT_ANY_THROW(tv.stride(0));
-}
-
 TEST(VulkanTest, upsampleNearest2D) {
   if (!at::vulkan::is_available())
     return;
