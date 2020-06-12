@@ -126,16 +126,9 @@ struct uniform_real_distribution {
     T to_;
 };
 
-#define DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(member)              \
-template <typename T>                                                \
-struct has_member_##member                                           \
-{                                                                    \
-    typedef char yes;                                                \
-    typedef long no;                                                 \
-    template <typename U> static yes test(decltype(&U::member));     \
-    template <typename U> static no test(...);                       \
-    static constexpr bool value = sizeof(test<T>(0)) == sizeof(yes); \
-}
+#define DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(X)                                                  \
+template<class T, class Enable = void> struct has_member_##X : std::false_type {};                  \
+template<class T> struct has_member_##X<T, guts::void_t<decltype(T::X)>> : std::true_type {};
 
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(next_double_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_double_normal_sample);
@@ -204,28 +197,28 @@ struct normal_distribution {
   C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
     dist_acctype<T> ret;
     // return cached values if available
-    if (std::is_same<T, double>::value && maybe_get_next_double_normal_sample(generator, &ret)) {
-      ret = transformation::normal(ret, mean, stdv);
-      return ret;
-    } else if (maybe_get_next_float_normal_sample(generator, &ret)) {
-      ret = transformation::normal(ret, mean, stdv);
-      return ret;
-    } else {
-      // otherwise generate new normal values
-      uniform_real_distribution<T> uniform(0.0, 1.0);
-      const dist_acctype<T> u1 = uniform(generator);
-      const dist_acctype<T> u2 = uniform(generator);
-      const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
-      const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
-      if (std::is_same<T, double>::value) {
-        maybe_set_next_double_normal_sample(generator, r * ::sin(theta));
-      } else {
-        maybe_set_next_float_normal_sample(generator, r * ::sin(theta));
+    if (std::is_same<T, double>::value) {
+      if (maybe_get_next_double_normal_sample(generator, &ret)) {
+        return transformation::normal(ret, mean, stdv);
       }
-      ret = r * ::cos(theta);
-      ret = transformation::normal(ret, mean, stdv);
-      return ret;
+    } else {
+      if (maybe_get_next_float_normal_sample(generator, &ret)) {
+        return transformation::normal(ret, mean, stdv);
+      }
     }
+    // otherwise generate new normal values
+    uniform_real_distribution<T> uniform(0.0, 1.0);
+    const dist_acctype<T> u1 = uniform(generator);
+    const dist_acctype<T> u2 = uniform(generator);
+    const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
+    const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
+    if (std::is_same<T, double>::value) {
+      maybe_set_next_double_normal_sample(generator, r * ::sin(theta));
+    } else {
+      maybe_set_next_float_normal_sample(generator, r * ::sin(theta));
+    }
+    ret = r * ::cos(theta);
+    return transformation::normal(ret, mean, stdv);
   }
 
   private:

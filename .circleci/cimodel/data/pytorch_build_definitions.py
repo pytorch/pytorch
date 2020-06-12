@@ -188,6 +188,10 @@ def instantiate_configs():
         is_xla = fc.find_prop("is_xla") or False
         parms_list_ignored_for_docker_image = []
 
+        vulkan = fc.find_prop("vulkan") or False
+        if vulkan:
+            parms_list_ignored_for_docker_image.append("vulkan")
+
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
             python_version = fc.find_prop("pyver")
@@ -222,10 +226,6 @@ def instantiate_configs():
             # TODO The gcc version is orthogonal to CUDA version?
             cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
             parms_list.append(cuda_gcc_version)
-
-        vulkan = fc.find_prop("vulkan") or False
-        if vulkan:
-            parms_list_ignored_for_docker_image.append("vulkan")
 
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
