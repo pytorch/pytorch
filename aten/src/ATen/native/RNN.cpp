@@ -286,7 +286,8 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
     c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed,
     c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed,
     at::Tensor bias_ih,
-    at::Tensor bias_hh);
+    at::Tensor bias_hh,
+    bool reduce_range);
 
 struct QuantizedCellParamsDynamic : public CellParamsBase {
   QuantizedCellParamsDynamic(
@@ -295,16 +296,19 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
       c10::intrusive_ptr<LinearPackedParamsBase>
           _packed_w_hh, /* Prepacked Weight Tensor */
       Tensor _b_ih, /* float Bias Tensor */
-      Tensor _b_hh /* float Bias Tensor */)
+      Tensor _b_hh, /* float Bias Tensor */
+      bool _reduce_range = false /* Use reduced range for activation tensors */)
       : packed_w_ih(std::move(_packed_w_ih)),
         packed_w_hh(std::move(_packed_w_hh)),
         b_ih_(std::move(_b_ih)),
-        b_hh_(std::move(_b_hh)) {}
+        b_hh_(std::move(_b_hh)),
+        reduce_range_(_reduce_range) {}
 
   c10::intrusive_ptr<LinearPackedParamsBase> packed_w_ih;
   c10::intrusive_ptr<LinearPackedParamsBase> packed_w_hh;
   const Tensor b_ih_;
   const Tensor b_hh_;
+  bool reduce_range_;
 
   Tensor matmul_ih(const Tensor& input) const override {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
@@ -314,10 +318,10 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
   }
 
   Tensor linear_ih(const Tensor& input_ih) const override {
-    return packed_w_ih->apply_dynamic(input_ih);
+    return packed_w_ih->apply_dynamic(input_ih, reduce_range_);
   }
   Tensor linear_hh(const Tensor& input_hh) const override {
-    return packed_w_hh->apply_dynamic(input_hh);
+    return packed_w_hh->apply_dynamic(input_hh, reduce_range_);
   }
 
   const Tensor& b_ih() const override {
@@ -340,27 +344,31 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     std::vector<c10::intrusive_ptr<LinearPackedParamsBase>>
         packed_params_to_serialize{packed_w_ih, packed_w_hh};
 
+    // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
         std::move(tensors_to_serialize),
         {},
-        {},
+        {reduce_range_},
         std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
     std::vector<at::Tensor> tensors;
     std::vector<c10::intrusive_ptr<LinearPackedParamsBase>> packed_params;
-    std::tie(std::ignore, tensors, std::ignore, std::ignore, packed_params) =
+    std::vector<int64_t> serialized_ints;
+    std::tie(std::ignore, tensors, std::ignore, serialized_ints, packed_params) =
         std::move(state);
     TORCH_INTERNAL_ASSERT(tensors.size() == 2);
     TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
 
+    bool reduce_range = serialized_ints.empty() ? false : serialized_ints[0];
     return make_quantized_cell_params_dynamic(
         /*w_ih_packed=*/std::move(packed_params[0]),
         /*w_hh_packed=*/std::move(packed_params[1]),
         /*bias_ih=*/std::move(tensors[0]),
-        /*bias_hh=*/std::move(tensors[1]));
+        /*bias_hh=*/std::move(tensors[1]),
+        /*reduce_range=*/reduce_range);
   }
 };
 
@@ -368,12 +376,15 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
     c10::intrusive_ptr<LinearPackedParamsBase> w_ih_packed,
     c10::intrusive_ptr<LinearPackedParamsBase> w_hh_packed,
     at::Tensor bias_ih,
-    at::Tensor bias_hh) {
+    at::Tensor bias_hh,
+    bool reduce_range) {
+
   return c10::make_intrusive<QuantizedCellParamsDynamic>(
       /*_packed_w_ih=*/std::move(w_ih_packed),
       /*_packed_w_hh=*/std::move(w_hh_packed),
       /*_b_ih=*/std::move(bias_ih),
-      /*_b_hh=*/std::move(bias_hh));
+      /*_b_hh=*/std::move(bias_hh),
+      /*_reduce_range=*/reduce_range);
 }
 
 c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
@@ -1248,41 +1259,69 @@ bool _use_cudnn_rnn_flatten_weight() {
     return std::make_tuple(                                                 \
         std::move(packed_output.data), std::move(std::get<1>(result)));     \
   }
-
+#define ONE_HIDDEN_QRNN(NAME, CELL)                                         \
+  std::tuple<Tensor, Tensor> NAME##_input(                                  \
+      const Tensor& _input,                                                 \
+      const Tensor& hx,                                                     \
+      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,                \
+      bool has_biases,                                                      \
+      int64_t num_layers,                                                   \
+      double dropout_p,                                                     \
+      bool train,                                                           \
+      bool bidirectional,                                                   \
+      bool batch_first) {                                                   \
+    std::vector<QRNNCellParamsWrapper> params;                              \
+    for (c10::intrusive_ptr<CellParamsBase> x : _params) {                  \
+      params.emplace_back(std::move(x));                                    \
+    }                                                                       \
+    auto input = batch_first ? _input.transpose(0, 1) : _input;             \
+    auto results =                                                          \
+        _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>(     \
+            input,                                                          \
+            params,                                                         \
+            hx.unbind(0),                                                   \
+            num_layers,                                                     \
+            dropout_p,                                                      \
+            train,                                                          \
+            bidirectional);                                                 \
+    if (batch_first) {                                                      \
+      std::get<0>(results).transpose_(0, 1);                                \
+    }                                                                       \
+    return results;                                                         \
+  }                                                                         \
+                                                                            \
+  std::tuple<Tensor, Tensor> NAME##_data(                                   \
+      const Tensor& data,                                                   \
+      const Tensor& batch_sizes,                                            \
+      const Tensor& hx,                                                     \
+      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,                \
+      bool has_biases,                                                      \
+      int64_t num_layers,                                                   \
+      double dropout_p,                                                     \
+      bool train,                                                           \
+      bool bidirectional) {                                                 \
+    std::vector<QRNNCellParamsWrapper> params;                              \
+    for (c10::intrusive_ptr<CellParamsBase> x : _params) {                  \
+      params.emplace_back(std::move(x));                                    \
+    }                                                                       \
+    PackedSequence input{data, batch_sizes};                                \
+    auto result =                                                           \
+        _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
+            input,                                                          \
+            params,                                                         \
+            hx.unbind(0),                                                   \
+            num_layers,                                                     \
+            dropout_p,                                                      \
+            train,                                                          \
+            bidirectional);                                                 \
+    auto& packed_output = std::get<0>(result);                              \
+    return std::make_tuple(                                                 \
+        std::move(packed_output.data), std::move(std::get<1>(result)));     \
+  }
 
 
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
-
-// scenarios where runtime is dominated by memory fetches of the weight matrix.
- std::tuple<Tensor, Tensor> quantized_gru_input(
-      const Tensor& _input,
-      const Tensor& hx,
-      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,
-      bool has_biases,
-      int64_t num_layers,
-      double dropout_p,
-      bool train,
-      bool bidirectional,
-      bool batch_first) {
-    std::vector<QRNNCellParamsWrapper> params;
-    for (c10::intrusive_ptr<CellParamsBase> x : _params) {
-      params.emplace_back(std::move(x));
-    }
-    auto input = batch_first ? _input.transpose(0, 1) : _input;
-    auto results =
-        _rnn_impl_with_concat<GRUCell<QRNNCellParamsWrapper>, FullLayer, FullBidirectionalLayer>(
-            input,
-            params,
-            hx.unbind(0),
-            num_layers,
-            dropout_p,
-            train,
-            bidirectional);
-    if (batch_first) {
-      std::get<0>(results).transpose_(0, 1);
-    }
-    return results;
-  }
+ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 
 // BC wrappers for quantized_gru
 
@@ -1312,39 +1351,6 @@ std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
       bidirectional,
       batch_first);
 }
-
-std::tuple<Tensor, Tensor> quantized_gru_data(
-      const Tensor& data,
-      const Tensor& batch_sizes,
-      const Tensor& hx,
-      c10::List<c10::intrusive_ptr<CellParamsBase>> _params,
-      bool has_biases,
-      int64_t num_layers,
-      double dropout_p,
-      bool train,
-      bool bidirectional) {
-    std::cout << "In function quantized_gru_data" << num_layers;
-    std::vector<QRNNCellParamsWrapper> params;
-    for (c10::intrusive_ptr<CellParamsBase> x : _params) {
-      params.emplace_back(std::move(x));
-    }
-    PackedSequence input{data, batch_sizes};
-
-    std::tuple<PackedSequence, Tensor> result;
-    std::cout << "num_layers" << num_layers;
-    result =
-        _rnn_impl_with_concat<GRUCell<QRNNCellParamsWrapper>, PackedLayer, PackedBidirectionalLayer>(
-            input,
-            params,
-            hx.unbind(0),
-            num_layers,
-            dropout_p,
-            train,
-            bidirectional);
-    auto& packed_output = std::get<0>(result);
-    return std::make_tuple(
-        std::move(packed_output.data), std::move(std::get<1>(result)));
-  }
 
 std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
     const Tensor& data,
@@ -1875,7 +1881,7 @@ static auto registry =
                 .kernel<
                     decltype(quantized_lstm_data_legacy),
                     quantized_lstm_data_legacy>(DispatchKey::CPUTensorId))
-        .op("quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh) -> __torch__.torch.classes.rnn.CellParamsBase",
+        .op("quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh, bool reduce_range=False) -> __torch__.torch.classes.rnn.CellParamsBase",
             torch::RegisterOperators::options()
                 .kernel<
                     decltype(make_quantized_cell_params_dynamic),
@@ -1891,18 +1897,14 @@ static auto registry =
                 .kernel<
                     decltype(make_quantized_cell_params),
                     make_quantized_cell_params>(DispatchKey::CPUTensorId))
-        .op("quantized::quantized_gru_input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_gru_input), quantized_gru_input>(
                     DispatchKey::CPUTensorId))
-        .op("quantized::quantized_gru_data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)",
+        .op("aten::quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<decltype(quantized_gru_data), quantized_gru_data>(
                     DispatchKey::CPUTensorId))
-//        .op("quantized::quantized_gru_data(Tensor data, Tensor batch_sizes, Tensor hx) -> (Tensor, Tensor)",
-//            torch::RegisterOperators::options()
-//                .kernel<decltype(quantized_gru_data), quantized_gru_data>(
-//                    DispatchKey::CPUTensorId))
         .op("aten::quantized_gru.input_legacy(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)",
             torch::RegisterOperators::options()
                 .kernel<

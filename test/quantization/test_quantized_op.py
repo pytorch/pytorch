@@ -2136,8 +2136,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
     def _get_rnn_inputs(self, seq_len, num_batches, input_size, hidden_size, num_directions):
         # For Input (seq_len, batch, input_size)
         X = torch.randn(seq_len, num_batches, input_size)
-        # TODO: Change to reduce_range=True once support is enabled
-        s, z = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=False)
+        s, z = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=True)
         Xq = torch.quantize_per_tensor(X, s, z, torch.quint8)
 
         # For H and C: (num_layers(1) * num_directions, batch, hidden_size)
@@ -2149,9 +2148,9 @@ class TestDynamicQuantizedRNNOp(TestCase):
             H = torch.zeros(num_directions, num_batches, hidden_size)
             C = torch.zeros(num_directions, num_batches, hidden_size)
 
-        s, z = _calculate_dynamic_qparams(H, torch.quint8, reduce_range=False)
+        s, z = _calculate_dynamic_qparams(H, torch.quint8, reduce_range=True)
         Hq = torch.quantize_per_tensor(H, s, z, torch.quint8)
-        s, z = _calculate_dynamic_qparams(C, torch.quint8, reduce_range=False)
+        s, z = _calculate_dynamic_qparams(C, torch.quint8, reduce_range=True)
         Cq = torch.quantize_per_tensor(C, s, z, torch.quint8)
         return Xq, Hq, Cq
 
@@ -2272,15 +2271,15 @@ class TestDynamicQuantizedRNNOp(TestCase):
                                              True,
                                              False)
 
-                        result_dynamic = torch.ops.quantized.quantized_gru_input(Xq.dequantize(),
-                                                                                 Hq.dequantize(),
-                                                                                 ([cell_params, cell_params]),
-                                                                                 True,
-                                                                                 1,
-                                                                                 0,
-                                                                                 False,
-                                                                                 True,
-                                                                                 False)
+                        result_dynamic = torch.quantized_gru(Xq.dequantize(),
+                                                             Hq.dequantize(),
+                                                             ([cell_params, cell_params]),
+                                                             True,
+                                                             1,
+                                                             0,
+                                                             False,
+                                                             True,
+                                                             False)
                     else:
                         result_ref = _VF.gru(Xq.dequantize(),
                                              Hq.dequantize(),
@@ -2292,15 +2291,15 @@ class TestDynamicQuantizedRNNOp(TestCase):
                                              False,
                                              False)
 
-                        result_dynamic = torch.ops.quantized.quantized_gru_input(Xq.dequantize(),
-                                                                                 Hq.dequantize(),
-                                                                                 ([cell_params]),
-                                                                                 True,
-                                                                                 1,
-                                                                                 0,
-                                                                                 False,
-                                                                                 False,
-                                                                                 False)
+                        result_dynamic = torch.quantized_gru(Xq.dequantize(),
+                                                             Hq.dequantize(),
+                                                             ([cell_params]),
+                                                             True,
+                                                             1,
+                                                             0,
+                                                             False,
+                                                             False,
+                                                             False)
 
 
                 self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_lstm results are off")
