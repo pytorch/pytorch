@@ -507,6 +507,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cuda(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input) {
+  globalContext().alertNotDeterministic("adaptive_avg_pool3d_backward_out_cuda");
   adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
   return gradInput;
 }
@@ -514,6 +515,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cuda(
 Tensor adaptive_avg_pool3d_backward_cuda(
     const Tensor& gradOutput_,
     const Tensor& input) {
+  globalContext().alertNotDeterministic("adaptive_avg_pool3d_backward_cuda");
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
   return gradInput;

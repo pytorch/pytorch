@@ -418,6 +418,7 @@ Tensor& reflection_pad1d_backward_out_cuda(
     Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
+  globalContext().alertNotDeterministic("reflection_pad1d_backward_out_cuda");
   grad_input.resize_as_(input);
   grad_input.zero_();
   reflection_pad1d_backward_out_template(
@@ -429,6 +430,7 @@ Tensor reflection_pad1d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
+  globalContext().alertNotDeterministic("reflection_pad1d_backward_cuda");
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
@@ -451,6 +453,7 @@ Tensor& reflection_pad2d_backward_out_cuda(
     Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
+  globalContext().alertNotDeterministic("reflection_pad2d_backward_out_cuda");
   grad_input.resize_as_(input);
   grad_input.zero_();
   reflection_pad2d_backward_out_template(
@@ -462,6 +465,7 @@ Tensor reflection_pad2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
+  globalContext().alertNotDeterministic("reflection_pad2d_backward_cuda");
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);

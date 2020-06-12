@@ -55,6 +55,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
            THCTensor *total_weight,
            int64_t ignore_index)
 {
+  at::globalContext().alertNotDeterministic("SpatialClassNLLCriterion_updateOutput");
   #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
   TORCH_CHECK(false, "SpatialClassNLLCriterion_updateOutput not suppported with BFloat16");
   #else
