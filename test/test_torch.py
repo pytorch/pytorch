@@ -6079,6 +6079,7 @@ class TestTorchDeviceType(TestCase):
 
         # exp, cos, cosh, tan, atan, tanh, erf, erfc, reciprocal
         self.assertEqual((), torch.exp(zero_d).shape)
+        self.assertEqual((), torch.sinc(zero_d).shape)
         self.assertEqual((), torch.cos(zero_d).shape)
         self.assertEqual((), torch.cosh(zero_d).shape)
         self.assertEqual((), torch.tan(zero_d).shape)
@@ -6091,6 +6092,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.erfc(zero_d).shape)
         self.assertEqual((), torch.reciprocal(zero_d).shape)
         self.assertEqual((1,), torch.exp(one_d).shape)
+        self.assertEqual((1,), torch.sinc(one_d).shape)
         self.assertEqual((1,), torch.cos(one_d).shape)
         self.assertEqual((1,), torch.cosh(one_d).shape)
         self.assertEqual((1,), torch.tan(one_d).shape)
@@ -14618,6 +14620,8 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.sign_(),
                 lambda x, y: x.sin(),
                 lambda x, y: x.sin_(),
+                lambda x, y: x.sinc(),
+                lambda x, y: x.sinc_(),
                 lambda x, y: x.sinh(),
                 lambda x, y: x.sinh_(),
                 lambda x, y: x.sqrt(),

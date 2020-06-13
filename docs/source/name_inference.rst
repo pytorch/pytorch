@@ -199,6 +199,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.sign_`,None
    ":meth:`Tensor.sin`, :func:`torch.sin`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.sin_`,None
+   ":meth:`Tensor.sinc`, :func:`torch.sinc`",:ref:`keeps_input_names-doc`
+   :meth:`Tensor.sinc_`,None
    ":meth:`Tensor.sinh`, :func:`torch.sinh`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.sinh_`,None
    ":meth:`Tensor.asinh`, :func:`torch.asinh`",:ref:`keeps_input_names-doc`

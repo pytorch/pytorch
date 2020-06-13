@@ -606,6 +606,7 @@ _(aten, set) \
 _(aten, sigmoid) \
 _(aten, sign) \
 _(aten, sin) \
+_(aten, sinc) \
 _(aten, sinh) \
 _(aten, size) \
 _(aten, sizes) \
