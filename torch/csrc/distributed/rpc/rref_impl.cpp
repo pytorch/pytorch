@@ -139,7 +139,7 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
       " is an RRef to a ScriptModule. "
       "It can't be sent through RPC "
       "from owner, ",
-      owner(),
+      ownerWorkerInfo(),
       ", to user, ",
       RpcAgent::getCurrentRpcAgent()->getWorkerInfo(),
       ".");
