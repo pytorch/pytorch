@@ -2458,7 +2458,8 @@ void testGPU_FusionReduction4() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
-void testGPU_FusionReduction5() {
+/*
+void testGPU_FusionReductionJ() {
   torch::jit::fuser::cuda::CudaKernel prog;
   Fusion& fusion = *prog.fusion_;
   FusionGuard fg(&fusion);
@@ -2632,6 +2633,8 @@ void testGPU_FusionReductionJ() {
   gpulw.printKernel(cdg);
   std::cout << cdg.str() << std::endl;
 }
+*/
+
 /*
 void testGPU_FusionReductionJ() {
   torch::jit::fuser::cuda::CudaKernel prog;
@@ -2687,6 +2690,78 @@ void testGPU_FusionReductionJ() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 */
+/*
+void testGPU_FusionReductionJ() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  tv1->split(1, 128);
+  auto tv2 = tv1->rFactor({1});
+  std::cout << "fusion 1: \n" << fusion << std::endl;
+
+  tv0->computeAt(tv2, 2);
+  std::cout << "fusion 2: \n" << fusion << std::endl;
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  //tv0->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  std::cout << "fusion 3: \n" << fusion << std::endl;
+
+  GPULower gpulw(&fusion);
+  std::stringstream cdg;
+  gpulw.printKernel(cdg);
+  std::cout << cdg.str() << std::endl;
+}
+*/
+
+void testGPU_FusionReductionJ() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+  tv1->split(1, 128);
+  auto tv2 = tv1->rFactor({1});
+  std::cout << "fusion 1: \n" << fusion << std::endl;
+
+  tv0->computeAt(tv1, 2);
+  tv0->computeAt(tv2, 3);
+  std::cout << "fusion 2: \n" << fusion << std::endl;
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+  //tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv0->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  std::cout << "fusion 3: \n" << fusion << std::endl;
+
+  GPULower gpulw(&fusion);
+  std::stringstream cdg;
+  gpulw.printKernel(cdg);
+  std::cout << cdg.str() << std::endl;
+}
 
 void testGPU_FusionSimpleBCast() {
   {

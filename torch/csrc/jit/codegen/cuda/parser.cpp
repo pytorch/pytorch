@@ -55,12 +55,15 @@ bool hasReduction(const Block* block) {
 
 std::vector<int> reductionAxes(TensorView* tv) {
   size_t n_dims = tv->nDims();
-  std::vector<int> reduction_axes(n_dims);
+  std::vector<int> reduction_axes;
+  printf("reduction axes: ");
   for (int i = 0; i < n_dims; i++) {
     if (tv->axis(i)->isReduction()) {
+      printf("%d, ", i);
       reduction_axes.emplace_back(i);
     }
   }
+  printf("\n");
   return reduction_axes;
 }
 
@@ -72,9 +75,10 @@ size_t coalescReduction(TensorView* tv) {
   std::unordered_map<int, int> coalesc_permute;
   for (size_t i = 0; i < reduction_axes.size(); i++) {
     size_t new_pos = i + n_dims - reduction_axes.size();
-    if (new_pos == i) {
+    if (new_pos == reduction_axes[i]) {
       break;
     } else {
+      printf("permute: %d to %zu\n", reduction_axes[i], new_pos);
       coalesc_permute[reduction_axes[i]] = new_pos;
     }
   }
@@ -167,6 +171,8 @@ class IrParser {
       }
     }
 
+    printf("process node finished\n");
+
     // mark output;
     for (auto jit_output : block->outputs()) {
       TensorView* out =
@@ -183,6 +189,8 @@ class IrParser {
 
       cuda_kernel_->fusion_->addOutput(out);
 
+      // TODO: has_reduction for scheudling should be done on a per output
+      //       tensor basis.
       if (has_reduction) {
         // TODO: this scheduling only works for a single reduction operation in
         //       the fusion, in this case we can coalesc all reduction axes and
@@ -190,7 +198,7 @@ class IrParser {
         // TODO: does this work for multiple outputs?
 
         // query if fastest changing dimension (FCD) is a reduction
-        fcd_reduction = out->axis(out->nDims())->isReduction();
+        fcd_reduction = out->axis(out->nDims()-1)->isReduction();
 
         // TODO: could really use evaluation here. Launch configuration is
         //       imposed by transformation and the information should be
@@ -209,19 +217,6 @@ class IrParser {
           out->merge(1, 2);
         }
 
-        // fcd_reduction could be queried later via 
-        // cuda_kernel_->reduction_axes_, which would ensure we have proper
-        // launch configuratoin.
-        if (fcd_reduction) {
-          out->split(1, nthreads);
-          // necessary to avoid dynamic allocation on intermediates;
-          TensorView* intermediate = out->rFactor({-2});
-        } else {
-          out->split(0, 32);
-          out->split(-1, nthreads/32);
-          // necessary to avoid dynamic allocation on intermediates;
-          TensorView* intermediate = out->rFactor({-2});
-        }
       } else {
         // Merge all dimensions because we're only supporting pointwise
         while (out->nDims() > 1)
@@ -246,6 +241,23 @@ class IrParser {
           continue;
         std::cout << "checkout output" << std::endl;
         TensorView* out_tv = static_cast<TensorView*>(output);
+
+        // fcd_reduction could be queried later via 
+        // cuda_kernel_->reduction_axes_, which would ensure we have proper
+        // launch configuratoin.
+        TensorView* intermediate;
+        if (fcd_reduction) {
+          out_tv->split(-1, nthreads);
+          // necessary to avoid dynamic allocation on intermediates;
+          intermediate = out_tv->rFactor({-2});
+        } else {
+          // TODO: we don't need a full warp here, this should be determined by
+          //       element data type
+          out_tv->split(0, 32);
+          out_tv->split(-1, nthreads/32);
+          // necessary to avoid dynamic allocation on intermediates;
+          intermediate = out_tv->rFactor({-2});
+        }
         for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
           std::cout << inp->as<TensorView>() << std::endl;
           if (inp->getOrigin() == nullptr) {
@@ -254,11 +266,25 @@ class IrParser {
             std::cout << "not direct input!" << std::endl;
             std::cout << inp->getOrigin() << std::endl;
           }
-          //if (inp->getValType().value() == ValType::TensorView)
-            //static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
+          if (fcd_reduction) {
+            if (inp->getValType().value() == ValType::TensorView) {
+              static_cast<TensorView*>(inp)->computeAt(intermediate, -1);
+            }
+          } else {
+            TORCH_INTERNAL_ASSERT(false, "not yet implemented, should do");
+          }
+        }
+        if (fcd_reduction) {
+          intermediate->computeAt(out_tv, 1);
+        } else {
+          TORCH_INTERNAL_ASSERT(false, "not yet implemented, should do");
         }
         std::cout << "finished output!" << std::endl;
-        out_tv->axis(0)->parallelize(ParallelType::BIDx);
+        if (fcd_reduction) {
+          out_tv->axis(0)->parallelize(ParallelType::BIDx);
+        } else {
+          TORCH_INTERNAL_ASSERT(false, "not yet implemented, should do");
+        }
       }
       // Run through intermediates, unroll, and bind their axes
       for (auto val : cuda_kernel_->fusion_->vals()) {
@@ -267,7 +293,11 @@ class IrParser {
         std::cout << "check intermediates" << std::endl;
         std::cout << val->as<TensorView>() << std::endl;
         TensorView* tv = static_cast<TensorView*>(val);
-        tv->axis(-1)->parallelize(ParallelType::TIDx);
+        if (fcd_reduction) {
+          tv->axis(-1)->parallelize(ParallelType::TIDx);
+        } else {
+          TORCH_INTERNAL_ASSERT(false, "not yet implemented, should do");
+        }
       }
       std::cout << "finished scheduling!" << std::endl;
     } else {
