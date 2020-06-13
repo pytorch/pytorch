@@ -27,7 +27,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   static PythonRpcHandler& getInstance();
 
   // Run a pickled Python UDF and return the result py::object
-  py::object runPythonUdf(py::object&& pythonUdf);
+  py::object runPythonUdf(const py::object& pythonUdf);
 
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);

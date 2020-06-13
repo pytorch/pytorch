@@ -30,12 +30,12 @@ enum class ExprType {
   BinaryOp,
   TernaryOp,
   ReductionOp,
+  BroadcastOp,
   ForLoop,
   IfThenElse,
   Allocate,
   Split,
-  Merge,
-  Reorder
+  Merge
 };
 
 enum class UnaryOpType {

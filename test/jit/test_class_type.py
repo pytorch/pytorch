@@ -485,6 +485,7 @@ class TestClassType(JitTestCase):
 
     def test_interface(self):
         global Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2
+
         @torch.jit.script
         class Foo(object):
             def __init__(self):
@@ -647,6 +648,7 @@ class TestClassType(JitTestCase):
 
     def test_overloaded_fn(self):
         global Foo, MyClass  # see [local resolution in python]
+
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):
@@ -802,6 +804,7 @@ class TestClassType(JitTestCase):
 
     def test_cast_overloads(self):
         global Foo  # see [local resolution in python]
+
         @torch.jit.script
         class Foo(object):
             def __init__(self, val):
@@ -980,3 +983,27 @@ class TestClassType(JitTestCase):
 
         with self.assertRaises(torch.jit.Error):
             script_module.calls_unused_indirectly()
+
+    def test_self_referential_method(self):
+        """
+        Test that a scripted class can have a method that refers to the class itself
+        in its type annotations.
+        """
+        @torch.jit.script
+        class Meta(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            def method(self, other: List['Meta']) -> 'Meta':
+                return Meta(len(other))
+
+        class ModuleWithMeta(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.meta = Meta(a)
+
+            def forward(self):
+                new_obj = self.meta.method([self.meta])
+                return new_obj.a
+
+        self.checkModule(ModuleWithMeta(5), ())

@@ -20,7 +20,7 @@ std::string getTypeStr(const c10::TypePtr& type) {
     case c10::TypeKind::InterfaceType:
       return type->cast<c10::InterfaceType>()->name()->qualifiedName();
     default:
-      return type->str();
+      return type->annotation_str();
   }
 }
 } // namespace
@@ -61,6 +61,25 @@ RRefForkData RRef::fork() const {
       ctx.genGloballyUniqueId(),
       ctx.getWorkerId(),
       getTypeStr(type_));
+}
+
+void RRef::handleError(
+    RPCErrorType errorType,
+    const FutureMessage& futMessage) {
+  static std::unordered_map<
+      RPCErrorType,
+      std::function<void(const FutureMessage& fm)>,
+      std::hash<int>>
+      errorHandlers = {
+          {RPCErrorType::TIMEOUT,
+           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::INTENTIONAL_FAILURE,
+           [this](const FutureMessage& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::UNKNOWN_ERROR, [](const FutureMessage& fm) {
+             // Default error handler
+             RRefContext::handleException(fm);
+           }}};
+  errorHandlers.find(errorType)->second(futMessage);
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -106,7 +125,11 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere() const {
+IValue UserRRef::toHere(const float timeoutSeconds) const {
+  TORCH_CHECK(
+      !getTimedOut(),
+      "RRef creation via rpc.remote() timed out, and it "
+      "is possible that the RRef on the owner node does not exist.");
   // see Note [Best-Effort Check on Deleted UserRRefs]
   TORCH_CHECK(
       !deletedOnOwner_,
@@ -146,8 +169,12 @@ IValue UserRRef::toHere() const {
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
-      true /* forceGradRecording */);
+      true /* forceGradRecording */,
+      timeoutSeconds);
 
+  // TODO: we should ideally be able to interrupt this blocking wait if we check
+  // getTimedOut() and it is true
+  // (https://github.com/pytorch/pytorch/issues/39411).
   const Message& message = futureResponse->wait();
   MessageType msgType = message.type();
   auto response = deserializeResponse(message, msgType);
@@ -202,6 +229,10 @@ RRefForkData UserRRef::fork() const {
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
+  TORCH_CHECK(
+      !getTimedOut(),
+      "RRef creation via rpc.remote() timed out, and it "
+      "is possible that the RRef on the owner node does not exist.");
   future_->wait();
   if (future_->hasError()) {
     (void)future_->value(); // Throws the error.

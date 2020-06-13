@@ -1,9 +1,17 @@
 #pragma once
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/quantization/quantization_type.h>
+
+#include <functional>
+#include <regex>
 
 namespace torch {
 namespace jit {
+
+using graph_rewrite_helper::getFuncName;
 
 // Vector of a module and the name of its method
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
@@ -21,10 +29,8 @@ TORCH_API bool isWeight(Value* v);
 // quantize
 TORCH_API bool isBiasOfConvOrLinear(Value* v);
 
-// Check if the value may need observation or not
-// one example for values that doesn't need observation is the
-// scalar inputs for ops like add/mul
-TORCH_API bool mayRequireObservation(Value* v);
+// Get the use as scalar input of clamp ops for the input value
+c10::optional<Use> getClampScalarInputUse(Value* v);
 
 // For a given value `v`, get the list of values that we need to check
 // if they are observed/quantized or not, if so, we can say the
@@ -32,12 +38,20 @@ TORCH_API bool mayRequireObservation(Value* v);
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
 
+// Check if a value in the graph is a Scalar value
+TORCH_API bool isScalar(Value* v);
+
+// Check if value is the input of the graph
+TORCH_API bool hitGraphInput(Value* value);
+
 // =========== helper functions for Node =========
 TORCH_API bool isSingleInputGeneralValueAtenFunction(Node* n);
 
 TORCH_API bool isSingleInputGeneralCallFunction(Node* n);
 
 TORCH_API bool isSingleInputGeneralAtenFunction(Node* n);
+
+TORCH_API bool isClamp(Node* n);
 
 // Check if the node will produce the same result regardless of whether
 // the input tensor is quantized or not, example: aten::size
@@ -64,11 +78,13 @@ TORCH_API bool userDefinedCallFunction(Node* n);
 TORCH_API bool hasScalarInput(Node* n);
 
 // Check if a node is quantizable
-TORCH_API bool nodeQuantizable(Node* n, bool is_dynamic = false);
+TORCH_API bool nodeQuantizable(
+    Node* n,
+    QuantType quant_type = QuantType::STATIC);
 
 // Check if a use of the value is quantizable, this depends on
 // both the use node and the offset
-TORCH_API bool useQuantizable(const Use& use, bool is_dynamic);
+TORCH_API bool useQuantizable(const Use& use, QuantType quant_type);
 
 // Given a CallFunction node, extract the graph of the called function
 TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
@@ -77,7 +93,7 @@ TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 // checks if a block will always raise an Exception
 TORCH_API bool alwaysRaisesException(Block* block);
 
-// =========== helper functions for Graph ==========
+// =========== helper functions for Module  ==========
 // TODO: remove
 TORCH_API std::vector<std::string> getModuleAccessPath(
     Value* instance,
@@ -89,7 +105,39 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
-// =========== helper functions for Module  ==========
+
+// ==================== filter functions for matches ==============
+// filter to check if the %alpha argument of aten::add is constant 1
+bool aten_add_alpha_is_one(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+// filter to check if the functional in CallFunction is relu
+bool is_functional_relu(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+// filter to check if the module is torch.nn.ReLU
+bool is_relu_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+// TODO: add a macro to declare the filters
+bool is_conv1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_batchnorm2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
 
 } // namespace jit
 } // namespace torch
