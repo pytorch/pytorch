@@ -36,7 +36,8 @@ def drosenbrock(tensor):
 def _update(optimizer, x):
     """ Simple update function for multi-processing test. """
     optimizer.zero_grad()
-    val = x.sum().backward()
+    val = x.sum()
+    val.backward()
     optimizer.step()
     return val.item()
 
