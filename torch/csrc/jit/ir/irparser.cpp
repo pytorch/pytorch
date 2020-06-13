@@ -149,7 +149,10 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
     case '-':
       str = "-";
       L.next();
-      L.expect(TK_NUMBER);
+      if (L.cur().kind != TK_NUMBER) {
+        throw ErrorReport(token.range)
+            << "Expected a number after '-' but got:" << token.text();
+      }
       // Fallthrough
     case TK_NUMBER:
       str += L.cur().text();
