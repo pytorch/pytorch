@@ -60,16 +60,6 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistered_th
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredWithTorchFn_thenCanBeCalled) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, TORCH_FN(incrementKernel)));
-  expectCallsIncrement(DispatchKey::CPU);
-}
-
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenCatchAllKernel_whenRegisteredWithTorchFn_thenCanBeCalled) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().catchAllKernel(TORCH_FN(incrementKernel)));
-  expectCallsIncrement(DispatchKey::CPU);
-}
-
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredWithTorchLibraryAndTorchFn_thenCanBeCalled) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("my_op(Tensor dummy, int input) -> int");

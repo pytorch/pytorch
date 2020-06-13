@@ -25,17 +25,11 @@ GENERATED_COMMENT = CodeTemplate(
     "@" + "generated from ${filename}")
 
 UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyKernel(DispatchKey::BackendSelect, TORCH_FN(${function_name}))
-  .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  m.impl_UNBOXED("aten::${op_name_with_overload_name}", ${function_name});
 """)
 
 FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .kernel(DispatchKey::BackendSelect, c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(${function_name})))
-  .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  m.impl("aten::${op_name_with_overload_name}", c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN(${function_name})));
 """)
 
 FUNCTION_DEFINITION = CodeTemplate("""\
@@ -79,15 +73,19 @@ def register_backend_select_methods(declarations, template_path, file_manager):
         for option in decl["options"]:
             if needs_backend_select(option):
                 name = option['name']
+                op_name_with_overload_name = option['name']
                 if option.get('overload_name', '') != '':
                     name = "{0}_{1}".format(name, option['overload_name'])
+                    op_name_with_overload_name = "{0}.{1}".format(op_name_with_overload_name, option['overload_name'])
 
                 if option['use_c10_dispatcher'] == 'full':
                     func_reg = FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
+                                                                op_name_with_overload_name=op_name_with_overload_name,
                                                                 function_name=name)
                 else:
                     assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                     func_reg = UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
+                                                                            op_name_with_overload_name=op_name_with_overload_name,
                                                                             function_name=name)
 
                 dispatch_key_init = gen_dispatch_key_init('_dk', option['formals_list'])
