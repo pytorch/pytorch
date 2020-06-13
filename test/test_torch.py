@@ -115,6 +115,18 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_deterministic_flag(self):
+            deterministic_restore = torch.is_deterministic()
+
+            for deterministic in [True, False]:
+                torch.set_deterministic(deterministic)
+                self.assertEqual(deterministic, torch.is_deterministic())
+
+            with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
+                torch.set_deterministic(1)
+
+            torch.set_deterministic(deterministic_restore)
+
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
             self.assertEqual(x.byte().dtype, torch.uint8)

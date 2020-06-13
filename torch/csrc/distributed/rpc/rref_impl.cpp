@@ -20,7 +20,7 @@ std::string getTypeStr(const c10::TypePtr& type) {
     case c10::TypeKind::InterfaceType:
       return type->cast<c10::InterfaceType>()->name()->qualifiedName();
     default:
-      return type->str();
+      return type->annotation_str();
   }
 }
 } // namespace
