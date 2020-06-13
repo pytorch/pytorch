@@ -665,7 +665,7 @@ def test_worker_info_init_fn(worker_id):
     except RuntimeError as e:
         assert str(e) == "Cannot assign attributes to WorkerInfo objects"
     for k in ['id', 'num_workers', 'seed', 'dataset']:
-        assert "{}:".format(k) in repr(worker_info)
+        assert "{}=".format(k) in repr(worker_info)
     dataset.value = [worker_id, os.getpid()]
 
 
