@@ -34,7 +34,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   auto registry1 = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
       .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-      .impl_unboxedOnlyKernel(DispatchKey::MSNPU, TORCH_FN(empty_override)));
+      .impl_unboxedOnlyKernel(DispatchKey::MSNPU, empty_override));
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
@@ -50,7 +50,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   auto registry2 = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
       .schema("aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")
-      .impl_unboxedOnlyKernel(DispatchKey::MSNPU, TORCH_FN(add_override)));
+      .impl_unboxedOnlyKernel(DispatchKey::MSNPU, add_override));
   add(a, b);
   ASSERT_EQ(test_int, 2);
 
