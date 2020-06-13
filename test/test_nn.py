@@ -10964,7 +10964,7 @@ class TestNNDeviceType(NNTestCase):
                 x2 = torch.full([1, 1] + num_dim * [3], -inf, device=device, dtype=dtype)
                 res2 = fn(x2, 1 if adaptive else 3)
 
-                #TODO: fix CPU adaptive_maxpool_2d inf
+                # TODO: fix CPU adaptive_maxpool_2d inf
                 if device != 'cpu' and adaptive != 'adaptive_':
                     self.assertTrue(math.isinf(res2.item()))
 
