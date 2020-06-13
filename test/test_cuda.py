@@ -2674,7 +2674,7 @@ class TestCudaComm(TestCase):
         if not TEST_MULTIGPU:
             raise unittest.SkipTest("only one GPU detected")
         # test regular
-        results = comm.broadcast(input, (0, 1))
+        results = comm.broadcast(input, (0, torch.device('cuda', 1)))
         for i, t in enumerate(results):
             self.assertEqual(t.get_device(), i)
             self.assertEqual(t, input)
@@ -2709,13 +2709,13 @@ class TestCudaComm(TestCase):
         self._test_broadcast(torch.randn(5, 5).cuda())
 
     def _test_broadcast_coalesced(self, tensors, buffer_size):
-        b_tensors = [comm.broadcast(t, (0, 1)) for t in tensors]
+        b_tensors = [comm.broadcast(t, (0, torch.device('cuda', 1))) for t in tensors]
         for (_, bt), t in zip(b_tensors, tensors):
             self.assertEqual(bt.get_device(), 1)
             self.assertEqual(bt, t)
             self.assertIsInstance(bt, type(t))
 
-        bc_tensors = comm.broadcast_coalesced(tensors, (0, 1), buffer_size=buffer_size)
+        bc_tensors = comm.broadcast_coalesced(tensors, (0, torch.device('cuda', 1)), buffer_size=buffer_size)
         bc_tensors_t = list(zip(*bc_tensors))
         self.assertEqual(b_tensors, bc_tensors_t)
         for (_, bt), (_, bct) in zip(b_tensors, bc_tensors_t):
@@ -2854,7 +2854,7 @@ class TestCudaComm(TestCase):
             ref_chunk_sizes = chunk_sizes
 
         # test regular
-        result = comm.scatter(input, (0, 1), chunk_sizes, dim)
+        result = comm.scatter(input, (0, torch.device('cuda', 1)), chunk_sizes, dim)
         self.assertEqual(len(result), 2)
         chunk_start = 0
         for i, r in enumerate(result):
@@ -2985,7 +2985,7 @@ class TestCudaComm(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_memory_format_scatter_gather(self):
         nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
-        results = torch.cuda.comm.scatter(nhwc, (0, 1), None, 0)
+        results = torch.cuda.comm.scatter(nhwc, (0, torch.device('cuda', 1)), None, 0)
         for result in results:
             self.assertFalse(result.is_contiguous())
             self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
