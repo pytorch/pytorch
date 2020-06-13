@@ -5829,7 +5829,7 @@ Example::
     >>> torch.sum(a)
     tensor(-0.5475)
 
-.. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
+.. function:: nansum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim` treating Not a Numbers (NaNs) as zero. 
