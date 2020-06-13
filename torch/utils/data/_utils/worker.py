@@ -72,12 +72,10 @@ class WorkerInfo(object):
         return super(WorkerInfo, self).__setattr__(key, val)
     
     def __repr__(self):
-        items = [self.__class__.__name__ + ':']
+        items = []
         for k in self.__keys:
-            items.append('{}:\t{}'.format(k, getattr(self, k)))
-        if len(items) == 1:
-            items.append('<no values>')
-        return '\n\t'.join(items)
+            items.append('{}={}'.format(k, getattr(self, k)))
+        return '{}({})'.format(self.__class__.__name__ ', '.join(items))
 
 
 def get_worker_info():
