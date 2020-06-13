@@ -40,6 +40,7 @@ VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',
     'as_strided': 'self',
+    'chunk': 'self',
     'diagonal': 'self',
     'expand': 'self',
     'narrow': 'self',
