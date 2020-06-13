@@ -293,7 +293,15 @@ void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, d
       vectorized_outer_reduction(data, inner_stride, size0, size1, op, vop);
     } else {
       UNARY_OUTER_LOOP(data, outer_strides, size1, [&] {
-        reduction(data, 0, size0, strides[1], op);
+        if (strides[0] > 0) {
+            // In this case data is accomulated in different output positions
+            // So we are not operating in a single value
+            char* ptrs[3] = { data[0], data[0], data[1] };
+            int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
+            basic_loop(ptrs, inner_strides, 0, size0, op);
+        } else {
+            reduction(data, 0, size0, strides[1], op);
+        }
       });
     }
   });
