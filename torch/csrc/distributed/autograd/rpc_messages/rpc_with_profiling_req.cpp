@@ -19,7 +19,7 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     torch::autograd::profiler::ProfilerConfig&& profilerConfig)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
-      profilerConfig_(std::move(profilerConfig)) {
+      profilerConfig_(profilerConfig) {
   tensors_ = wrappedMessage_.tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_REQ,
@@ -42,7 +42,7 @@ RpcWithProfilingReq::RpcWithProfilingReq(
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
       tensors_(std::move(tensors)),
-      profilerConfig_(std::move(profilerConfig)) {
+      profilerConfig_(profilerConfig) {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cant be null");
 }
 
