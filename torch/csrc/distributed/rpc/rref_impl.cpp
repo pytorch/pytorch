@@ -76,10 +76,8 @@ void RRef::handleError(
           {RPCErrorType::INTENTIONAL_FAILURE,
            [this](const FutureMessage& /* unused */) { setTimedOut(); }},
           {RPCErrorType::UNKNOWN_ERROR, [](const FutureMessage& fm) {
-             // Default error handler, equivalent to
-             // RRefContext::handleException().
-             VLOG(1) << "Got exception: " << fm.error()->what();
-             throw std::runtime_error(fm.error()->what());
+             // Default error handler
+             RRefContext::handleException(fm);
            }}};
   errorHandlers.find(errorType)->second(futMessage);
 }
@@ -128,11 +126,10 @@ const ForkId& UserRRef::forkId() const {
 }
 
 IValue UserRRef::toHere(const float timeoutSeconds) const {
-  if (this->getTimedOut()) {
-    throw std::runtime_error(
-        "RRef creation via rpc.remote() timed out, and it "
-        "is possible that the RRef on the owner node does not exist.");
-  }
+  TORCH_CHECK(
+      !getTimedOut(),
+      "RRef creation via rpc.remote() timed out, and it "
+      "is possible that the RRef on the owner node does not exist.");
   // see Note [Best-Effort Check on Deleted UserRRefs]
   TORCH_CHECK(
       !deletedOnOwner_,
@@ -176,7 +173,8 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
       timeoutSeconds);
 
   // TODO: we should ideally be able to interrupt this blocking wait if we check
-  // isTimedOut() and it is true.
+  // getTimedOut() and it is true
+  // (https://github.com/pytorch/pytorch/issues/39411).
   const Message& message = futureResponse->wait();
   MessageType msgType = message.type();
   auto response = deserializeResponse(message, msgType);
@@ -231,11 +229,10 @@ RRefForkData UserRRef::fork() const {
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
-  if (this->getTimedOut()) {
-    throw std::runtime_error(
-        "RRef creation via rpc.remote() to self timed out, and it "
-        "is possible that the RRef on the owner node does not exist.");
-  }
+  TORCH_CHECK(
+      !getTimedOut(),
+      "RRef creation via rpc.remote() timed out, and it "
+      "is possible that the RRef on the owner node does not exist.");
   future_->wait();
   if (future_->hasError()) {
     (void)future_->value(); // Throws the error.
