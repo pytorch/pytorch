@@ -641,7 +641,7 @@ void initPythonIRBindings(PyObject* module_) {
 
   using ::c10::Type;
   py::class_<Type, std::shared_ptr<Type>>(m, "Type")
-      .def("__repr__", [](Type& t) { return t.python_str(); })
+      .def("__repr__", [](Type& t) { return t.annotation_str(); })
       .def(
           "str",
           [](Type& t) {
