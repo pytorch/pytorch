@@ -9,6 +9,7 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
+import logging
 import os
 import sys
 import platform
@@ -36,6 +37,18 @@ __all__ = [
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'set_deterministic', 'is_deterministic'
 ]
+
+_cwd_torch_init = os.path.join(os.getcwd(), 'torch', '__init__.py')
+if __file__ == _cwd_torch_init:
+    logging.warn(
+        'You appear to be importing PyTorch from a clone of the git repo:\n  '
+        f'{os.getcwd()}\n  '
+        'This will prevent `import torch` from resolving to the PyTorch install\n  '
+        f'(instead it will try to load {_cwd_torch_init})\n  '
+        'and will generally lead to other failures such as a failure '
+        'to load C extensions.\n'
+    )
+
 
 ################################################################################
 # Load the extension module
