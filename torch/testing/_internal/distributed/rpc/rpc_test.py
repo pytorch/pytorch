@@ -978,7 +978,6 @@ class RpcTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
 
-        print(p.key_averages().table())
         function_events = p.function_events
         event_cpu_mem_usages = set(event.cpu_memory_usage for event in function_events)
         # if cpu_memory_usage was not propagated over the wire, this set would
@@ -1010,7 +1009,6 @@ class RpcTest(RpcAgentTestFixture):
             fut1.wait()
             fut2.wait()
 
-        print(p.key_averages().table())
         function_events = p.function_events
         for event in function_events:
             if event.is_async:
@@ -1050,12 +1048,9 @@ class RpcTest(RpcAgentTestFixture):
         ]
 
         events = p.function_events
-        print(p.key_averages().table())
         with TemporaryFileName() as fname:
             path = fname
-            path = "/tmp/dist_trace_abs2.json"
             p.export_chrome_trace(path)
-            print(f"Wrote profile to {path}")
             with open(path) as f:
                 trace = json.load(f)
                 event_names = [event['name'] for event in trace]
@@ -1078,7 +1073,6 @@ class RpcTest(RpcAgentTestFixture):
                 ret = fut.wait()
 
             events = prof.function_events
-            print(prof.key_averages().table())
 
             rpc_event = get_function_event(events, RPCExecMode.ASYNC.value)
             self.check_profiling_info(
@@ -1129,7 +1123,6 @@ class RpcTest(RpcAgentTestFixture):
 
     def validate_profiling_workload(self, dst, prof):
         events = prof.function_events
-        print(prof.key_averages().table())
 
         rpc_mul_event = get_function_event(
             events, torch.jit._find_builtin(torch.mul)
@@ -1208,9 +1201,6 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(rpc_event.node_id, self.rank)
             # Ensure recording of remote events.
             remote_events = {event for event in events if event.node_id == dst} - {rpc_event}
-            print("-- prof table --")
-            print(prof.key_averages().table())
-            print("-- end prof table --")
             self.assertGreaterEqual(len(remote_events), 1)
             for remote_event in remote_events:
                 self.assertEqual(remote_event.node_id, dst)

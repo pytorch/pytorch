@@ -26,6 +26,25 @@ namespace {
 
   constexpr auto kProfilerConfigIValuesSize = 3;
   constexpr auto kEventIValuesSize = 11;
+  enum EventIValueIdx {
+    KIND = 0,
+    NAME,
+    THREAD_ID,
+    HANDLE,
+    NODE_ID,
+    CPU_MEM_USAGE,
+    CPU_NS,
+    CUDA_RECORDED,
+    CUDA_MEM_USAGE,
+    CUDA_DEVICE,
+    CUDA_US
+  };
+
+  enum ProfilerIValueIdx {
+    STATE = 0,
+    REPORT_INPUT_SHAPES,
+    PROFILE_MEMORY,
+  };
 
 CUDAStubs default_stubs;
 constexpr CUDAStubs* default_stubs_addr = &default_stubs;
@@ -401,9 +420,9 @@ ProfilerConfig ProfilerConfig::fromIValue(
           kProfilerConfigIValuesSize,
           " ivalues to resconstruct ProfilerConfig."));
   return ProfilerConfig(
-      static_cast<ProfilerState>(ivalues.get(0).toInt()),
-      ivalues.get(1).toBool(),
-      ivalues.get(2).toBool());
+      static_cast<ProfilerState>(ivalues.get(ProfilerIValueIdx::STATE).toInt()),
+      ivalues.get(ProfilerIValueIdx::REPORT_INPUT_SHAPES).toBool(),
+      ivalues.get(ProfilerIValueIdx::PROFILE_MEMORY).toBool());
 }
 
 ProfilerConfig getProfilerConfig() {
@@ -497,19 +516,21 @@ void Event::record(bool record_cuda) {
       " elements to reconstruct Event.");
 
   Event evt(
-    static_cast<EventKind>(ivalues.get(0).toInt()), // EventKind
-    at::StringView(ivalues.get(1).toStringRef()), // name
-    ivalues.get(2).toInt(), // thread
-    static_cast<at::RecordFunctionHandle>(ivalues.get(3).toDouble()), // handle
-    {}, // TODO: record shapes
-    ivalues.get(4).toInt(), // node id
-    true, // is remote
-    ivalues.get(5).toInt(), // cpu_mem_usage
-    ivalues.get(6).toInt(), // cpu_ns
-    ivalues.get(7).toBool(), // was cuda recorded
-    ivalues.get(8).toInt(), // cuda memory usage
-    ivalues.get(9).toInt(), // device
-    ivalues.get(10).toInt() // cuda_us
+      static_cast<EventKind>(
+          ivalues.get(EventIValueIdx::KIND).toInt()), // EventKind
+      at::StringView(ivalues.get(EventIValueIdx::NAME).toStringRef()), // name
+      ivalues.get(EventIValueIdx::THREAD_ID).toInt(), // thread_id
+      static_cast<at::RecordFunctionHandle>(
+          ivalues.get(EventIValueIdx::HANDLE).toDouble()), // handle
+      {}, // TODO: record shapes
+      ivalues.get(EventIValueIdx::NODE_ID).toInt(), // node id
+      true, // is remote
+      ivalues.get(EventIValueIdx::CPU_MEM_USAGE).toInt(), // cpu_mem_usage
+      ivalues.get(EventIValueIdx::CPU_NS).toInt(), // cpu_ns
+      ivalues.get(EventIValueIdx::CUDA_RECORDED).toBool(), // was cuda recorded
+      ivalues.get(EventIValueIdx::CUDA_MEM_USAGE).toInt(), // cuda memory usage
+      ivalues.get(EventIValueIdx::CUDA_DEVICE).toInt(), // device
+      ivalues.get(EventIValueIdx::CUDA_US).toInt() // cuda_us
   );
   return evt;
 }
