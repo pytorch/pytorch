@@ -5826,7 +5826,7 @@ Example::
     >>> a = torch.randn(1, 3)
     >>> a
     tensor([[ 0.1133, -0.9567,  0.2958]])
-    >>> torch.sum(a)
+    >>> torch.nansum(a)
     tensor(-0.5475)
 
 .. function:: nansum(input, dim, keepdim=False, dtype=None) -> Tensor

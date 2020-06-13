@@ -17479,7 +17479,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
-<<<<<<< HEAD
     @dtypesIfCUDA(torch.half, torch.float, torch.double,
                   torch.int8, torch.short, torch.int, torch.long)
     @dtypes(torch.float, torch.double,
@@ -17490,8 +17489,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             x[x < 0.2] = float('nan')
         # Randomly scale the values
         x = (x * random.randint(10, 100)).tolist()
-        self._np_compare("nansum", x, device, dtype)
-=======
+
+        self.compare_with_numpy(torch.nansum, np.nansum, x, device, dtype)
+
     @onlyCUDA
     def test_mv_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315
@@ -17512,7 +17512,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             t = torch.tensor(val, dtype=dtype, device=device)
             a = np.array(val, dtype=torch_to_numpy_dtype_dict[dtype])
             self.assertEqual(t, torch.from_numpy(a))
->>>>>>> 18073ffca30fa5e8aae2f90c0cb42819eaf36743
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
