@@ -57,13 +57,13 @@ void registerOps() {
   static auto registry = torch::RegisterOperators()
       .op(torch::RegisterOperators::options()
         .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel(DispatchKey::CustomRNGKeyId, TORCH_FN(random_from_to)))
+        .impl_unboxedOnlyKernel(DispatchKey::CustomRNGKeyId, random_from_to))
       .op(torch::RegisterOperators::options()
         .schema("aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel(DispatchKey::CustomRNGKeyId, TORCH_FN(random_to)))
+        .impl_unboxedOnlyKernel(DispatchKey::CustomRNGKeyId, random_to))
       .op(torch::RegisterOperators::options()
         .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel(DispatchKey::CustomRNGKeyId, TORCH_FN(random_)));
+        .impl_unboxedOnlyKernel(DispatchKey::CustomRNGKeyId, random_)))
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
