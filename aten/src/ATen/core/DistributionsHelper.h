@@ -126,9 +126,16 @@ struct uniform_real_distribution {
     T to_;
 };
 
-#define DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(X)                                                  \
-template<class T, class Enable = void> struct has_member_##X : std::false_type {};                  \
-template<class T> struct has_member_##X<T, guts::void_t<decltype(T::X)>> : std::true_type {};
+#define DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(member)              \
+template <typename T>                                                \
+struct has_member_##member                                           \
+{                                                                    \
+    typedef char yes;                                                \
+    typedef long no;                                                 \
+    template <typename U> static yes test(decltype(&U::member));     \
+    template <typename U> static no test(...);                       \
+    static constexpr bool value = sizeof(test<T>(0)) == sizeof(yes); \
+}
 
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(next_double_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_double_normal_sample);
