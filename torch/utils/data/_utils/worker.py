@@ -75,7 +75,7 @@ class WorkerInfo(object):
         items = []
         for k in self.__keys:
             items.append('{}={}'.format(k, getattr(self, k)))
-        return '{}({})'.format(self.__class__.__name__ ', '.join(items))
+        return '{}({})'.format(self.__class__.__name__, ', '.join(items))
 
 
 def get_worker_info():
