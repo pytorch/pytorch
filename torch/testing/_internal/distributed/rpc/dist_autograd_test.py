@@ -1045,7 +1045,8 @@ class DistAutogradTest(RpcAgentTestFixture):
         _set_rpc_done(None, 0)
 
         # wait until all trainers are done
-        torch.futures.wait_all(futures)
+        for fut in futures:
+            fut.wait()
 
     @dist_init
     def test_trainer_ps(self):
