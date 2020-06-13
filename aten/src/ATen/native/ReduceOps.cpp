@@ -954,4 +954,17 @@ Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
   return at::norm(self - other, p);
 }
 
+Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
+  auto mask = (self != 0);
+  return mask.sum(dims);
+}
+
+Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
+  if (dim){
+    auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
+    return at::count_nonzero(self, IntArrayRef{wrap_dim});
+  }
+  return at::count_nonzero(self, IntArrayRef{});
+}
+
 }} // namespace at::native
