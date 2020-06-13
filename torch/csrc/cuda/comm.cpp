@@ -9,6 +9,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/WrapDimUtils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
@@ -66,12 +67,13 @@ std::vector<Tensor>& broadcast_out(const Tensor& tensor, std::vector<Tensor> &ou
   for (size_t i = 0; i < out_tensors.size(); i++) {
     TORCH_CHECK(
       out_tensors[i].is_cuda(),
-      "Output tensor at index ", i, " should be a CUDA tensor, but has device ",
-      out_tensors[i].device());
+      "Expected all output tensors to be CUDA tensors, but output tensor at index ",
+      i, " has device '", out_tensors[i].device(), "'");
     TORCH_CHECK(
       out_tensors[i].sizes() == tensor.sizes(),
-      "Output tensor at index ", i, " has incorrect shape. Expected same "
-      "shape as the source tensor: ", tensor.sizes());
+      "Expected all output tensors to have same shape as the source tensor ",
+      tensor.sizes(), ", but output tensor at index ", i, " has shape ",
+      out_tensors[i].sizes());
   }
   return _broadcast_out_impl(tensor, out_tensors);
 }
@@ -203,14 +205,16 @@ std::vector<at::Tensor>& scatter_out(
     std::vector<at::Tensor>& out_tensors,
     int64_t dim,
     const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams) {
+  TORCH_CHECK(!out_tensors.empty(), "Expected at least one output tensor to scatter to");
+  dim = at::maybe_wrap_dim(dim, tensor);
   int64_t total_size = 0;
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(out_tensors.size());
   for (size_t i = 0; i < out_tensors.size(); i++) {
     TORCH_CHECK(
       out_tensors[i].is_cuda(),
-      "Output tensor at index ", i, " should be a CUDA tensor, but has device ",
-      out_tensors[i].device());
+      "Expected all output tensors to be CUDA tensors, but output tensor at index ",
+      i, " has device '", out_tensors[i].device(), "'");
     auto out_sizes = out_tensors[i].sizes().vec();
     bool same_ndim = out_sizes.size() == tensor.dim();
     if (same_ndim) {
@@ -229,11 +233,11 @@ std::vector<at::Tensor>& scatter_out(
     total_size == tensor.size(dim),
     "Total size for output tensors along scatter dim ", dim, " does not match "
     "the source tensor size at dim ", dim, ". Expected ", tensor.size(dim),
-    ", but got ", total_size);
+    ", but got total size ", total_size);
 
   auto chunks = tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
-  for (size_t i; i < chunks.size(); i++) {
+  for (size_t i = 0; i < chunks.size(); i++) {
     if (streams && (*streams)[i]) {
       const auto device_index = static_cast<int16_t>(out_tensors[i].get_device());
       TORCH_CHECK(
@@ -259,6 +263,13 @@ std::vector<at::Tensor> scatter(
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
     const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams) {
+  TORCH_CHECK(!devices.empty(), "Expected at least one device to scatter to");
+  if (chunk_sizes.has_value()) {
+    TORCH_CHECK(chunk_sizes->size() == devices.size(),
+        "Expected devices and chunk_sizes to be of same length, but got "
+        "len(devices) = ", devices.size(), " and len(chunk_sizes) = ", chunk_sizes->size());
+  }
+  dim = at::maybe_wrap_dim(dim, tensor);
   std::vector<at::Tensor> chunks =
     chunk_sizes ? tensor.split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
                 : tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
@@ -321,22 +332,23 @@ at::Tensor& gather_out(
   int64_t total_size = 0;
   auto& first = tensors.front();
   const auto first_size = first.sizes();
+  dim = at::maybe_wrap_dim(dim, first);
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   for (size_t i = 0; i < tensors.size(); i++) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(
-        tensor.is_cuda(), "Expected all input tensors to have CUDA type, but "
-        "got tensor at index ", i, " with device ", tensor.device());
+        tensor.is_cuda(), "Expected all input tensors to be CUDA tensors, but "
+        "tensor at index ", i, " has device '", tensor.device(), "'");
     TORCH_CHECK(
         tensor.ndimension() == static_cast<int64_t>(expected_size.size()),
-        "Expected all input tensors to have the same number of dimensions: got ",
-        "tensor at index ", i, "with ", tensor.ndimension(), " dimensions, ",
-        "but expected ", expected_size.size());
+        "Expected all input tensors to have the same number of dimensions, but ",
+        "tensor at index ", i, "has ", tensor.ndimension(), " dimensions, (expected ",
+        expected_size.size(), ")");
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
-          "Input tensor at index ", i, " has invalid size ", tensor.sizes(),
+          "Input tensor at index ", i, " has invalid shape ", tensor.sizes(),
           ", but expected ", at::IntArrayRef(expected_size));
     }
     total_size += tensor.size(dim);
@@ -344,7 +356,7 @@ at::Tensor& gather_out(
   expected_size[dim] = total_size;
   TORCH_CHECK(
     out_tensor.sizes() == expected_size,
-    "Expected out tensor to have size ", at::IntArrayRef(expected_size),
+    "Expected out tensor to have shape ", at::IntArrayRef(expected_size),
     ", but got ", out_tensor.sizes())
 
   return _gather_out_impl(tensors, out_tensor, dim);
@@ -359,23 +371,24 @@ at::Tensor gather(
   int64_t total_size = 0;
   auto& first = tensors.front();
   const auto first_size = first.sizes();
+  dim = at::maybe_wrap_dim(dim, first);
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
   auto memory_format = first.suggest_memory_format();
   for (size_t i = 0; i < tensors.size(); i++) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(
-        tensor.is_cuda(), "Expected all input tensors to have CUDA type, but "
-        "got tensor at index ", i, " with device ", tensor.device());
+        tensor.is_cuda(), "Expected all input tensors to be CUDA tensors, but "
+        "tensor at index ", i, " has device ", tensor.device());
     TORCH_CHECK(
         tensor.ndimension() == static_cast<int64_t>(expected_size.size()),
-        "Expected all input tensors to have the same number of dimensions: got ",
-        "tensor at index ", i, "with ", tensor.ndimension(), " dimensions, ",
-        "but expected ", expected_size.size());
+        "Expected all input tensors to have the same number of dimensions, but ",
+        "tensor at index ", i, "has ", tensor.ndimension(), " dimensions, (expected ",
+        expected_size.size(), ")");
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
       TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
-          "Input tensor at index ", i, " has invalid size ", tensor.sizes(),
+          "Input tensor at index ", i, " has invalid shape ", tensor.sizes(),
           ", but expected ", at::IntArrayRef(expected_size));
     }
     total_size += tensor.size(dim);
