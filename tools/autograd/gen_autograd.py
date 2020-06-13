@@ -46,6 +46,8 @@ VIEW_FUNCTIONS = {
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
+    'split': 'self',
+    'split_with_sizes': 'self',
     'squeeze': 'self',
     't': 'self',
     'transpose': 'self',
