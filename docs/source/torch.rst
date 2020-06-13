@@ -325,6 +325,7 @@ Reduction Ops
     median
     mode
     norm
+    nansum
     prod
     std
     std_mean
