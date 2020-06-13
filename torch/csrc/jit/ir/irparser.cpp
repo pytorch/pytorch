@@ -368,10 +368,9 @@ void IRParser::parseOperator(Block* b) {
         if (!schema_return_type->hasFreeVariables() &&
             !v.type->isSubtypeOf(schema_return_type)) {
           throw ErrorReport(source_range)
-              << "Annotated type " << v.type->python_str()
+              << "Annotated type " << v.type->repr_str()
               << " does not match schema type "
-              << schema_return_type->python_str() << " for operator "
-              << *schema;
+              << schema_return_type->repr_str() << " for operator " << *schema;
         }
         vmap[v.name]->setType(v.type);
       }

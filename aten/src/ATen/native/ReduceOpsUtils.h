@@ -212,7 +212,7 @@ static TensorIterator make_reduction(
 
 static TensorIterator make_reduction(
     const char* name, Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
-    bool keepdim, ScalarType dtype1, ScalarType dtype2, bool promote_gpu_output_dtypes=true)
+    bool keepdim, ScalarType dtype1, ScalarType dtype2)
 {
   // check that result type and dtype match if provided
   TORCH_CHECK(
@@ -240,9 +240,9 @@ static TensorIterator make_reduction(
   // product of templated kernel launches.
   if (self.scalar_type() == dtype1 ||
       (self.is_cuda() && self.scalar_type() == kHalf && dtype1 == kFloat)) {
-    return TensorIterator::reduce_op(viewed_result1, viewed_result2, self, promote_gpu_output_dtypes);
+    return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
   }
-  return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1), promote_gpu_output_dtypes);
+  return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
 }
 
 static TensorIterator make_reduction(

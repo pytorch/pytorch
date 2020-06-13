@@ -70,7 +70,10 @@ bool isWeight(Module& module, Value* v) {
 
 Node* insertChooseQParams(Graph* graph, Value* original_val) {
   std::string choose_qparams_func = "_choose_qparams_per_tensor";
-  auto reduce_range = graph->insertConstant(false);
+  // Set the reduce range to default to true, since qnnpack backend ignores this
+  // argument.
+  bool reduce_range_param = true;
+  auto reduce_range = graph->insertConstant(reduce_range_param);
   // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
   Node* choose_qparams = graph->create(
       at::Symbol::aten(choose_qparams_func),
@@ -193,7 +196,7 @@ void insertQuantizationOps(
     Node* observer,
     bool is_per_channel,
     const std::vector<std::string>& qparam_names,
-    bool is_dynamic = false) {
+    QuantType quant_type = QuantType::STATIC) {
   Graph* g = observer->owningGraph();
   // Observer output
   Value* observer_out = observer->output();
@@ -208,7 +211,7 @@ void insertQuantizationOps(
   }
   Value* original_val = observer->input(1);
   Node *quant, *choose_qparams, *dequant;
-  if (is_dynamic && !isWeight(module, observer_out)) {
+  if (quant_type == QuantType::DYNAMIC && !isWeight(module, observer_out)) {
     Value* dtype = g->insertGetAttr(self, qparam_names.back());
     std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
         g, observer_out, dtype, at::Symbol::aten(quantize_func));
@@ -360,7 +363,7 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
         dequant_out->uses().size() == 1,
         "Expect dequant output to have single use");
     Node* user = dequant_out->uses()[0].user;
-    return !nodeQuantizable(user, /* is_dynamic */ true);
+    return !nodeQuantizable(user, QuantType::DYNAMIC);
   };
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(dynamic_quant_ops, dynamic_quant_replacement);
@@ -455,8 +458,8 @@ class InsertQuantDeQuantHelper {
  public:
   void run(Module& module, const std::string& method_name);
 
-  void setDynamicFlag(bool is_dynamic) {
-    is_dynamic_ = is_dynamic;
+  void setQuantType(QuantType quant_type) {
+    quant_type_ = quant_type;
   }
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
@@ -558,7 +561,7 @@ class InsertQuantDeQuantHelper {
   // once
   std::unordered_set<Value*> quantized_values_;
 
-  bool is_dynamic_ = false;
+  QuantType quant_type_ = QuantType::STATIC;
 
   // Map from original weight value to GraphFunction corresponding to the
   // subgraph that includes the weight observer and dependent nodes.
@@ -774,7 +777,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       qparam_names.push_back(qparam_name);
     }
     insertQuantizationOps(
-        module, self, n, isPerChannel(qscheme), qparam_names, is_dynamic_);
+        module, self, n, isPerChannel(qscheme), qparam_names, quant_type_);
   }
 }
 
@@ -939,7 +942,7 @@ void InsertQuantDeQuantHelper::propagateQParams(
   }
 }
 
-void removeDequantizeFromInputs(const std::vector<Value*>& inputs) {
+void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
   // Delete dequantize node, we have one dequantize
   // for each use of the value
   for (auto* dequantized_val : inputs) {
@@ -1016,14 +1019,38 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
         }
       }
     } else {
+      // For ops that are quantized by propagating dequantize ops,
+      // e.g. flatten we need to
+      // 1. check if we need to propagate dequantize op
+      // 2. remove the dequantize ops from inputs
+      // 3. insert dequantize for all outputs
+      // to make sure it works for ops with multiple outputs
+      // since removing dequantize from inputs is mutating the graph
+      // and it will affect future checks for whether all the inputs
+      // has been quantized or not(since currently we just check if
+      // the value is produced by dequantize op to decide if the value
+      // is quantized or not
+      // list of dequantized input values
+      std::unordered_set<Value*> dequantized_inputs;
+      std::vector<Value*> outputs_to_dequantize;
+      // 1. collect dequantized inputs and outputs we need to dequantize
       for (auto* output : n->outputs()) {
         if (isQuantized(output)) {
           continue;
         }
         if (auto inputs = getDequantizedInputs(output)) {
-          removeDequantizeFromInputs(*inputs);
-          insertDeQuantForAllUse(output->owningGraph(), output, output);
+          std::copy(
+              inputs->begin(),
+              inputs->end(),
+              std::inserter(dequantized_inputs, dequantized_inputs.end()));
+          outputs_to_dequantize.push_back(output);
         }
+      }
+      // 2. remove the dequantize ops from inputs
+      removeDequantizeFromInputs(dequantized_inputs);
+      // 3. insert dequantize op for outpus
+      for (auto* output : outputs_to_dequantize) {
+        insertDeQuantForAllUse(output->owningGraph(), output, output);
       }
     }
   }
@@ -1282,11 +1309,11 @@ Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
     bool inplace,
-    bool is_dynamic) {
+    QuantType quant_type) {
   Module module = input_module.clone(inplace);
   InsertQuantDeQuantHelper h;
-  h.setDynamicFlag(is_dynamic);
-  if (is_dynamic) {
+  h.setQuantType(quant_type);
+  if (quant_type == QuantType::DYNAMIC) {
     h.runWeightObserver(module, method_name);
   }
   h.run(module, method_name);
