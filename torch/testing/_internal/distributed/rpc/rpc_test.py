@@ -1571,10 +1571,11 @@ class RpcTest(RpcAgentTestFixture):
         )
         with self.assertRaisesRegex(
             RuntimeError, (
-                r"Cannot call localValue\(\) on "
-                fr"UserRRef\(rref_id=GloballyUniqueId\(created_on={self.rank}, local_id=0\), "
-                fr"fork_id=GloballyUniqueId\(created_on={self.rank}, local_id=1\)\). "
-                fr"Call it on WorkerInfo\(id={next_rank}, name={worker_name(next_rank)}\)"
+                fr"For UserRRef\(rref_id=GloballyUniqueId\(created_on={self.rank}, local_id=0\), "
+                fr"fork_id=GloballyUniqueId\(created_on={self.rank}, local_id=1\)\), "
+                r"can't call localValue\(\) on user "
+                fr"WorkerInfo\(id={self.rank}, name={worker_name(self.rank)}\). "
+                fr"Call it on owner WorkerInfo\(id={next_rank}, name={worker_name(next_rank)}\)"
             )
         ):
             rref.local_value()
