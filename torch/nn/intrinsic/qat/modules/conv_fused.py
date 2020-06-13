@@ -9,6 +9,49 @@ from torch.nn import init
 from torch.nn.modules.utils import _pair
 from torch.nn.parameter import Parameter
 
+# Runs the conv forward with scaled weights and unscales the weights.
+#
+# Note: this is implemented as a standalone function to match the
+#   rules of graph mode quantization, which will mimic this code.
+#   In particular, the inputs and outputs of this function should be
+#   observed, and no intermediate values of this function should be
+#   observed.
+def _conv_forward_and_unscale(conv_obj, input, scaled_weight, scale_factor):
+    # type: (nn.Conv2d, Tensor, Tensor, Tensor) -> Tensor
+    conv = conv_obj._conv_forward(input, scaled_weight)
+    conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+    # TODO: figure out how to fix scripting without this
+    bias = conv_obj.bias
+    if bias is not None:
+        conv_orig = conv_orig + bias.reshape([1, -1, 1, 1])
+    return conv_orig
+
+def _conv_forward_and_unscale_2(input,
+                                scaled_weight,
+                                bias,
+                                stride,
+                                padding,
+                                dilation,
+                                groups,
+                                padding_mode,
+                                _reversed_padding_repeated_twice,
+                                scale_factor):
+    # type:(Tensor, Tensor, Optional[Tensor], Tuple[int, int], Tuple[int, int], Tuple[int, int], int, str, List[int], Tensor) -> Tensor
+
+    # copy of _conv_forward
+    if padding_mode != 'zeros':
+        conv = F.conv2d(F.pad(input, _reversed_padding_repeated_twice, mode=padding_mode),
+                        scaled_weight, bias, stride,
+                        _pair(0), dilation, groups)
+    else:
+        conv = F.conv2d(input, scaled_weight, bias, stride,
+                        padding, dilation, groups)
+
+    conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+    if bias is not None:
+        conv_orig = conv_orig + bias.reshape([1, -1, 1, 1])
+    return conv_orig
+
 class _ConvBnNd(nn.modules.conv._ConvNd):
 
     _version = 2
@@ -79,29 +122,31 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         self.bn.training = False
         return self
 
-    # Runs the conv forward with scaled weights and unscales the weights.
-    #
-    # Note: this is implemented as a standalone function to match the
-    #   rules of graph mode quantization, which will mimic this code.
-    #   In particular, the inputs and outputs of this function should be
-    #   observed, and no intermediate values of this function should be
-    #   observed.
-    def _conv_forward_and_unscale(self, input, scaled_weight, scale_factor):
-        # this does not include the conv bias
-        conv = self._conv_forward(input, scaled_weight)
-        conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
-        if self.bias is not None:
-            conv_orig = conv_orig + self.bias.reshape([1, -1, 1, 1])
-        return conv_orig
-
     def _forward(self, input):
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
-        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape([-1, 1, 1, 1]))
-        conv_orig = self._conv_forward_and_unscale(input, scaled_weight,
-                                                   scale_factor)
-        conv = self.bn(conv_orig)
-        return conv
+        scaled_weight_no_fq = self.weight * scale_factor.reshape([-1, 1, 1, 1])
+        scaled_weight = self.weight_fake_quant(scaled_weight_no_fq)
+
+        # this combines the logic in nn.Conv2d._conv_forward
+        # TODO before land: can remove nn.Conv2d._conv_forward, and
+        # improve this comment
+        # call conv with scaled weight, and get the unscaled result
+        if self.padding_mode != 'zeros':
+            input = F.pad(input, self._reversed_padding_repeated_twice,
+                          mode=self.padding_mode)
+            conv_res = \
+                torch.qat_conv2d_and_unscale(input, scaled_weight, scale_factor,
+                                             self.bias, self.stride, _pair(0),
+                                             self.dilation, self.groups)
+        else:
+            conv_res = \
+                torch.qat_conv2d_and_unscale(input, scaled_weight, scale_factor,
+                                             self.bias, self.stride, self.padding,
+                                             self.dilation, self.groups)
+        # at this point the conv is unscaled, so can do BN as before
+        bn_res = self.bn(conv_res)
+        return bn_res
 
     def extra_repr(self):
         # TODO(jerryzh): extend

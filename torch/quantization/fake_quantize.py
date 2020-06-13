@@ -62,23 +62,23 @@ class FakeQuantize(Module):
         self.ch_axis = self.activation_post_process.ch_axis \
             if hasattr(self.activation_post_process, 'ch_axis') else -1
 
-    @torch.jit.export
+    #@torch.jit.export
     def enable_fake_quant(self, enabled=True):
         # type: (bool) -> FakeQuantize
         self.fake_quant_enabled[0] = 1 if enabled else 0
         return self
 
-    @torch.jit.export
+    #@torch.jit.export
     def disable_fake_quant(self):
         return self.enable_fake_quant(False)
 
-    @torch.jit.export
+    #@torch.jit.export
     def enable_observer(self, enabled=True):
         # type: (bool) -> FakeQuantize
         self.observer_enabled[0] = 1 if enabled else 0
         return self
 
-    @torch.jit.export
+    #@torch.jit.export
     def disable_observer(self):
         return self.enable_observer(False)
 

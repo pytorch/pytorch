@@ -39,9 +39,9 @@ def _prepare_script(model, qconfig_dict, inplace=False, quant_type=QuantType.STA
     torch._C._jit_pass_dedup_module_uses(model._c)
     if quant_type == QuantType.QAT:
         model = wrap_cpp_module(torch._C._jit_pass_qat_combine_convbn(model._c))
-    else:
-        model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
-    # TODO(future PR): add handling for QAT convbn to observers pass
+        # TODO(future PR): add handling for QAT convbn to observers pass
+        return model
+    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
                                                                scripted_qconfig_dict,
