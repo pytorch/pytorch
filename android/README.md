@@ -121,7 +121,7 @@ packagingOptions {
 }
 ```
 
-## Linking to libtorch from aar dependency
+## Linking to prebuilt libtorch library from gradle dependency
 
 In some cases, you may want to use libtorch from your android native build.
 You can do it without building libtorch android, using native libraries from PyTorch android gradle dependency.
@@ -174,7 +174,7 @@ tasks.whenTaskAdded { task ->
 ```
 
 pytorch_android aar contains headers to link in `headers` folder and native libraries in `jni/$ANDROID_ABI/`.
-As PyTorch native libraries use ANDROID_STL - we should use ANDROID_STL=c++_shared to have only one loaded binary of STL.
+As PyTorch native libraries use `ANDROID_STL` - we should use `ANDROID_STL=c++_shared` to have only one loaded binary of STL.
 
 The added task will unpack them to gradle build directory.
 
@@ -227,8 +227,10 @@ void loadAndForwardModel(const std::string& modelPath) {
 }
 ```
 
-To load torchscript model for mobile we need special  setup which is placed in `struct JITCallGuard` in this example. It may change in future, you can track the latest changes keeping an eye in our [pytorch android jni code]([https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/cpp/pytorch_jni_jit.cpp#L28)
+To load torchscript model for mobile we need some special setup which is placed in `struct JITCallGuard` in this example. It may change in future, you can track the latest changes keeping an eye in our [pytorch android jni code]([https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/cpp/pytorch_jni_jit.cpp#L28)
 
-## More Details
+[Example of linking to libtorch from aar](https://github.com/pytorch/pytorch/tree/master/android/test_app)
+
+## PyTorch Android API Javadoc
 
 You can find more details about the PyTorch Android API in the [Javadoc](https://pytorch.org/docs/stable/packages.html).
