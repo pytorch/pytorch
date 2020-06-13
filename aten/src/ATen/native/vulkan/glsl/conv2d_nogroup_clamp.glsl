@@ -15,6 +15,8 @@ layout(set = 0, binding = 4) uniform constBlock {
   ivec2 dilate;
   ivec4 outputSize;
   ivec4 inputSize;
+  float outputMin;
+  float outputMax;
 }
 uConstBlock;
 
@@ -70,9 +72,11 @@ void main() {
         }
       }
     }
-    imageStore(uOutput, ivec3(pos.x + 0, pos.y, pos.z), color);
-    imageStore(uOutput, ivec3(pos.x + 1, pos.y, pos.z), color2);
-    imageStore(uOutput, ivec3(pos.x + 2, pos.y, pos.z), color3);
-    imageStore(uOutput, ivec3(pos.x + 3, pos.y, pos.z), color4);
+    vec4 outputMin = vec4(uConstBlock.outputMin);
+    vec4 outputMax = vec4(uConstBlock.outputMax);
+    imageStore(uOutput, ivec3(pos.x + 0, pos.y, pos.z), clamp(color, outputMin, outputMax));
+    imageStore(uOutput, ivec3(pos.x + 1, pos.y, pos.z), clamp(color2, outputMin, outputMax));
+    imageStore(uOutput, ivec3(pos.x + 2, pos.y, pos.z), clamp(color3, outputMin, outputMax));
+    imageStore(uOutput, ivec3(pos.x + 3, pos.y, pos.z), clamp(color4, outputMin, outputMax));
   }
 }
