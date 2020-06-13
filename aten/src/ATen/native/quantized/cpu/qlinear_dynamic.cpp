@@ -56,6 +56,8 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(at::Tensor input, bool reduce_
       /*max=*/&x_max,
       /*len=*/input.numel());
 
+  if (x_min > x_max)
+      x_min = x_max;
   // Input tensor is quantized as 8-bit unsigned values
   static constexpr int precision = 8;
   static constexpr bool is_signed = false;
