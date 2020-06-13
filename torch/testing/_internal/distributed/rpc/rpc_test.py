@@ -1570,7 +1570,13 @@ class RpcTest(RpcAgentTestFixture):
             worker_name(next_rank), torch.add, args=(torch.ones(1), torch.ones(1))
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Call it on worker{}".format(next_rank)
+            RuntimeError, (
+                fr"For UserRRef\(rref_id=GloballyUniqueId\(created_on={self.rank}, local_id=0\), "
+                fr"fork_id=GloballyUniqueId\(created_on={self.rank}, local_id=1\)\), "
+                r"can't call localValue\(\) on user "
+                fr"WorkerInfo\(id={self.rank}, name={worker_name(self.rank)}\). "
+                fr"Call it on owner WorkerInfo\(id={next_rank}, name={worker_name(next_rank)}\)"
+            )
         ):
             rref.local_value()
 
@@ -1870,7 +1876,7 @@ class RpcTest(RpcAgentTestFixture):
         rref1 = RRef(self.rank)
         id_class = "GloballyUniqueId"
         self.assertEqual(
-            "OwnerRRef({}({}, 0))".format(id_class, self.rank), rref1.__str__()
+            "OwnerRRef({}(created_on={}, local_id=0))".format(id_class, self.rank), rref1.__str__()
         )
 
         dst_rank = (self.rank + 1) % self.world_size
@@ -1879,7 +1885,7 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(
             rref2.__str__(),
-            "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(
+            "UserRRef(RRefId = {0}(created_on={1}, local_id=1), ForkId = {0}(created_on={1}, local_id=2))".format(
                 id_class, self.rank
             ),
         )
