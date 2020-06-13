@@ -654,7 +654,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             model = quantize_dynamic(NestedModel().eval(), qconfig_dict, dtype=dtype)
             checkQuantized(model)
 
-    def test_per_channel_quantize(self):
+    def test_per_channel_linear_quantize(self):
         r"""Test quantization for per_channel dynamic quantization
         """
         model = NestedModel().eval()
@@ -866,6 +866,55 @@ class TestPostTrainingDynamic(QuantizationTestCase):
 
                 y, (h, c) = cell_dq(x, (h, c))
 
+    def test_per_channel_lstm_quantize(self):
+        d_hid = 2
+        num_chunks = 4
+        model = LSTMDynamicModel().eval()
+        cell = model.lstm
+        vals = [[100, -155],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155]]
+
+        vals = vals[:d_hid * num_chunks]
+        cell.weight_ih_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
+        cell.weight_hh_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
+        ref = copy.deepcopy(cell)
+        qconfig_dict = {
+            torch.nn.LSTM : per_channel_dynamic_qconfig
+        }
+        model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=torch.qint8)
+
+        niter = 10
+
+        x = torch.tensor([[100, -155],
+                          [-155, 100],
+                          [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+
+        h0_vals = [[-155, 100],
+                   [-155, 155],
+                   [100, -155]]
+        hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+        cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+        hiddens = (hx, cx)
+        quant_out, quant_hidden = model_quantized(x)
+        ref_out, ref_hidden = ref(x)
+
+        def checkQuantized(model):
+            self.assertTrue('DynamicQuantizedLSTM' in str(model))
+            self.checkDynamicQuantizedLSTM(model.lstm, torch.nn.quantized.dynamic.LSTM, dtype=torch.qint8)
+            self.checkScriptable(model, [(x, x)], check_save_load=True)
+        checkQuantized(model_quantized)
+
+        self.assertEqual(quant_out, ref_out)
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):

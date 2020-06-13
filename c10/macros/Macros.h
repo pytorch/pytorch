@@ -247,11 +247,19 @@ __host__ __device__
         const char* function) throw();
 }
 #endif // NDEBUG
+#if defined(__ANDROID__)
+#include <assert.h>
+#define CUDA_KERNEL_ASSERT(cond)                    \
+  if (C10_UNLIKELY(!(cond))) {                      \
+    __assert2(__FILE__, __LINE__, __func__, #cond); \
+  }
+#else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(#cond, __FILE__, static_cast<unsigned int>(__LINE__),  \
                   __func__);                                             \
   }
+#endif
 #endif // __APPLE__
 
 #ifdef __APPLE__
