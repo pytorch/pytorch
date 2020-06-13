@@ -4,8 +4,9 @@
 #include <pybind11/stl.h>
 #include "activation_distribution_observer.h"
 #include "caffe2/opt/custom/fakefp16_transform.h"
+#include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/fbgemm_pack_blob.h"
-#include "caffe2_dnnlowp_utils.h"
+#include "caffe2/quantization/server/int8_gen_quant_params.h"
 #include "quantization_error_minimization.h"
 
 namespace caffe2 {
@@ -411,4 +412,37 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       },
       pybind11::arg("blob_name"),
       pybind11::arg("weights_out_file"));
+  m.def(
+      "CreateInt8QuantSchemeBlob",
+      [](std::string quant_scheme_blob_name,
+         std::string quantization_kind,
+         bool preserve_sparsity) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        auto* quant_scheme_blob = gWorkspace->GetBlob(quant_scheme_blob_name);
+        if (quant_scheme_blob == nullptr) {
+          quant_scheme_blob = gWorkspace->CreateBlob(quant_scheme_blob_name);
+        }
+        auto* quant_scheme_blob_data =
+            quant_scheme_blob->GetMutable<unique_ptr<Int8QuantSchemeBlob>>();
+        quant_scheme_blob_data->reset(
+            new Int8QuantSchemeBlob(quantization_kind, preserve_sparsity));
+      },
+      pybind11::arg("quant_scheme_blob_name"),
+      pybind11::arg("quantization_kind"),
+      pybind11::arg("preserve_sparsity"));
+  m.def(
+      "ObserveInt8QuantParamsBlob",
+      [](std::string quant_params_blob_name) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        auto* quant_params_blob = gWorkspace->GetBlob(quant_params_blob_name);
+        CAFFE_ENFORCE(quant_params_blob);
+        auto* quant_params_blob_data =
+            quant_params_blob->Get<unique_ptr<Int8QuantParamsBlob>>().get();
+        return std::tuple<float, int>(
+            quant_params_blob_data->qparam.scale,
+            quant_params_blob_data->qparam.zero_point);
+      },
+      pybind11::arg("quant_params_blob_name"));
 }

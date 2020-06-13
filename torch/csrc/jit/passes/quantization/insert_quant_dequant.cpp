@@ -70,7 +70,10 @@ bool isWeight(Module& module, Value* v) {
 
 Node* insertChooseQParams(Graph* graph, Value* original_val) {
   std::string choose_qparams_func = "_choose_qparams_per_tensor";
-  auto reduce_range = graph->insertConstant(false);
+  // Set the reduce range to default to true, since qnnpack backend ignores this
+  // argument.
+  bool reduce_range_param = true;
+  auto reduce_range = graph->insertConstant(reduce_range_param);
   // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
   Node* choose_qparams = graph->create(
       at::Symbol::aten(choose_qparams_func),
@@ -110,13 +113,14 @@ Node* insertDeQuant(
   return dequant;
 }
 
-void insertDeQuantForAllUse(
+std::vector<Value*> insertDeQuantForAllUse(
     Graph* graph,
     Value* quantized_val,
     Value* original_val) {
   // copy uses to vector since value->uses() is a reference
   // and changing the graph will also change the uses() list
   const std::vector<Use> uses = original_val->uses();
+  std::vector<Value*> outputs;
   for (size_t i = 0; i < uses.size(); ++i) {
     auto* user = uses[i].user;
     // Insert dequantize node right before use node, because
@@ -125,7 +129,9 @@ void insertDeQuantForAllUse(
     WithInsertPoint ins(user);
     Node* dequant = insertDeQuant(graph, quantized_val, original_val, i);
     user->replaceInput(uses[i].offset, dequant->output());
+    outputs.push_back(dequant->output());
   }
+  return outputs;
 }
 
 Node* insertQParam(
@@ -140,6 +146,31 @@ Node* insertQParam(
       ->setType(output_type);
   graph->insertNode(qparam);
   return qparam;
+}
+
+Node* insertScalarToTensor(Graph* graph, Value* scalar_value) {
+  Node* n = scalar_value->node();
+  WithInsertPoint ins(n->next());
+  Value* float_scalar_type = graph->insertConstant(IValue(c10::kFloat));
+  Value* none = graph->insertConstant(IValue());
+  Node* tensor_node = graph->create(
+      Symbol::aten("scalar_tensor"),
+      {scalar_value, float_scalar_type, none, none, none});
+  Value* tensor_output = tensor_node->output();
+  tensor_output->setDebugName(scalar_value->debugName() + ".tensor");
+  graph->insertNode(tensor_node);
+  // replace original_output with tensor
+  scalar_value->replaceAllUsesAfterNodeWith(tensor_node, tensor_output);
+  return tensor_node;
+}
+
+Node* insertItem(Graph* graph, Value* tensor, const TypePtr& output_type) {
+  WithInsertPoint ins(tensor->node()->next());
+  Node* n = graph->create(Symbol::aten("item"), {tensor});
+  Value* scalar = n->output();
+  scalar->setDebugName(tensor->debugName() + ".scalar")->setType(output_type);
+  graph->insertNode(n);
+  return n;
 }
 
 DynamicQuantOps insertChooseQParamQuantDequant(
@@ -165,7 +196,7 @@ void insertQuantizationOps(
     Node* observer,
     bool is_per_channel,
     const std::vector<std::string>& qparam_names,
-    bool is_dynamic = false) {
+    QuantType quant_type = QuantType::STATIC) {
   Graph* g = observer->owningGraph();
   // Observer output
   Value* observer_out = observer->output();
@@ -180,7 +211,7 @@ void insertQuantizationOps(
   }
   Value* original_val = observer->input(1);
   Node *quant, *choose_qparams, *dequant;
-  if (is_dynamic && !isWeight(module, observer_out)) {
+  if (quant_type == QuantType::DYNAMIC && !isWeight(module, observer_out)) {
     Value* dtype = g->insertGetAttr(self, qparam_names.back());
     std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
         g, observer_out, dtype, at::Symbol::aten(quantize_func));
@@ -332,11 +363,51 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
         dequant_out->uses().size() == 1,
         "Expect dequant output to have single use");
     Node* user = dequant_out->uses()[0].user;
-    return !nodeQuantizable(user, /* is_dynamic */ true);
+    return !nodeQuantizable(user, QuantType::DYNAMIC);
   };
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(dynamic_quant_ops, dynamic_quant_replacement);
   rewriter.runOnGraph(graph, filter);
+}
+
+void ReplicateClampScalarArgs(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  std::unordered_set<Node*> scalar_nodes_to_rewrite;
+  ;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      for (Value* output : n->outputs()) {
+        if (getClampScalarInputUse(output) && output->uses().size() > 1) {
+          scalar_nodes_to_rewrite.insert(n);
+        }
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+
+  for (Node* n : scalar_nodes_to_rewrite) {
+    const std::vector<Use> uses = n->output()->uses();
+    for (const auto& use : uses) {
+      Node* user = use.user;
+      WithInsertPoint ins(user);
+      Node* cloned_node = graph->createClone(n, [](Value* v) { return v; });
+      graph->insertNode(cloned_node);
+      user->replaceInput(use.offset, cloned_node->output());
+    }
+  }
+
+  for (Node* n : scalar_nodes_to_rewrite) {
+    n->removeAllInputs();
+  }
+
+  for (Node* n : scalar_nodes_to_rewrite) {
+    n->destroy();
+  }
 }
 
 void checkCalculateQParamsResult(const IValue& qparams) {
@@ -387,8 +458,8 @@ class InsertQuantDeQuantHelper {
  public:
   void run(Module& module, const std::string& method_name);
 
-  void setDynamicFlag(bool is_dynamic) {
-    is_dynamic_ = is_dynamic;
+  void setQuantType(QuantType quant_type) {
+    quant_type_ = quant_type;
   }
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
@@ -445,6 +516,27 @@ class InsertQuantDeQuantHelper {
   // Recursively find the nodes that produce the value and add to subgraph.
   void findSubgraph(Value* self, Value* v, std::vector<Node*>& weight_subgraph);
 
+  // Quantizes two types of general ops(ops that works both for floating point
+  // and quantized Tensors) in this pass
+  // for ops that only manipulates shape, e.g. flatten, quantization
+  // is done by swapping with previous dequantize op
+  // for ops that manipulates values of Tensor, e.g. average pool, quantization
+  // is done by inserting quant/dequant ops after the op
+  // also has a special handling of clamp/hardtanh
+  void propagateQuantizationOps(Block* block);
+
+  // Propagate quantization parameters from other quantized tensors
+  void propagateQParams(
+      Value* original_output,
+      const std::vector<Value*>& inputs,
+      bool is_scalar = false,
+      const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
+          c10::nullopt);
+
+  bool isQuantized(Value* v) {
+    return quantized_values_.count(v) != 0;
+  }
+
   std::unordered_map<Graph*, std::vector<std::string>>
       observer_modules_to_remove_;
   // We only remove observer module attributes from type in the
@@ -465,7 +557,11 @@ class InsertQuantDeQuantHelper {
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
 
-  bool is_dynamic_ = false;
+  // Set of quantized values, so that we quantize each value only
+  // once
+  std::unordered_set<Value*> quantized_values_;
+
+  QuantType quant_type_ = QuantType::STATIC;
 
   // Map from original weight value to GraphFunction corresponding to the
   // subgraph that includes the weight observer and dependent nodes.
@@ -681,7 +777,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(
       qparam_names.push_back(qparam_name);
     }
     insertQuantizationOps(
-        module, self, n, isPerChannel(qscheme), qparam_names, is_dynamic_);
+        module, self, n, isPerChannel(qscheme), qparam_names, quant_type_);
   }
 }
 
@@ -765,13 +861,18 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
   return invoked_methods;
 }
 
-void propagateQParams(
+void InsertQuantDeQuantHelper::propagateQParams(
     Value* original_output,
     const std::vector<Value*>& inputs,
-    const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt =
-        c10::nullopt) {
+    bool is_scalar,
+    const c10::optional<std::tuple<c10::QScheme, QParamVector>>& qparams_opt) {
   Node* n = original_output->node();
   Graph* graph = n->owningGraph();
+  if (is_scalar) {
+    // convert Scalar to Tensor
+    n = insertScalarToTensor(graph, original_output);
+    original_output = n->output();
+  }
   // for ops like average pool, we'll insert quant dequant after the op
   // We'll assume the tensor is a PerTensorAffine quantized Tensor for
   // now, and may generalize later if this becomes an issue
@@ -780,7 +881,11 @@ void propagateQParams(
   // input of the dequantize node
   Value* quantized_input = inputs[0]->node()->input(0);
   // insert ops after the general op
-  WithInsertPoint ins(n->next());
+  Node* quantized_input_node = quantized_input->node();
+  // Insert after the node that is later in topological order
+  WithInsertPoint ins(
+      quantized_input_node->isAfter(n) ? quantized_input_node->next()
+                                       : n->next());
   std::vector<Value*> quant_inputs;
   auto quant_kind = Symbol::aten("quantize_per_tensor");
   if (qparams_opt.has_value()) {
@@ -823,12 +928,21 @@ void propagateQParams(
   // replace uses of original output of the general op with quantized
   // output
   original_output->replaceAllUsesAfterNodeWith(quant, quantized_output);
-  insertDeQuantForAllUse(graph, quantized_output, quantized_output);
+  const auto& outputs =
+      insertDeQuantForAllUse(graph, quantized_output, quantized_output);
+  for (auto* output : outputs) {
+    if (is_scalar) {
+      // Convert the dequantized Tensor back to Scalar
+      Node* item = insertItem(graph, output, FloatType::get());
+      Value* scalar = item->output();
+      output->replaceAllUsesAfterNodeWith(item, scalar);
+      output = scalar;
+    }
+    quantized_values_.insert(output);
+  }
 }
 
-void propagateDequantize(Value* output, const std::vector<Value*> inputs) {
-  Node* n = output->node();
-  Graph* graph = n->owningGraph();
+void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
   // Delete dequantize node, we have one dequantize
   // for each use of the value
   for (auto* dequantized_val : inputs) {
@@ -842,10 +956,29 @@ void propagateDequantize(Value* output, const std::vector<Value*> inputs) {
     dequantize_node->removeAllInputs();
     dequantize_node->destroy();
   }
-  insertDeQuantForAllUse(graph, output, output);
 }
 
-void propagateQuantizationOps(Block* block) {
+// Check if we need to propagate the quantization ops from input to
+// output
+c10::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
+  auto inputs = getPassThroughInputs(output);
+  if (inputs.size() > 0) {
+    // note that we don't need to recursively check for prim::If
+    // here because if all inputs of a prim::If is dequantized
+    // the dequantize will be factored out before we get to this
+    // point
+    bool is_dequantized = true;
+    for (auto* input : inputs) {
+      is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
+    }
+    if (is_dequantized) {
+      return inputs;
+    }
+  }
+  return c10::nullopt;
+}
+
+void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::If) {
       for (Block* subblock : n->blocks()) {
@@ -860,27 +993,64 @@ void propagateQuantizationOps(Block* block) {
         continue;
       }
     }
-    for (auto* output : n->outputs()) {
-      auto inputs = getPassThroughInputs(output);
-      if (inputs.size() > 0) {
-        // note that we don't need to recursively check for prim::If
-        // here because if all inputs of a prim::If is dequantized
-        // the dequantize will be factored out before we get to this
-        // point
-        bool is_dequantized = true;
-        for (auto* input : inputs) {
-          is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
-        }
-        if (!is_dequantized) {
+    if (isSingleInputGeneralValueAtenFunction(n)) {
+      for (auto* output : n->outputs()) {
+        if (isQuantized(output)) {
           continue;
         }
-        if (isSingleInputGeneralValueAtenFunction(n)) {
-          propagateQParams(output, inputs);
-        } else if (auto qparams_opt = getFixedQParams(n)) {
-          propagateQParams(output, inputs, qparams_opt);
-        } else {
-          propagateDequantize(output, inputs);
+        if (auto inputs = getDequantizedInputs(output)) {
+          propagateQParams(output, *inputs);
+          if (isClamp(n)) {
+            for (size_t i = 1; i <= 2; ++i) {
+              // propagate qparams for min and max scalar arguments
+              // for aten::clamp/aten::hardtanh
+              propagateQParams(n->input(i), *inputs, /* is_scalar */ true);
+            }
+          }
         }
+      }
+    } else if (auto qparams_opt = getFixedQParams(n)) {
+      for (auto* output : n->outputs()) {
+        if (isQuantized(output)) {
+          continue;
+        }
+        if (auto inputs = getDequantizedInputs(output)) {
+          propagateQParams(output, *inputs, /* is_scalar */ false, qparams_opt);
+        }
+      }
+    } else {
+      // For ops that are quantized by propagating dequantize ops,
+      // e.g. flatten we need to
+      // 1. check if we need to propagate dequantize op
+      // 2. remove the dequantize ops from inputs
+      // 3. insert dequantize for all outputs
+      // to make sure it works for ops with multiple outputs
+      // since removing dequantize from inputs is mutating the graph
+      // and it will affect future checks for whether all the inputs
+      // has been quantized or not(since currently we just check if
+      // the value is produced by dequantize op to decide if the value
+      // is quantized or not
+      // list of dequantized input values
+      std::unordered_set<Value*> dequantized_inputs;
+      std::vector<Value*> outputs_to_dequantize;
+      // 1. collect dequantized inputs and outputs we need to dequantize
+      for (auto* output : n->outputs()) {
+        if (isQuantized(output)) {
+          continue;
+        }
+        if (auto inputs = getDequantizedInputs(output)) {
+          std::copy(
+              inputs->begin(),
+              inputs->end(),
+              std::inserter(dequantized_inputs, dequantized_inputs.end()));
+          outputs_to_dequantize.push_back(output);
+        }
+      }
+      // 2. remove the dequantize ops from inputs
+      removeDequantizeFromInputs(dequantized_inputs);
+      // 3. insert dequantize op for outpus
+      for (auto* output : outputs_to_dequantize) {
+        insertDeQuantForAllUse(output->owningGraph(), output, output);
       }
     }
   }
@@ -1012,7 +1182,8 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
   RemoveRedundantDequantize(graph);
-  PropagateQuantizationOps(graph);
+  ReplicateClampScalarArgs(graph);
+  propagateQuantizationOps(graph->block());
 }
 
 } // namespace
@@ -1134,22 +1305,15 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
   }
 }
 
-// This is the pass to handle ops that does not require observation
-// for example: flatten, average_pool, upsample
-// This is called after inline and before graph execution
-void PropagateQuantizationOps(std::shared_ptr<Graph>& graph) {
-  propagateQuantizationOps(graph->block());
-}
-
 Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
     bool inplace,
-    bool is_dynamic) {
+    QuantType quant_type) {
   Module module = input_module.clone(inplace);
   InsertQuantDeQuantHelper h;
-  h.setDynamicFlag(is_dynamic);
-  if (is_dynamic) {
+  h.setQuantType(quant_type);
+  if (quant_type == QuantType::DYNAMIC) {
     h.runWeightObserver(module, method_name);
   }
   h.run(module, method_name);

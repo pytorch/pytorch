@@ -35,6 +35,8 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
         dims = np.concatenate((np.array([1]), np.random.randint(1, 20, size=3)))
         A = np.random.uniform(low=-100.0, high=100.0, size=dims).astype(np.float32)
         B = np.random.uniform(low=-100.0, high=100.0, size=dims).astype(np.float32)
+        # Avoid dividing by 0
+        B[np.abs(B) < 1e-3] = 1e-3
         print(A.shape, B.shape)
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
