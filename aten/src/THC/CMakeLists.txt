@@ -37,15 +37,13 @@ endforeach()
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingHostAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
 
   ${CMAKE_CURRENT_SOURCE_DIR}/THCReduceApplyUtils.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCBlas.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSleep.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorage.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cu
+        ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorCopy.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMath.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathBlas.cu
@@ -71,7 +69,6 @@ install(FILES
           THCBlas.h
           THCSleep.h
           THCStorage.h
-          THCStorageCopy.h
           THCTensor.h
           THCTensorCopy.h
           THCTensorCopy.hpp
@@ -132,9 +129,6 @@ install(FILES
           generic/THCTensor.cu
           generic/THCTensor.h
           generic/THCTensor.hpp
-          generic/THCStorageCopy.cpp
-          generic/THCStorageCopy.cu
-          generic/THCStorageCopy.h
           generic/THCTensorCopy.cu
           generic/THCTensorCopy.h
           generic/THCTensorMasked.h

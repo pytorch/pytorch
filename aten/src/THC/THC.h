@@ -8,7 +8,6 @@
 #include <THC/THCCachingHostAllocator.h>
 #include <THC/THCSleep.h>
 #include <THC/THCStorage.h>
-#include <THC/THCStorageCopy.h>
 
 #include <THC/THCTensor.h>
 #include <THC/THCTensorCopy.h>

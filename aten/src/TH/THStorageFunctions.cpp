@@ -21,24 +21,6 @@
 #include <TH/generic/THStorage.cpp>
 #include <TH/THGenerateBFloat16Type.h>
 
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateHalfType.h>
-
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateBoolType.h>
-
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateQTypes.h>
-
-#include <TH/generic/THStorageCopy.cpp>
-#include <TH/THGenerateBFloat16Type.h>
-
 THStorage* THStorage_new() {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
