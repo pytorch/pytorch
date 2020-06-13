@@ -100,6 +100,7 @@ _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
 _(aten, _nnz) \
+_(aten, _nansum) \
 _(aten, _pack_padded_sequence) \
 _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
@@ -500,6 +501,7 @@ _(aten, multilabel_margin_loss_forward) \
 _(aten, multinomial) \
 _(aten, mv) \
 _(aten, mvlgamma) \
+_(aten, nansum) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
