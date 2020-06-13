@@ -1934,10 +1934,9 @@ Divides each element of the input ``input`` with the scalar ``other`` and
 returns a new resulting tensor.
 
 .. warning::
-    Integer division using div is deprecated, and in a future release div will
-    perform true division like :func:`torch.true_divide`.
-    Use :func:`torch.floor_divide` (// in Python) to perform integer division,
-    instead.
+    Integer division using div is no longer supported, and in a future release
+    div will perform true division as in Python 3. Use :func:`torch.true_divide`
+    or :func:`torch.floor_divide` (// in Python), instead.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}

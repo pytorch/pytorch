@@ -567,12 +567,10 @@ def configure_extension_build():
         extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB']
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
-        # /Z7 turns on symbolic debugging information in .obj files
         # /EHsc is about standard C++ exception handling
         # /DNOMINMAX removes builtin min/max functions
         # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/Z7',
-                              '/EHsc', '/DNOMINMAX',
+        extra_compile_args = ['/MD', '/EHsc', '/DNOMINMAX',
                               '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                               '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                               '/wd4275']
@@ -616,6 +614,7 @@ def configure_extension_build():
 
     if build_type.is_debug():
         if IS_WINDOWS:
+            extra_compile_args.append('/Z7')
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-O0', '-g']
@@ -623,6 +622,7 @@ def configure_extension_build():
 
     if build_type.is_rel_with_deb_info():
         if IS_WINDOWS:
+            extra_compile_args.append('/Z7')
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-g']
