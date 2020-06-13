@@ -323,10 +323,18 @@ Tensor& nansum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
 Tensor nansum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::native::nansum(self, std::vector<int64_t>{}, false, dtype);
 }
+
+Tensor nansum(const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  Tensor result;
+  dim = maybe_wrap_dim(dim, self.dim());
+  return at::native::nansum_out(result, self, std::vector<int64_t>{}, keepdim, dtype);
+}
+
 Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
   Tensor result;
   return at::native::nansum_out(result, self, dim, keepdim, dtype);
 }
+
 Tensor nansum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
   return at::nansum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }

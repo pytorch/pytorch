@@ -5849,9 +5849,9 @@ Example::
     >>> a = torch.tensor([[1, 1], [1., float("nan")]])
     >>> torch.nansum(a)
     tensor(3.)
-    >>> torch.nansum(a, axis=0)
+    >>> torch.nansum(a, dim=0)
     tensor([2., 1.])
-    >>> torch.nansum(a, axis=1)
+    >>> torch.nansum(a, dim=1)
     tensor([2., 1.])
 """.format(**multi_dim_common))
 
