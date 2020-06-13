@@ -392,6 +392,8 @@ class TORCH_API OwnerRRef final : public RRef {
   std::shared_ptr<JitFuture> future_;
 };
 
+TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

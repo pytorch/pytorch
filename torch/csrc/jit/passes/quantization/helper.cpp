@@ -472,6 +472,14 @@ bool alwaysRaisesException(Block* block) {
   return false;
 }
 
+// Check if a value in the graph is a Scalar value
+bool isScalar(Value* v) {
+  auto iv = toIValue(v);
+  return v->type()->isSubtypeOf(NumberType::get()) ||
+      (v->type()->isSubtypeOf(TensorType::get()) && iv && iv->isTensor() &&
+       iv->toTensor().dim() == 0);
+}
+
 // =================== Graph/Module analysis helper functions ============
 // Check if value is the input of the graph
 bool hitGraphInput(Value* value) {
