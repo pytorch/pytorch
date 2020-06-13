@@ -256,7 +256,7 @@ class TestOptim(TestCase):
         p_multi = torch.zeros(10).requires_grad_(True).share_memory_()
         opt_multi = constructor([p_multi])
         opt_multi.share_memory()
-        pool = mp.Pool(1)
+        pool = mp.get_context('spawn').Pool(1)
         res_multi = pool.apply(_update, args=(opt_multi, p_multi))
 
         # reference solution
