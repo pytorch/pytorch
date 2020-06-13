@@ -70,7 +70,7 @@ class WorkerInfo(object):
         if self.__initialized:
             raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
         return super(WorkerInfo, self).__setattr__(key, val)
-    
+
     def __repr__(self):
         items = []
         for k in self.__keys:
