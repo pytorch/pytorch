@@ -236,9 +236,9 @@
         command: |
             source /env
             cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-            pip3 install requests && \
+            pip install requests && \
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
-            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py ~/workspace/android || exit 0
+            python /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py ~/workspace/android || exit 0
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -327,9 +327,9 @@
         command: |
             source /env
             cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-            pip3 install requests && \
+            pip install requests && \
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
-            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py ~/workspace/android || exit 0
+            python /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py ~/workspace/android || exit 0
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
