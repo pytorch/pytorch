@@ -10,8 +10,7 @@ class AndroidJob:
     def gen_tree(self):
 
         props_dict = {
-            # TODO: UNCOMMENT!
-            # "filters": cimodel.data.simple.util.branch_filters.gen_filter_dict(),
+            "filters": cimodel.data.simple.util.branch_filters.gen_filter_dict(),
             "name": self.job_name,
             "requires": self.dependencies,
         }

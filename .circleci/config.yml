@@ -6936,10 +6936,22 @@ workflows:
           requires:
             - pytorch_macos_10_13_py3_build
       - pytorch_android_gradle_build-x86_32:
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
       - pytorch_android_gradle_build:
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
           requires:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
