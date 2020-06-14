@@ -744,8 +744,8 @@ class TestPostTrainingDynamic(QuantizationTestCase):
     def test_per_channel_lstm_quantize(self):
         d_hid = 2
         num_chunks = 4
-        model = LSTMDynamicModel().eval()
-        cell = model.lstm
+        model = RNNDynamicModel('LSTM').eval()
+        cell = model.mod
         vals = [[100, -155],
                 [100, -155],
                 [-155, 100],
@@ -785,7 +785,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
 
         def checkQuantized(model):
             self.assertTrue('DynamicQuantizedLSTM' in str(model))
-            self.checkDynamicQuantizedLSTM(model.lstm, torch.nn.quantized.dynamic.LSTM, dtype=torch.qint8)
+            self.checkDynamicQuantizedLSTM(model.mod, torch.nn.quantized.dynamic.LSTM, dtype=torch.qint8)
             self.checkScriptable(model, [(x, x)], check_save_load=True)
         checkQuantized(model_quantized)
 
