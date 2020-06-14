@@ -8,17 +8,16 @@ import torch
 import torchvision
 import yaml
 
-# Download and trace the model.
+# Download and script the model.
 model = torchvision.models.mobilenet_v2(pretrained=True)
 model.eval()
-example = torch.rand(1, 3, 224, 224)
-traced_script_module = torch.jit.trace(model, example)
+script_module = torch.jit.script(model)
 
-# Save traced TorchScript model.
-traced_script_module.save("MobileNetV2.pt")
+# Save TorchScript model.
+script_module.save("MobileNetV2.pt")
 
 # Dump root ops used by the model (for custom build optimization).
-ops = torch.jit.export_opnames(traced_script_module)
+ops = torch.jit.export_opnames(script_module)
 
 # Besides the ops used by the model, custom c++ client code might use some extra
 # ops, too. For example, the dummy predictor.cpp driver in this test suite calls
