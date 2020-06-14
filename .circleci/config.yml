@@ -1479,7 +1479,7 @@ jobs:
         name: save binary size
         no_output_timeout: "5m"
         command: |
-          cat << EOL | docker exec -u jenkins -i "$id_x86_32" bash
+          cat \<< EOL | docker exec -u jenkins -i "$id_x86_32" bash
           # ============================== Begin Docker ==============================
           cd workspace
           source ./env
@@ -1577,7 +1577,7 @@ jobs:
         name: save binary size
         no_output_timeout: "5m"
         command: |
-          cat << EOL | docker exec -u jenkins -i "$id" bash
+          cat \<< EOL | docker exec -u jenkins -i "$id" bash
           # ============================== Begin Docker ==============================
           cd workspace
           source ./env
