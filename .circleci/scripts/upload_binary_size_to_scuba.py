@@ -3,11 +3,9 @@ import json
 import logging
 import os
 import os.path
-import pathlib
 import re
 import sys
 import time
-import zipfile
 
 import requests
 
@@ -50,7 +48,7 @@ def build_message(size):
     }
 
 
-def send_message(messages):
+def send_message(message):
     access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
     if not access_token:
         raise ValueError("Can't find access token from environment variable")
@@ -66,60 +64,12 @@ def send_message(messages):
                         "message": json.dumps(message),
                         "line_escape": False,
                     }
-                    for message in messages
                 ]
             ),
         },
     )
     print(r.text)
     r.raise_for_status()
-
-
-def report_android_sizes(file_dir):
-    def gen_sizes():
-        # we should only expect one file, if no, something is wrong
-        aar_files = list(pathlib.Path(file_dir).rglob("pytorch_android-*.aar"))
-        if len(aar_files) != 1:
-            logging.exception(f"error getting aar files from: {file_dir} / {aar_files}")
-            return
-
-        aar_file = aar_files[0]
-        zf = zipfile.ZipFile(aar_file)
-        for info in zf.infolist():
-            # Scan ".so" libs in `jni` folder. Examples:
-            # jni/arm64-v8a/libfbjni.so
-            # jni/arm64-v8a/libpytorch_jni.so
-            m = re.match(r"^jni/([^/]+)/(.*\.so)$", info.filename)
-            if not m:
-                continue
-            arch, lib = m.groups()
-            # report per architecture library size
-            yield [arch, lib, info.compress_size, info.file_size]
-
-        # report whole package size
-        yield ["all", aar_file.name, os.stat(aar_file).st_size, 0]
-
-    def gen_messages():
-        for arch, lib, comp_size, uncomp_size in gen_sizes():
-            print(arch, lib, comp_size, uncomp_size)
-            yield {
-                "normal": {
-                    "os": "android",
-                    "pkg_type": "{}/{}".format(arch, lib),  # TODO: create dedicated columns
-                    "pr": os.environ.get("CIRCLE_PR_NUMBER"),
-                    "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
-                    "sha1": os.environ.get("CIRCLE_SHA1"),
-                    "branch": os.environ.get("CIRCLE_BRANCH"),
-                },
-                "int": {
-                    "time": int(time.time()),
-                    "commit_time": int(os.environ.get("COMMIT_TIME", "0")),
-                    "size": comp_size,
-                    "raw_size": uncomp_size,
-                },
-            }
-
-    send_message(list(gen_messages()))
 
 
 if __name__ == "__main__":
@@ -129,13 +79,9 @@ if __name__ == "__main__":
     if len(sys.argv) == 2:
         file_dir = sys.argv[1]
     print("checking dir: " + file_dir)
-
-    if "-android" in os.environ.get("BUILD_ENVIRONMENT", ""):
-        report_android_sizes(file_dir)
-    else:
-        size = get_size(file_dir)
-        if size != 0:
-            try:
-                send_message([build_message(size)])
-            except:
-                logging.exception("can't send message")
+    size = get_size(file_dir)
+    if size != 0:
+        try:
+            send_message(build_message(size))
+        except:
+            logging.exception("can't send message")
