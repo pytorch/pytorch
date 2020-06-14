@@ -8038,11 +8038,6 @@ class TestTorchDeviceType(TestCase):
         B = torch.mm(C, C.t())
         self.assertEqual(A, B, atol=1e-14, rtol=0)
 
-        # cholesky_mod
-        C, e = torch.cholesky_mod(A)
-        B = torch.mm(C, C.t())
-        self.assertEqual(A, B, atol=1e-14+torch.max(e), rtol=0)
-
         # test Upper Triangular
         U = torch.cholesky(A, True)
         B = torch.mm(U.t(), U)
@@ -8052,6 +8047,38 @@ class TestTorchDeviceType(TestCase):
         L = torch.cholesky(A, False)
         B = torch.mm(L, L.t())
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_cholesky_mod(self, device, dtype):
+        # cholesky_mod: change A from positive definite to positive
+        # semi-definite
+        n = 10
+        x = torch.rand(n, n, dtype=dtype, device=device) + 1e-1
+        # make D a diagonal, rank-deficient matrix
+        d = torch.arange(n, dtype=dtype, device=device)
+        d[:2] = 0 # two zeros
+        D = torch.eye(n, dtype=dtype, device=device) * d
+        A = x @ D @ x.t()
+
+        # make sure the regular cholesky fails
+        self.assertRaises(RuntimeError, lambda: torch.cholesky(A))
+
+        # default
+        C, e = torch.cholesky_mod(A)
+        B = torch.mm(C, C.t()) - (torch.eye(n) * e)
+        self.assertEqual(A, B, atol=1e-14, rtol=0)
+
+        # test Upper Triangular
+        U, e = torch.cholesky_mod(A, True)
+        B = torch.mm(U.t(), U) - (torch.eye(n) * e)
+        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky_mod (upper) did not allow rebuilding the original matrix')
+
+        # test Lower Triangular
+        L, e = torch.cholesky_mod(A, False)
+        B = torch.mm(L, L.t()) - (torch.eye(n) * e)
+        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky_mod (lower) did not allow rebuilding the original matrix')
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)

@@ -572,34 +572,56 @@ Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
 }
 
 template<typename scalar_t>
-static void apply_cholesky_mod(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+static void  apply_cholesky_mod(const Tensor& self, Tensor & out, Tensor & err, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("cholesky: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
   auto self_data = self.data_ptr<scalar_t>();
+  auto out_data = out.data_ptr<scalar_t>();
+  auto err_data = err.data_ptr<double>();
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
+  auto m = self.size(-1);
 
   int info;
   for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* out_working_ptr = &out_data[i * self_matrix_stride];
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
+    double err_val = 1e-8;
+    lapackCholesky<scalar_t>(uplo, n, out_working_ptr, n, &info);
+    for (int64_t j=0; j<6; j++)
+    {
+      if (info == 0) {
+        break;
+      }
+      // lapackChelesky failed.
+      // Copy current 2D matrix to out, add err_value to diagnal
+      memcpy(out_working_ptr, self_working_ptr, n * m * sizeof(scalar_t));
+      for (int64_t mm=0; mm<m; mm++)
+      {
+        out_working_ptr[(mm * m) + mm] += err_val;
+      }
+      err_data[i] = err_val;
+      err_val *= 100.0;
+      lapackCholesky<scalar_t>(uplo, n, out_working_ptr, n, &info);
     }
+    infos[i] = info;
   }
 #endif
 }
 
-std::tuple<Tensor, Tensor> _cholesky_mod_helper_cpu(const Tensor& self, const Tensor& err, bool upper) {
+std::tuple<Tensor, Tensor> _cholesky_mod_helper_cpu(const Tensor& self, bool upper) {
   std::vector<int64_t> infos(batchCount(self), 0);
-  auto self_working_copy = cloneBatchedColumnMajor(self);
+  Tensor self_working_copy = cloneBatchedColumnMajor(self);
+  auto req_size = self.sizes().vec();
+  req_size.pop_back();
+  req_size.pop_back();
+  auto err = at::zeros(req_size, self.options().dtype(ScalarType::Double));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_mod_cpu", [&]{
-    apply_cholesky_mod<scalar_t>(self_working_copy, upper, infos);
+    apply_cholesky_mod<scalar_t>(self, self_working_copy, err, upper, infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "cholesky_mod_cpu");
@@ -610,15 +632,15 @@ std::tuple<Tensor, Tensor> _cholesky_mod_helper_cpu(const Tensor& self, const Te
 }
 
 std::tuple<Tensor, Tensor> cholesky_mod(const Tensor &self, bool upper) {
-  auto req_size = self.sizes().vec();
-  req_size.pop_back();
-  auto err = at::zeros(req_size, self.options().dtype(ScalarType::Double));
   if (self.size(-1) == 0) {
+      auto req_size = self.sizes().vec();
+      req_size.pop_back();
+      auto err = at::empty(req_size, self.options().dtype(ScalarType::Double));
     return std::make_tuple(at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), err);
   }
   squareCheckInputs(self);
 
-  auto helper_out = at::_cholesky_mod_helper(self, err, upper);
+  auto helper_out = at::_cholesky_mod_helper(self, upper);
   auto raw_cholesky_output = std::get<0>(helper_out);
   auto err_output = std::get<1>(helper_out);
   if (upper) {

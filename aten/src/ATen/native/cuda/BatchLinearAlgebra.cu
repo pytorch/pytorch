@@ -901,7 +901,7 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   }
 }
 
-std::tuple<Tensor, Tensor> _cholesky_mod_helper_cuda(const Tensor& self, const Tensor& err, bool upper) {
+std::tuple<Tensor, Tensor> _cholesky_mod_helper_cuda(const Tensor& self, bool upper) {
   std::vector<int64_t> infos(batchCount(self), 0);
   Tensor self_working_copy;
   if (upper) {
@@ -909,6 +909,10 @@ std::tuple<Tensor, Tensor> _cholesky_mod_helper_cuda(const Tensor& self, const T
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
   }
+  auto req_size = self.sizes().vec();
+  req_size.pop_back();
+  req_size.pop_back();
+  auto err = at::zeros(req_size, self.options().dtype(ScalarType::Double));
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_mod_cuda", [&]{
     apply_cholesky<scalar_t>(self_working_copy, false, infos);

@@ -4896,7 +4896,7 @@
   use_c10_dispatcher: full
   variants: method, function
 
-- func: _cholesky_mod_helper(Tensor self, Tensor err, bool upper) -> (Tensor, Tensor)
+- func: _cholesky_mod_helper(Tensor self, bool upper) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   variants: function
   dispatch:
