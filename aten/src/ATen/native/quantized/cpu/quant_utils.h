@@ -30,7 +30,13 @@ inline TensorQuantizationParams ChooseQuantizationParams(
     bool reduce_range = false) {
 
   if (min > max)
-    min = max;
+  {
+    std::cout << "min" << min << max<<"\n";
+    TensorQuantizationParams result;
+    result.scale = 0.1f;
+    result.zero_point = 0;
+    return result;
+  }
   if (reduce_range) {
     qmin = qmin/2;
     qmax = qmax/2;
