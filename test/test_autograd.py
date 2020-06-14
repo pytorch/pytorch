@@ -4400,6 +4400,8 @@ def add_test(
                             return output_process_fn(output)
 
                         if not is_inplace and name not in EXCLUDE_GRADCHECK:
+                            print(name)
+                            print("Self, self_variable: ", self, self_variable)
                             run_grad_and_gradgrad_checks(self, name, test_name, fn,
                                                          output_variable, (self_variable,) + args_variable)
 
