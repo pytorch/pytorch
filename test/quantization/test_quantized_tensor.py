@@ -22,6 +22,7 @@ class Foo(torch.nn.Module):
 def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
+    _float_eps = 1.2e-7
     if isinstance(X, torch.Tensor):
         X = X.numpy()
     if dtype == torch.qint8:
@@ -39,9 +40,9 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     max_val = X.max().astype(dtype=np.float32)
     min_val = min(0.0, min_val)
     max_val = max(0.0, max_val)
-    scale = (np.float64(max_val) - min_val) / (qmax - qmin)
-    if scale == 0.0 or math.isinf(1.0 / scale):
-        scale = np.float64(0.1)
+    scale = np.float64(max_val - min_val) / (qmax - qmin)
+    if scale <= _float_eps or math.isinf(1.0 / scale):
+        scale = np.float32(0.1)
         zero_point = 0
 
     zero_point_from_min = qmin - min_val / float(scale)
