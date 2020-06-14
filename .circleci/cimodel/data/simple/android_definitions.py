@@ -77,7 +77,7 @@ WORKFLOW_DATA = [
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32",
         "pytorch_android_gradle_build-x86_32",
         ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build"],
-        is_master_only=False),  # TODO: remove
+        is_master_only=False),
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build",
         "pytorch_android_gradle_build",
@@ -85,7 +85,7 @@ WORKFLOW_DATA = [
          "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build",
          "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build",
          "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build"],
-         is_master_only=False),  # TODO: remove
+        is_master_only=False),  # TODO: remove
 ]
 
 

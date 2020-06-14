@@ -1479,7 +1479,10 @@ jobs:
         name: save binary size
         no_output_timeout: "5m"
         command: |
-          cat \<< EOL | docker exec -u jenkins -i "$id_x86_32" bash
+          docker_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image})
+          echo "docker-id: $id"
+          cat \<< EOL | docker exec -u jenkins -i "$id" bash
           # ============================== Begin Docker ==============================
           cd workspace
           source ./env
@@ -1577,6 +1580,9 @@ jobs:
         name: save binary size
         no_output_timeout: "5m"
         command: |
+          docker_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image})
+          echo "docker-id: $id"
           cat \<< EOL | docker exec -u jenkins -i "$id" bash
           # ============================== Begin Docker ==============================
           cd workspace
