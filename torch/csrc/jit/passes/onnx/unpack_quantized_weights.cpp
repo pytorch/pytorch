@@ -144,7 +144,6 @@ void unpackQuantizedWeightsHelper(
     std::map<std::string, IValue>& paramsDict,
     const std::string& pattern,
     const std::string& unpack_fn) {
-  TORCH_WARN("===> DEBUG!");
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   parseIR(pattern, &pattern_graph, vmap);
