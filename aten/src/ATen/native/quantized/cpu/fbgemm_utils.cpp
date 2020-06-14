@@ -214,16 +214,6 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 
 template <int kSpatialDim = 2>
 CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
-  // using ConvPackedParamsSerializationType = std::tuple<
-  //   at::Tensor /*weight*/,
-  //   c10::optional<at::Tensor> /*bias*/,
-  //   // these are meant to be torch::List<int64_t> but
-  //   // it's not supported by onnx, so we'll use Tensor as
-  //   // a workaround
-  //   torch::List<at::Tensor>,
-  //   torch::List<at::Tensor>,
-  //   torch::List<at::Tensor>,
-  //   at::Tensor>;
   static auto register_conv_params =
     torch::jit::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
