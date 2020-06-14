@@ -9,8 +9,22 @@ namespace rpc {
 // saved by calling torch.save(), rref is not allowed to be pickled directly.
 static thread_local bool allowJitRRefPickle = false;
 
+static thread_local bool skipJitRRefPickle = false;
+
 bool getAllowJitRRefPickle() {
   return allowJitRRefPickle;
+}
+
+bool getSkipJitRRefPickle() {
+  return skipJitRRefPickle;
+}
+
+void enableSkipJitRRefPickle() {
+  skipJitRRefPickle = true;
+}
+
+void disableSkipJitRRefPickle() {
+  skipJitRRefPickle = false;
 }
 
 static_assert(

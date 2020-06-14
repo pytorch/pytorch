@@ -693,6 +693,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "_disable_server_process_global_profiler",
       &profiler::processglobal::disableServer);
 
+  module.def(
+      "_enable_skip_jit_rref_pickle",
+      &enableSkipJitRRefPickle);
+  module.def(
+      "_disable_skip_jit_rref_pickle",
+      &disableSkipJitRRefPickle);
+
   Py_RETURN_TRUE;
 }
 

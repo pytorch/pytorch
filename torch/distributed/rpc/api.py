@@ -28,6 +28,11 @@ from . import (
     backend_registry,
 )
 
+from . import (
+    _enable_skip_jit_rref_pickle,
+    _disable_skip_jit_rref_pickle,
+)
+
 from .internal import (
     PythonUDF,
     RPCExecMode,
@@ -65,6 +70,19 @@ def _use_rpc_pickler(rpc_pickler):
         yield
     finally:
         _default_pickler = _internal_rpc_pickler
+
+
+@contextlib.contextmanager
+def _skip_jit_rref_pickle():
+    r"""
+    If wrapped with this context, ``torch.jit.save(script_module)`` will ignore
+    all RRefs in ``script_module``.
+    """
+    _enable_skip_jit_rref_pickle()
+    try:
+        yield
+    finally:
+        _disable_skip_jit_rref_pickle()
 
 
 def _require_initialized(func):

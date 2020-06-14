@@ -1,7 +1,8 @@
+import io
+import typing
 from typing import Dict, Tuple
 
 import torch
-import time
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc.internal import _build_rpc_profiling_key, RPCExecMode
@@ -191,6 +192,7 @@ class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
         self.rrefs = []
         for _ in range(4):
             self.rrefs.append(rpc_return_rref(dst_worker))
+        self.arg = "verify pickle result"
 
     @torch.jit.script_method
     def forward(self):
@@ -257,6 +259,32 @@ class RRefTypingTest:
 
         res = rref_script_annotation(rref_var)
         self.assertEqual(res, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_skip_jit_rref_pickle_ctx(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        module_with_rrefs = MyScriptModuleWithRRefs(worker_name(dst_rank))
+
+        self.assertTrue(len(module_with_rrefs.rrefs) > 0)
+
+        f = io.BytesIO()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "RRef jit pickling is only allowed inside RPC calls"
+        ):
+            torch.jit.save(module_with_rrefs, f)
+
+        f = io.BytesIO()
+
+        with rpc._skip_jit_rref_pickle():
+            torch.jit.save(module_with_rrefs, f)
+
+        f.seek(0)
+        unpickled = torch.jit.load(f)
+        self.assertEqual(unpickled.arg, "verify pickle result")
+        self.assertTrue(len(unpickled.rrefs) == 0)
 
 
 class FutureTypingTest:

@@ -12,6 +12,10 @@ using local_id_t = int64_t;
 
 bool getAllowJitRRefPickle();
 
+bool getSkipJitRRefPickle();
+TORCH_API void enableSkipJitRRefPickle();
+TORCH_API void disableSkipJitRRefPickle();
+
 struct TORCH_API JitRRefPickleGuard {
   JitRRefPickleGuard();
   ~JitRRefPickleGuard();
