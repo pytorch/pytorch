@@ -2,6 +2,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/cpu/Reduce.h>
+#include <c10/util/llvmMathExtras.h>
 
 #include <algorithm>
 
@@ -46,6 +47,17 @@ void store_result(char * C10_RESTRICT data, int64_t stride, int64_t index,
   }
 }
 
+int64_t ceil_log2(int64_t x) {
+  if (x <= 2) {
+    return 1;
+  }
+
+  auto ux = static_cast<uint64_t>(x);
+  // Last set bit is floor(log2(x)), floor + 1 is ceil
+  // except when x is an exact powers of 2, so subtract 1 first
+  return static_cast<int64_t>(llvm::findLastSet(ux - 1)) + 1;
+}
+
 // Simultaneously sum over n rows at once
 template <typename scalar_t, int64_t nrows>
 std::array<scalar_t, nrows> multi_row_sum(
@@ -56,8 +68,7 @@ std::array<scalar_t, nrows> multi_row_sum(
   constexpr int64_t num_levels = 4;
 
   const int64_t level_power =
-    std::max(4l, std::lround(std::ceil(
-        std::log2(size) / (num_levels + 1))));
+      std::max(int64_t(4), ceil_log2(size) / num_levels);
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
