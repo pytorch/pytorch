@@ -2602,9 +2602,6 @@
 - func: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: nansum.dim_Int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  variants: function, method
-
 - func: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
