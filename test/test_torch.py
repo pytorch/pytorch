@@ -9547,7 +9547,7 @@ class TestTorchDeviceType(TestCase):
             M, N = input_.shape
             input_.zero_()
             for i in range(min(M, N)):
-                input_[i][i] = 1    
+                input_[i][i] = 1
             output1 = input_.argmax(dim=0)
             output2 = input_.sum(dim=0)
             for i in range(min(M, N)):
@@ -14165,6 +14165,24 @@ class TestTorchDeviceType(TestCase):
                     op(a, cpu_tensor)
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(cpu_tensor, a)
+
+    # This test ensures that a scalar Tensor can be safely used
+    # in a binary operation in conjuction with a Tensor on all
+    # available CUDA devices
+    @deviceCountAtLeast(2)
+    @onlyCUDA
+    def test_binary_op_scalar_device_unspecified(self, devices):
+        scalar_val = torch.tensor(1.)
+        for default_device in devices:
+            with torch.cuda.device(default_device):
+                for device in devices:
+                    device_obj = torch.device(device)
+                    x = torch.rand(3, device=device)
+                    y0 = x * scalar_val
+                    self.assertEqual(y0.device, device_obj)
+                    y1 = scalar_val * x
+                    self.assertEqual(y1.device, device_obj)
+                    self.assertEqual(y0, y1)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
     # binary operations with CUDA tensors.

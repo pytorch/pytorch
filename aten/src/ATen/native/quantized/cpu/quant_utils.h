@@ -29,8 +29,11 @@ inline TensorQuantizationParams ChooseQuantizationParams(
     bool force_scale_power_of_two = false,
     bool reduce_range = false) {
 
+  // Floating point resolution is 2^-23 for unsigned values, which is 1.2e-7
+  float _float_eps = 1.2e-7;
   if (min > max)
   {
+    TORCH_WARN("min and max are incorrect", min, max);
     std::cout << "min" << min << max<<"\n";
     TensorQuantizationParams result;
     result.scale = 0.1f;
@@ -62,15 +65,17 @@ inline TensorQuantizationParams ChooseQuantizationParams(
 
   // Use double precision for intermediate computation but use single precision
   // in final number to reflect the actual number used during quantization.
-  double scale = (static_cast<double>(max) - min) / (qmax - qmin);
+  double scale = static_cast<double>(max - min) / (qmax - qmin);
   // If scale is 0 or too small so its reciprocal is infinity, we arbitrary
   // adjust the scale to 0.1 . We want to avoid scale's reciprocal being
   // infinity because some of fbgemm code pre-computes scale's reciprocal to do
   // multiplication instead of division in the time critical part of code.
-  if (float(scale) == 0.0f || std::isinf(1.0f / float(scale))) {
-    scale = 0.1;
+  if (float(scale) <= _float_eps || std::isinf(1.0f / float(scale))) {
+    TORCH_WARN("scale value incorrect", scale, float(scale));
+    scale = 0.1f;
   }
-  TORCH_CHECK(scale > 0, "quantization scale should be > 0");
+
+  TORCH_CHECK(scale > 0, "quantization scale should be > 0, double scale ", scale, " float_scale ", float(scale));
 
   if (force_scale_power_of_two) {
     if (scale < 1) {
@@ -121,7 +126,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   }
 
   TensorQuantizationParams result;
-  result.scale = scale;
+  result.scale = float(scale);
   result.zero_point = nudged_zero_point;
   return result;
 }
