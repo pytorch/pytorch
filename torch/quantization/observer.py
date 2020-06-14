@@ -407,9 +407,9 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
     @torch.jit.export
     def calculate_qparams(self):
         r"""Calculates the quantization parameters."""
-
+        _float_eps = 1.2e-7
         if self.max_val.numel() == 0 or self.min_val.numel() == 0:
-            return torch.tensor([1.0]), torch.tensor([0])
+            return torch.tensor([1.0]).to(dtype=torch.float), torch.tensor([0])
 
         assert self.min_val <= self.max_val, "min {} should be less than max {}".format(
             self.min_val, self.max_val
@@ -432,9 +432,9 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
         min_val = torch.min(min_val, torch.tensor(0.).to(dtype=torch.float))
         max_val = torch.max(max_val, torch.tensor(0.).to(dtype=torch.float))
 
-        scale = (max_val.to(dtype=torch.double) - min_val) / float(qmax - qmin)
+        scale = (max_val - min_val).to(dtype=torch.double) / float(qmax - qmin)
 
-        if scale == 0.0 or torch.isinf(1.0 / scale):
+        if scale <= _float_eps or torch.isinf(1.0 / scale):
             scale = torch.tensor(0.1).to(dtype=torch.float)
             zero_point = 0
 
