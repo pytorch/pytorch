@@ -266,24 +266,19 @@ class IrParser {
             std::cout << "not direct input!" << std::endl;
             std::cout << inp->getOrigin() << std::endl;
           }
-          if (fcd_reduction) {
-            if (inp->getValType().value() == ValType::TensorView) {
-              static_cast<TensorView*>(inp)->computeAt(intermediate, -1);
-            }
-          } else {
-            TORCH_INTERNAL_ASSERT(false, "not yet implemented, should do");
+          // scheduling of inputs shouldn't change with different fcd_reduction
+          if (inp->getValType().value() == ValType::TensorView) {
+            static_cast<TensorView*>(inp)->computeAt(intermediate, -1);
           }
         }
-        if (fcd_reduction) {
-          intermediate->computeAt(out_tv, 1);
-        } else {
-          TORCH_INTERNAL_ASSERT(false, "not yet implemented, should do");
-        }
+        // scheduling of inputs shouldn't change with different fcd_reduction
+        intermediate->computeAt(out_tv, -2);
         std::cout << "finished output!" << std::endl;
         if (fcd_reduction) {
           out_tv->axis(0)->parallelize(ParallelType::BIDx);
         } else {
-          TORCH_INTERNAL_ASSERT(false, "not yet implemented, should do");
+          out_tv->axis(0)->parallelize(ParallelType::BIDx);
+          out_tv->axis(1)->parallelize(ParallelType::TIDy);
         }
       }
       // Run through intermediates, unroll, and bind their axes
@@ -296,7 +291,7 @@ class IrParser {
         if (fcd_reduction) {
           tv->axis(-1)->parallelize(ParallelType::TIDx);
         } else {
-          TORCH_INTERNAL_ASSERT(false, "not yet implemented, should do");
+          tv->axis(-1)->parallelize(ParallelType::TIDy);
         }
       }
       std::cout << "finished scheduling!" << std::endl;

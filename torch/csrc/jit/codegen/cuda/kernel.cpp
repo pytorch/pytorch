@@ -548,6 +548,7 @@ void runKernel(
   if (!entry->reduction_axes_.empty()) {
     // TODO: MAJOR HACK! Expr evaluation makes launch configuration much easier
     blocks = numel;
+    // Translated to `fcd_reduction`
     if (entry->reduction_axes_.back() == outputs[0].dim()-1) {
       thread_x = 128;
       thread_y = 1;
