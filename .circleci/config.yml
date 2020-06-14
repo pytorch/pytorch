@@ -1475,6 +1475,15 @@ jobs:
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
           time docker push ${output_image}
+    - run:
+        name: save binary size
+        no_output_timeout: "5m"
+        command: |
+            source /env
+            cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            pip3 install requests && \
+            SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
+            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py ~/workspace/android || exit 0
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -1557,6 +1566,15 @@ jobs:
           output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
           time docker push ${output_image}
+    - run:
+        name: save binary size
+        no_output_timeout: "5m"
+        command: |
+            source /env
+            cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            pip3 install requests && \
+            SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
+            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py ~/workspace/android || exit 0
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
