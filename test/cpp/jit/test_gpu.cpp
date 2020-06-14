@@ -2458,7 +2458,67 @@ void testGPU_FusionReduction4() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
-/*
+void testGPU_FusionReduction5() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(3);
+
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+
+  fusion.addOutput(tv1);
+
+  int bidy = 2;
+  int bidx = 3;
+  int tidy = 4;
+  int tidx = 5;
+
+  int dim1 = 11;
+  std::cout << "phase 1:\n" << fusion << std::endl;
+
+  tv1->split(-2, tidy);
+  std::cout << "phase 2:\n" << fusion << std::endl;
+
+  TensorView* tv2 = tv1->rFactor({-3});
+  std::cout << "phase 3:\n" << fusion << std::endl;
+
+  tv0->computeAt(tv1, 1);
+  std::cout << "phase 4:\n" << fusion << std::endl;
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  std::cout << "phase 5:\n" << fusion << std::endl;
+
+  for (auto* val : fusion.vals()) {
+    if (val->getValType().value() == ValType::TensorView)
+      val->as<TensorView>()->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+  std::cout << "phase 6:\n" << fusion << std::endl;
+
+  tv2->axis(-2)->parallelize(ParallelType::TIDy);
+  tv1->axis(-2)->parallelize(ParallelType::TIDy);
+
+  std::cout << "phase last:\n" << fusion << std::endl;
+
+  prog.device_ = 0;
+  prog.grid(1, bidy);
+  prog.block(tidx, tidy);
+  torch::jit::fuser::cuda::compileKernel(&prog);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({bidy, dim1, tidx}, options);
+
+  at::Tensor cg_output = at::empty({bidy, tidx}, options);
+
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({1});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
 void testGPU_FusionReductionJ() {
   torch::jit::fuser::cuda::CudaKernel prog;
   Fusion& fusion = *prog.fusion_;
@@ -2586,6 +2646,7 @@ void testGPU_FusionReductionTFT() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
+/*
 void testGPU_FusionReductionJ() {
   // Set up your input tensor views
   TensorView* tv0 = makeDummyTensor(8);
@@ -2635,6 +2696,7 @@ void testGPU_FusionReductionJ() {
 }
 */
 
+/*
 void testGPU_FusionReductionJ() {
   torch::jit::fuser::cuda::CudaKernel prog;
   Fusion& fusion = *prog.fusion_;
@@ -2691,6 +2753,7 @@ void testGPU_FusionReductionJ() {
   gpulw.printKernel(cdg);
   std::cout << cdg.str() << std::endl;
 }
+*/
 
 /*
 void testGPU_FusionReductionJ() {
