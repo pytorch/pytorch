@@ -16,6 +16,8 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
+#include "serialization_types.h"
+
 torch::jit::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
@@ -212,22 +214,22 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 
 template <int kSpatialDim = 2>
 CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
-  using SerializationType = std::tuple<
-    at::Tensor,
-    c10::optional<at::Tensor>,
-    // these are meant to be torch::List<int64_t> but
-    // it's not supported by onnx, so we'll use Tensor as
-    // a workaround
-    torch::List<at::Tensor>,
-    torch::List<at::Tensor>,
-    torch::List<at::Tensor>,
-    at::Tensor>;
+  // using ConvPackedParamsSerializationType = std::tuple<
+  //   at::Tensor /*weight*/,
+  //   c10::optional<at::Tensor> /*bias*/,
+  //   // these are meant to be torch::List<int64_t> but
+  //   // it's not supported by onnx, so we'll use Tensor as
+  //   // a workaround
+  //   torch::List<at::Tensor>,
+  //   torch::List<at::Tensor>,
+  //   torch::List<at::Tensor>,
+  //   at::Tensor>;
   static auto register_conv_params =
     torch::jit::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
     .def_pickle(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
-        -> SerializationType { // __getstate__
+        -> ConvPackedParamsSerializationType { // __getstate__
           at::Tensor weight;
           c10::optional<at::Tensor> bias;
           std::tie(weight, bias) = params->unpack();
@@ -253,7 +255,7 @@ CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_p
               dilation,
               groups);
         },
-        [](SerializationType state)
+        [](ConvPackedParamsSerializationType state)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
           at::Tensor weight;
           c10::optional<at::Tensor> bias;
