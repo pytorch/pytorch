@@ -144,6 +144,7 @@ void unpackQuantizedWeightsHelper(
     std::map<std::string, IValue>& paramsDict,
     const std::string& pattern,
     const std::string& unpack_fn) {
+  TORCH_WARN("===> DEBUG!");
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   parseIR(pattern, &pattern_graph, vmap);
@@ -162,10 +163,10 @@ void unpackQuantizedWeightsHelper(
     }
     at::Tensor unpacked_weight;
     c10::optional<at::Tensor> bias;
-    const int64_t stride_idx = 2;
-    const int64_t padding_idx = 3;
-    const int64_t dilation_idx = 4;
-    const int64_t groups_idx = 5;
+    const int64_t params1_idx = 2;
+    const int64_t params2_idx = 3;
+    const int64_t params3_idx = 4;
+    const int64_t scalars_idx = 5;
     c10::optional<torch::List<int64_t>> stride, padding, dilation;
     c10::optional<int64_t> groups;
 
@@ -177,22 +178,52 @@ void unpackQuantizedWeightsHelper(
       bias = ser_tup->elements()[1].toOptional<at::Tensor>();
       // conv only parameters
       if (ser_tup->elements().size() > 2) {
-        auto stride_ivalue = ser_tup->elements()[stride_idx].toListRef();
-        auto padding_ivalue = ser_tup->elements()[padding_idx].toListRef();
-        auto dilation_ivalue = ser_tup->elements()[dilation_idx].toListRef();
-        auto groups_ivalue = ser_tup->elements()[groups_idx];
+        auto params1_ivalue = ser_tup->elements()[params1_idx].toListRef();
+        auto params2_ivalue = ser_tup->elements()[params2_idx].toListRef();
+        auto params3_ivalue = ser_tup->elements()[params3_idx].toListRef();
+        auto scalars_tensor = ser_tup->elements()[scalars_idx].toTensor();
+
         torch::List<int64_t> stride_int, padding_int, dilation_int;
         int64_t groups_int;
-        for (const auto& s : stride_ivalue) {
-          stride_int.emplace_back(s.toTensor()[0].item<int64_t>());
+
+        if (scalars_tensor.numel() == 1) {  // Version 1
+          for (const auto& s : params1_ivalue) {
+            stride_int.emplace_back(s.toTensor()[0].item<int64_t>());
+          }
+          for (const auto& p : params2_ivalue) {
+            padding_int.emplace_back(p.toTensor()[0].item<int64_t>());
+          }
+          for (const auto& d : params3_ivalue) {
+            dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
+          }
+          groups_int = scalars_tensor[0].item<int64_t>();
+        } else {
+          int64_t version = scalars_tensor[0].item<int64_t>();
+          switch (version) {
+            case 2: {
+              int64_t spatial_dims = params1_ivalue.size() / 3;
+              int64_t idx = 0;
+              for (; idx < spatial_dims; ++idx) {
+                at::Tensor s = params1_ivalue[idx].toTensor();
+                stride_int.emplace_back(s[0].item<int64_t>());
+              }
+              for (; idx < 2 * spatial_dims; ++idx) {
+                at::Tensor p = params1_ivalue[idx].toTensor();
+                padding_int.emplace_back(p[0].item<int64_t>());
+              }
+              for (; idx < 3 * spatial_dims; ++idx) {
+                at::Tensor d = params1_ivalue[idx].toTensor();
+                dilation_int.emplace_back(d[0].item<int64_t>());
+              }
+              groups_int = scalars_tensor[1].item<int64_t>();
+              break;
+            }
+            default: {
+              TORCH_CHECK(false, "Unsupported version ", version);
+            }
+          }
         }
-        for (const auto& p : padding_ivalue) {
-          padding_int.emplace_back(p.toTensor()[0].item<int64_t>());
-        }
-        for (const auto& d : dilation_ivalue) {
-          dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
-        }
-        groups_int = groups_ivalue.toTensor()[0].item<int64_t>();
+
         stride = stride_int;
         padding = padding_int;
         dilation = dilation_int;
@@ -302,7 +333,7 @@ void unpackQuantizedWeightsHelper(
       }
       Node* groups_node = createInt(groups.value(), graph);
       groups_node->insertBefore(qlinear_node);
-      qlinear_node->insertInput(groups_idx + 1, groups_node->output());
+      qlinear_node->insertInput(scalars_idx + 1, groups_node->output());
     }
     auto b = graph->block();
     auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);

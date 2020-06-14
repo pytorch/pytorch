@@ -1,10 +1,11 @@
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <torch/custom_class.h>
-
 #include <ATen/ATen.h>
 #include <ATen/native/TensorFactories.h>
+
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/cpu/serialization_versions.h>
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
@@ -12,11 +13,7 @@
 #include <c10/core/TensorOptions.h>
 
 #include <torch/custom_class.h>
-
-#include <ATen/native/quantized/cpu/packed_params.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-
-#include "serialization_types.h"
+#include <torch/torch.h>
 
 torch::jit::class_<LinearPackedParamsBase> register_linear_params();
 
@@ -223,48 +220,79 @@ CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_p
           at::Tensor weight;
           c10::optional<at::Tensor> bias;
           std::tie(weight, bias) = params->unpack();
-          torch::List<at::Tensor> stride;
-          torch::List<at::Tensor> padding;
-          torch::List<at::Tensor> dilation;
-          at::Tensor groups;
+
+          torch::List<at::Tensor> all_parameters;
           for (int64_t s : params->stride()) {
-            stride.emplace_back(at::tensor(s));
+            all_parameters.emplace_back(at::tensor(s));
           }
           for (int64_t p : params->padding()) {
-            padding.emplace_back(at::tensor(p));
+            all_parameters.emplace_back(at::tensor(p));
           }
           for (int64_t d : params->dilation()) {
-            dilation.emplace_back(at::tensor(d));
+            all_parameters.emplace_back(at::tensor(d));
           }
-          groups = at::tensor(params->groups());
+          // Make empty lists
+          torch::List<at::Tensor> placeholder_list;
+          placeholder_list.emplace_back(at::tensor(0));
+          // Version metadata and other scalars
+          at::Tensor scalars = torch::tensor({(int64_t)2, params->groups()},
+                                             torch::dtype(torch::kLong));
           return std::make_tuple(
               std::move(weight),
               std::move(bias),
-              stride,
-              padding,
-              dilation,
-              groups);
+              all_parameters,
+              placeholder_list,
+              placeholder_list,
+              scalars);
+
         },
         [](ConvPackedParamsSerializationType state)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
           at::Tensor weight;
           c10::optional<at::Tensor> bias;
-          torch::List<at::Tensor> stride_tensor, padding_tensor,
-            dilation_tensor;
-          at::Tensor groups_tensor;
+          torch::List<at::Tensor> params1_tensor, params2_tensor,
+            params3_tensor;
+          at::Tensor scalars_tensor;
           torch::List<int64_t> stride, padding, dilation;
           int64_t groups;
-          std::tie(weight, bias, stride_tensor, padding_tensor, dilation_tensor, groups_tensor) = state;
-          for (at::Tensor s : stride_tensor) {
-            stride.emplace_back(s[0].item<int64_t>());
+          std::tie(weight, bias, params1_tensor, params2_tensor, params2_tensor,
+                   scalars_tensor) = state;
+          if (scalars_tensor.numel() == 1) {  // Version 1
+            for (at::Tensor s : params1_tensor) {
+              stride.emplace_back(s[0].item<int64_t>());
+            }
+            for (at::Tensor p : params2_tensor) {
+              padding.emplace_back(p[0].item<int64_t>());
+            }
+            for (at::Tensor d : params3_tensor) {
+              dilation.emplace_back(d[0].item<int64_t>());
+            }
+            groups = scalars_tensor[0].item<int64_t>();
+          } else {  // Version > 1
+            int64_t version = scalars_tensor[0].item<int64_t>();
+            switch (version) {
+              case 2: {
+                int idx = 0;
+                for (; idx < kSpatialDim; ++idx) {
+                  at::Tensor s = params1_tensor[idx];
+                  stride.emplace_back(s[0].item<int64_t>());
+                }
+                for (; idx < 2 * kSpatialDim; ++idx) {
+                  at::Tensor p = params1_tensor[idx];
+                  padding.emplace_back(p[0].item<int64_t>());
+                }
+                for (; idx < 3 * kSpatialDim; ++idx) {
+                  at::Tensor d = params1_tensor[idx];
+                  dilation.emplace_back(d[0].item<int64_t>());
+                }
+                groups = scalars_tensor[1].item<int64_t>();
+                break;
+              }
+              default: {
+                TORCH_CHECK(false, "Unsupported version ", version);
+              }
+            }
           }
-          for (at::Tensor p : padding_tensor) {
-            padding.emplace_back(p[0].item<int64_t>());
-          }
-          for (at::Tensor d : dilation_tensor) {
-            dilation.emplace_back(d[0].item<int64_t>());
-          }
-          groups = groups_tensor[0].item<int64_t>();
           auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
