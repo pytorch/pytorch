@@ -9,10 +9,10 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
-import logging
 import os
 import sys
 import platform
+import textwrap
 import ctypes
 
 if sys.version_info < (3,):
@@ -37,17 +37,6 @@ __all__ = [
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'set_deterministic', 'is_deterministic'
 ]
-
-_cwd_torch_init = os.path.join(os.getcwd(), 'torch', '__init__.py')
-if __file__ == _cwd_torch_init:
-    logging.warn(
-        'You appear to be importing PyTorch from a clone of the git repo:\n  '
-        f'{os.getcwd()}\n  '
-        'This will prevent `import torch` from resolving to the PyTorch install\n  '
-        f'(instead it will try to load {_cwd_torch_init})\n  '
-        'and will generally lead to other failures such as a failure '
-        'to load C extensions.\n'
-    )
 
 
 ################################################################################
@@ -205,6 +194,42 @@ else:
 # torch._C module initialization code in C
 if False:
     import torch._C as _C
+
+# Check to see if we can load C extensions, and if not provide some guidance
+# on what the problem might be.
+import torch._C as _C_for_compiled_check
+if _C_for_compiled_check.__file__ is None:
+    _cwd_torch_init = os.path.join(os.getcwd(), 'torch', '__init__.py')
+    if __file__ == _cwd_torch_init:
+        raise ImportError(textwrap.dedent(f'''
+            Failed to load PyTorch C extensions:
+                You appear to be importing PyTorch from a clone of the git repo:
+                    {os.getcwd()}
+                If you intended to compile and run PyTorch from within this
+                clone then this means that the compilation has failed.
+                Otherwise, `cd` to a different directory and rerun your code.
+            ''').strip())
+
+    if any(__file__ == os.path.join(i, 'torch', '__init__.py') for i in sys.path):
+        _torch_root_path = os.path.split(os.path.split(__file__)[0])[0]
+        print(_torch_root_path)
+        raise ImportError(textwrap.dedent(f'''
+            Failed to load PyTorch C extensions:
+                `{_torch_root_path}`` appears in `sys.path`
+                This generally occurs because the PYTHONPATH environment
+                variable is set or an entry is manually added to `sys.path`
+                before calling `import torch`.
+
+                If you intended to compile and run PyTorch using this
+                clone then this means that the compilation has failed.
+                Otherwise, adjust your environment so that the intended
+                install location appears first in `sys.path`.
+            ''').strip())
+
+    raise ImportError(textwrap.dedent(f'''
+        Failed to load PyTorch C extensions:
+            The cause of this failure could not be determined.''').strip())
+
 
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
