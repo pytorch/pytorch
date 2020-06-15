@@ -1120,7 +1120,7 @@ if(USE_ROCM)
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
-if (BUILD_MOBILE_BENCHMARK)
+if(BUILD_MOBILE_BENCHMARK)
   foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
     get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
     add_executable(${benchmark_name} "${benchmark_src}")
