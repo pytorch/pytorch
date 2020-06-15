@@ -98,35 +98,91 @@ __global__ void max_unpooling3d_backward_kernel(
   }
 }
 
+static void max_unpooling2d_shape_check(
+    const Tensor& input,
+    const Tensor& gradOutput,
+    const Tensor& indices,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  auto oheight = output_size[0];
+  auto owidth = output_size[1];
+
+  TORCH_CHECK(
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type int64");
+  TORCH_CHECK(
+      output_size.size() == 2,
+      "There should be exactly two elements (height, width) in output_size");
+  TORCH_CHECK(
+      stride.size() == 2,
+      "There should be exactly two elements (height, width) in stride");
+  TORCH_CHECK(
+      padding.size() == 2,
+      "There should be exactly two elements (height, width) in padding");
+  TORCH_CHECK(
+      (input.ndimension() == 3 || input.ndimension() == 4),
+      "Input to max_unpooling2d should be a 3d or 4d Tensor");
+  TORCH_CHECK(
+      input.sizes() == indices.sizes(),
+      "Shape of indices should match shape of input");
+
+  TORCH_CHECK(input.numel() > 0, "Input must be non-empty");
+  TORCH_CHECK(
+      stride[0] > 0 && stride[1] > 0,
+      "strides should be greater than zero, but got stride: ",
+      stride);
+
+  int dimw = 2;
+  int dimh = 1;
+  int dimn = 0;
+
+  if (input.ndimension() == 4) {
+    dimw++;
+    dimh++;
+    dimn++;
+  }
+
+  int nslices = input.size(dimn);
+
+  if (gradOutput.defined()) {
+    if (oheight != gradOutput.size(dimh) ||
+        owidth != gradOutput.size(dimw)) {
+      AT_ERROR(
+          "Inconsistent gradOutput size. oH= ",
+          oheight,
+          ", oW= ",
+          owidth,
+          ". gradOutput: ",
+          gradOutput.size(dimh),
+          "x",
+          gradOutput.size(dimw));
+    }
+    TORCH_CHECK(
+        gradOutput.ndimension() == input.ndimension() &&
+            gradOutput.size(dimn) == nslices,
+        "gradOutput and input Tensors should have same number of dimensions and also the same number of channels/slices");
+  }
+}
+
 Tensor& max_unpooling2d_forward_out_cuda(
     Tensor& output,
     const Tensor& self_,
     const Tensor& indices_,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
-  TORCH_CHECK(
-      indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64");
   auto oheight = output_size[0];
   auto owidth = output_size[1];
+  max_unpooling2d_shape_check(
+      self_, Tensor(), indices_, output_size, stride, padding);
 
   TensorArg output_arg{output, "output", 1}, self_arg{self_, "self_", 2},
       indices_arg{indices_, "indices_", 3};
   checkAllSameGPU(
       "max_unpooling2d_forward_out_cuda", {output_arg, self_arg, indices_arg});
-
-  TORCH_CHECK(self_.numel() > 0, "Input must be non-empty tensor");
-
-  TORCH_CHECK(
-      (self_.ndimension() == 3 || self_.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor",
-      self_.sizes());
-  TORCH_CHECK(
-      self_.sizes() == indices_.sizes(),
-      "Shape of input must match shape of indices");
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "There should be exactly two elements (width, height) in output_size");
 
   int64_t dimw = 2;
   int64_t dimh = 1;
@@ -180,9 +236,11 @@ Tensor& max_unpooling2d_forward_out_cuda(
 Tensor max_unpooling2d_forward_cuda(
     const Tensor& self,
     const Tensor& indices,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
-  max_unpooling2d_forward_out_cuda(output, self, indices, output_size);
+  max_unpooling2d_forward_out_cuda(output, self, indices, output_size, stride, padding);
   return output;
 }
 
@@ -368,30 +426,20 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
     const Tensor& grad_output_,
     const Tensor& self_,
     const Tensor& indices_,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   int64_t oheight = output_size[0];
   int64_t owidth = output_size[1];
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  TORCH_CHECK(
-      indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64");
+  max_unpooling2d_shape_check(
+      self_, grad_output_, indices_, output_size, stride, padding);
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2},
       self_arg{self_, "self_", 3}, indices_arg{indices_, "indices_", 4};
   checkAllSameGPU(
       "max_unpooling2d_backward_out_cuda",
       {grad_input_arg, grad_output_arg, self_arg, indices_arg});
-
-  TORCH_CHECK(
-      (self_.ndimension() == 3 || self_.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor, instead got: ",
-      self_);
-
-  TORCH_CHECK(
-      self_.sizes() == indices_.sizes(),
-      "Input should have same shape as indices");
-
-  TORCH_CHECK(output_size.size() == 2, "output_size must have two elements");
 
   int64_t nInputCols, nInputRows, nInputPlane;
 
@@ -412,18 +460,6 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
 
   nInputCols = self.size(dimw);
   nInputRows = self.size(dimh);
-
-  if (oheight != grad_output.size(dimh) || owidth != grad_output.size(dimw)) {
-    AT_ERROR(
-        "Inconsistent gradOutput size. output height: ",
-        oheight,
-        ", output width= ",
-        owidth,
-        ", gradOutput: ",
-        grad_output.size(dimh),
-        "x",
-        grad_output.size(dimw));
-  }
 
   grad_input.resize_as_(self);
   grad_input.zero_();
@@ -454,10 +490,12 @@ at::Tensor max_unpooling2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& indices,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_unpooling2d_backward_out_cuda(
-      grad_input, grad_output, self, indices, output_size);
+      grad_input, grad_output, self, indices, output_size, stride, padding);
   return grad_input;
 }
 

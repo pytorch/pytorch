@@ -681,8 +681,10 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
         output_size = output_size + [1]
     else:
         output_size = output_size + (1,)
+    _stride = _stride + (1,)
+    padding = padding + (1,)
     return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3),
-                                     output_size).squeeze(3)
+                                     output_size, _stride, padding).squeeze(3)
 
 
 def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
@@ -705,7 +707,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     padding = _pair(padding)
     output_size = _unpool_output_size(input, kernel_size, _stride, padding,
                                       output_size)
-    return torch._C._nn.max_unpool2d(input, indices, output_size)
+    return torch._C._nn.max_unpool2d(input, indices, output_size, _stride, padding)
 
 
 def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,

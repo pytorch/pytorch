@@ -641,8 +641,13 @@ inline Tensor max_unpool1d(
                                           stride, padding,
                                           output_size);
   output_size_.push_back(1);
+  std::vector<int64_t> v_stride({(int64_t)((*stride)[0]), 1});
+  std::vector<int64_t> v_padding({(int64_t)((*padding)[0]), 1});
+  ExpandingArray<2> stride_(v_stride);
+  ExpandingArray<2> padding_(v_padding);
+
   return torch::max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3),
-                             output_size_).squeeze(3);
+                             output_size_, stride_, padding_).squeeze(3);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -682,7 +687,7 @@ inline Tensor max_unpool2d(
                                           stride, padding,
                                           output_size);
 
-  return torch::max_unpool2d(input, indices, output_size_);
+  return torch::max_unpool2d(input, indices, output_size_, stride, padding);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */

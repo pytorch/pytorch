@@ -76,28 +76,85 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
   return output;
 }
 
-Tensor& max_unpooling2d_forward_out_cpu(
-    Tensor& output,
-    const Tensor& self_,
-    const Tensor& indices_,
-    IntArrayRef output_size) {
+static void max_unpooling2d_shape_check(
+    const Tensor& input,
+    const Tensor& gradOutput,
+    const Tensor& indices,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto oheight = output_size[0];
   auto owidth = output_size[1];
-  TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
+
   TORCH_CHECK(
-      indices_.scalar_type() == at::ScalarType::Long,
+      indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
   TORCH_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
   TORCH_CHECK(
-      (self_.ndimension() == 3 || self_.ndimension() == 4),
+      stride.size() == 2,
+      "There should be exactly two elements (height, width) in stride");
+  TORCH_CHECK(
+      padding.size() == 2,
+      "There should be exactly two elements (height, width) in padding");
+  TORCH_CHECK(
+      (input.ndimension() == 3 || input.ndimension() == 4),
       "Input to max_unpooling2d should be a 3d or 4d Tensor");
   TORCH_CHECK(
-      self_.sizes() == indices_.sizes(),
+      input.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
 
-  TORCH_CHECK(self_.numel() > 0, "Input must be non-empty");
+  TORCH_CHECK(input.numel() > 0, "Input must be non-empty");
+  TORCH_CHECK(
+      stride[0] > 0 && stride[1] > 0,
+      "strides should be greater than zero, but got stride: ",
+      stride);
+
+  int dimw = 2;
+  int dimh = 1;
+  int dimn = 0;
+
+  if (input.ndimension() == 4) {
+    dimw++;
+    dimh++;
+    dimn++;
+  }
+
+  int nslices = input.size(dimn);
+
+  if (gradOutput.defined()) {
+    if (oheight != gradOutput.size(dimh) ||
+        owidth != gradOutput.size(dimw)) {
+      AT_ERROR(
+          "Inconsistent gradOutput size. oH= ",
+          oheight,
+          ", oW= ",
+          owidth,
+          ". gradOutput: ",
+          gradOutput.size(dimh),
+          "x",
+          gradOutput.size(dimw));
+    }
+    TORCH_CHECK(
+        gradOutput.ndimension() == input.ndimension() &&
+            gradOutput.size(dimn) == nslices,
+        "gradOutput and input Tensors should have same number of dimensions and also the same number of channels/slices");
+  }
+}
+
+Tensor& max_unpooling2d_forward_out_cpu(
+    Tensor& output,
+    const Tensor& self_,
+    const Tensor& indices_,
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  auto oheight = output_size[0];
+  auto owidth = output_size[1];
+  TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
+  max_unpooling2d_shape_check(
+      self_, Tensor(), indices_, output_size, stride, padding);
 
   auto self = self_.contiguous();
   auto indices = indices_.contiguous();
@@ -118,14 +175,16 @@ Tensor& max_unpooling2d_forward_out_cpu(
             output, self, indices, oheight, owidth);
       }));
   return output;
-};
+}
 
 Tensor max_unpooling2d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
-  max_unpooling2d_forward_out_cpu(output, self, indices, output_size);
+  max_unpooling2d_forward_out_cpu(output, self, indices, output_size, stride, padding);
   return output;
 }
 
@@ -388,7 +447,9 @@ Tensor& max_unpooling2d_backward_out_cpu(
     const Tensor& grad_output_,
     const Tensor& self,
     const Tensor& indices_,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   int64_t oheight = output_size[0];
   int64_t owidth = output_size[1];
@@ -398,14 +459,9 @@ Tensor& max_unpooling2d_backward_out_cpu(
   int nslices;
   int iheight;
   int iwidth;
-  TORCH_CHECK(
-      indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64");
-  TORCH_CHECK(
-      self.sizes() == indices_.sizes(), "Input shape must match indices shape");
 
-  TORCH_CHECK(output_size.size() == 2, "Output size must be 2");
-
+  max_unpooling2d_shape_check(
+      self, grad_output_, indices_, output_size, stride, padding);
   /* get contiguous gradOutput and indices */
   auto grad_output = grad_output_.contiguous();
   auto indices = indices_.contiguous();
@@ -425,17 +481,6 @@ Tensor& max_unpooling2d_backward_out_cpu(
   iheight = self.size(dimh);
   iwidth = self.size(dimw);
 
-  if (owidth != grad_output.size(dimw) || oheight != grad_output.size(dimh)) {
-    AT_ERROR(
-        "Inconsistent gradOutput size. output height = ",
-        oheight,
-        ", output width = ",
-        owidth,
-        ", gradOutput: ",
-        grad_output.size(dimh),
-        "x",
-        grad_output.size(dimw));
-  }
   AT_DISPATCH_FLOATING_TYPES(
       self.scalar_type(), "max_unpooling2d_backward_out_cpu_frame", ([&] {
         int p;
@@ -460,10 +505,12 @@ Tensor max_unpooling2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& indices,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_unpooling2d_backward_out_cpu(
-      grad_input, grad_output, self, indices, output_size);
+      grad_input, grad_output, self, indices, output_size, stride, padding);
   return grad_input;
 }
 
