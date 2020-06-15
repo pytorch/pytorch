@@ -141,6 +141,8 @@ def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
 def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
 def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
 def _set_cudnn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicCuDNN
+def _get_deterministic() -> _bool: ...  # THPModule_deterministic
+def _set_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministic
 # NB: There is no Capsule type in typing, see
 # https://code.activestate.com/lists/python-dev/139675/
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
