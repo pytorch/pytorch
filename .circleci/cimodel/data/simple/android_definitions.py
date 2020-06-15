@@ -69,9 +69,9 @@ class AndroidGradleJob:
 
 WORKFLOW_DATA = [
     AndroidJob(["x86_32"], "pytorch_linux_build", is_master_only=False),
-    AndroidJob(["x86_64"], "pytorch_linux_build"),
-    AndroidJob(["arm", "v7a"], "pytorch_linux_build"),
-    AndroidJob(["arm", "v8a"], "pytorch_linux_build"),
+    AndroidJob(["x86_64"], "pytorch_linux_build", is_master_only=False), # TODO: remove `is_master_only` before land
+    AndroidJob(["arm", "v7a"], "pytorch_linux_build", is_master_only=False), # TODO: remove `is_master_only` before land
+    AndroidJob(["arm", "v8a"], "pytorch_linux_build", is_master_only=False), # TODO: remove `is_master_only` before land
     AndroidJob(["vulkan", "x86_32"], "pytorch_linux_build", is_master_only=False),
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32",
@@ -85,7 +85,7 @@ WORKFLOW_DATA = [
          "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build",
          "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build",
          "pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build"],
-        is_master_only=False),  # TODO: remove
+        is_master_only=False),  # TODO: remove `is_master_only` before land
 ]
 
 
