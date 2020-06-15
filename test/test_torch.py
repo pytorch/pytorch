@@ -115,6 +115,18 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_deterministic_flag(self):
+            deterministic_restore = torch.is_deterministic()
+
+            for deterministic in [True, False]:
+                torch.set_deterministic(deterministic)
+                self.assertEqual(deterministic, torch.is_deterministic())
+
+            with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
+                torch.set_deterministic(1)
+
+            torch.set_deterministic(deterministic_restore)
+
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
             self.assertEqual(x.byte().dtype, torch.uint8)
@@ -9535,7 +9547,7 @@ class TestTorchDeviceType(TestCase):
             M, N = input_.shape
             input_.zero_()
             for i in range(min(M, N)):
-                input_[i][i] = 1    
+                input_[i][i] = 1
             output1 = input_.argmax(dim=0)
             output2 = input_.sum(dim=0)
             for i in range(min(M, N)):
@@ -14162,15 +14174,15 @@ class TestTorchDeviceType(TestCase):
     def test_binary_op_scalar_device_unspecified(self, devices):
         scalar_val = torch.tensor(1.)
         for default_device in devices:
-            torch.cuda.set_device(default_device)
-            for device in devices:
-                device_obj = torch.device(device)
-                x = torch.rand(3, device=device)
-                y0 = x * scalar_val
-                self.assertEqual(y0.device, device_obj)
-                y1 = scalar_val * x
-                self.assertEqual(y1.device, device_obj)
-                self.assertEqual(y0, y1)
+            with torch.cuda.device(default_device):
+                for device in devices:
+                    device_obj = torch.device(device)
+                    x = torch.rand(3, device=device)
+                    y0 = x * scalar_val
+                    self.assertEqual(y0.device, device_obj)
+                    y1 = scalar_val * x
+                    self.assertEqual(y1.device, device_obj)
+                    self.assertEqual(y0, y1)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
     # binary operations with CUDA tensors.

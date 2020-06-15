@@ -122,7 +122,8 @@ class DataLoader(object):
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
                  batch_sampler=None, num_workers=0, collate_fn=None,
                  pin_memory=False, drop_last=False, timeout=0,
-                 worker_init_fn=None, multiprocessing_context=None):
+                 worker_init_fn=None, multiprocessing_context=None,
+                 generator=None):
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
@@ -211,7 +212,7 @@ class DataLoader(object):
                 sampler = _InfiniteConstantSampler()
             else:  # map-style
                 if shuffle:
-                    sampler = RandomSampler(dataset)
+                    sampler = RandomSampler(dataset, generator=generator)
                 else:
                     sampler = SequentialSampler(dataset)
 
@@ -223,6 +224,7 @@ class DataLoader(object):
         self.drop_last = drop_last
         self.sampler = sampler
         self.batch_sampler = batch_sampler
+        self.generator = generator
 
         if collate_fn is None:
             if self._auto_collation:
@@ -336,7 +338,7 @@ class _BaseDataLoaderIter(object):
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
-        self._base_seed = torch.empty((), dtype=torch.int64).random_().item()
+        self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._num_yielded = 0
 
     def __iter__(self):
