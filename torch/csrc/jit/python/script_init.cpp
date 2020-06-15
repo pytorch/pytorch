@@ -1007,6 +1007,14 @@ void initJitScriptBindings(PyObject* module) {
            c10::intrusive_ptr<c10::ivalue::Object>,
            std::shared_ptr<mobile::CompilationUnit>>())
       .def(
+          "find_method",
+          [](mobile::Module& m,
+             const std::string& method_name) {
+            auto method = m.find_method(method_name);
+            return method != nullptr;
+          },
+          py::arg("method_name"))
+      .def(
           "run_method",
           [](mobile::Module& m,
              const std::string& method_name,
