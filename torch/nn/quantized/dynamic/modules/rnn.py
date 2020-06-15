@@ -75,14 +75,12 @@ class RNNBase(torch.nn.Module):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
 
                 if dtype == torch.qint8:
-                    w_ih = torch._empty_affine_quantized(
-                        [gate_size, layer_input_size], scale=1, zero_point=0, dtype=torch.qint8)
-                    w_hh = torch._empty_affine_quantized(
-                        [gate_size, hidden_size], scale=1, zero_point=0, dtype=torch.qint8)
-                    b_ih = torch.empty([gate_size], dtype=torch.float)
+                    w_ih = torch._empty_affine_quantized([gate_size, layer_input_size], scale=1, zero_point=0, dtype=torch.qint8)
+                    w_hh = torch._empty_affine_quantized([gate_size, hidden_size], scale=1, zero_point=0, dtype=torch.qint8)
+                    b_ih = torch.zeros([gate_size], dtype=torch.float)
                     # Second bias vector included for CuDNN compatibility. Only one
                     # bias vector is needed in standard definition.
-                    b_hh = torch.empty([gate_size], dtype=torch.float)
+                    b_hh = torch.zeros([gate_size], dtype=torch.float)
 
                     packed_ih = \
                         torch.ops.quantized.linear_prepack(w_ih, b_ih)
@@ -401,8 +399,8 @@ class RNNCellBase(torch.nn.Module):
         self.hidden_size = hidden_size
         self.bias = bias
         if bias:
-            self.bias_ih = nn.Parameter(torch.Tensor(num_chunks * hidden_size)).float()
-            self.bias_hh = nn.Parameter(torch.Tensor(num_chunks * hidden_size)).float()
+            self.bias_ih = torch.zeros([num_chunks * hidden_size], dtype=torch.float)
+            self.bias_hh = torch.zeros([num_chunks * hidden_size], dtype=torch.float)
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
