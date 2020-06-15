@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 import enum
-import uuid
 from typing import Tuple
 
 import torch

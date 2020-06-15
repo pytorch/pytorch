@@ -84,6 +84,7 @@ TESTS = [
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'test_futures',
+    'distributed/test_ddp_under_dist_autograd',
 ]
 
 WINDOWS_BLACKLIST = [
@@ -100,6 +101,7 @@ WINDOWS_BLACKLIST = [
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
     'distributed/test_distributed',
+    'distributed/test_ddp_under_dist_autograd',
 ]
 
 ROCM_BLACKLIST = [
@@ -113,6 +115,7 @@ ROCM_BLACKLIST = [
     'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
     'distributed/rpc/tensorpipe/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
     'test_determination',
@@ -158,6 +161,7 @@ SLOW_TESTS = [
     'distributed/rpc/tensorpipe/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_rpc_spawn',
+    'distributed/test_ddp_under_dist_autograd',
     'test_cuda',
     'test_cuda_primary_ctx',
     'test_cpp_extensions_aot_ninja',

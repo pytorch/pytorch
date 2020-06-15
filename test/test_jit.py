@@ -4378,6 +4378,7 @@ def foo(x):
         torch._jit_internal.is_optional(ann)
 
     def test_interpreter_fuzz(self):
+        import builtins
         # This test generates random tree-like programs to fuzz test
         # that the interpreter does not have a bug in its stack manipulation
         # code. An assert in that code ensures individual operators are
@@ -4427,7 +4428,7 @@ def foo(x):
         for i in range(100):
             g = {'torch': torch}
             code = gen_code()
-            torch._six.exec_(code, g, None)
+            builtins.exec(code, g, None)
             cu = torch.jit.CompilationUnit(code)
             with freeze_rng_state():
                 o1 = g['f']()
@@ -6509,11 +6510,16 @@ a")
         loop_inputs = list(loop_body.inputs())
         loop_outputs = list(loop_body.outputs())
 
-
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            self.assertTrue(loop_inputs[2].requires_grad())
+            # TODO: simplify this test as it's very sensitive
+            # the optimized graph will have 3 loops
+            # the original loop is peeled
+            # peeled loop also gets unrolled
+            index_of_x_in_peeled_unrolled_loop = -2
+            self.assertTrue(loop_inputs[index_of_x_in_peeled_unrolled_loop].requires_grad())
             bailouts_in_outer_block = graph.findAllNodes("prim::BailOut", False)
-            self.assertFalse(bailouts_in_outer_block[0].output().requires_grad())
+            last_bailout_index_on_loops_output = -1
+            self.assertFalse(bailouts_in_outer_block[last_bailout_index_on_loops_output].output().requires_grad())
         else:
             self.assertTrue(loop_inputs[1].requires_grad())
             self.assertTrue(loop.output().requires_grad())
@@ -17620,7 +17626,8 @@ a")
         def foo(a):
             return a
 
-        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+        with self.assertRaisesRegex(RuntimeError, (r"Expected a value of type \'Tensor \(inferred\)\'"
+                                                   r"[\S\s]*Inferred \'a\' to be of type \'Tensor\'")):
             foo(1)
 
     def test_type_comments_in_body(self):

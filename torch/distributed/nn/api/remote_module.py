@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 import types
-import uuid
 from typing import Any, Dict, Tuple
 
 import torch
