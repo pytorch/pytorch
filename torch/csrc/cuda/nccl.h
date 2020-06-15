@@ -82,7 +82,8 @@ struct AutoNcclGroup {
 TORCH_CUDA_API at::ArrayRef<ncclComm_t> get_communicators(at::TensorList inputs);
 TORCH_CUDA_API void check_inputs(
     at::TensorList inputs,
-    at::TensorList outputs,
+    const at::Tensor& output,
+    int root,
     int input_multiplier,
     int output_multiplier);
 TORCH_CUDA_API torchNcclDataType_t get_data_type(const at::Tensor& t);
@@ -110,7 +111,7 @@ size_t get_max_count();
 
 TORCH_CUDA_API void reduce(
     const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    at::Tensor& output,
     int32_t root = 0,
     int32_t op = 0,
     const stream_list& streams = {},

@@ -66,7 +66,8 @@ static std::vector<c10::optional<at::cuda::CUDAStream>> unpack_streams(PyObject*
   return streams;
 }
 
-static std::vector<at::Tensor> extract_tensors(PyObject* obj);
+static inline at::Tensor extract_tensor(PyObject* obj);
+static inline std::vector<at::Tensor> extract_tensors(PyObject* obj);
 
 static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
   if (obj == Py_None) {
@@ -122,14 +123,14 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs, *_outputs, *_streams, *_comms;
+  PyObject *_inputs, *_output, *_streams, *_comms;
   int root, op;
 
   if (!PyArg_ParseTuple(
           args,
           "OOiiOO",
           &_inputs,
-          &_outputs,
+          &_output,
           &root,
           &op,
           &_streams,
@@ -139,19 +140,19 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
         nullptr,
         "nccl_reduce",
         1,
-        "(sequence[Tensor] inputs, sequence[Tensor] outputs, int root,"
+        "(sequence[Tensor] inputs, Tensor output, int root,"
         " int op, sequence[torch.cuda.Stream or None]");
     return nullptr;
   }
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
-  std::vector<at::Tensor> outputs = extract_tensors(_outputs);
+  auto output = extract_tensor(_output);
   std::vector<c10::optional<at::cuda::CUDAStream>> streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
   {
     pybind11::gil_scoped_release no_gil;
-    torch::cuda::nccl::reduce(inputs, outputs, root, op, streams, user_comms);
+    torch::cuda::nccl::reduce(inputs, output, root, op, streams, user_comms);
   }
 
   Py_RETURN_NONE;
@@ -278,7 +279,16 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static std::vector<at::Tensor> extract_tensors(PyObject* obj) {
+static inline
+at::Tensor extract_tensor(PyObject* obj) {
+  if (!THPVariable_Check(obj)) {
+    throw TypeError("expected Tensor (got %s)", Py_TYPE(obj)->tp_name);
+  }
+  return ((THPVariable*)obj)->cdata;
+}
+
+static inline
+std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   auto seq = THPObjectPtr(PySequence_Fast(obj, "expected a sequence"));
   if (!seq)
     throw python_error();
