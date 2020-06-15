@@ -28,6 +28,18 @@ def rref_local_value(rref):
     # type: (RRef[Tensor]) -> Tensor
     return rref.local_value()
 
+@torch.jit.script
+def list_create():
+    # type: () -> List[int]
+    global_list = [1, 2, 3]
+    return global_list
+
+@torch.jit.script
+def rref_list_mutate(rref):
+    # type: (RRef[List[int]]) -> None
+    rref.local_value().append(4)
+    rref.to_here().append(5)
+    rref.to_here(5.0).append(6)
 
 def return_value(value):
     # type: (int) -> int
@@ -95,6 +107,15 @@ class RRefAPITest:
             worker_name(dst_rank), script_check_rref_confirmed, args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
+
+    @dist_init
+    def test_rref_list_mutate(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        list_rref = rpc.remote(dst, list_create)
+
+        rpc.rpc_sync(dst, rref_list_mutate, args=(list_rref,))
+        self.assertEqual(list_rref.to_here(), [1, 2, 3, 4, 5, 6])
+
 
 
 @torch.jit.script
