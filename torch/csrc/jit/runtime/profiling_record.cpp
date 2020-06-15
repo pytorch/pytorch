@@ -1,28 +1,30 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <ostream>
 
 namespace torch {
 namespace jit {
 
 bool ShapeSymbolTable::bindSymbolicShapes(
     at::IntArrayRef new_sizes,
-    const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes) {
-  if (!sym_shapes.size().has_value()) {
+    const c10::SymbolicShape& sym_shapes) {
+  if (!sym_shapes.rank().has_value()) {
     return true;
   }
-  if (*sym_shapes.size() != new_sizes.size()) {
+  if (*sym_shapes.rank() != new_sizes.size()) {
     return false;
   }
   for (size_t i = 0; i < new_sizes.size(); i++) {
-    if (!sym_shapes[i].has_value()) {
+    auto symbol = (*sym_shapes.sizes())[i];
+    if (!symbol.is_static()) {
       continue;
     }
-    auto symbol = *sym_shapes[i];
+
     if (!isBound(symbol)) {
       assign(symbol, new_sizes[i]);
       continue;
@@ -76,29 +78,29 @@ static void unprofileBlock(Block* start_block) {
   }
 }
 
-std::vector<c10::optional<c10::ShapeSymbol>> ProfilingRecord::
-    mergeSymbolicShapes(
-        const c10::VaryingShape<c10::ShapeSymbol>& new_sizes,
-        const c10::VaryingShape<c10::ShapeSymbol>& sym_shapes,
-        SetPartitioningHelper& partition_helper) {
-  std::vector<c10::optional<c10::ShapeSymbol>> new_symbols;
+c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
+    const c10::SymbolicShape& new_sizes,
+    const c10::SymbolicShape& sym_shapes,
+    SetPartitioningHelper& partition_helper) {
+  std::vector<c10::ShapeSymbol> new_symbols;
   TORCH_INTERNAL_ASSERT(
-      new_sizes.size().has_value() && sym_shapes.size().has_value() &&
-      *new_sizes.size() == *sym_shapes.size());
-  for (size_t i = 0; i < new_sizes.size(); i++) {
-    if (!sym_shapes[i].has_value() || !new_sizes[i].has_value()) {
-      new_symbols.emplace_back(c10::nullopt);
+      new_sizes.rank().has_value() && sym_shapes.rank().has_value() &&
+      *new_sizes.rank() == *sym_shapes.rank());
+
+  for (size_t i = 0; i < *new_sizes.rank(); i++) {
+    if (!(*sym_shapes.sizes())[i].is_static() ||
+        !(*new_sizes.sizes())[i].is_static()) {
+      new_symbols.emplace_back();
       continue;
     }
-    auto symbol = *sym_shapes[i];
-    TORCH_INTERNAL_ASSERT(new_sizes[i]->is_static());
-    Dimension new_size = new_sizes[i]->static_size();
+    auto symbol = (*sym_shapes.sizes())[i];
+    Dimension new_size = (*new_sizes.sizes())[i].static_size();
     GRAPH_DEBUG("Merging symbol ", symbol);
     auto new_sym = partition_helper.partitionSetByDimension(new_size, symbol);
     new_symbols.emplace_back(new_sym);
   }
 
-  return new_symbols;
+  return c10::SymbolicShape(new_symbols);
 }
 
 void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
@@ -145,16 +147,57 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
   n->replaceInputWith(i, pn->output());
 }
 
+bool needsProfiledInputs(Node* n) {
+  if (tensorexpr::isSupported(n)) {
+    return true;
+  }
+
+  switch (n->kind()) {
+    // specialize_autogradzero
+    case prim::AutogradAdd:
+    case prim::AutogradAnyNonZero:
+    case prim::AutogradZero:
+    // peephole
+    case aten::dim:
+    case aten::size:
+    case aten::expand:
+    case prim::dtype:
+    case prim::device:
+    case prim::is_cuda:
+    case aten::is_floating_point:
+    case aten::type_as:
+    // TODO: hack to make `test_lstm_gates_permutations_cuda`
+    // pass.
+    case aten::t:
+    case aten::mm:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool needsProfiledOutput(Node* n) {
+  if (tensorexpr::isSupported(n)) {
+    return true;
+  }
+
+  switch (n->kind()) {
+    case prim::AutogradAdd:
+    case prim::AutogradZero:
+      return true;
+    default:
+      return false;
+  }
+}
+
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
-      if (!i->type()->isSubtypeOf(TensorType::get()) ||
-          i->node()->kind() == prim::profile) {
-        continue;
+      if (i->type()->kind() == c10::TypeKind::TensorType &&
+          (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
+        insertShapeProfile(n, i);
       }
-
-      insertShapeProfile(n, i);
     }
 
     for (auto b : n->blocks()) {
@@ -177,6 +220,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     const std::shared_ptr<Graph>& graph) {
   auto new_g = graph->copy();
+
   auto pr = std::unique_ptr<ProfilingRecord>(new ProfilingRecord(new_g));
   auto raw_pr = pr.get();
   unprofileGraphInputs(new_g);
@@ -258,6 +302,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
 
   auto pop = pr->createProfileNode(counter, {});
   new_g->appendNode(pop);
+  GRAPH_DUMP("Instrumented Graph: ", new_g);
   return pr;
 }
 

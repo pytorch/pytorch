@@ -2,6 +2,8 @@
 #include <ATen/Config.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
+#include <thread>
+
 #if !AT_NNPACK_ENABLED()
 
 namespace at {

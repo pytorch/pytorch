@@ -26,10 +26,7 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
   const int64_t inH = input.size(2);
   const int64_t inW = input.size(3);
 
-  // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
-  // regression of it is fixed. Today it's equivalent because `input` sizes
-  // are not used below
-  Tensor input_contig = input.permute({0, 2, 3, 1}).contiguous();
+  Tensor input_contig = input.contiguous(MemoryFormat::ChannelsLast);
 
   initQNNPACK();
   const auto scale = input_contig.q_scale();
