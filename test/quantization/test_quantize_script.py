@@ -2462,12 +2462,9 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
                 x = x + 5
                 return self.fc1(x)
         eager_model = M().eval()
-        for tracing_mode in [True, False]:
-            if tracing_mode:
-                x = torch.randn(5, 5)
-                model = torch.jit.trace(eager_model, x)
-            else:
-                model = torch.jit.script(eager_model)
+        x = torch.randn(5, 5)
+        for tracing in [True, False]:
+            model = get_script_module(eager_model, tracing, x)
             qconfig_dict = {'' : default_dynamic_qconfig}
             model = quantize_dynamic_script(model, qconfig_dict)
             # add op is not dynamically quantized.
@@ -2487,12 +2484,9 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
                 return self.fc(x), size1, size2
 
         eager_model = M().eval()
-        for tracing_mode in [True, False]:
-            if tracing_mode:
-                x = torch.randn(5, 5)
-                model = torch.jit.trace(eager_model, x)
-            else:
-                model = torch.jit.script(eager_model)
+        x = torch.randn(5, 5)
+        for tracing in [True, False]:
+            model = get_script_module(eager_model, tracing, x)
             qconfig_dict = {'': default_dynamic_qconfig}
 
             model = quantize_dynamic_script(model, qconfig_dict)
@@ -2608,13 +2602,9 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
 
         qconfig_dict = {'': default_dynamic_qconfig}
         eager_model = M().eval()
-        for tracing_mode in [True, False]:
-            if tracing_mode:
-                x = torch.randn(5, 5)
-                model = torch.jit.trace(eager_model, x)
-            else:
-                model = torch.jit.script(eager_model)
-
+        x = torch.rand(5, 5)
+        for tracing in [True, False]:
+            model = get_script_module(eager_model, tracing, x)
             qconfig = script_qconfig(default_dynamic_qconfig)
             ref_qparams = []
             wt_module = wrap_cpp_module(qconfig.weight)
@@ -2626,7 +2616,7 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
             model = convert_dynamic_script(model, debug=True)
             graph_params = []
             for x, obs in model._modules._c.items():
-                if tracing_mode:
+                if tracing:
                     graph_params.append((obs.getattr('4_scale_0'), obs.getattr('4_zero_point_0')))
                 else:
                     graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
@@ -2646,14 +2636,10 @@ class TestQuantizeScriptPTDQOps(QuantizationTestCase):
                 return self.fc(x)
 
         qconfig_dict = {'': default_dynamic_qconfig}
-        for tracing_mode in [True, False]:
-            eager_model = M()
-            eager_model.eval()
-            if tracing_mode:
-                x = torch.randn(5, 5)
-                model = torch.jit.trace(eager_model, x)
-            else:
-                model = torch.jit.script(eager_model)
+        eager_model = M().eval()
+        x = torch.rand(5, 5)
+        for tracing in [True, False]:
+            model = get_script_module(eager_model, tracing, x)
             model = quantize_dynamic_script(model, qconfig_dict)
             FileCheck().check("quantized::linear_dynamic") \
                        .run(model.graph)
