@@ -97,15 +97,17 @@ def report_android_sizes(file_dir):
             yield [arch, lib, info.compress_size, info.file_size]
 
         # report whole package size
-        yield ["all", aar_file.name, os.stat(aar_file).st_size, 0]
+        yield ["aar", aar_file.name, os.stat(aar_file).st_size, 0]
 
     def gen_messages():
+        android_build_type = os.environ.get("ANDROID_BUILD_TYPE")
         for arch, lib, comp_size, uncomp_size in gen_sizes():
-            print(arch, lib, comp_size, uncomp_size)
+            print(android_build_type, arch, lib, comp_size, uncomp_size)
             yield {
                 "normal": {
                     "os": "android",
-                    "pkg_type": "{}/{}".format(arch, lib),  # TODO: create dedicated columns
+                    # TODO: create dedicated columns
+                    "pkg_type": "{}/{}/{}".format(android_build_type, arch, lib),
                     "pr": os.environ.get("CIRCLE_PR_NUMBER"),
                     "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
                     "sha1": os.environ.get("CIRCLE_SHA1"),

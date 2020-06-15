@@ -241,6 +241,7 @@
           # ============================== Begin Docker ==============================
           cd workspace
           source ./env
+          export ANDROID_BUILD_TYPE="prebuild"
           export COMMIT_TIME=\$(git log --max-count=1 --format=%ct || echo 0)
           export CIRCLE_BUILD_NUM="${CIRCLE_BUILD_NUM}"
           export CIRCLE_SHA1="${CIRCLE_SHA1}"
@@ -342,6 +343,7 @@
           # ============================== Begin Docker ==============================
           cd workspace
           source ./env
+          export ANDROID_BUILD_TYPE="prebuild-single"
           export COMMIT_TIME=\$(git log --max-count=1 --format=%ct || echo 0)
           export CIRCLE_BUILD_NUM="${CIRCLE_BUILD_NUM}"
           export CIRCLE_SHA1="${CIRCLE_SHA1}"
