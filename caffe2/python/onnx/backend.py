@@ -35,7 +35,6 @@ import onnx
 from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
 import onnx.numpy_helper
 import onnx.defs
-import onnx.optimizer
 import onnx.shape_inference
 import onnx.utils
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
@@ -652,19 +651,6 @@ class Caffe2Backend(Backend):
                 value_info.name,
                 np.ones(shape, dtype=onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[value_info.type.tensor_type.elem_type]),
                 device_option)
-
-    @staticmethod
-    def optimize_onnx(input, init=False, predict=False):
-        passes =  ['fuse_consecutive_transposes',
-                   'eliminate_nop_transpose',
-                   'fuse_transpose_into_gemm',
-                   'lift_lexical_references']
-        if init:
-            passes.append('split_init')
-        if predict:
-            passes.append('split_predict')
-        out = onnx.optimizer.optimize(input, passes)
-        return out
 
     @classmethod
     def prepare_zip_archive(cls, file, device='CPU', **kwargs):
