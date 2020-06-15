@@ -3,7 +3,6 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
 #include <torch/ordered_dict.h>
-
 #include <vector>
 
 namespace torch {
@@ -24,8 +23,8 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
     }
   }
 
-  /// `reset()` is empty for `ParameterDict`, since it does not have parameters
-  /// of its own.
+  /// `reset()` is empty for `ParameterDict`, since it does not have
+  /// parameters of its own.
   void reset() override {}
 
   /// Pretty prints the `ParameterDict` module into the given `stream`.
@@ -80,7 +79,8 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   }
 
   /// Returns an `OrderedDict` with the parameters of this `Module` along with
-  /// their keys, and if `recurse` is true also recursively of every submodule.
+  /// their keys, and if `recurse` is true also recursively of every
+  /// submodule.
   OrderedDict<std::string, Tensor> named_parameters(bool recurse = true) const {
     return named_parameters(recurse);
   }
