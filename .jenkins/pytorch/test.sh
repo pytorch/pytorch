@@ -173,7 +173,9 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@43e94b39bcdda519c093ca11d99dfa2568aa7258
+  # Check out torch/vision at Jun 11 2020 commit
+  # This hash must match one in .jenkins/caffe2/test.sh
+  pip_install --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
 }
 
 test_libtorch() {
