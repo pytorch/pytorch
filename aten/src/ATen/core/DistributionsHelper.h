@@ -126,6 +126,8 @@ struct uniform_real_distribution {
     T to_;
 };
 
+// The SFINAE checks introduced in #39816 looks overcomplicated and must revisited
+// https://github.com/pytorch/pytorch/issues/40052
 #define DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(member)              \
 template <typename T>                                                \
 struct has_member_##member                                           \
@@ -137,8 +139,6 @@ struct has_member_##member                                           \
     static constexpr bool value = sizeof(test<T>(0)) == sizeof(yes); \
 }
 
-// The SFINAE checks introduced in #39816 looks overcomplicated and must revisited
-// https://github.com/pytorch/pytorch/issues/40052
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(next_double_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_double_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(next_float_normal_sample);
