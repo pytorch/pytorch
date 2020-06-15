@@ -449,7 +449,7 @@ def largeTensorTest(size):
                          torch.cuda.get_device_properties(0).total_memory >= size)
             else:
                 if not HAS_PSUTIL:
-                    raise unittest.skip('Need psutil to determine if memory is sufficient')
+                    raise unittest.SkipTest('Need psutil to determine if memory is sufficient')
 
                 # The sanitizers have significant memory overheads
                 if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:

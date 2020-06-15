@@ -11,6 +11,7 @@
 #include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/TracerMode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
@@ -461,6 +462,7 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
     // In the future when we remove the overhead of device dispatch, we'll happily
     // revert this to following:
     //   auto result = at::empty({}, options);
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     auto result = empty_cpu({}, options);
     at::native::fill_(result, s);
