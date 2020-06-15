@@ -28,6 +28,9 @@ def script_qconfig(qconfig):
 def script_qconfig_dict(qconfig_dict):
     return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
 
+def fuse_conv_bn_script(model):
+    return wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+
 def _prepare_script(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC):
     assert not inplace, "The inplace support is still in development"
     _check_is_script_module(model)
@@ -35,15 +38,13 @@ def _prepare_script(model, qconfig_dict, inplace=False, quant_type=QuantType.STA
     if not all(isinstance(x, str) for x in qconfig_dict.keys()):
         raise ValueError('qconfig_dict should only contain names(str) as keys.')
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
-    torch._C._jit_pass_dedup_module_uses(model._c)
     model = fuse_conv_bn_script(model)
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
                                                                scripted_qconfig_dict,
                                                                inplace,
                                                                quant_type))
-def fuse_conv_bn_script(model):
-    return wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+
 def prepare_script(model, qconfig_dict, inplace=False):
     return _prepare_script(model, qconfig_dict, inplace, quant_type=QuantType.STATIC)
 
@@ -71,7 +72,6 @@ def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=Fa
     # copied in prepare_script when inplace is False
     if quant_type == QuantType.DYNAMIC:
         model = prepare_dynamic_script(model, qconfig_dict, inplace)
-        model(*run_args)
         # TODO: change inplace to True
         model = convert_dynamic_script(model, False, debug)
     else:
