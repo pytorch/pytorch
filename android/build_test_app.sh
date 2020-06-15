@@ -6,7 +6,7 @@ PYTORCH_ANDROID_DIR=$PYTORCH_DIR/android
 
 echo "PYTORCH_DIR:$PYTORCH_DIR"
 
-source $PYTORCH_ANDROID_DIR/common.sh
+source "$PYTORCH_ANDROID_DIR/common.sh"
 
 check_android_sdk
 check_gradle

@@ -4,7 +4,7 @@ set -eux
 PYTORCH_DIR="$(cd $(dirname $0)/..; pwd -P)"
 PYTORCH_ANDROID_DIR=$PYTORCH_DIR/android
 
-source $PYTORCH_ANDROID_DIR/common.sh
+source "$PYTORCH_ANDROID_DIR/common.sh"
 
 check_android_sdk
 check_gradle
