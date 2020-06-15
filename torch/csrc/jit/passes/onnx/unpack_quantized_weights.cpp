@@ -185,7 +185,7 @@ void unpackQuantizedWeightsHelper(
         torch::List<int64_t> stride_int, padding_int, dilation_int;
         int64_t groups_int;
 
-        if (scalars_tensor.numel() == 1) {  // Version 1
+        if (scalars_tensor.numel() == 1) { // Version 1
           for (const auto& s : params1_ivalue) {
             stride_int.emplace_back(s.toTensor()[0].item<int64_t>());
           }
