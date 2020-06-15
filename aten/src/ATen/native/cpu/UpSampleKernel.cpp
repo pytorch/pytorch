@@ -167,6 +167,8 @@ void cpu_upsample_nearest_channels_last(
   int64_t output_width = output_sizes[ndim - 1];
   int64_t numel = output.numel();
 
+  TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
+
   using Vec = vec256::Vec256<scalar_t>;
   auto copy = [](scalar_t* out, scalar_t* in, int64_t size) {
     int64_t d = 0;
@@ -216,7 +218,6 @@ void cpu_upsample_nearest_channels_last(
     }
   };
 
-  TORCH_INTERNAL_ASSERT(channels > 0);
   if (ndim == 4) {
     // upsample nearest 2d
     at::parallel_for(0, numel / channels, at::internal::GRAIN_SIZE / channels, loop2d);
@@ -304,7 +305,6 @@ void cpu_upsample_nearest_backward(
     }
   };
 
-  TORCH_INTERNAL_ASSERT(output_slice_size > 0);
   if (ndim == 3) {
     // upsample nearest 1d
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop1d);

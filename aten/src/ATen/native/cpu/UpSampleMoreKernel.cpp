@@ -162,7 +162,6 @@ void cpu_upsample_linear(
 
   // compared to "nearest" mode, lower the grain size:
   // "linear", "bilinear", "trilinear" mode are more computational expensive
-  TORCH_INTERNAL_ASSERT(output_slice_size > 0);
   if (ndim == 3) {
     // upsample linear 1d
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 2, loop1d);
@@ -210,6 +209,7 @@ void cpu_upsample_linear_channels_last(
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
+  TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
   int64_t output_slice_size = output_depth * output_height * output_width * channels;
 
   using Vec = vec256::Vec256<scalar_t>;
@@ -333,7 +333,6 @@ void cpu_upsample_linear_channels_last(
     }
   };
 
-  TORCH_INTERNAL_ASSERT(output_slice_size > 0);
   if (ndim == 4) {
     // upsample nearest 2d
     at::parallel_for(0, num_batches, at::internal::GRAIN_SIZE / output_slice_size / 4, loop2d);
@@ -468,7 +467,6 @@ void cpu_upsample_linear_backward(
     }
   };
 
-  TORCH_INTERNAL_ASSERT(output_slice_size > 0);
   if (ndim == 3) {
     // upsample linear 1d
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 2, loop1d);
