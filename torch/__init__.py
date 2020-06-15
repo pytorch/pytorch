@@ -484,3 +484,8 @@ from ._lobpcg import lobpcg
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+# torch.fft is currently imported after doc strings because it mimics
+#   both the torch.fft namespace and the torch.fft function
+#   (see fft/__init__.py)
+import torch.fft
