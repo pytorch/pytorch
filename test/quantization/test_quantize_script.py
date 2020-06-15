@@ -1249,9 +1249,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             def forward(self, x):
                 return self.relu(self.linear(x))
 
-        class ModuleFunc(torch.nn.Module):
+        class FuncLinear(torch.nn.Module):
             def __init__(self, has_relu=False, f_relu=False):
-                super(ModuleFunc, self).__init__()
+                super(FuncLinear, self).__init__()
                 self.w = torch.randn(4, 30)
                 self.b = torch.randn(4)
                 if has_relu:
@@ -1268,7 +1268,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
 
         for model in [ModuleLinear(has_relu=False),
-                      ModuleFunc(has_relu=False)]:
+                      FuncLinear(has_relu=False)]:
             model = self._test_op_impl(model, data, "quantized::linear")
             FileCheck() \
                 .check_count("aten::quantize_per_tensor", 1, exactly=True) \
@@ -1278,7 +1278,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         for f_relu in [True, False]:
             for model in [ModuleLinear(has_relu=True, f_relu=f_relu),
-                          ModuleFunc(has_relu=True, f_relu=f_relu)]:
+                          FuncLinear(has_relu=True, f_relu=f_relu)]:
                 model = self._test_op_impl(model, data,
                                            "quantized::linear_relu")
                 checker = FileCheck().check_not("aten::linear") \
