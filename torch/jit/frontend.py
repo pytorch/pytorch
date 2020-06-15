@@ -167,10 +167,15 @@ def get_jit_def(fn, def_name, self_name=None):
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
     fn_def = py_ast.body[0]
 
-    # Swap out the function body if it is unused
+    # Swap out the function signature and body if it is unused
     if should_drop(fn):
-        unused_fn_def = ast.parse("def unused_fn(self):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
+        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
         fn_def.body = unused_fn_def.body
+        # kwarg/vararg not supported by `build_def`
+        fn_def.args.kwarg = fn_def.args.vararg = None
+        for arg in fn_def.args.args + fn_def.args.kwonlyargs:
+            # Replace potentially unsupported type annotations by "Any"
+            arg.annotation = unused_fn_def.args.args[0].annotation
 
     return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
 

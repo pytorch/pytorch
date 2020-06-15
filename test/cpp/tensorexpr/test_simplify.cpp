@@ -383,6 +383,49 @@ void testHashLargeExpression() {
   ASSERT_NE(hash_t, hash_f);
 }
 
+void testHashForLoopOptions() {
+  KernelScope kernel_scope;
+  constexpr int N = 1024;
+  Buffer a(BufHandle("A", {N}, kInt));
+  Buffer b(BufHandle("B", {N}, kInt));
+  Buffer c(BufHandle("C", {N}, kInt));
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto for_stmt = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          {i},
+          CompareSelect::make(
+              Load::make(a, {i}, mask),
+              Load::make(b, {i}, mask),
+              CompareSelectOperation::kEQ),
+          mask));
+
+  HashProvider hasher;
+  auto hash_before = hasher.hash(for_stmt);
+  hasher.clearCache();
+
+  for_stmt->set_gpu_block_index(LoopOptions::IDX_X);
+  auto hash_block_idx = hasher.hash(for_stmt);
+  hasher.clearCache();
+
+  ASSERT_NE(hash_before, hash_block_idx);
+
+  for_stmt->set_gpu_block_index(LoopOptions::IDX_UNSET);
+  auto hash_reset = hasher.hash(for_stmt);
+  hasher.clearCache();
+
+  ASSERT_EQ(hash_before, hash_reset);
+  for_stmt->set_gpu_thread_index(LoopOptions::IDX_X);
+  auto hash_thread_idx = hasher.hash(for_stmt);
+
+  ASSERT_NE(hash_before, hash_thread_idx);
+  ASSERT_NE(hash_block_idx, hash_thread_idx);
+}
+
 /// (2 + x) + 4 => x + 6
 void testSimplifyAdd() {
   KernelScope kernel_scope;
@@ -1776,6 +1819,34 @@ void testSimplifyConstantCond() {
   }
 }
 
+void testSimplifyEliminateEmptyCond() {
+  KernelScope kernel_scope;
+  // If the branches are empty in different ways, eliminate.
+  {
+    VarHandle x("x", kInt);
+    ExprHandle condition(x);
+    Stmt* true_val = new Block({});
+
+    Stmt* body = new Cond(condition.node(), true_val, nullptr);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_NE(block, nullptr);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+
+  {
+    VarHandle x("x", kInt);
+    ExprHandle condition(x);
+    Stmt* false_val = new Block({});
+
+    Stmt* body = new Cond(condition.node(), nullptr, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_NE(block, nullptr);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+}
+
 void testSimplifyEliminateZeroLengthFor() {
   KernelScope kernel_scope;
 
@@ -2137,6 +2208,80 @@ void testSimplifyFlattenBlock() {
     Stmt* simplified = IRSimplifier::simplify(last);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 0);
+  }
+}
+
+void testSimplifyEliminateZeroLengthAlloc() {
+  KernelScope kernel_scope;
+
+  {
+    // Simple positive case.
+    VarHandle x("x", kInt);
+
+    Allocate* alloc = Allocate::make(x, kInt, {0});
+    Free* free_ = Free::make(x);
+
+    Block* block1 = new Block({alloc, free_});
+    ASSERT_EQ(block1->nstmts(), 2);
+
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 0);
+  }
+
+  {
+    // Simple negative case.
+    VarHandle x("x", kInt);
+
+    Allocate* alloc = Allocate::make(x, kInt, {2});
+    Free* free_ = Free::make(x);
+
+    Block* block1 = new Block({alloc, free_});
+    ASSERT_EQ(block1->nstmts(), 2);
+
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 2);
+  }
+
+  {
+    // Finds right Alloc/Free.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+
+    Allocate* alloc1 = Allocate::make(x, kInt, {0});
+    Allocate* alloc2 = Allocate::make(y, kInt, {2});
+    Free* free2_ = Free::make(y);
+    Free* free1_ = Free::make(x);
+
+    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    ASSERT_EQ(block1->nstmts(), 4);
+
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 2);
+    IS_NODE_WITH_NAME(Allocate, block2->stmts().front(), simplified_alloc);
+    IS_VAR_WITH_NAME(simplified_alloc->buffer_var(), "y");
+    IS_NODE_WITH_NAME(Free, block2->stmts().back(), simplified_free);
+    ASSERT_EQ(simplified_alloc->buffer_var(), simplified_free->buffer_var());
+  }
+
+  {
+    // Dynamic shape.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle z("z", kInt);
+
+    Allocate* alloc1 = Allocate::make(x, kInt, {0});
+    Allocate* alloc2 = Allocate::make(y, kInt, {z});
+    Free* free2_ = Free::make(y);
+    Free* free1_ = Free::make(x);
+
+    Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
+    ASSERT_EQ(block1->nstmts(), 4);
+    Stmt* simplified = IRSimplifier::simplify(block1);
+    IS_NODE_WITH_NAME(Block, simplified, block2);
+    ASSERT_EQ(block2->nstmts(), 2);
   }
 }
 

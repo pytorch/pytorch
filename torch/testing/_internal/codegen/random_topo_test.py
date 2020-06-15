@@ -358,7 +358,7 @@ if __name__ == '__main__':
 
     # Register CUDA fuser
     if args.cuda_fuser:
-        torch._C._jit_register_cuda_fuser()
+        torch._C._jit_set_nvfuser_enabled(True)
 
     # Turn off legacy fuser
     if not args.legacy_fuser:

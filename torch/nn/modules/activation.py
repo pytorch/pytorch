@@ -3,7 +3,7 @@ from typing import Tuple, Optional
 
 import torch
 from torch import Tensor
-from . import Linear
+from .linear import _LinearWithBias
 from torch.nn.init import xavier_uniform_
 from torch.nn.init import constant_
 from torch.nn.init import xavier_normal_
@@ -42,14 +42,18 @@ class Threshold(Module):
     """
     __constants__ = ['threshold', 'value', 'inplace']
 
-    def __init__(self, threshold, value, inplace=False):
+    threshold: float
+    value: float
+    inplace: bool
+
+    def __init__(self, threshold: float, value: float, inplace: bool = False) -> None:
         super(Threshold, self).__init__()
         self.threshold = threshold
         self.value = value
         self.inplace = inplace
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
     def extra_repr(self):
@@ -88,15 +92,16 @@ class ReLU(Module):
         >>> output = torch.cat((m(input),m(-input)))
     """
     __constants__ = ['inplace']
+    inplace: bool
 
-    def __init__(self, inplace=False):
+    def __init__(self, inplace: bool = False):
         super(ReLU, self).__init__()
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.relu(input, inplace=self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
@@ -142,13 +147,22 @@ class RReLU(Module):
     """
     __constants__ = ['lower', 'upper', 'inplace']
 
-    def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
+    lower: float
+    upper: float
+    inplace: bool
+
+    def __init__(
+        self,
+        lower: float = 1. / 8,
+        upper: float = 1. / 3,
+        inplace: bool = False
+    ):
         super(RReLU, self).__init__()
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
     def extra_repr(self):
@@ -194,7 +208,18 @@ class Hardtanh(Module):
     """
     __constants__ = ['min_val', 'max_val', 'inplace']
 
-    def __init__(self, min_val=-1., max_val=1., inplace=False, min_value=None, max_value=None):
+    min_val: float
+    max_val: float
+    inplace: bool
+
+    def __init__(
+        self,
+        min_val: float = -1.,
+        max_val: float = 1.,
+        inplace: bool = False,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None
+    ) -> None:
         super(Hardtanh, self).__init__()
         if min_value is not None:
             warnings.warn("keyword argument min_value is deprecated and rename to min_val")
@@ -208,10 +233,10 @@ class Hardtanh(Module):
         self.inplace = inplace
         assert self.max_val > self.min_val
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
         return 'min_val={}, max_val={}{}'.format(
             self.min_val, self.max_val, inplace_str
@@ -241,10 +266,10 @@ class ReLU6(Hardtanh):
         >>> output = m(input)
     """
 
-    def __init__(self, inplace=False):
+    def __init__(self, inplace: bool = False):
         super(ReLU6, self).__init__(0., 6., inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
@@ -270,7 +295,7 @@ class Sigmoid(Module):
         >>> output = m(input)
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return torch.sigmoid(input)
 
 
@@ -297,7 +322,7 @@ class Hardsigmoid(Module):
         >>> output = m(input)
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.hardsigmoid(input)
 
 
@@ -321,7 +346,7 @@ class Tanh(Module):
         >>> output = m(input)
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return torch.tanh(input)
 
 
@@ -352,7 +377,7 @@ class Hardswish(Module):
         https://arxiv.org/abs/1905.02244
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.hardswish(input)
 
 
@@ -380,16 +405,18 @@ class ELU(Module):
         >>> output = m(input)
     """
     __constants__ = ['alpha', 'inplace']
+    alpha: float
+    inplace: bool
 
-    def __init__(self, alpha=1., inplace=False):
+    def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
         super(ELU, self).__init__()
         self.alpha = alpha
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.elu(input, self.alpha, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
@@ -423,16 +450,18 @@ class CELU(Module):
         https://arxiv.org/abs/1704.07483
     """
     __constants__ = ['alpha', 'inplace']
+    alpha: float
+    inplace: bool
 
-    def __init__(self, alpha=1., inplace=False):
+    def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
         super(CELU, self).__init__()
         self.alpha = alpha
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.celu(input, self.alpha, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
@@ -467,15 +496,16 @@ class SELU(Module):
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
     __constants__ = ['inplace']
+    inplace: bool
 
-    def __init__(self, inplace=False):
+    def __init__(self, inplace: bool = False) -> None:
         super(SELU, self).__init__()
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.selu(input, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
@@ -500,15 +530,16 @@ class GLU(Module):
         >>> output = m(input)
     """
     __constants__ = ['dim']
+    dim: int
 
-    def __init__(self, dim=-1):
+    def __init__(self, dim: int = -1) -> None:
         super(GLU, self).__init__()
         self.dim = dim
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.glu(input, self.dim)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'dim={}'.format(self.dim)
 
 
@@ -532,7 +563,7 @@ class GELU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.gelu(input)
 
 
@@ -564,15 +595,16 @@ class Hardshrink(Module):
         >>> output = m(input)
     """
     __constants__ = ['lambd']
+    lambd: float
 
-    def __init__(self, lambd=0.5):
+    def __init__(self, lambd: float = 0.5) -> None:
         super(Hardshrink, self).__init__()
         self.lambd = lambd
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.hardshrink(input, self.lambd)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return '{}'.format(self.lambd)
 
 
@@ -610,16 +642,18 @@ class LeakyReLU(Module):
         >>> output = m(input)
     """
     __constants__ = ['inplace', 'negative_slope']
+    inplace: bool
+    negative_slope: float
 
-    def __init__(self, negative_slope=1e-2, inplace=False):
+    def __init__(self, negative_slope: float = 1e-2, inplace: bool = False) -> None:
         super(LeakyReLU, self).__init__()
         self.negative_slope = negative_slope
         self.inplace = inplace
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
         return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
@@ -644,7 +678,7 @@ class LogSigmoid(Module):
         >>> output = m(input)
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.logsigmoid(input)
 
 
@@ -678,16 +712,18 @@ class Softplus(Module):
         >>> output = m(input)
     """
     __constants__ = ['beta', 'threshold']
+    beta: int
+    threshold: int
 
-    def __init__(self, beta=1, threshold=20):
+    def __init__(self, beta: int = 1, threshold: int = 20) -> None:
         super(Softplus, self).__init__()
         self.beta = beta
         self.threshold = threshold
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.softplus(input, self.beta, self.threshold)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'beta={}, threshold={}'.format(self.beta, self.threshold)
 
 
@@ -719,15 +755,16 @@ class Softshrink(Module):
         >>> output = m(input)
     """
     __constants__ = ['lambd']
+    lambd: float
 
-    def __init__(self, lambd=0.5):
+    def __init__(self, lambd: float = 0.5) -> None:
         super(Softshrink, self).__init__()
         self.lambd = lambd
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.softshrink(input, self.lambd)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return str(self.lambd)
 
 
@@ -763,7 +800,6 @@ class MultiheadAttention(Module):
         'bias_k': torch._jit_internal.Optional[torch.Tensor],
         'bias_v': torch._jit_internal.Optional[torch.Tensor],
     }
-    __constants__ = ['q_proj_weight', 'k_proj_weight', 'v_proj_weight', 'in_proj_weight']
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
         super(MultiheadAttention, self).__init__()
@@ -792,7 +828,7 @@ class MultiheadAttention(Module):
             self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
         else:
             self.register_parameter('in_proj_bias', None)
-        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+        self.out_proj = _LinearWithBias(embed_dim, embed_dim)
 
         if add_bias_kv:
             self.bias_k = Parameter(torch.empty(1, 1, embed_dim))
@@ -835,8 +871,10 @@ class MultiheadAttention(Module):
         query, key, value: map a query and a set of key-value pairs to an output.
             See "Attention Is All You Need" for more details.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention. This is an binary mask. When the value is True,
-            the corresponding value on the attention layer will be filled with -inf.
+            be ignored by the attention. When given a binary mask and a value is True,
+            the corresponding value on the attention layer will be ignored. When given
+            a byte mask and a value is non-zero, the corresponding value on the attention
+            layer will be ignored
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
@@ -939,16 +977,17 @@ class PReLU(Module):
         >>> output = m(input)
     """
     __constants__ = ['num_parameters']
+    num_parameters: int
 
-    def __init__(self, num_parameters=1, init=0.25):
+    def __init__(self, num_parameters: int = 1, init: float = 0.25) -> None:
         self.num_parameters = num_parameters
         super(PReLU, self).__init__()
         self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'num_parameters={}'.format(self.num_parameters)
 
 
@@ -972,7 +1011,7 @@ class Softsign(Module):
         >>> output = m(input)
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.softsign(input)
 
 
@@ -996,7 +1035,7 @@ class Tanhshrink(Module):
         >>> output = m(input)
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.tanhshrink(input)
 
 
@@ -1030,14 +1069,22 @@ class Softmin(Module):
         >>> output = m(input)
     """
     __constants__ = ['dim']
+    dim: Optional[int]
 
-    def __init__(self, dim=None):
+    def __init__(self, dim: Optional[int] = None) -> None:
         super(Softmin, self).__init__()
         self.dim = dim
 
-    def forward(self, input):
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
+    def forward(self, input: Tensor) -> Tensor:
         return F.softmin(input, self.dim, _stacklevel=5)
 
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
 
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
@@ -1078,8 +1125,9 @@ class Softmax(Module):
 
     """
     __constants__ = ['dim']
+    dim: Optional[int]
 
-    def __init__(self, dim=None):
+    def __init__(self, dim: Optional[int] = None) -> None:
         super(Softmax, self).__init__()
         self.dim = dim
 
@@ -1088,10 +1136,10 @@ class Softmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.softmax(input, self.dim, _stacklevel=5)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'dim={dim}'.format(dim=self.dim)
 
 
@@ -1117,7 +1165,7 @@ class Softmax2d(Module):
         >>> output = m(input)
     """
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return F.softmax(input, 1, _stacklevel=5)
 
@@ -1148,8 +1196,9 @@ class LogSoftmax(Module):
         >>> output = m(input)
     """
     __constants__ = ['dim']
+    dim: Optional[int]
 
-    def __init__(self, dim=None):
+    def __init__(self, dim: Optional[int] = None) -> None:
         super(LogSoftmax, self).__init__()
         self.dim = dim
 
@@ -1158,5 +1207,8 @@ class LogSoftmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.log_softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)

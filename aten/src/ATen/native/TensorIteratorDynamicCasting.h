@@ -64,13 +64,6 @@ struct CPPTypeAndStdComplexToScalarType<thrust::complex<double>> {
 };
 #endif
 
-// this shouldn't strictly be necessary, but needs some finagling to get to work
-// with "fake" C++17 if_constexpr.
-template<>
-struct CPPTypeAndStdComplexToScalarType<void> {
-  constexpr static c10::ScalarType value() { return c10::ScalarType::Undefined; }
-};
-
 }} //namespace cppmap::detail
 
 // `needs_dynamic_casting` compares the types expected by iterator
@@ -101,8 +94,10 @@ struct needs_dynamic_casting<func_t, 0> {
     // (including arity) are currently pushed outside of this struct.
     return c10::guts::if_constexpr<std::is_void<cpp_type>::value>([]() {
       return false;
-    }, /* else */ [&]() {
-      return iter.dtype(0) != cpp_map::value();
+    }, /* else */ [&](auto _) {
+      // decltype(_) is used to delay computation
+      using dtype = typename decltype(_)::template type_identity<cpp_map>;
+      return iter.dtype(0) != dtype::value();
     });
   }
 };

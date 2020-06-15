@@ -235,9 +235,6 @@ extern "C" {
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {
-#if !defined(__CUDA_ARCH__)  || !defined(__clang__)
-  [[noreturn]]
-#endif
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
     defined(__HIP_ARCH__) || defined(__HIP__)
 __host__ __device__
