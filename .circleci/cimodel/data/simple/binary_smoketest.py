@@ -54,7 +54,7 @@ class SmoketestJob:
             props_dict["docker_image"] = self.docker_image
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branches_only_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
 
         if self.has_libtorch_variant:
             props_dict["libtorch_variant"] = "shared-with-deps"

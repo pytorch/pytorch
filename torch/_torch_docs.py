@@ -1934,10 +1934,9 @@ Divides each element of the input ``input`` with the scalar ``other`` and
 returns a new resulting tensor.
 
 .. warning::
-    Integer division using div is deprecated, and in a future release div will
-    perform true division like :func:`torch.true_divide`.
-    Use :func:`torch.floor_divide` (// in Python) to perform integer division,
-    instead.
+    Integer division using div is no longer supported, and in a future release
+    div will perform true division as in Python 3. Use :func:`torch.true_divide`
+    or :func:`torch.floor_divide` (// in Python), instead.
 
 .. math::
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}
@@ -6021,6 +6020,58 @@ Example::
 
             [[ 2,  3],
              [ 0,  1]]])
+""".format(**common_args))
+
+add_docstr(torch.fliplr,
+           r"""
+fliplr(input) -> Tensor
+
+Flip array in the left/right direction, returning a new tensor.
+
+Flip the entries in each row in the left/right direction. 
+Columns are preserved, but appear in a different order than before.
+
+Note:
+    Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
+
+Args:
+    input (Tensor): Must be at least 2-dimensional.
+
+Example::
+
+    >>> x = torch.arange(4).view(2, 2)
+    >>> x
+    tensor([[0, 1],
+            [2, 3]])
+    >>> torch.fliplr(x)
+    tensor([[1, 0],
+            [3, 2]])
+""".format(**common_args))
+
+add_docstr(torch.flipud,
+           r"""
+flipud(input) -> Tensor
+
+Flip array in the up/down direction, returning a new tensor.
+
+Flip the entries in each column in the up/down direction.
+Rows are preserved, but appear in a different order than before.
+
+Note:
+    Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
+
+Args:
+    input (Tensor): Must be at least 1-dimensional.
+
+Example::
+
+    >>> x = torch.arange(4).view(2, 2)
+    >>> x
+    tensor([[0, 1],
+            [2, 3]])
+    >>> torch.flipud(x)
+    tensor([[2, 3],
+            [0, 1]])
 """.format(**common_args))
 
 add_docstr(torch.roll,

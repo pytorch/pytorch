@@ -130,7 +130,7 @@ class QMulScalar final {
   static Tensor run(Tensor qa, Scalar b) {
     TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is suuported in Mul.");
+              "Only per tensor quantization is supported in Mul.");
     auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _mul_scalar_out<ReLUFused>(qc, qa, b);
   }
@@ -145,6 +145,33 @@ class QMulScalarOut final {
   }
 };
 
+// `torch.jit.trace` will trace Scalar as Tensor
+// This can be removed after broadcast is supported and
+// all variations of `quantized::mul` is merged into `quantized::mul`
+template <bool ReLUFused = false>
+class QMulScalarTensor final {
+ public:
+  static Tensor run(Tensor qa, Tensor b) {
+    TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
+              qa.qscheme() == kPerTensorSymmetric,
+              "Only per tensor quantization is suported in Mul.");
+    auto qc = at::empty_like(qa, qa.suggest_memory_format());
+    return _mul_scalar_out<ReLUFused>(qc, qa, b.item());
+  }
+};
+
+// `torch.jit.trace` will trace Scalar as Tensor
+// This can be removed after broadcast is supported and
+// all variations of `quantized::mul` is merged into `quantized::mul`
+template <bool ReLUFused = false>
+class QMulScalarTensorOut final {
+ public:
+  static Tensor run(Tensor qa, Tensor b, Tensor out) {
+    check_inputs(qa, out);
+    return _mul_scalar_out<ReLUFused>(out, qa, b.item());
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("mul",                 QMul</*ReLUFused=*/false>::run);
   m.impl("mul_relu",            QMul</*ReLUFused=*/true>::run);
@@ -154,6 +181,11 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("mul_scalar_relu",     QMulScalar</*ReLUFused=*/true>::run);
   m.impl("mul_scalar_out",      QMulScalarOut</*ReLUFused=*/false>::run);
   m.impl("mul_scalar_relu_out", QMulScalarOut</*ReLUFused=*/true>::run);
+  // TODO: remove after broadcasting is supported
+  m.impl("mul_scalar.Tensor", QMulScalarTensor</*ReLUFused=*/false>::run);
+  m.impl("mul_scalar_relu.Tensor", QMulScalarTensor</*ReLUFused=*/true>::run);
+  m.impl("mul_scalar_out.Tensor", QMulScalarTensorOut</*ReLUFused=*/false>::run);
+  m.impl("mul_scalar_relu_out.Tensor", QMulScalarTensorOut</*ReLUFused=*/true>::run);
 }
 
 }  // namespace
