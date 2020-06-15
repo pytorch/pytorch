@@ -21,7 +21,7 @@ https://github.com/NVIDIA/nccl/blob/master/src/nccl.h.in
 however they're declare anyonomously there, so we can't forward declare them
 here.*/
 /* Error type */
-typedef enum {
+enum class {
   ncclSuccess = 0,
   ncclUnhandledCudaError = 1,
   ncclSystemError = 2,
@@ -32,7 +32,7 @@ typedef enum {
 } torchNcclResult_t;
 
 /* Data types */
-typedef enum {
+enum class {
   ncclInt8 = 0,
   ncclChar = 0,
   ncclUint8 = 1,
