@@ -17599,24 +17599,25 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_count_nonzero(self, device, dtype):
-        # Test for default `dim=None`
-        rand_dim = random.randint(3, 4)
-        shape = self._rand_shape(rand_dim, 5, 10)
-        x = torch.randn(*shape)
-        x[torch.randn(*shape) > 0.5] = 0
-        self.compare_with_numpy(torch.count_nonzero, np.count_nonzero, x, device, dtype)
+        for ndims in (0, 2, 1, 3):
+            shape = self._rand_shape(ndims, 5, 10)
+            for n in range(ndims + 1):
+                for c in combinations(list(range(ndims)), n):
+                    for count_dim in permutations(c):
+                        if shape == ():
+                            x = torch.tensor(())
+                        else:
+                            x = torch.randn(*shape)
+                            x[torch.randn(*shape) > 0.5] = 0
 
-        rand_dim = random.randint(3, 4)
-        shape = self._rand_shape(rand_dim, 5, 10)
-        # Axis to sample for given shape.
-        for i in range(1, rand_dim):
-            # Check all combinations of `i` axis.
-            for non_zero_dim in combinations(range(rand_dim), i):
-                data = (torch.randn(*shape) * random.randint(20, 30)).to(dtype)
-                data[torch.randn(*shape) > 0.5] = 0
-                torch_fn = partial(torch.count_nonzero, dims=non_zero_dim)
-                np_fn = partial(np.count_nonzero, axis=non_zero_dim)
-                self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+                        if count_dim == ():
+                            # Default `dims=None` case
+                            self.compare_with_numpy(torch.count_nonzero, np.count_nonzero, x, device, dtype)
+                        else:
+                            # With `dims: tuple of ints` case
+                            torch_func = partial(torch.count_nonzero, dim=count_dim)
+                            np_func = partial(np.count_nonzero, axis=count_dim)
+                            self.compare_with_numpy(torch_func, np_func, x, device, dtype)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
