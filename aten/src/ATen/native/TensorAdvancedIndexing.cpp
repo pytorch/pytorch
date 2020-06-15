@@ -231,11 +231,11 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
 }
 
 static TensorIterator make_index_iterator(const AdvancedIndex& info) {
-  TensorIteratorConfig config;
-  config.check_all_same_dtype(false);
-  config.declare_static_dtype(info.src.scalar_type());
-  config.add_output(Tensor());
-  config.add_input(info.src);
+  auto config = TensorIteratorConfig();
+  config.check_all_same_dtype(false)
+        .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
+        .add_output(Tensor())
+        .add_input(info.src);
   for (auto& index : info.indices) {
     config.add_input(index);
   }
@@ -245,8 +245,8 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
 static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
   TensorIteratorConfig config;
   config.check_all_same_dtype(false);
-  config.add_output(result);
-  config.add_input(info.src);
+        .add_output(result);
+        .add_input(info.src);
   for (auto& index : info.indices) {
     config.add_input(index);
   }

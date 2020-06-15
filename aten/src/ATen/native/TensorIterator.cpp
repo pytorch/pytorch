@@ -124,10 +124,11 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     //   the device it should be allocated on.
     if (!op.is_type_defined()) {
       TORCH_INTERNAL_ASSERT(op.is_output, "Found type undefined input tensor!");
-      TORCH_INTERNAL_ASSERT(config.check_all_same_device_);
-      if (config.static_dtype_.has_value()) {
-        op.target_dtype = *config.static_dtype_;
+      if (config.static_dtype_and_device_.has_value()) {
+        op.target_dtype = config.static_dtype_and_device_->first;
+        op.device = config.static_dtype_and_device_->second;
       } else {
+        TORCH_INTERNAL_ASSERT(config.check_all_same_device_);
         has_undefined_outputs = true;
         continue;
       }

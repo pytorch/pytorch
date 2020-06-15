@@ -494,10 +494,10 @@ public:
     return *this;
   }
 
-  // Bypass output dtype computation and fix the dtype as specified here.
-  TensorIteratorConfig& declare_static_dtype(ScalarType dtype) {
+  // Bypass output dtype/device computation and fix the dtype/device as specified here.
+  TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device) {
     TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
-    static_dtype_ = dtype;
+    static_dtype_and_device_ = c10::make_optional(std::make_pair(dtype, device));
     return *this;
   }
 
@@ -529,7 +529,7 @@ private:
   int num_inputs_ = 0;
 
   c10::optional<DimVector> static_shape_ = c10::nullopt;
-  c10::optional<ScalarType> static_dtype_ = c10::nullopt;
+  c10::optional<std::pair<ScalarType, Device>> static_dtype_and_device_ = c10::nullopt;
   bool check_mem_overlap_ = false;
   bool allow_cpu_scalars_ = false;
   bool is_reduction_ = false;
