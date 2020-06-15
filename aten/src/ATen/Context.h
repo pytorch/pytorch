@@ -106,6 +106,9 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+  bool deterministic() const;
+  void setDeterministic(bool);
+  void alertNotDeterministic(c10::string_view const& caller);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   const std::vector<at::QEngine>& supportedQEngines() const;
@@ -131,6 +134,7 @@ class CAFFE2_API Context {
   std::once_flag thh_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
+  bool _deterministic = false;
   bool benchmark_cudnn = false;
   bool enabled_mkldnn = true;
   #ifdef C10_MOBILE
