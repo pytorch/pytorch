@@ -219,8 +219,20 @@ CAFFE2_API void setCurrentCUDAStream(CUDAStream stream);
  * current scheme, CUDAStream does not contain the actual stream. Hence
  * preventing users from just wrapping their own cudaStream_t into a CUDAStream
  * type. This API is compatiable with 'CUDAStreamGuard'.
- * 
- * Caller is responsible for the lifetime of the stream. This may change in the future.
+ *
+ * WARNING(1) this API is meant for very specific usages. E.g. when the full
+ * control of the execution order on a stream is required.
+ *
+ * WARNING(2) this API DOES NOT check if the stream and the device_index match.
+ * The only validation on the device_index is an existence check via
+ * 'cudaGetDeviceProperties'.
+ *
+ * WARNING(3) this API supports at most 32 streams. When this number is exceeded,
+ * caller will get an exception for every subsequent call made to this API.
+ *
+ * WARNING(4) Caller is responsible for the lifetime of the stream. Hence, this API
+ * should not be expose in the python frontend, where a user would generally expect
+ * no lifetime managment is required.
  */
 CAFFE2_API CUDAStream registerCustomCUDAStream(DeviceIndex device_index, cudaStream_t stream);
 
