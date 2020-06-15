@@ -1,4 +1,4 @@
-#include <ATen/native/ScatterGatherShapeChecks.h>
+#include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
@@ -53,6 +53,7 @@ struct cpu_scatter_gather_base_kernel {
 
     dim = maybe_wrap_dim(dim, self.dim());
 
+    scatter_gather_dtype_check(method_name, self, index, src);
     if (is_scatter_like) {
       scatter_shape_check(self, dim, index, src);
     }
@@ -61,11 +62,11 @@ struct cpu_scatter_gather_base_kernel {
     }
 
     auto iter = TensorIterator();
-    iter.dont_compute_common_dtype();
+    iter.check_all_same_dtype(false);
     iter.dont_resize_outputs();
     iter.declare_static_shape(index.sizes(), /*squash_dim=*/dim);
     iter.add_output(self);
-    iter.add_input(src, src.device(), src.scalar_type());
+    iter.add_input(src);
     iter.add_input(index);
     iter.build();
 

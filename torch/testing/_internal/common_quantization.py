@@ -130,6 +130,8 @@ def skipIfNoFBGEMM(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def get_script_module(model, tracing, data):
+    return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -137,9 +139,15 @@ class QuantizationTestCase(TestCase):
         super().setUp()
         self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
         self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
+        # TODO: reame to img_data2d
+        self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float),
+                          torch.randint(0, 1, (1,), dtype=torch.long))
                          for _ in range(2)]
-        self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
+        self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float),
+                             torch.randint(0, 1, (1,), dtype=torch.long))
+                            for _ in range(2)]
+        self.img_data_3d = [(torch.rand(1, 3, 5, 5, 5, dtype=torch.float),
+                             torch.randint(0, 1, (1,), dtype=torch.long))
                             for _ in range(2)]
 
     def checkNoPrepModules(self, module):
@@ -194,6 +202,15 @@ class QuantizationTestCase(TestCase):
         """
         self.assertEqual(type(mod), nnqd.Linear)
         self.assertEqual(mod._packed_params.dtype, dtype)
+
+    def checkDynamicQuantizedLSTM(self, mod, reference_module_type, dtype):
+        r"""Checks that mod has been swapped for an nnqd.LSTM type
+            module, the bias is float.
+        """
+        wt_dtype_map = {torch.qint8: 'quantized_dynamic', torch.float16: 'quantized_fp16'}
+        self.assertEqual(type(mod), reference_module_type)
+        for packed_params in mod._all_weight_values:
+            self.assertEqual(packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype])
 
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
@@ -407,11 +424,44 @@ class NormalizationTestModel(torch.nn.Module):
         self.quant = torch.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.layer_norm = torch.nn.LayerNorm((8))
+        self.group_norm = torch.nn.GroupNorm(2, 8)
+        # TODO: add handling for affine=False (future PR)
+        self.instance_norm1d = torch.nn.InstanceNorm1d(8, affine=True)
+        self.instance_norm2d = torch.nn.InstanceNorm2d(8, affine=True)
+        self.instance_norm3d = torch.nn.InstanceNorm3d(8, affine=True)
 
     def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.layer_norm(x)
+        x = self.group_norm(x.unsqueeze(-1))
+        x = self.instance_norm1d(x)
+        x = self.instance_norm2d(x.unsqueeze(-1))
+        x = self.instance_norm3d(x.unsqueeze(-1))
+        return x
+
+class NormalizationQATTestModel(torch.nn.Module):
+    def __init__(self, qengine):
+        super().__init__()
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.quant = torch.quantization.QuantStub()
+        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
+        self.layer_norm = torch.nn.LayerNorm((8))
+        self.group_norm = torch.nn.GroupNorm(2, 8)
+        self.instance_norm1d = torch.nn.InstanceNorm1d(4, affine=True)
+        self.instance_norm2d = torch.nn.InstanceNorm2d(4, affine=True)
+        self.instance_norm3d = torch.nn.InstanceNorm3d(4, affine=True)
+        self.fc2 = torch.nn.Linear(8, 2)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.layer_norm(x)
+        x = self.group_norm(x.unsqueeze(-1))
+        x = self.instance_norm1d(x.reshape((2, 4, 2)))
+        x = self.instance_norm2d(x.unsqueeze(-1))
+        x = self.instance_norm3d(x.unsqueeze(-1))
+        x = self.fc2(x.reshape((2, 8)))
         return x
 
 class NestedModel(torch.nn.Module):

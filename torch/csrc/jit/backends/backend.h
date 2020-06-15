@@ -71,8 +71,7 @@ class backend {
           "__processed_module",
           AnyType::get(),
           cloned_module._ivalue(),
-          /*is_param=*/false,
-          /*allow_any=*/true);
+          /*is_param=*/false);
 
       // This is for the method_compile_spec passed in to to_<backend> or
       // loaded from an exported model.
@@ -80,8 +79,7 @@ class backend {
           "__method_compile_spec",
           any_dict_ty,
           toIValue(method_compile_spec, any_dict_ty).toGenericDict(),
-          /*is_param=*/false,
-          /*allow_any=*/true);
+          /*is_param=*/false);
 
       // This is a pointer to a backend instance that is used to access
       // compile and execute functions.
@@ -98,8 +96,7 @@ class backend {
           any_dict_ty,
           c10::impl::GenericDict(
               any_dict_ty->getKeyType(), any_dict_ty->getValueType()),
-          /*is_param=*/false,
-          /*allow_any=*/true);
+          /*is_param=*/false);
 
       // Methods.
 

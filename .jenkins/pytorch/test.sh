@@ -53,25 +53,14 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   # TODO: Please move this to Docker
   # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
   pip_install --user "hypothesis==4.53.2"
-
-  # TODO: move this to Docker
-  PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
-  echo $PYTHON_VERSION
-  # if [[ $PYTHON_VERSION == "2" ]]; then
-  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl
-  # else
-  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
-  # fi
-  pip_install --user tb-nightly
-  # mypy will fail to install on Python <3.4.  In that case,
-  # we just won't run these tests.
   # Pin MyPy version because new errors are likely to appear with each release
-  pip_install --user "mypy==0.770" || true
-fi
+  pip_install --user "mypy==0.770"
+  # Update scikit-learn to a python-3.8 compatible version
+  if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
+    pip_install -U scikit-learn
+  fi
 
-# faulthandler become built-in since 3.3
-if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
-  pip_install --user faulthandler
+  pip_install --user tb-nightly
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -184,7 +173,9 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@43e94b39bcdda519c093ca11d99dfa2568aa7258
+  # Check out torch/vision at Jun 11 2020 commit
+  # This hash must match one in .jenkins/caffe2/test.sh
+  pip_install --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
 }
 
 test_libtorch() {

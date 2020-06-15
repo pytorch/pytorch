@@ -202,6 +202,20 @@ acos_() -> Tensor
 In-place version of :meth:`~Tensor.acos`
 """)
 
+add_docstr_all('acosh',
+               r"""
+acosh() -> Tensor
+
+See :func:`torch.acosh`
+""")
+
+add_docstr_all('acosh_',
+               r"""
+acosh_() -> Tensor
+
+In-place version of :meth:`~Tensor.acosh`
+""")
+
 add_docstr_all('add',
                r"""
 add(other, *, alpha=1) -> Tensor
@@ -481,6 +495,19 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('asinh', r"""
+asinh() -> Tensor
+
+See :func:`torch.asinh`
+""")
+
+add_docstr_all('asinh_',
+               r"""
+asinh_() -> Tensor
+
+In-place version of :meth:`~Tensor.asinh`
+""")
+
 add_docstr_all('as_strided', r"""
 as_strided(size, stride, storage_offset=0) -> Tensor
 
@@ -513,6 +540,18 @@ add_docstr_all('atan_',
 atan_() -> Tensor
 
 In-place version of :meth:`~Tensor.atan`
+""")
+
+add_docstr_all('atanh',
+               r"""
+atanh() -> Tensor
+
+See :func:`torch.atanh`
+""")
+
+add_docstr_all('atanh_',
+               r"""
+In-place version of :meth:`~Tensor.atanh`
 """)
 
 add_docstr_all('baddbmm',
@@ -1202,6 +1241,20 @@ add_docstr_all('flip',
 flip(dims) -> Tensor
 
 See :func:`torch.flip`
+""")
+
+add_docstr_all('fliplr',
+               r"""
+fliplr() -> Tensor
+
+See :func:`torch.fliplr`
+""")
+
+add_docstr_all('flipud',
+               r"""
+flipud() -> Tensor
+
+See :func:`torch.flipud`
 """)
 
 add_docstr_all('roll',
@@ -2236,6 +2289,34 @@ value is representable. For example, `torch.tensor(1, dtype=torch.double).random
 will be uniform in ``[0, 2^53]``.
 """)
 
+add_docstr_all('rad2deg',
+               r"""
+rad2deg() -> Tensor
+
+See :func:`torch.rad2deg`
+""")
+
+add_docstr_all('rad2deg_',
+               r"""
+rad2deg_() -> Tensor
+
+In-place version of :meth:`~Tensor.rad2deg`
+""")
+
+add_docstr_all('deg2rad',
+               r"""
+deg2rad() -> Tensor
+
+See :func:`torch.deg2rad`
+""")
+
+add_docstr_all('deg2rad_',
+               r"""
+deg2rad_() -> Tensor
+
+In-place version of :meth:`~Tensor.deg2rad`
+""")
+
 add_docstr_all('reciprocal',
                r"""
 reciprocal() -> Tensor
@@ -3100,7 +3181,7 @@ In-place version of :meth:`~Tensor.tanh`
 """)
 
 add_docstr_all('tolist',
-               r""""
+               r"""
 tolist() -> list or number
 
 Returns the tensor as a (nested) list. For scalars, a standard
