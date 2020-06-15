@@ -36,7 +36,7 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 void add_clamp_kernel(TensorIterator& iter, Scalar alpha_scalar, Scalar min_val, Scalar max_val) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_relu_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_clamp_cpu", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
     auto alpha_vec = Vec256<scalar_t>(alpha);
     auto min_scalar = min_val.to<scalar_t>();
@@ -48,10 +48,10 @@ void add_clamp_kernel(TensorIterator& iter, Scalar alpha_scalar, Scalar min_val,
         return std::min(max_scalar, std::max(min_scalar, a + alpha * b));
       },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) __ubsan_ignore_undefined__ {
-        auto add_relu_res = vec256::fmadd(b, alpha_vec, a);
-        add_relu_res = vec256::clamp_min(add_relu_res, min_vec);
-        add_relu_res = vec256::clamp_max(add_relu_res, max_vec);
-        return add_relu_res;
+        auto add_clamp_res = vec256::fmadd(b, alpha_vec, a);
+        add_clamp_res = vec256::clamp_min(add_clamp_res, min_vec);
+        add_clamp_res = vec256::clamp_max(add_clamp_res, max_vec);
+        return add_clamp_res;
       });
     });
 }
