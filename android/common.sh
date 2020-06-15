@@ -16,7 +16,7 @@ check_android_sdk() {
     exit 1
   fi
 
-  if [ ! -d $ANDROID_HOME ]; then
+  if [ ! -d "$ANDROID_HOME" ]; then
     echo "ANDROID_HOME not a directory; did you install it under $ANDROID_HOME?"
     exit 1
   fi
@@ -29,12 +29,12 @@ check_gradle() {
 
   if [ ! -x "$(command -v gradle)" ]; then
     if [ -z "$GRADLE_HOME" ]; then
-      echo GRADLE_NOT_FOUND_MSG
+      echo "$GRADLE_NOT_FOUND_MSG"
       exit 1
     fi
     GRADLE_PATH=$GRADLE_HOME/bin/gradle
     if [ ! -f "$GRADLE_PATH" ]; then
-      echo GRADLE_NOT_FOUND_MSG
+      echo "$GRADLE_NOT_FOUND_MSG"
       exit 1
     fi
   fi
@@ -54,25 +54,28 @@ parse_abis_list() {
 }
 
 build_android() {
-  PYTORCH_ANDROID_DIR=$PYTORCH_DIR/android
-  BUILD_ROOT=${BUILD_ROOT:-$PYTORCH_DIR}
+  PYTORCH_ANDROID_DIR="$PYTORCH_DIR/android"
+  BUILD_ROOT="${BUILD_ROOT:-$PYTORCH_DIR}"
   echo "BUILD_ROOT:$BUILD_ROOT"
 
-  LIB_DIR=$PYTORCH_ANDROID_DIR/pytorch_android/src/main/jniLibs
-  INCLUDE_DIR=$PYTORCH_ANDROID_DIR/pytorch_android/src/main/cpp/libtorch_include
+  LIB_DIR="$PYTORCH_ANDROID_DIR/pytorch_android/src/main/jniLibs"
+  INCLUDE_DIR="$PYTORCH_ANDROID_DIR/pytorch_android/src/main/cpp/libtorch_include"
 
   # These directories only contain symbolic links.
-  rm -rf $LIB_DIR && mkdir -p $LIB_DIR
-  rm -rf $INCLUDE_DIR && mkdir -p $INCLUDE_DIR
+  rm -rf "$LIB_DIR" && mkdir -p "$LIB_DIR"
+  rm -rf "$INCLUDE_DIR" && mkdir -p "$INCLUDE_DIR"
 
-  for abi in $(echo $ABIS_LIST | tr ',' '\n')
+  for abi in $(echo "$ABIS_LIST" | tr ',' '\n')
   do
     echo "abi:$abi"
-    ANDROID_BUILD_ROOT=$BUILD_ROOT/build_android_$abi
-    ANDROID_ABI=$abi BUILD_ROOT=$ANDROID_BUILD_ROOT $PYTORCH_DIR/scripts/build_android.sh -DANDROID_CCACHE=$(which ccache)
+    ANDROID_BUILD_ROOT="$BUILD_ROOT/build_android_$abi"
+    ANDROID_ABI="$abi" \
+      BUILD_ROOT="$ANDROID_BUILD_ROOT" \
+      "$PYTORCH_DIR/scripts/build_android.sh" \
+      -DANDROID_CCACHE=$(which ccache)
 
     echo "$abi build output lib,include at $ANDROID_BUILD_ROOT/install"
-    ln -s $ANDROID_BUILD_ROOT/install/lib $LIB_DIR/$abi
-    ln -s $ANDROID_BUILD_ROOT/install/include $INCLUDE_DIR/$abi
+    ln -s "$ANDROID_BUILD_ROOT/install/lib" "$LIB_DIR/$abi"
+    ln -s "$ANDROID_BUILD_ROOT/install/include" "$INCLUDE_DIR/$abi"
   done
 }
