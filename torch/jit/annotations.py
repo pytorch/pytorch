@@ -13,7 +13,6 @@ from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
-PY35 = sys.version_info >= (3, 5)
 
 class Module(object):
     def __init__(self, name, members):
