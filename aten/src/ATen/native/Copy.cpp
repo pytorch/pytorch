@@ -162,7 +162,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   if(!self.is_complex() && src.is_complex()) {
-    TORCH_WARN("Casting complex values to real discards the imaginary part");
+    TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
 
   copy_stub(device_type, iter, non_blocking);

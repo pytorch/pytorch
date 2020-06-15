@@ -1,13 +1,306 @@
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 
+namespace {
+
+struct ReplayRFactor : public ReplayTransformations {
+ private:
+  // Took a good bit of this from ReplayTransformations::handle(Split...)
+  void handle(Split* s) override {
+    // Grab input to the split operation
+    auto id_in = s->in();
+    // Grab our mapping of that ID to the one we're replaying
+    auto it = id_map_.find(id_in);
+    // Make sure it exists in the map
+    TORCH_INTERNAL_ASSERT(
+        it != id_map_.end(),
+        "Transform traversal failed, dependencies not met.");
+    // Grab the ID we're going to replay on
+    auto mapped = (*it).second;
+    TORCH_INTERNAL_ASSERT(
+        s->factor()->isConst(),
+        "Transform traversal does not support splitting on non-const values.");
+    // This ID should be a leaf ID (meaning it has no uses we generated)
+    TORCH_INTERNAL_ASSERT(
+        leaf_ids_.find(mapped) != leaf_ids_.end(),
+        "Transform traversal failed, modified a node but it was not a leaf node.");
+
+    // Check if either outputs of the split are going to be an rfactored axis
+    bool rfactor_outer = false;
+    bool rfactor_inner = false;
+    if (rfactor_axes_.find(s->outer()) != rfactor_axes_.end())
+      rfactor_outer = true;
+
+    if (rfactor_axes_.find(s->inner()) != rfactor_axes_.end())
+      rfactor_inner = true;
+
+    bool rfactor_input = mapped->isRFactorProduct();
+
+    // If nothing is going to be rfactored replay a normal split
+    if (!rfactor_inner && !rfactor_outer && !rfactor_input)
+      return ReplayTransformations::handle(s);
+
+    // outer loop size
+    Val* oe = ceilDiv(mapped->extent(), s->factor());
+
+    // Manually replay the split, making reduction = false and rfactor = true
+    // outer IterDomain
+    IterDomain* ido = new IterDomain(
+        new Int(0),
+        static_cast<Int*>(oe),
+        mapped->parallel_method(),
+        rfactor_outer,
+        true,
+        mapped->isBroadcast());
+
+    // inner IterDomain
+    IterDomain* idi = new IterDomain(
+        new Int(0),
+        s->factor(),
+        mapped->parallel_method(),
+        rfactor_inner,
+        true,
+        mapped->isBroadcast());
+
+    // Generate the split node
+    new Split(ido, idi, mapped, s->factor());
+
+    // Remove mapped id from leaf IDs
+    leaf_ids_.erase(mapped);
+    // Add outputs to leaf IDs
+    leaf_ids_[ido] = counter++;
+    leaf_ids_[idi] = counter++;
+
+    // Update our ID map to include these outputs
+    id_map_[s->outer()] = ido;
+    id_map_[s->inner()] = idi;
+  }
+
+  void handle(Merge* m) override {
+    auto id_outer = m->outer();
+    auto id_inner = m->inner();
+    auto it_outer = id_map_.find(id_outer);
+    auto it_inner = id_map_.find(id_inner);
+    TORCH_INTERNAL_ASSERT(
+        it_outer != id_map_.end() && it_inner != id_map_.end(),
+        "Transform traversal failed, dependencies not met.");
+
+    auto id_outer_mapped = (*it_outer).second;
+    auto id_inner_mapped = (*it_inner).second;
+
+    TORCH_INTERNAL_ASSERT(
+        leaf_ids_.find(id_outer_mapped) != leaf_ids_.end() &&
+            leaf_ids_.find(id_inner_mapped) != leaf_ids_.end(),
+        "Transform traversal failed, modified ",
+        id_outer_mapped,
+        " and ",
+        id_inner_mapped,
+        " however one or both are not leaf nodes.");
+
+    bool rfactor_output = false;
+    if (rfactor_axes_.find(m->out()) != rfactor_axes_.end())
+      rfactor_output = true;
+
+    bool rfactor_input = id_inner_mapped->isRFactorProduct() ||
+        id_outer_mapped->isRFactorProduct();
+
+    if (!rfactor_output && !rfactor_input)
+      return ReplayTransformations::handle(m);
+
+    Val* merged_id_size =
+        mul(id_outer_mapped->extent(), id_inner_mapped->extent());
+    IterDomain* merged_id = new IterDomain(
+        new Int(0),
+        static_cast<Int*>(merged_id_size),
+        id_outer_mapped->parallel_method(),
+        rfactor_output,
+        true,
+        id_outer_mapped->isBroadcast() && id_inner_mapped->isBroadcast());
+
+    new Merge(merged_id, id_outer_mapped, id_inner_mapped);
+
+    // Remove inputs from the leaf IDs
+    leaf_ids_.erase(id_outer_mapped);
+    leaf_ids_.erase(id_inner_mapped);
+
+    // Add the output to the leaf IDs
+    leaf_ids_[merged_id] = counter++;
+
+    id_map_[m->out()] = merged_id;
+  }
+
+  std::unordered_set<IterDomain*> rfactor_axes_;
+
+ public:
+  ReplayRFactor(
+      const std::vector<IterDomain*>& _target_domain,
+      std::unordered_map<IterDomain*, IterDomain*> _id_map,
+      std::unordered_set<IterDomain*> _rfactor_axes)
+      : ReplayTransformations(_target_domain, std::move(_id_map), false),
+        rfactor_axes_(std::move(_rfactor_axes)) {}
+};
+
+} // namespace
+
+// Take any axes not provided, that are reductions, and convert them to
+// iteration axes. Any axes that share inputs to the axes provided should be
+// marked as rfactorProduct.
 TensorDomain* TransformRFactor::runReplay(
+    TensorDomain* orig_td,
+    std::vector<int> axes) {
+  TORCH_CHECK(!axes.empty(), "No axes provided to rfactor replay.");
+
+  int ndims = (int)orig_td->nDims();
+
+  // Adjust and check provided axes
+  std::transform(axes.begin(), axes.end(), axes.begin(), [ndims](int i) {
+    TORCH_CHECK(
+        i >= -ndims && i < ndims,
+        "Rfactor replay recieved an axis outside the number of dims in the tensor, acceptable inclusive range is ",
+        -ndims,
+        " to ",
+        ndims - 1);
+    return i < 0 ? i + ndims : i;
+  });
+
+  // remove duplicates, and put into a set for searching
+  std::unordered_set<int> axes_set(axes.begin(), axes.end());
+
+  TORCH_INTERNAL_ASSERT(
+      std::all_of(
+          axes_set.begin(),
+          axes_set.end(),
+          [orig_td](int i) { return orig_td->axis(i)->isReduction(); }),
+      "Cannot rfactor axes that are not reduction axes.");
+
+  // RFactor requires at least one reduction axis to be marked as factored out,
+  // and at least one reduction axis that won't. Otherwise it's just a pointwise
+  // cacheing operation.
+  bool found_non_rfactor_reduction = false;
+
+  // Make a set of final axes that are marked to be rfactored
+  std::unordered_set<IterDomain*> rfactor_axes(axes_set.size());
+  {
+    size_t i = 0;
+    for (auto id : orig_td->domain()) {
+      if (axes_set.find(i++) != axes_set.end())
+        rfactor_axes.emplace(id);
+      if (id->isReduction())
+        found_non_rfactor_reduction = true;
+    }
+  }
+
+  TORCH_CHECK(
+      found_non_rfactor_reduction,
+      "Must have at least one reduction axis not marked as rfactor.");
+
+  // Get root IterDomains of the rfactor domains, these will be the ones we will
+  // replay marked as rfactor axes, those marked in the axes set will be
+  // reduction=false
+
+  auto rfactor_root_vals = IterVisitor::getInputsTo(
+      std::vector<Val*>(rfactor_axes.begin(), rfactor_axes.end()));
+
+  // Make sure they're all IterDomains.
+  TORCH_INTERNAL_ASSERT(
+      std::all_of(
+          rfactor_root_vals.begin(),
+          rfactor_root_vals.end(),
+          [](Val* v) {
+            return v->getValType().value() == ValType::IterDomain;
+          }),
+      "Found invalid input domain axes.");
+
+  // Put in a set to make searching easy
+  std::unordered_set<IterDomain*> rfactor_root_axes;
+  std::transform(
+      rfactor_root_vals.begin(),
+      rfactor_root_vals.end(),
+      std::inserter(rfactor_root_axes, rfactor_root_axes.end()),
+      [](Val* val) {
+        TORCH_INTERNAL_ASSERT(
+            val->getValType().value() == ValType::IterDomain,
+            "Invalid value type found in rfactor axes inputs.");
+        return static_cast<IterDomain*>(val);
+      });
+
+  auto orig_td_root = orig_td->rootDomain();
+
+  // Generate a new TensorDomain and set up map from one root to this one.
+  std::vector<IterDomain*> new_root(orig_td_root.size(), nullptr);
+  std::unordered_map<IterDomain*, IterDomain*> replay_map;
+
+  {
+    size_t i = 0;
+    for (auto id : orig_td_root) {
+      // If this is an rfactor root, it will be a reduction in this stage
+      if (rfactor_root_axes.find(id) != rfactor_root_axes.end()) {
+        new_root[i] = new IterDomain(
+            id->start(),
+            id->extent(),
+            id->parallel_method(),
+            true,
+            true,
+            false);
+        // If this is not an rfactor root, but a reduction root, it should be
+        // turned into an iteration domain
+      } else if (id->isReduction()) {
+        new_root[i] = new IterDomain(
+            id->start(),
+            id->extent(),
+            id->parallel_method(),
+            false,
+            true,
+            false);
+      } else {
+        new_root[i] = id->clone();
+      }
+      replay_map[id] = new_root[i++];
+    }
+  }
+
+  // Replay producer dimensions.
+  ReplayRFactor replay_rfactor(orig_td->domain(), replay_map, rfactor_axes);
+
+  std::unordered_map<IterDomain*, IterDomain*> replayed =
+      replay_rfactor.getReplay();
+
+  std::vector<IterDomain*> new_domain(orig_td->nDims(), nullptr);
+  {
+    size_t i = 0;
+    for (auto id : orig_td->domain()) {
+      TORCH_INTERNAL_ASSERT(
+          replayed.find(id) != replayed.end(),
+          "Error during rfactor replay, missing an axis.");
+      new_domain[i++] = replayed[id];
+    }
+  }
+
+  // We need a root to match up with the consumer of this domain, it should have
+  // rfactor axes after transformations, but not other axes.
+  std::vector<IterDomain*> rfactor_root;
+  for (auto dom : new_root)
+    if (!dom->isRFactorProduct())
+      rfactor_root.push_back(dom);
+
+  for (auto dom : new_domain)
+    if (dom->isRFactorProduct())
+      rfactor_root.push_back(dom);
+
+  return new TensorDomain(new_root, rfactor_root, new_domain);
+}
+
+// We want to take any axes marked in axes and remove them from the TensorDomain
+// completely, any other reduction axes found should remain.
+TensorDomain* TransformRFactor::runReplay2(
     TensorDomain* orig_td,
     std::vector<int> axes) {
   int ndims = (int)orig_td->nDims();
@@ -26,213 +319,75 @@ TensorDomain* TransformRFactor::runReplay(
   // remove duplicates, and put into a set for searching
   std::set<int> axes_set(axes.begin(), axes.end());
 
-  // Make a copy of orig_td as we're going to change its history:
-  bool found_rfactor = false;
-  std::vector<IterDomain*> domain_copy;
-  for (int i{0}; i < ndims; i++) {
-    IterDomain* orig_axis = orig_td->axis(i);
-    if (axes_set.find(i) != axes_set.end())
-      TORCH_CHECK(
-          orig_axis->isReduction(),
-          "Tried to rFactor an axis that is not a reduction.");
-
-    if (orig_axis->isReduction()) {
-      if (axes_set.find(i) == axes_set.end()) {
-        domain_copy.push_back(new IterDomain(
-            orig_axis->start(),
-            orig_axis->extent(),
-            orig_axis->parallel_method(),
-            false,
-            true));
-        found_rfactor = true;
-      } else {
-        domain_copy.push_back(new IterDomain(
-            orig_axis->start(),
-            orig_axis->extent(),
-            orig_axis->parallel_method(),
-            true,
-            true));
-      }
-    } else {
-      domain_copy.push_back(orig_td->axis(i));
-    }
-  }
-  TORCH_CHECK(found_rfactor, "Could not find axis to rfactor out.");
-
-  // TD that we will actually modify,
-  TensorDomain* out_td = new TensorDomain(domain_copy);
-
-  // Axis map to create history for non-rfactor axes
-  std::vector<int> axis_map(ndims, -1);
-  std::vector<int> orig_rfactor_axis_map(ndims, -1);
-  std::set<IterDomain*> rfactor_ids;
-  for (decltype(out_td->nDims()) i{0}; i < out_td->nDims(); i++)
-    if (!out_td->axis(i)->isRFactorProduct()) {
-      axis_map[i] = i;
-    } else {
-      orig_rfactor_axis_map[i] = i;
-    }
-
-  // Replay non-rfactor axes
-  auto running_td = TransformIter::replayBackward(
-      out_td, TransformIter::getHistory(orig_td), axis_map);
-
-  // running_td has iteration domains on the right, but to find a valid rfactor
-  // root, we want those to be on the right. If we continued to replay backward
-  // we likely won't have a valid rfactor root. Lets manually insert a reorder
-  // so we have a valid rfactor root.
-
-  std::vector<int> new2old(running_td->nDims());
+  // Grab the axes in the rfactor, these were converted to iter domains in the
+  // producer of this domain, and will be reduced in this domain
+  std::unordered_set<IterDomain*> rfactor_axes(axes_set.size());
   {
-    int running_pos = 0;
-    for (decltype(running_td->nDims()) i{0}; i < running_td->nDims(); i++)
-      if (!running_td->axis(i)->isRFactorProduct())
-        new2old[i] = running_pos++;
-
-    for (decltype(running_td->nDims()) i{0}; i < running_td->nDims(); i++)
-      if (running_td->axis(i)->isRFactorProduct())
-        new2old[i] = running_pos++;
-  }
-  std::vector<int> reorder_axis_map(running_td->nDims());
-  std::iota(reorder_axis_map.begin(), reorder_axis_map.end(), 0);
-
-  running_td = TransformIter::replayBackward(
-      running_td,
-      // include dummy reorder
-      {new Reorder(
-          new TensorDomain(running_td->domain()), running_td, new2old)},
-      reorder_axis_map);
-
-  // how do we find axes
-  // Need axis map from rfactor axes in running_td to corresponding axes in
-  // orig_td orig_rfactor_axis_map goes from orig_td to out_td we want it to
-  // go from orig_td to running_td
-
-  // Go from IterDomain to its position in running_td
-  std::unordered_map<IterDomain*, int> new_pos;
-  for (decltype(running_td->nDims()) i{0}; i < running_td->nDims(); i++) {
-    new_pos[running_td->axis(i)] = i;
-  }
-
-  for (decltype(out_td->nDims()) i{0}; i < out_td->nDims(); i++)
-    if (orig_rfactor_axis_map[i] != -1) {
-      // int orig_td_pos = i;
-      int out_td_pos = orig_rfactor_axis_map[i];
-      TORCH_INTERNAL_ASSERT(
-          new_pos.find(out_td->axis(out_td_pos)) != new_pos.end(),
-          "Error aligning axes in rfactor first TD replay.");
-      int running_td_pos = new_pos[out_td->axis(out_td_pos)];
-      orig_rfactor_axis_map[i] = running_td_pos;
-    }
-
-  TransformIter::replayBackward(
-      running_td, TransformIter::getHistory(orig_td), orig_rfactor_axis_map);
-
-  return out_td;
-}
-
-TensorDomain* TransformRFactor::runReplay2(
-    TensorDomain* in_td,
-    std::vector<int> axes) {
-  int ndims = (int)in_td->nDims();
-
-  // Adjust and check provided axes
-  std::transform(axes.begin(), axes.end(), axes.begin(), [ndims](int i) {
-    TORCH_CHECK(
-        i >= -ndims && i < ndims,
-        "Rfactor replay recieved an axis outside the number of dims in the tensor, acceptable inclusive range is ",
-        -ndims,
-        " to ",
-        ndims - 1);
-    return i < 0 ? i + ndims : i;
-  });
-
-  // remove duplicates, and put into a set for searching
-  std::set<int> axes_set(axes.begin(), axes.end());
-
-  bool found_rfactor = false;
-  // Axes marked as rfactor, these will be removed from this domain
-  std::vector<bool> rfactor_axes(in_td->nDims(), false);
-  for (int i{0}; i < ndims; i++) {
-    bool in_set = axes_set.find(i) != axes_set.end();
-    IterDomain* orig_axis = in_td->axis(i);
-
-    if (in_set) {
-      TORCH_CHECK(
-          orig_axis->isReduction(),
-          "Tried to rFactor an axis that is not a reduction.");
-      rfactor_axes[i] = true;
-      found_rfactor = true;
+    size_t i = 0;
+    for (auto id : orig_td->domain()) {
+      if (axes_set.find(i++) != axes_set.end())
+        rfactor_axes.emplace(id);
     }
   }
 
-  TORCH_CHECK(found_rfactor, "Could not find axis to rfactor out.");
-  auto root_rfactor_axes = TransformIter::getRootInfluence(in_td, rfactor_axes);
+  auto rfactor_root_vals = IterVisitor::getInputsTo(
+      std::vector<Val*>(rfactor_axes.begin(), rfactor_axes.end()));
 
-  // Root axes involved in rfactor, these axes should not be replayed, they need
-  // to be either removed completely, or part of the root domain
-  auto root_dom = TransformIter::getRoot(in_td);
+  // Make sure they're all IterDomains.
   TORCH_INTERNAL_ASSERT(
-      root_rfactor_axes.size() == root_dom->nDims(),
-      "Error backpropagating influence of rfactor.");
+      std::all_of(
+          rfactor_root_vals.begin(),
+          rfactor_root_vals.end(),
+          [](Val* v) {
+            return v->getValType().value() == ValType::IterDomain;
+          }),
+      "Found invalid input domain axes.");
 
-  // Forward propagate influence back to the end we want to mark everything
-  // that's part of the rfactor
-  rfactor_axes = TransformIter::replayInfluence(
-      TransformIter::getHistory(in_td), root_rfactor_axes);
+  // Put in a set to make searching easy
+  std::unordered_set<IterDomain*> rfactor_root_axes;
+  std::transform(
+      rfactor_root_vals.begin(),
+      rfactor_root_vals.end(),
+      std::inserter(rfactor_root_axes, rfactor_root_axes.end()),
+      [](Val* val) {
+        TORCH_INTERNAL_ASSERT(
+            val->getValType().value() == ValType::IterDomain,
+            "Invalid value type found in rfactor axes inputs.");
+        return static_cast<IterDomain*>(val);
+      });
 
-  // Axes part of rfactor we need to keep
-  std::vector<IterDomain*> rfactor_axes_keep;
-
-  for (int i{0}; i < ndims; i++) {
-    if (rfactor_axes[i] && axes_set.find(i) == axes_set.end()) {
-      TORCH_INTERNAL_ASSERT(
-          in_td->axis(i)->isReduction(),
-          "Error occured when tracking rfactor axes.");
-      rfactor_axes_keep.push_back(in_td->axis(i));
+  // Replay all other root domains that are iter domains, as these will match in
+  // the domain we're creating
+  std::vector<IterDomain*> new_root;
+  std::unordered_map<IterDomain*, IterDomain*> replay_root_map;
+  for (auto id : orig_td->rootDomain()) {
+    if (rfactor_root_axes.find(id) == rfactor_root_axes.end()) {
+      new_root.push_back(id->clone());
+      replay_root_map[id] = new_root.back();
     }
   }
 
-  int root_ndims = (int)root_dom->nDims();
-  std::vector<IterDomain*> domain_copy;
-  // These are the axes that are not involved in the rfactor.
-  for (int i{0}; i < root_ndims; i++) {
-    if (!root_rfactor_axes[i]) {
-      domain_copy.push_back(root_dom->axis(i));
-    }
-  }
+  ReplayTransformations rt(orig_td->domain(), replay_root_map, false);
+  auto replayed = rt.getReplay();
 
-  TORCH_INTERNAL_ASSERT(
-      domain_copy.size() < root_dom->nDims(),
-      "Error during rfactor, didn't get any rfactor axes.");
+  std::vector<IterDomain*> new_domain;
 
-  // Setup axis map before we add back in the rfactor_axes
-  std::vector<int> replay_axis_map(root_dom->nDims(), -1);
   {
-    decltype(domain_copy.size()) it = 0;
-    decltype(root_dom->nDims()) ir = 0;
-    while (it < domain_copy.size() && ir < root_dom->nDims()) {
-      if (root_rfactor_axes[ir]) {
-        ir++;
-      } else {
-        replay_axis_map[ir++] = it++;
+    // Construct the new domain, and append rfactor axes to the new root domain
+    size_t i = 0;
+    for (auto id : orig_td->domain()) {
+      if (replayed.find(id) != replayed.end()) {
+        new_domain.push_back(replayed[id]);
+      } else if (axes_set.find(i) == axes_set.end()) {
+        IterDomain* new_id = id->clone();
+        new_domain.push_back(new_id);
+        new_root.push_back(new_id);
       }
+      i++;
     }
-    TORCH_INTERNAL_ASSERT(
-        it == domain_copy.size(),
-        "Error during rfactor, missed an unmodified root domain.");
   }
 
-  // Push back the rfactor axes we need to keep
-  domain_copy.insert(
-      domain_copy.end(), rfactor_axes_keep.begin(), rfactor_axes_keep.end());
-
-  // TD that we will actually modify
-  TensorDomain* replay_root_td = new TensorDomain(domain_copy);
-  auto td = TransformIter::replay(
-      replay_root_td, TransformIter::getHistory(in_td), replay_axis_map);
-
-  return td;
+  return new TensorDomain(new_root, new_domain);
 }
 
 } // namespace fuser

@@ -35,7 +35,6 @@ def _prepare_script(model, qconfig_dict, inplace=False, quant_type=QuantType.STA
     if not all(isinstance(x, str) for x in qconfig_dict.keys()):
         raise ValueError('qconfig_dict should only contain names(str) as keys.')
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
-    torch._C._jit_pass_dedup_module_uses(model._c)
     model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
