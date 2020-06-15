@@ -2461,14 +2461,19 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
             def forward(self, x):
                 x = x + 5
                 return self.fc1(x)
-
-        m = torch.jit.script(M())
-        qconfig_dict = {'' : default_dynamic_qconfig}
-        model = quantize_dynamic_script(m, qconfig_dict)
-        # add op is not dynamically quantized.
-        FileCheck().check("aten::add") \
-                   .check("quantized::linear_dynamic") \
-                   .run(model.graph)
+        eager_model = M().eval()
+        for tracing_mode in [True, False]:
+            if tracing_mode:
+                x = torch.randn(5, 5)
+                model = torch.jit.trace(eager_model, x)
+            else:
+                model = torch.jit.script(eager_model)
+            qconfig_dict = {'' : default_dynamic_qconfig}
+            model = quantize_dynamic_script(model, qconfig_dict)
+            # add op is not dynamically quantized.
+            FileCheck().check("aten::add") \
+                       .check("quantized::linear_dynamic") \
+                       .run(model.graph)
 
     def test_dynamic_quant_multi_uses(self):
         class M(torch.nn.Module):
@@ -2481,13 +2486,19 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
                 size2 = x.size()
                 return self.fc(x), size1, size2
 
-        model = torch.jit.script(M()).eval()
-        qconfig_dict = {'': default_dynamic_qconfig}
+        eager_model = M().eval()
+        for tracing_mode in [True, False]:
+            if tracing_mode:
+                x = torch.randn(5, 5)
+                model = torch.jit.trace(eager_model, x)
+            else:
+                model = torch.jit.script(eager_model)
+            qconfig_dict = {'': default_dynamic_qconfig}
 
-        model = quantize_dynamic_script(model, qconfig_dict)
-        FileCheck().check("quantized::linear_dynamic") \
-                   .check_not("aten::_choose_qparams_per_tensor") \
-                   .run(model.graph)
+            model = quantize_dynamic_script(model, qconfig_dict)
+            FileCheck().check("quantized::linear_dynamic") \
+                       .check_not("aten::_choose_qparams_per_tensor") \
+                       .run(model.graph)
 
     @override_qengines
     def test_dynamic_shared_weights(self):
@@ -2596,20 +2607,30 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
                 return self.fc2(x)
 
         qconfig_dict = {'': default_dynamic_qconfig}
-        model = torch.jit.script(M()).eval()
-        qconfig = script_qconfig(default_dynamic_qconfig)
-        ref_qparams = []
-        wt_module = wrap_cpp_module(qconfig.weight)
-        for wt in [model.fc.weight, model.fc2.weight]:
-            wt_module(wt)
-            qparams = wt_module.calculate_qparams()
-            ref_qparams.append((qparams[0].item(), qparams[1].item()))
-        model = prepare_dynamic_script(model, qconfig_dict)
-        model = convert_dynamic_script(model, debug=True)
-        graph_params = []
-        for x, obs in model._modules._c.items():
-            graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
-        self.assertEqual(ref_qparams, graph_params)
+        eager_model = M().eval()
+        for tracing_mode in [True, False]:
+            if tracing_mode:
+                x = torch.randn(5, 5)
+                model = torch.jit.trace(eager_model, x)
+            else:
+                model = torch.jit.script(eager_model)
+
+            qconfig = script_qconfig(default_dynamic_qconfig)
+            ref_qparams = []
+            wt_module = wrap_cpp_module(qconfig.weight)
+            for wt in [model.fc.weight, model.fc2.weight]:
+                wt_module(wt)
+                qparams = wt_module.calculate_qparams()
+                ref_qparams.append((qparams[0].item(), qparams[1].item()))
+            model = prepare_dynamic_script(model, qconfig_dict)
+            model = convert_dynamic_script(model, debug=True)
+            graph_params = []
+            for x, obs in model._modules._c.items():
+                if tracing_mode:
+                    graph_params.append((obs.getattr('4_scale_0'), obs.getattr('4_zero_point_0')))
+                else:
+                    graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
+            self.assertEqual(ref_qparams, graph_params)
 
 class TestQuantizeScriptPTDQOps(QuantizationTestCase):
     """ Test graph mode post training dynamic quantization works
