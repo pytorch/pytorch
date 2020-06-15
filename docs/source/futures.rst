@@ -3,7 +3,7 @@
 .. _futures-docs:
 
 torch.futures
-============
+=============
 
 .. warning::
   TorchScript support in RPC is experimental and subject to change.
