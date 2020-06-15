@@ -74,10 +74,10 @@ class RNNBase(torch.nn.Module):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
 
                 if dtype == torch.qint8:
-                    w_ih = torch._empty_affine_quantized(
-                        [gate_size, layer_input_size], scale=1, zero_point=0, dtype=torch.qint8)
-                    w_hh = torch._empty_affine_quantized(
-                        [gate_size, hidden_size], scale=1, zero_point=0, dtype=torch.qint8)
+                    w_ih = torch.randn(gate_size, layer_input_size, dtype=torch.float)
+                    w_ih = torch.quantize_per_tensor(w_ih, scale=1, zero_point=0, dtype=torch.qint8)
+                    w_hh = torch.randn(gate_size, hidden_size, dtype=torch.float)
+                    w_hh = torch.quantize_per_tensor(w_hh, scale=1, zero_point=0, dtype=torch.qint8)
                     b_ih = torch.empty([gate_size], dtype=torch.float)
                     # Second bias vector included for CuDNN compatibility. Only one
                     # bias vector is needed in standard definition.

@@ -75,7 +75,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
     scale = 0.1f;
   }
 
-  TORCH_CHECK(scale > 0, "quantization scale should be > 0, double scale ", scale, " float_scale ", float(scale));
+  TORCH_CHECK(scale > 0, "quantization scale should be > 0, double scale ", scale, " float_scale ", float(scale), min, max);
 
   if (force_scale_power_of_two) {
     if (scale < 1) {
