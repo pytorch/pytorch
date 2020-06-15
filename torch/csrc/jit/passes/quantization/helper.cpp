@@ -599,7 +599,7 @@ bool is_linear_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
   return is_module(
-    match, vmap, "linear", "__torch__.torch.nn.modules.linear.Linear");
+      match, vmap, "linear", "__torch__.torch.nn.modules.linear.Linear");
 }
 
 bool is_conv1d_module(

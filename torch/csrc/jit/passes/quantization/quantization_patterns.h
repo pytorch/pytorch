@@ -419,7 +419,7 @@ graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r) )";
 
- std::string quantized_linear_relu = R"(
+  std::string quantized_linear_relu = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype):
         %r = quantized::linear_relu(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r) )";

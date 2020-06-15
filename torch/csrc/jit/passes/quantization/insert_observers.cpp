@@ -468,28 +468,32 @@ class InsertObserversHelper {
   // the pass.
 
   // nn.Linear + nn.ReLU
-  const PatternInfo nn_linear_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_linear_nn_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %linear, %relu, %input):
     %first_output = prim::CallMethod[name="forward"](%linear, %input)
     %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
     return (%second_output) )",
       {is_linear_module, is_relu_module});
   // nn.Linear + F.relu
-  const PatternInfo nn_linear_f_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_linear_f_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %linear, %relu, %input, %inplace):
     %first_output = prim::CallMethod[name="forward"](%linear, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )",
       {is_linear_module, is_functional_relu});
   // nn.Linear + aten::relu
-  const PatternInfo nn_linear_aten_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_linear_aten_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %linear, %relu, %input):
     %first_output = prim::CallMethod[name="forward"](%linear, %input)
     %second_output = aten::relu(%first_output)
     return (%second_output) )",
       {is_linear_module});
   // nn.Linear + aten::relu_
-  const PatternInfo nn_linear_aten_relu_ = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_linear_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %linear, %relu, %input):
     %first_output = prim::CallMethod[name="forward"](%linear, %input)
     %second_output = aten::relu_(%first_output)
@@ -497,28 +501,32 @@ graph(%self, %linear, %relu, %input):
       {is_linear_module});
 
   // F.linear + nn.ReLU
-  const PatternInfo f_linear_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo f_linear_nn_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %linear, %relu, %input, %weight, %bias):
     %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
     %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
     return (%second_output) )",
       {is_functional_linear, is_relu_module});
   // F.linear + F.relu
-  const PatternInfo f_linear_f_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo f_linear_f_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %linear, %relu, %input, %weight, %bias, %inplace):
     %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )",
       {is_functional_linear, is_functional_relu});
   // F.linear + aten::relu
-  const PatternInfo f_linear_aten_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo f_linear_aten_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %linear, %relu, %input, %weight, %bias):
     %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
     %second_output = aten::relu(%first_output)
     return (%second_output) )",
       {is_functional_linear});
   // F.linear + aten::relu_
-  const PatternInfo f_linear_aten_relu_ = PatternInfo::parse_from_str(R"(
+  const PatternInfo f_linear_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %linear, %relu, %input, %weight, %bias):
     %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
     %second_output = aten::relu_(%first_output)
