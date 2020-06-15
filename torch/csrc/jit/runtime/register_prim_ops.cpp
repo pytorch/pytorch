@@ -427,6 +427,49 @@ RegisterOperators reg(
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),
 
+     DEFINE_INT_OP(aten::__and__, a& b),
+     DEFINE_INT_OP(aten::__or__, a | b),
+     DEFINE_INT_OP(aten::__xor__, a ^ b),
+     DEFINE_INT_OP(aten::__lshift__, a << b),
+     DEFINE_INT_OP(aten::__rshift__, a >> b),
+
+     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
+     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
+     DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
+     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
+     DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
+     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
+     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
+     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
+     DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
+     DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
+     DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
+     DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
+     DEFINE_BINARY_FLOAT_OP(aten::atan2, std::atan2(a, b)),
+     DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
+     DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
+     DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
+     DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
+     DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
+     DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
+     DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
+     DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
+     DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+     DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
+     DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
+     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
+     DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
+     DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
+     DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
+     DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
+
+     DEFINE_UNARY_OP(aten::neg, -a, int, float),
+     DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
+     DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
+     DEFINE_UNARY_OP(aten::erfc, std::erfc(a), float, float),
+     DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
+     DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
+     DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and
      // Python (on negative), we preserve the python behavior as it's more
@@ -481,8 +524,12 @@ RegisterOperators reg(
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
          float),
-
-     DEFINE_BINARY_OP(aten::pow, pow(a, b)),
+     DEFINE_SCALAR_BINARY_OP(
+         aten::pow.Scalar,
+         static_cast<double>(pow(a, b)),
+         static_cast<double>(pow(a, b)),
+         Scalar),
+     DEFINE_INT_OP(aten::pow.int_to_int, pow(a, b)),
      // min and max are in prim:: because there is a difference between
      // the python builtin 'min' and 'torch.min'
      DEFINE_BINARY_OP(prim::min, a < b ? a : b),
@@ -581,6 +628,22 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+         [](Stack& stack) {
+           bool non_blocking;
+           bool copy;
+           pop(stack, non_blocking, copy);
+           c10::optional<at::ScalarType> scalarType =
+               pop(stack).toOptional<at::ScalarType>();
+           c10::optional<c10::Device> device = c10::nullopt;
+           at::Tensor self = pop(stack).toTensor();
+           push(
+               stack,
+               to_dispatch(self, device, scalarType, non_blocking, copy));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_cuda(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
@@ -589,15 +652,24 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     Operator(
+         "prim::data(Tensor(a) a) -> Tensor(a)",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, autograd::Variable(a).variable_data());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
 // these ops are not defined for Tensor
 #define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
   Operator(                                                                   \
-      "prim::min." decl_type "(" decl_type "[] l, " decl_type                 \
+      "prim::min." decl_type "_list(" decl_type "[] l, " decl_type            \
       "[] r) -> " decl_type "[]",                                             \
       minList<value_type>,                                                    \
       aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
-          "prim::max." decl_type "(" decl_type "[] l, " decl_type             \
+          "prim::max." decl_type "_list(" decl_type "[] l, " decl_type        \
           "[] r) -> " decl_type "[]",                                         \
           maxList<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \

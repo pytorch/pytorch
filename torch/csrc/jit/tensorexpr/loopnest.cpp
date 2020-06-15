@@ -1528,18 +1528,18 @@ void LoopNest::rfactor(
                                       reduce_op->reduce_args().end()};
 
   // Store loops below the target point.
-  std::vector<const For*> init_loops;
+  std::vector<const For*> output_loops;
 
   while (st) {
     if (For* f = dynamic_cast<For*>(st)) {
       if (f->var() == reduction_var) {
         target_for = f;
-        init_loops.push_back(f);
+        output_loops.push_back(f);
       }
       if (reduce_args.count(f->var())) {
         reduce_args.erase(f->var());
       } else {
-        init_loops.push_back(f);
+        output_loops.push_back(f);
       }
 
       if (reduce_args.empty()) {
@@ -1658,11 +1658,11 @@ void LoopNest::rfactor(
         new Store(tmp_buf, new_outer, init_it->second, new IntImm(1));
 
     // Wrap it in any loops lower than the insertion point of the new reduction.
-    for (auto* il : init_loops) {
-      init_stmt = il->cloneWithNewBody(init_stmt);
+    for (auto* ol : output_loops) {
+      init_stmt = ol->cloneWithNewBody(init_stmt);
     }
 
-    parent_block->prepend_stmt(init_stmt);
+    parent_block->insert_stmt_before(init_stmt, new_root_for);
   } else {
     // We may support this but not possible now.
     throw std::runtime_error("can't rfactor reduction with no initializer\n");
@@ -1676,16 +1676,16 @@ void LoopNest::rfactor(
     insertion_point->append_stmt(
         new Store(second_buf, second_indices, second_reduce, new IntImm(1)));
   } else {
-    For* new_for = new For(
-        target_for->var(),
-        target_for->start(),
-        target_for->stop(),
-        new Store(second_buf, second_indices, second_reduce, new IntImm(1)),
-        target_for->loop_options());
+    Stmt* body_stmt =
+        new Store(second_buf, second_indices, second_reduce, new IntImm(1));
+
+    for (auto* il : output_loops) {
+      body_stmt = il->cloneWithNewBody(body_stmt);
+    }
     if (insertion_point) {
-      insertion_point->append_stmt(new_for);
+      insertion_point->append_stmt(body_stmt);
     } else {
-      parent_block->append_stmt(new_for);
+      parent_block->insert_stmt_after(body_stmt, new_root_for);
     }
   }
 

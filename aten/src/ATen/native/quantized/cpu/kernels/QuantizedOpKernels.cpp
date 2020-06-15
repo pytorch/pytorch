@@ -631,6 +631,75 @@ void qclamp_kernel(
   });
 }
 
+void qthreshold_kernel(
+  // TODO: For future tasks, since output quantization parameters are set equal to
+  // the input ones, it might make sense to implement this completely in the
+  // quantized domain.
+   const Tensor& qx,
+   Scalar threshold_scalar,
+   Scalar value_scalar,
+   Tensor& qy) {
+
+  // defines input and output scales and zero_points
+  int64_t input_zero_point = qx.q_zero_point();
+  float input_scale = qx.q_scale();
+  int64_t output_zero_point = qy.q_zero_point();
+  float output_scale = qy.q_scale();
+  float inv_output_scale = 1.0 / output_scale;
+
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qthreshold", [&]() {
+    qy = at::_empty_affine_quantized(
+      qx.sizes(),
+      at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
+      qx.q_scale(),
+      qx.q_zero_point(),
+      c10::nullopt);
+
+    // vectorized
+    using Vec = Vec256<float>;
+    using qVec = Vec256<scalar_t>;
+    // defines the iterator
+    auto iter = TensorIterator::unary_op(qy, qx);
+    // defines the vectorized versions
+    Vec input_scale_vec = Vec(input_scale);
+    Vec input_zero_point_vec = Vec(input_zero_point);
+    Vec input_scale_neg_zp_premul_vec = input_scale_vec * input_zero_point_vec.neg();
+    // defines the floating-point versions of threshold and value
+    float threshold_float = threshold_scalar.to<float>();
+    float value_float = value_scalar.to<float>();
+    Vec threshold_vec = Vec(threshold_float);
+    Vec value_vec = Vec(value_float);
+
+    // Naive implemenentation: uses dequantize/execute/quantize routine
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value_qx) -> scalar_t {
+          // dequantize
+          const auto x = at::native::dequantize_val(input_scale, input_zero_point, value_qx);
+          // Applies the Threshold operation
+          const auto y = x > threshold_float ? x : value_float;
+          // quantize
+          return at::native::quantize_val<scalar_t>(output_scale, output_zero_point, y);
+        },
+        [&](qVec value_qx) -> qVec {
+          // dequantize
+          auto dx_vec = value_qx.dequantize(
+            input_scale_vec, input_zero_point_vec, input_scale_neg_zp_premul_vec);
+          for (int idx = 0; idx < dx_vec.size(); ++idx) {
+            // check if any elements are below threshold
+            auto cmp_to_threshold = dx_vec[idx] > threshold_vec;
+            if (cmp_to_threshold.zero_mask()) {
+              // blend
+              dx_vec[idx] = Vec::blendv(value_vec, dx_vec[idx], cmp_to_threshold);
+              }
+            }
+          // quantize
+          return qVec::quantize(dx_vec, output_scale, output_zero_point, inv_output_scale);
+        });
+  });
+}
+
+
 void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
   const auto i_scale = qx.q_scale();
   const auto i_zero_point = qx.q_zero_point();
@@ -2318,6 +2387,7 @@ REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
+REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
 REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
 REGISTER_DISPATCH(qelu_stub, &qelu_kernel);

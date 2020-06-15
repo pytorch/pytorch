@@ -5,9 +5,11 @@ from torch import Tensor
 from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload, Iterator, NamedTuple, Sequence, TypeVar, Type
 from torch._six import inf
 
-from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Number
+from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Number, Device
 
 import builtins
+
+# This module is defined in torch/csrc/Module.cpp
 
 from . import _nn as _nn
 from . import _onnx as _onnx
@@ -17,16 +19,17 @@ T = TypeVar('T')
 
 # Defined in torch/csrc/Device.cpp
 class device:
-    type: str
-    index: _int
+    type: str  # THPDevice_type
+    index: _int  # THPDevice_index
 
+    # THPDevice_pynew
     @overload
     def __init__(self, device: Union[_int, str]) -> None: ...
 
     @overload
     def __init__(self, type: str, index: _int) -> None: ...
 
-    # TODO: __reduce__
+    def __reduce__(self) -> Tuple[Any, ...]: ...  # THPDevice_reduce
 
 # Defined in torch/csrc/Size.cpp
 class Size(Tuple[_int, ...]):
@@ -35,7 +38,10 @@ class Size(Tuple[_int, ...]):
 
 # Defined in torch/csrc/Dtype.cpp
 class dtype:
-    # TODO: is_floating_point, is_complex, is_Signed, __reduce__
+    # TODO: __reduce__
+    is_floating_point: _bool
+    is_complex: _bool
+    is_signed: _bool
     ...
 
 # Defined in torch/csrc/TypeInfo.cpp
@@ -74,6 +80,9 @@ class memory_format: ...
 
 # Defined in torch/csrc/utils/tensor_memoryformats.cpp
 contiguous_format: memory_format = ...
+channels_last: memory_format = ...
+channels_last_3d: memory_format = ...
+preserve_format: memory_format = ...
 
 # Defined in torch/csrc/QScheme.cpp
 class qscheme: ...
@@ -103,25 +112,53 @@ def _jit_get_operation(op_name: str) -> Callable: ...
 def _jit_pass_optimize_for_mobile(module: 'torch.jit.ScriptModule') -> 'torch.jit.ScriptModule': ...
 
 # Defined in torch/csrc/Module.cpp
-def _init_names(arg: Sequence[Type]) -> None: ...
-def _show_config() -> str: ...
-def _parallel_info() -> str: ...
-def _add_docstr(obj: T, doc_obj: str) -> T: ...
-def _from_dlpack(data: Any) -> Tensor: ...
-def _to_dlpack(data: Tensor) -> Any: ...
-def _set_backcompat_broadcast_warn(arg: _bool) -> None: ...
-def _get_backcompat_broadcast_warn() -> _bool: ...
-def _set_backcompat_keepdim_warn(arg: _bool) -> None: ...
-def _get_backcompat_keepdim_warn() -> _bool: ...
-def _is_xnnpack_enabled() -> _bool: ...
-def _get_mkldnn_enabled() -> _bool: ...
-def _set_mkldnn_enabled(arg: _bool) -> None: ...
-def _set_default_tensor_type(type) -> None: ...  # ick, what a bad legacy API
-def _set_default_dtype(d: _dtype) -> None: ...
-def _initExtension(shm_manager_path: str) -> None: ...
+def _initExtension(shm_manager_path: str) -> None: ...  # THPModule_initExtension
+def _autograd_init() -> _bool: ...  # THPAutograd_initExtension
+def _add_docstr(obj: T, doc_obj: str) -> T: ...  # THPModule_addDocStr
+def _init_names(arg: Sequence[Type]) -> None: ...  # THPModule_initNames
+def _has_distributed() -> _bool: ...  # THPModule_hasDistributed
+def _set_default_tensor_type(type) -> None: ...  # THPModule_setDefaultTensorType
+def _set_default_dtype(d: _dtype) -> None: ...  # THPModule_setDefaultDtype
+def _infer_size(arg1: Size, arg2: Size) -> Size: ...  # THPModule_inferSize
+def _crash_if_csrc_asan() -> _int: ...  # THPModule_crashIfCsrcASAN
+def _crash_if_csrc_ubsan() -> _int: ...  # THPModule_crashIfCsrcUBSAN
+def _crash_if_aten_asan() -> _int: ...  # THPModule_crashIfATenASAN
+def _show_config() -> str: ...  # THPModule_showConfig
+def _parallel_info() -> str: ...  # THPModule_parallelInfo
+def _set_backcompat_broadcast_warn(arg: _bool) -> None: ...  # THPModule_setBackcompatBroadcastWarn
+def _get_backcompat_broadcast_warn() -> _bool: ...  # THPModule_getBackcompatBroadcastWarn
+def _set_backcompat_keepdim_warn(arg: _bool) -> None: ...  # THPModule_setBackcompatKeepdimWarn
+def _get_backcompat_keepdim_warn() -> _bool: ...  # THPModule_getBackcompatKeepdimWarn
+def get_num_thread() -> _int: ...  # THPModule_getNumThreads
+def set_num_threads(nthreads: _int) -> None: ...  # THPModule_setNumThreads
+def get_num_interop_threads() -> _int: ...  # THPModule_getNumInteropThreads
+def set_num_interop_threads(nthreads: _int) -> None: ...  # THPModule_setNumInteropThreads
+def _get_cudnn_enabled() -> _bool: ...  # THPModule_userEnabledCuDNN
+def _set_cudnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledCuDNN
+def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
+def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
+def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
+def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
+def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
+def _set_cudnn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicCuDNN
+def _get_deterministic() -> _bool: ...  # THPModule_deterministic
+def _set_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministic
+# NB: There is no Capsule type in typing, see
+# https://code.activestate.com/lists/python-dev/139675/
+def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
+def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
+def set_flush_denormal(arg: _bool) -> _bool: ...  # THPModule_setFlushDenormal
+def get_default_dtype() -> _dtype: ...  # THPModule_getDefaultDtype
+def _get_default_device() -> str: ...  # THPModule_getDefaultDevice
+def _get_qengine() -> _int: ...  # THPModule_qEngine
+def _set_qengine(qegine: _int) -> None: ...  # THPModule_setQEngine
+def _supported_qengines() -> List[_int]: ...  # THPModule_supportedQEngines
+def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
+
 has_openmp: _bool
 has_mkldnn: _bool
 has_mkl: _bool
+has_cudnn: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool
 
 # Defined in torch/csrc/jit/python/script_init.cpp
@@ -177,4 +214,5 @@ class _TensorBase(object):
     layout: _layout
     real: Tensor
     imag: Tensor
+    _version: _bool
     ${tensor_method_hints}
