@@ -673,9 +673,8 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
-
-    write(out, 'ProfiledType%s.cpp' % suffix, PROFILED_TYPE_CPP, env)
-    write(out, 'TraceType%s.cpp' % suffix, TRACE_TYPE_CPP, env)
+        write(out, 'ProfiledType%s.cpp' % suffix, PROFILED_TYPE_CPP, env)
+        write(out, 'TraceType%s.cpp' % suffix, TRACE_TYPE_CPP, env)
 
 
 def emit_profiled_body(declaration):

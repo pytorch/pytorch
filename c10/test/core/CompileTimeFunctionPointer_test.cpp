@@ -59,7 +59,7 @@ namespace test_run_through_value {
         return Func::func_ptr()(a, b);
     }
 
-    TEST(CompileTimeFunctionPointerTest, runFunctionThroughType) {
+    TEST(CompileTimeFunctionPointerTest, runFunctionThroughValue) {
         EXPECT_EQ(3, execute(TORCH_FN(add), 1, 2));
     }
 }
