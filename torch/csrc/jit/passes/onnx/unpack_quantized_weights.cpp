@@ -168,6 +168,7 @@ void unpackQuantizedWeightsHelper(
     const int64_t scalars_idx = 5;
     c10::optional<torch::List<int64_t>> stride, padding, dilation;
     c10::optional<int64_t> groups;
+    c10::optional<uint8_t> transpose;
 
     if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Conv/Linear weights which are
@@ -182,8 +183,10 @@ void unpackQuantizedWeightsHelper(
         auto params3_ivalue = ser_tup->elements()[params3_idx].toListRef();
         auto scalars_tensor = ser_tup->elements()[scalars_idx].toTensor();
 
-        torch::List<int64_t> stride_int, padding_int, dilation_int;
+        torch::List<int64_t> stride_int, padding_int, dilation_int,
+                             output_padding_int;
         int64_t groups_int;
+        uint8_t transpose = 0;
 
         if (scalars_tensor.numel() == 1) { // Version 1
           for (const auto& s : params1_ivalue) {
@@ -198,23 +201,29 @@ void unpackQuantizedWeightsHelper(
           groups_int = scalars_tensor[0].item<int64_t>();
         } else {
           int64_t version = scalars_tensor[0].item<int64_t>();
+          int64_t spatial_dims = params1_ivalue.size() / 3;
+          int64_t idx = 0;
+          for (; idx < spatial_dims; ++idx) {
+            at::Tensor s = params1_ivalue[idx].toTensor();
+            stride_int.emplace_back(s[0].item<int64_t>());
+          }
+          for (; idx < 2 * spatial_dims; ++idx) {
+            at::Tensor p = params1_ivalue[idx].toTensor();
+            padding_int.emplace_back(p[0].item<int64_t>());
+          }
+          for (; idx < 3 * spatial_dims; ++idx) {
+            at::Tensor d = params1_ivalue[idx].toTensor();
+            dilation_int.emplace_back(d[0].item<int64_t>());
+          }
+          groups_int = scalars_tensor[1].item<int64_t>();
           switch (version) {
-            case 2: {
-              int64_t spatial_dims = params1_ivalue.size() / 3;
-              int64_t idx = 0;
-              for (; idx < spatial_dims; ++idx) {
-                at::Tensor s = params1_ivalue[idx].toTensor();
-                stride_int.emplace_back(s[0].item<int64_t>());
-              }
-              for (; idx < 2 * spatial_dims; ++idx) {
+            case 2: break;
+            case 3: {
+              for (; idx < 4 * spatial_dims; ++idx) {
                 at::Tensor p = params1_ivalue[idx].toTensor();
-                padding_int.emplace_back(p[0].item<int64_t>());
+                output_padding_int.emplace_back(p[0].item<int64_t>());
               }
-              for (; idx < 3 * spatial_dims; ++idx) {
-                at::Tensor d = params1_ivalue[idx].toTensor();
-                dilation_int.emplace_back(d[0].item<int64_t>());
-              }
-              groups_int = scalars_tensor[1].item<int64_t>();
+              transpose = scalars_tensor[2].item<uint8_t>();
               break;
             }
             default: {
