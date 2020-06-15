@@ -215,14 +215,14 @@ bool input_b_is_scalar(
 // graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
 //     %a_dequant = aten::dequantize(%a_quant)
 //     %r = {op_name}(%a_dequant, {extra_args})
-//     %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-//     return (%r_quant)
+//     %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point,
+//     %r_dtype) return (%r_quant)
 //
 // after fusion:
 //
 // graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
-//     %r_quant = {quantized_op_name}(%a_quant, {extra_args}, %r_scale, %r_zero_point)
-//     return (%r_quant)
+//     %r_quant = {quantized_op_name}(%a_quant, {extra_args}, %r_scale,
+//     %r_zero_point) return (%r_quant)
 QuantFusionInfo getObservedQParamOpFusionInfo(
     const std::string& fp_op_name,
     const std::string& q_op_name,
@@ -231,16 +231,19 @@ QuantFusionInfo getObservedQParamOpFusionInfo(
   const auto& fp_extra_arg_list = getExtraArgList(fp_extra_args);
   const auto& q_extra_arg_list = getExtraArgList(q_extra_args);
 
-  std::string op_pattern =
-  "graph(%a_quant" + fp_extra_arg_list + ", %r_scale, %r_zero_point, %r_dtype):" + R"(
+  std::string op_pattern = "graph(%a_quant" + fp_extra_arg_list +
+      ", %r_scale, %r_zero_point, %r_dtype):" + R"(
           %a_dequant = aten::dequantize(%a_quant)
-          %r = )" + fp_op_name + "(" + "%a_dequant" + fp_extra_arg_list + ")" + R"(
+          %r = )" +
+      fp_op_name + "(" + "%a_dequant" + fp_extra_arg_list + ")" + R"(
           %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
           return (%r_quant) )";
 
-  std::string aten_op_pattern =
-  "graph(%a_quant" + fp_extra_arg_list + ", %r_scale, %r_zero_point, %r_dtype):" + R"(
-          %r_quant = )" + q_op_name + "(%a_quant" + q_extra_arg_list + ", %r_scale, %r_zero_point)" + R"(
+  std::string aten_op_pattern = "graph(%a_quant" + fp_extra_arg_list +
+      ", %r_scale, %r_zero_point, %r_dtype):" + R"(
+          %r_quant = )" +
+      q_op_name + "(%a_quant" + q_extra_arg_list +
+      ", %r_scale, %r_zero_point)" + R"(
           return (%r_quant) )";
 
   return {q_op_name, op_pattern, aten_op_pattern};
@@ -801,9 +804,7 @@ graph(%a_quant, %b_scalar):
   auto tanh_ = getFixedQParamOpFusionInfo("aten::tanh_", {}, true);
 
   auto hardswish = getObservedQParamOpFusionInfo(
-      "aten::hardswish",
-      "quantized::hardswish",
-      {}, {});
+      "aten::hardswish", "quantized::hardswish", {}, {});
 
   auto layer_norm = getObservedQParamOpFusionInfo(
       "aten::layer_norm",
@@ -820,8 +821,14 @@ graph(%a_quant, %b_scalar):
   auto instance_norm = getObservedQParamOpFusionInfo(
       "aten::instance_norm",
       "quantized::instance_norm",
-      {"%weight", "%bias", "%running_mean", "%running_var", "%use_input_stats",
-        "%momentum", "%eps", "%cudnn_enabled"},
+      {"%weight",
+       "%bias",
+       "%running_mean",
+       "%running_var",
+       "%use_input_stats",
+       "%momentum",
+       "%eps",
+       "%cudnn_enabled"},
       {"%weight", "%bias", "%eps"});
 
   return {
