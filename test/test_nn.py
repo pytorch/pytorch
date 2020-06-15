@@ -3931,7 +3931,7 @@ class TestNN(NNTestCase):
         ]
 
         def run_test(benchmark):
-            with torch.backends.cudnn.flags(enabled=True, benchmark=benchmark):
+            with torch.backends.cudnn.flags(benchmark=benchmark):
                 conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).to("cuda", dtype)
                 for size in sizes:
                     x = torch.randn(size, device="cuda", dtype=dtype)
