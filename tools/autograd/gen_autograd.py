@@ -36,6 +36,9 @@ from .utils import YamlLoader, split_name_params, signature_without_args
 # e.g alias & sparse_coo_tensor_with_dims_and_tensors.
 #
 # A map: function name => name of the argument that all outputs are view of
+
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
+
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',
@@ -63,8 +66,6 @@ VIEW_FUNCTIONS = {
     # FIXME: clone indices on construction.
     'sparse_coo_tensor_with_dims_and_tensors': 'values',
 }
-
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
 
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
     VIEW_FUNCTIONS[key] = 'self'

@@ -128,9 +128,9 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
       } else {
         // current_view has a view_func and but it's parent doesn't have one
         if(base_var.unsafeGetTensorImpl()->support_as_strided()) {
-          auto size = tensor.sizes().vec();
-          auto stride = tensor.strides().vec();
-          auto storage_offset = tensor.storage_offset();
+          auto size = base.sizes().vec();
+          auto stride = base.strides().vec();
+          auto storage_offset = base.storage_offset();
           view_func = [=](const at::Tensor& root_base) {
             auto temp = root_base.as_strided(size, stride, storage_offset);
             return fn(temp);
