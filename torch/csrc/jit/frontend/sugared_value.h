@@ -147,7 +147,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
     std::stringstream ss;
-    ss << "value of type '" << value_->type()->python_str() << "'";
+    ss << "value of type '" << value_->type()->annotation_str() << "'";
     return ss.str();
   }
   Value* asValue(const SourceRange& range, Function& m) override {

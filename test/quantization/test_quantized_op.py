@@ -401,7 +401,7 @@ class TestQuantizedOps(TestCase):
                     bias = None
                 epsilon = 1e-5
 
-                qY = torch.quantized_layer_norm(
+                qY = torch.ops.quantized.layer_norm(
                     qX, qX.size()[1:], weight=weight, bias=bias, eps=epsilon,
                     output_scale=Y_scale, output_zero_point=Y_zero_point)
 
@@ -1750,7 +1750,7 @@ class TestQuantizedOps(TestCase):
                             float(torch.unique(group_vals).shape[0]) / group_vals.numel() > 0.01
                             or group_vals.numel() < 5)
 
-                qY = torch.quantized_group_norm(qX, num_groups, weight, bias, eps, Y_scale, Y_zero_point)
+                qY = torch.ops.quantized.group_norm(qX, num_groups, weight, bias, eps, Y_scale, Y_zero_point)
 
                 dqY_hat = F.group_norm(dqX, num_groups=num_groups, weight=weight, bias=bias, eps=eps)
                 qY_hat = torch.quantize_per_tensor(dqY_hat, Y_scale, Y_zero_point, torch_type)
@@ -1835,7 +1835,7 @@ class TestQuantizedOps(TestCase):
                             float(torch.unique(ch_vals).shape[0]) / ch_vals.numel() > 0.01
                             or group_vals.numel() < 5)
 
-                qY = torch.quantized_instance_norm(qX, weight, bias, eps, Y_scale, Y_zero_point)
+                qY = torch.ops.quantized.instance_norm(qX, weight, bias, eps, Y_scale, Y_zero_point)
 
                 dqY_hat = F.instance_norm(dqX, weight=weight, bias=bias, eps=eps)
                 qY_hat = torch.quantize_per_tensor(dqY_hat, Y_scale, Y_zero_point, torch_type)
@@ -2062,10 +2062,6 @@ class TestDynamicQuantizedLinear(TestCase):
         X_value_max = 255
         if reduce_range:
             X_value_max = 127
-        X_q0 = np.round(np.random.rand(batch_size, input_channels) *
-                        (X_value_max - X_value_min)
-                        + X_value_min
-                        ).astype(np.uint8)
         X_q0 = np.round(np.random.rand(batch_size, input_channels) *
                         (X_value_max - X_value_min) + X_value_min).astype(np.uint8)
         X_q0[0, 0] = X_value_min

@@ -147,6 +147,11 @@ inline void setStrided(
   if (self_->sizes() == size && self_->strides() == stride) {
     return;
   }
+  for (auto val : stride) {
+    TORCH_CHECK(val >= 0,
+                "as_strided: Negative strides are not supported at the moment, "
+                "got strides: ", stride);
+  }
   self_->set_sizes_and_strides(size, stride);
 }
 
