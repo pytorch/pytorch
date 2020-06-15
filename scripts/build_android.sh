@@ -84,9 +84,14 @@ fi
 # Use android-cmake to build Android project from CMake.
 CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake")
 
+if [ -z "$BUILD_MOBILE_BENCHMARK" ]; then
+  BUILD_MOBILE_BENCHMARK=0
+fi
+
 # Don't build artifacts we don't need
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
+CMAKE_ARGS+=("-DBUILD_MOBILE_BENCHMARK=$BUILD_MOBILE_BENCHMARK")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
 if (( "${ANDROID_NDK_VERSION:-0}" < 18 )); then
