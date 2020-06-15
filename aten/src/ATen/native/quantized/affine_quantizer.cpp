@@ -128,7 +128,8 @@ Tensor quantize_tensor_per_channel_affine(
 
   TORCH_CHECK(
       0 <= axis && axis < rtensor.dim(),
-      "Channel axis out of range in per channel affine quantization.");
+      "Channel axis out of range in per channel affine quantization. Got: ",
+      axis, "Expected: [0, ", rtensor.dim(), ")");
   int64_t channel = rtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
@@ -182,7 +183,8 @@ Tensor dequantize_tensor_per_channel_affine(
 
   TORCH_CHECK(
       0 <= axis && axis < qtensor.dim(),
-      "Channel axis out of range in per channel affine dequantization.");
+      "Channel axis out of range in per channel affine dequantization. Got:",
+      axis, " Expected: [0, ", qtensor.dim(), ")");
   int64_t channel = qtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),

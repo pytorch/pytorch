@@ -174,13 +174,13 @@ getLevelsAndLargestExampleDim(TensorList logical_tensors) {
   return { levels, largest_example_dim };
 }
 
-std::vector<VmapPhysicalView> BroadcastingVmapTransform::logicalToPhysical(TensorList logical_tensors) {
+VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   TORCH_INTERNAL_ASSERT(
       logical_tensors.size() == 2,
       "This function has only been tested for two tensors. Please add more tests ",
       "before removing this check ");
 
-  std::vector<VmapPhysicalView> result;
+  VmapPhysicalViewVec result;
 
   std::bitset<kVmapNumLevels> levels;
   int64_t largest_example_dim;

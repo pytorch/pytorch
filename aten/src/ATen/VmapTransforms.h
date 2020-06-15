@@ -28,6 +28,10 @@ namespace at {
 // Forward declared; see NOTE: [What is a VmapPhysicalView?]
 struct VmapPhysicalView;
 
+// Most PyTorch operators take 4 or fewer inputs.
+constexpr int64_t kVmapTransformStaticInputSize = 4;
+using VmapPhysicalViewVec = SmallVector<VmapPhysicalView, kVmapTransformStaticInputSize>;
+
 // NOTE: [What is an VmapTransform?]
 // An *VmapTransform* converts logical views of tensors to physical views.
 //
@@ -66,7 +70,7 @@ struct TORCH_API MultiBatchVmapTransform {
 // because the broadcasting operation takes care of that for us, but we do
 // it anyways to keep things simple.
 struct TORCH_API BroadcastingVmapTransform {
-  static std::vector<VmapPhysicalView> logicalToPhysical(TensorList logical_tensors);
+  static VmapPhysicalViewVec logicalToPhysical(TensorList logical_tensors);
 };
 
 // NOTE: [What is a VmapPhysicalView?]
