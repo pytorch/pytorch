@@ -184,7 +184,7 @@ test_torchvision() {
   # torch/extension.h which transitively includes Parallel.h
   # which transitively includes tbb.h which is not available!
   if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
-    BUILD_EXT_OPTS = '--global-option=build_ext --global-option="-Ithird_party/tbb/include/tbb/tbb.h'
+    BUILD_EXT_OPTS='--global-option=build_ext --global-option="-Ithird_party/tbb/include/tbb/tbb.h'
   fi
   # Check out torch/vision at Jun 11 2020 commit
   # This hash must match one in .jenkins/caffe2/test.sh
