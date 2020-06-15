@@ -13,7 +13,7 @@ TORCH_CUDA_API bool canUse32BitIndexMath(const at::Tensor &t, int64_t max_elem=s
 
 template <typename scalar, typename IndexType>
 TensorInfo<scalar, IndexType>
-getTensorInfo(const at::Tensor& t) {
+getTensorInfo(const at::Tensor& t, bool positiveDim = false) {
   IndexType sz[MAX_TENSORINFO_DIMS];
   IndexType st[MAX_TENSORINFO_DIMS];
 
@@ -21,6 +21,11 @@ getTensorInfo(const at::Tensor& t) {
   for (int i = 0; i < dims; ++i) {
     sz[i] = t.size(i);
     st[i] = t.stride(i);
+  }
+  if (positiveDim && dims == 0) {
+    dims = 1;
+    sz[0] = 1;
+    st[0] = 1;
   }
 
   return TensorInfo<scalar, IndexType>(
