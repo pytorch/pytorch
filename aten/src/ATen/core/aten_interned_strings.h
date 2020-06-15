@@ -147,7 +147,6 @@ _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
 _(aten, _th_median) \
 _(aten, _th_mode) \
-_(aten, _th_prod) \
 _(aten, _th_sigmoid) \
 _(aten, _th_std) \
 _(aten, _th_sum) \
