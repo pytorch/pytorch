@@ -967,4 +967,8 @@ Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim){
   return at::count_nonzero(self, IntArrayRef{});
 }
 
+Tensor count_nonzero(const Tensor& self, DimnameList dim) {
+  return at::count_nonzero(self, dimnames_to_positions(self, dim));
+}
+
 }} // namespace at::native
