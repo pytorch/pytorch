@@ -1,4 +1,3 @@
-import sys
 import ast
 import inspect
 import re
@@ -14,8 +13,7 @@ from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
-
-PY35 = sys.version_info >= (3, 5)
+from typing import Callable
 
 
 class Module(object):
@@ -54,18 +52,15 @@ class EvalEnv(object):
         return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc, is_method):
-    # Python 3.5 adds support for the nice annotation syntax, so try that first.
-    signature = None
-    if PY35:
-        signature = try_real_annotations(fn, loc)
-        if signature is not None and is_method:
-            # If this is a method, then the signaure will include a type for
-            # `self`, but type comments do not contain a `self`. So strip it
-            # away here so everything is consistent (`inspect.ismethod` does
-            # not work here since `fn` is unbound at this point)
-            param_types, return_type = signature
-            param_types = param_types[1:]
-            signature = (param_types, return_type)
+    signature = try_real_annotations(fn, loc)
+    if signature is not None and is_method:
+        # If this is a method, then the signature will include a type for
+        # `self`, but type comments do not contain a `self`. So strip it
+        # away here so everything is consistent (`inspect.ismethod` does
+        # not work here since `fn` is unbound at this point)
+        param_types, return_type = signature
+        param_types = param_types[1:]
+        signature = (param_types, return_type)
 
     if signature is None:
         type_line, source = None, None
@@ -244,7 +239,7 @@ def try_real_annotations(fn, loc):
 def try_ann_to_type(ann, loc):
     if ann is None:
         return TensorType.get()
-    if ann is torch.Tensor:
+    if inspect.isclass(ann) and issubclass(ann, torch.Tensor):
         return TensorType.get()
     if is_tuple(ann):
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
@@ -281,10 +276,15 @@ def try_ann_to_type(ann, loc):
         return InterfaceType(_qualified_name(ann))
     if ann is torch.device:
         return DeviceObjType.get()
+    if ann is torch.dtype:
+        return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))
-        ignored_builtin_classes = (torch.nn.Module, tuple, list)
+        # Why Callable?  forward is declared to be a Callable so that
+        # people can define it without mypy complaining.  But we shouldn't
+        # try to recursively compile it!
+        ignored_builtin_classes = (torch.nn.Module, tuple, list, Callable)
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
             torch.jit._recursive_compile_class(ann, loc)
             return ClassType(_qualified_name(ann))

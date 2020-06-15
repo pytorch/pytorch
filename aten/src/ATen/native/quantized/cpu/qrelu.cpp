@@ -24,7 +24,7 @@ Tensor qnnpack_relu(Tensor input) {
   TORCH_CHECK(
       input.ndimension() > 0, "qnnpack_relu(): Got empty input tensor");
 
-  Tensor input_contig = input.contiguous();
+  Tensor input_contig = input.contiguous(input.suggest_memory_format());
 
   const auto zero_point = input_contig.q_zero_point();
 
@@ -53,9 +53,10 @@ Tensor qnnpack_relu(Tensor input) {
 
   qy = at::_empty_affine_quantized(
       input_contig.sizes(),
-      input.options(),
+      at::device(kCPU).dtype(input.scalar_type()),
       input_contig.q_scale(),
-      input_contig.q_zero_point());
+      input_contig.q_zero_point(),
+      input.suggest_memory_format());
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_clamp_nc_u8(
       qnnpack_operator, /* clamp */
@@ -113,9 +114,12 @@ Tensor& quantized_leaky_relu_out(Tensor& result, const Tensor& self,
 }
 
 Tensor quantized_leaky_relu(const Tensor& self, Scalar negval) {
-  const auto qx = self.contiguous();
-  auto qy = at::_empty_affine_quantized(qx.sizes(), self.options(),
-                                        qx.q_scale(), qx.q_zero_point());
+  const auto qx = self.contiguous(self.suggest_memory_format());
+  auto qy = at::_empty_affine_quantized(qx.sizes(),
+      at::device(kCPU).dtype(self.scalar_type()),
+      qx.q_scale(),
+      qx.q_zero_point(),
+      self.suggest_memory_format());
   qrelu_leaky_stub(self.device().type(), qy, qx, negval);
   return qy;
 }

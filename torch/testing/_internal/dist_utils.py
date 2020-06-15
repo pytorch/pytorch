@@ -203,7 +203,7 @@ def get_timeout_error_regex(rpc_backend_name):
         return "(Timed out)|(Task expired)"
 
 
-def wait_until_pending_futures_and_users_flushed():
+def wait_until_pending_futures_and_users_flushed(timeout=20):
     '''
     The RRef protocol holds forkIds of rrefs in a map until those forks are
     confirmed by the owner. The message confirming the fork may arrive after
@@ -214,6 +214,7 @@ def wait_until_pending_futures_and_users_flushed():
     as processed. Call this function before asserting the map returned by
     _get_debug_info is empty.
     '''
+    start = time.time()
     while True:
         debug_info = _rref_context_get_debug_info()
         num_pending_futures = int(debug_info["num_pending_futures"])
@@ -221,6 +222,47 @@ def wait_until_pending_futures_and_users_flushed():
         if num_pending_futures == 0 and num_pending_users == 0:
             break
         time.sleep(0.1)
+        if time.time() - start > timeout:
+            raise ValueError(
+                "Timed out waiting to flush pending futures and users, had {} pending futures and {} pending users".format(
+                    num_pending_futures, num_pending_users
+                )
+            )
+
+
+def get_num_owners_and_forks():
+    """
+    Retrieves number of OwnerRRefs and forks on this node from
+    _rref_context_get_debug_info.
+    """
+    rref_dbg_info = _rref_context_get_debug_info()
+    num_owners = rref_dbg_info["num_owner_rrefs"]
+    num_forks = rref_dbg_info["num_forks"]
+    return num_owners, num_forks
+
+
+def wait_until_owners_and_forks_on_rank(num_owners, num_forks, rank, timeout=20):
+    """
+    Waits until timeout for num_forks and num_owners to exist on the rank. Used
+    to ensure proper deletion of RRefs in tests.
+    """
+    start = time.time()
+    while True:
+        num_owners_on_rank, num_forks_on_rank = rpc.rpc_sync(
+            worker_name(rank), get_num_owners_and_forks, args=(), timeout=5
+        )
+        num_owners_on_rank = int(num_owners_on_rank)
+        num_forks_on_rank = int(num_forks_on_rank)
+        if num_owners_on_rank == num_owners and num_forks_on_rank == num_forks:
+            return
+        time.sleep(1)
+        if time.time() - start > timeout:
+            raise ValueError(
+                "Timed out waiting for {} owners and {} forks on rank, had {} owners and {} forks".format(
+                    num_owners, num_forks, num_owners_on_rank, num_forks_on_rank
+                )
+            )
+
 
 def initialize_pg(init_method, rank, world_size):
     # This is for tests using `dist.barrier`.

@@ -211,7 +211,7 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
   }
 
   if(beta == 0) {
-    THTensor_(zero)(r_);
+    THTensor_wrap(r_).zero_();
   }
   else if(beta != 1)
     THTensor_(mul)(r_, r_, beta);

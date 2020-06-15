@@ -365,6 +365,7 @@ quantization output parameters)
 
 * :func:`~torch.nn.quantized.functional.adaptive_avg_pool2d` — 2D adaptive average pooling
 * :func:`~torch.nn.quantized.functional.avg_pool2d` — 2D average pooling
+* :func:`~torch.nn.quantized.functional.avg_pool3d` — 3D average pooling
 * :func:`~torch.nn.quantized.functional.conv1d` — 1D convolution
 * :func:`~torch.nn.quantized.functional.conv2d` — 2D convolution
 * :func:`~torch.nn.quantized.functional.conv3d` — 3D convolution

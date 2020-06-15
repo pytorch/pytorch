@@ -15,7 +15,8 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
   PythonRemoteCall(
       SerializedPyObj&& serializedPyObj,
       at::IValue retRRefId,
-      at::IValue retForkId);
+      at::IValue retForkId,
+      const bool isAsyncExecution);
 
   inline const SerializedPyObj& serializedPyObj() const {
     return serializedPyObj_;
@@ -29,6 +30,10 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
     return retForkId_;
   }
 
+  inline bool isAsyncExecution() const {
+    return isAsyncExecution_;
+  }
+
   Message toMessageImpl() && override;
   static std::unique_ptr<PythonRemoteCall> fromMessage(const Message& message);
 
@@ -36,6 +41,7 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
   SerializedPyObj serializedPyObj_;
   const at::IValue retRRefId_;
   const at::IValue retForkId_;
+  const bool isAsyncExecution_;
 };
 
 } // namespace rpc
