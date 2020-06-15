@@ -11,12 +11,30 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/native/ComplexHelper.h>
 
 #include <algorithm>
 #include <vector>
 #include <cmath>
 
-namespace at { namespace native {
+namespace at { namespSace native {
+
+Tensor fft_fft(const Tensor& self) {
+  TORCH_CHECK(self.is_complex(), "Expected a complex tensor.");
+  TORCH_CHECK(self.dim() == 1, "Expected a 1D tensor.");
+
+  if (self.scalar_type() != ScalarType::ComplexDouble) {
+    TORCH_WARN("It's recommended to call torch.fft.fft with a complex double "
+               "tensor for numerical precision");
+  }
+
+  auto as_float = view_complex_as_float(self);
+  auto result = native::fft(self, 1, false);
+
+  // todo: convert 2D float to complex
+
+  return result;
+}
 
 // This is a pass-through wrapper function that does the size check and
 // inferences. The actual forward implementation function is called

@@ -1354,7 +1354,7 @@
 
 # FFT
 
-- func: fftfn(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
+- func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
   dispatch:
     CPU: fft
     CUDA: fft
@@ -6649,6 +6649,10 @@
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
 
-- func: silly(Tensor self) -> Tensor
+- func: fft.fft(Tensor self) -> Tensor
+  dispatch:
+    CPU: fft_fft
+    CUDA: fft_fft
   python_module: fft
   use_c10_dispatcher: full
+  variants: function
