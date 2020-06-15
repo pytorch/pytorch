@@ -72,8 +72,8 @@ GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
 }
 
 std::ostream& operator<<(std::ostream& os, GloballyUniqueId const& globalId) {
-  return os << "GloballyUniqueId(" << globalId.createdOn_ << ", "
-            << globalId.localId_ << ")";
+  return os << "GloballyUniqueId(created_on=" << globalId.createdOn_
+            << ", local_id=" << globalId.localId_ << ")";
 }
 
 ///////////////////////////  SerializedPyObj   ///////////////////////////

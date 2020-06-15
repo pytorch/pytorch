@@ -8010,9 +8010,10 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("curandGenerateUniform", ("hiprandGenerateUniform", API_CAFFE2)),
         ("curand_generator", ("hiprand_generator", API_CAFFE2)),
         ("CaffeCudaGetDevice", ("CaffeHipGetDevice", API_CAFFE2)),
-        # do not rename CUDA_KERNEL_ASSERT,
+        # do not rename CUDA_KERNEL_ASSERT, lazyInitCUDA in caffe2 sources
         # the ordered dict guarantees this pattern will match first, before "CUDA"
         ("CUDA_KERNEL_ASSERT", ("CUDA_KERNEL_ASSERT", API_CAFFE2)),
+        ("lazyInitCUDA", ("lazyInitCUDA", API_CAFFE2)),
         ("CUDA", ("HIP", API_CAFFE2)),
         ("Cuda", ("Hip", API_CAFFE2)),
         ("cuda_", ("hip_", API_CAFFE2)),

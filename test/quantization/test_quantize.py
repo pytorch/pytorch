@@ -654,7 +654,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             model = quantize_dynamic(NestedModel().eval(), qconfig_dict, dtype=dtype)
             checkQuantized(model)
 
-    def test_per_channel_quantize(self):
+    def test_per_channel_linear_quantize(self):
         r"""Test quantization for per_channel dynamic quantization
         """
         model = NestedModel().eval()
@@ -866,6 +866,55 @@ class TestPostTrainingDynamic(QuantizationTestCase):
 
                 y, (h, c) = cell_dq(x, (h, c))
 
+    def test_per_channel_lstm_quantize(self):
+        d_hid = 2
+        num_chunks = 4
+        model = LSTMDynamicModel().eval()
+        cell = model.lstm
+        vals = [[100, -155],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155],
+                [-155, 100],
+                [-155, 100],
+                [100, -155]]
+
+        vals = vals[:d_hid * num_chunks]
+        cell.weight_ih_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
+        cell.weight_hh_l0 = torch.nn.Parameter(
+            torch.tensor(vals, dtype=torch.float),
+            requires_grad=False)
+        ref = copy.deepcopy(cell)
+        qconfig_dict = {
+            torch.nn.LSTM : per_channel_dynamic_qconfig
+        }
+        model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=torch.qint8)
+
+        niter = 10
+
+        x = torch.tensor([[100, -155],
+                          [-155, 100],
+                          [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+
+        h0_vals = [[-155, 100],
+                   [-155, 155],
+                   [100, -155]]
+        hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+        cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+        hiddens = (hx, cx)
+        quant_out, quant_hidden = model_quantized(x)
+        ref_out, ref_hidden = ref(x)
+
+        def checkQuantized(model):
+            self.assertTrue('DynamicQuantizedLSTM' in str(model))
+            self.checkDynamicQuantizedLSTM(model.lstm, torch.nn.quantized.dynamic.LSTM, dtype=torch.qint8)
+            self.checkScriptable(model, [(x, x)], check_save_load=True)
+        checkQuantized(model_quantized)
+
+        self.assertEqual(quant_out, ref_out)
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):
@@ -1246,39 +1295,40 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
                         inplace=False)
                     self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
+    @override_qengines
     def test_single_linear_dynamic(self):
         r"""Compare the result of dynamic quantization of single linear layer in
         eager mode and graph mode.
         """
-        if 'qnnpack' in supported_qengines:
-            with override_quantized_engine('qnnpack'):
-                # eager mode
-                annotated_linear_model = AnnotatedSingleLayerLinearModel('qnnpack').eval()
-                linear_model = SingleLayerLinearModel().eval()
-                # copy the weight from eager mode so that we can
-                # compare the result of the two quantized models later
-                linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
-                linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-                qconfig_dict = {'': default_dynamic_qconfig}
-                model_eager = quantize_dynamic(annotated_linear_model, qconfig_dict)
+        qengine = torch.backends.quantized.engine
+        for qconfig in [default_dynamic_qconfig, per_channel_dynamic_qconfig]:
+            # eager mode
+            annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
+            linear_model = SingleLayerLinearModel().eval()
+            annotated_linear_model.qconfig = qconfig
+            # copy the weight from eager mode so that we can
+            # compare the result of the two quantized models later
+            linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+            linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+            qconfig_dict = {'': qconfig}
+            model_eager = quantize_dynamic(annotated_linear_model, qconfig_dict)
+            model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+            model_script = torch.jit.script(linear_model)
+            result_eager = model_eager(self.calib_data[0][0])
 
-                model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
-                model_script = torch.jit.script(linear_model)
-                result_eager = model_eager(self.calib_data[0][0])
+            for model_under_test in [model_script]:
+                model_quantized = quantize_dynamic_script(
+                    model_under_test,
+                    qconfig_dict)
+                self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
-                for model_under_test in [model_traced, model_script]:
-                    model_quantized = quantize_dynamic_script(
-                        model_under_test,
-                        qconfig_dict)
-                    self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
-
-                    # Check to make sure choose_qparams->quant->dequant->linear is numerically
-                    # equivalent to the final quantized model.
-                    model_fake_quantized = quantize_dynamic_script(
-                        model_under_test,
-                        qconfig_dict,
-                        debug=True)
-                    self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
+                # Check to make sure choose_qparams->quant->dequant->linear is numerically
+                # equivalent to the final quantized model.
+                model_fake_quantized = quantize_dynamic_script(
+                    model_under_test,
+                    qconfig_dict,
+                    debug=True)
+                self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
 
 
 class TestFunctionalModule(QuantizationTestCase):

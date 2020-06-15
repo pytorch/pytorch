@@ -46,6 +46,10 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image-xla
             elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-libtorch
+            elif [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
+            elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
@@ -54,6 +58,8 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v8a
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_32"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-vulkan-x86_32"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-vulkan-x86_32
             else
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
@@ -81,6 +87,10 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image-xla
           elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-libtorch
+          elif [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
+          elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -195,30 +205,7 @@ jobs:
           no_output_timeout: 30m
           command: |
             if [[ "${USE_CUDA}" == "1" ]]; then
-              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-              7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
-              cd cuda_10.1.243_426.00_win10
-              mkdir cuda_install_logs
-              ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
-              if [[ "${VC_YEAR}" == "2017" ]]; then
-                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
-              else
-                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
-              fi
-              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
-              7z x NvToolsExt.7z -oNvToolsExt
-              mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
-              cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
-              export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
-              cat cuda_install_logs/LOG.setup.exe.log
-              if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
-              then
-                echo "CUDA installation failed"
-                exit 1
-              fi
-              cd ..
-              rm -rf ./cuda_10.1.243_426.00_win10
-              rm -f ./cuda_10.1.243_426.00_win10.exe
+              .circleci/scripts/windows_cuda_install.sh
             fi
       - run:
           name: Install Cudnn
@@ -291,30 +278,7 @@ jobs:
           no_output_timeout: 30m
           command: |
             if [[ "${CUDA_VERSION}" != "cpu" && "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
-              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-              7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
-              cd cuda_10.1.243_426.00_win10
-              mkdir cuda_install_logs
-              ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
-              if [[ "${VC_YEAR}" == "2017" ]]; then
-                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
-              else
-                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
-              fi
-              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
-              7z x NvToolsExt.7z -oNvToolsExt
-              mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
-              cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
-              export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
-              cat cuda_install_logs/LOG.setup.exe.log
-              if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
-              then
-                echo "CUDA installation failed"
-                exit 1
-              fi
-              cd ..
-              rm -rf ./cuda_10.1.243_426.00_win10
-              rm -f ./cuda_10.1.243_426.00_win10.exe
+              .circleci/scripts/windows_cuda_install.sh
             fi
       - run:
           name: Install Cudnn

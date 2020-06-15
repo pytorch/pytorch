@@ -2759,6 +2759,14 @@
     CPU: flip_cpu
     CUDA: flip_cuda
 
+- func: fliplr(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: flipud(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
