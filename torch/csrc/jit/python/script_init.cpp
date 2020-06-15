@@ -260,7 +260,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
       c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
       if (!value) {
         ErrorReport error(range);
-        error << "Expected a default value of type " << arg.type()->python_str()
+        error << "Expected a default value of type " << arg.type()->repr_str()
               << " on parameter \"" << arg.name() << "\".";
         if (arg.is_inferred_type()) {
           error << "Because \"" << arg.name()
@@ -799,7 +799,7 @@ void initJitScriptBindings(PyObject* module) {
                   TORCH_INTERNAL_ASSERT(
                       setstate_schema.arguments().size() == 2,
                       "__setstate__ method for class ",
-                      class_type->python_str(),
+                      class_type->repr_str(),
                       " must have exactly 2 arguments!");
                   auto state_type = setstate_schema.arguments().at(1).type();
                   (*setstate_method)(Stack{toIValue(state, state_type)});
@@ -1006,6 +1006,14 @@ void initJitScriptBindings(PyObject* module) {
       .def(py::init<
            c10::intrusive_ptr<c10::ivalue::Object>,
            std::shared_ptr<mobile::CompilationUnit>>())
+      .def(
+          "find_method",
+          [](mobile::Module& m,
+             const std::string& method_name) {
+            auto method = m.find_method(method_name);
+            return method != nullptr;
+          },
+          py::arg("method_name"))
       .def(
           "run_method",
           [](mobile::Module& m,
@@ -1398,7 +1406,9 @@ void initJitScriptBindings(PyObject* module) {
       .def("check_next", &testing::FileCheck::check_next)
       .def("check_count", &testing::FileCheck::check_count)
       .def("check_dag", &testing::FileCheck::check_dag)
-      .def("check_count", &testing::FileCheck::check_count)
+      .def(
+          "check_source_highlighted",
+          &testing::FileCheck::check_source_highlighted)
       .def(
           "check_count",
           [](testing::FileCheck& f,
