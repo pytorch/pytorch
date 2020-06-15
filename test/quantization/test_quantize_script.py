@@ -9,6 +9,7 @@ from torch._C import parse_ir
 # torch.quantization
 from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
+from torch.quantization import per_channel_dynamic_qconfig
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
@@ -2427,27 +2428,29 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
             def forward(self, x):
                 x = self.fc1(x)
                 return self.fc2(x)
+        for is_per_channel in [True, False]:
+            m = torch.jit.script(M())
+            qconfig = per_channel_dynamic_qconfig if is_per_channel is True else default_dynamic_qconfig
+            m = prepare_dynamic_script(m, {'': qconfig})
+            m = convert_dynamic_script(m, debug=True)
+            assert len(m._modules._c.items()) == 2, \
+                'Expected to have two submodule of linear'
 
-        m = torch.jit.script(M())
-        m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-        m = convert_dynamic_script(m, debug=True)
-        assert len(m._modules._c.items()) == 2, \
-            'Expected to have two submodule of linear'
-
-        quant_func = "aten::quantize_per_tensor"
-
-        # quantizing activations
-        FileCheck().check("aten::_choose_qparams_per_tensor") \
-                   .check_next(quant_func) \
-                   .check_next("aten::dequantize") \
-                   .check("aten::_choose_qparams_per_tensor") \
-                   .check_next(quant_func) \
-                   .check_next("aten::dequantize") \
-                   .check(quant_func) \
-                   .check_next("aten::dequantize") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(m.graph)
+            wt_quant_func = "aten::quantize_per_channel" if is_per_channel \
+                else "aten::quantize_per_tensor"
+            act_quant_func = "aten::quantize_per_tensor"
+            # quantizing activations
+            FileCheck().check("aten::_choose_qparams_per_tensor") \
+                       .check_next(act_quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("aten::_choose_qparams_per_tensor") \
+                       .check_next(act_quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check(wt_quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check_not(wt_quant_func) \
+                       .check("return") \
+                       .run(m.graph)
 
     def test_finalize_for_linear_dynamic(self):
         class M(torch.nn.Module):
