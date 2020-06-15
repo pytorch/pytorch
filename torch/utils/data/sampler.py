@@ -82,6 +82,8 @@ class RandomSampler(Sampler):
         self.replacement = replacement
         self._num_samples = num_samples
         self.generator = generator
+        self.count = 0
+        self.sample_list = None
 
         if not isinstance(self.replacement, bool):
             raise TypeError("replacement should be a boolean value, but got "
@@ -103,11 +105,25 @@ class RandomSampler(Sampler):
         return self._num_samples
 
     def __iter__(self):
+        self.sample_list = None
+        self.count = 0
+        return self
+
+    def __next__(self):
         n = len(self.data_source)
         if self.replacement:
-            rand_tensor = torch.randint(high=n, size=(self.num_samples,), dtype=torch.int64, generator=self.generator)
-            return iter(rand_tensor.tolist())
-        return iter(torch.randperm(n, generator=self.generator).tolist())
+            if self.count >= self.num_samples:
+                raise StopIteration()
+            self.count = self.count + 1
+            return torch.randint(high=n, size=(1,), dtype=torch.int64, generator=self.generator).tolist()[0]
+        if self.sample_list is None:
+            self.sample_list = torch.randperm(n, generator=self.generator).tolist()
+        if self.count >= self.num_samples:
+            self.sample_list = None
+            raise StopIteration()
+        self.count = self.count + 1
+        return self.sample_list[self.count - 1]
+
 
     def __len__(self):
         return self.num_samples
