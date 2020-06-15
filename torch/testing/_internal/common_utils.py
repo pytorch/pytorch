@@ -212,10 +212,7 @@ def repeat_test_for_types(dtypes):
         @wraps(f)
         def call_helper(self, *args):
             for dtype in dtypes:
-                if PY34:
-                    with TestCase.subTest(self, dtype=dtype):
-                        f(self, *args, dtype=dtype)
-                else:
+                with TestCase.subTest(self, dtype=dtype):
                     f(self, *args, dtype=dtype)
 
         return call_helper
@@ -224,8 +221,6 @@ def repeat_test_for_types(dtypes):
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
 
-PY3 = sys.version_info > (3, 0)
-PY34 = sys.version_info >= (3, 4)
 
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
@@ -240,7 +235,6 @@ def get_test_names(test_cases):
 
 def chunk_list(lst, nchunks):
     return [lst[i::nchunks] for i in range(nchunks)]
-
 
 
 def run_tests(argv=UNITTEST_ARGS):
@@ -319,15 +313,10 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    if not PY34:  # Python [3, 3.4)
-        import importlib
-        loader = importlib.find_loader(name)
-        return loader is not None
-    else:  # Python >= 3.4
-        import importlib
-        import importlib.util
-        spec = importlib.util.find_spec(name)
-        return spec is not None
+    import importlib
+    import importlib.util
+    spec = importlib.util.find_spec(name)
+    return spec is not None
 
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
