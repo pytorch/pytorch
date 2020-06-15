@@ -14,12 +14,12 @@ from torch.quantization import (
     default_per_channel_weight_observer,
     default_qconfig,
     get_default_qconfig,
-
     quantize,
     quantize_dynamic,
     default_weight_observer,
     default_histogram_observer,
     default_eval_fn,
+    fuse_modules,
 )
 
 # torch.quantization.quantize_script
@@ -38,6 +38,8 @@ from torch.testing._internal.common_quantized import (
     override_qengines,
     supported_qengines,
     override_quantized_engine,
+    qengine_is_fbgemm,
+    qengine_is_qnnpack,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -49,13 +51,15 @@ from torch.testing._internal.common_quantization import (
     ConvModel,
     default_per_channel_qconfig,
     test_only_eval_fn,
+    ConvBnModel,
 )
-#annotated models
+# Annotated models
 from torch.testing._internal.common_quantization import (
     AnnotatedSingleLayerLinearModel,
     AnnotatedSkipQuantModel,
     AnnotatedNestedModel,
     AnnotatedConvModel,
+    AnnotatedConvBnModel,
 )
 
 from torch.testing import FileCheck
@@ -2602,34 +2606,33 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                    .run(m1.graph)
 
 class TestQuantizeScript(QuantizationTestCase):
+    @override_qengines
     def test_single_linear(self):
         r"""Compare the result of quantizing single linear layer in
         eager mode and graph mode
         """
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
-                # eager mode
-                annotated_linear_model = AnnotatedSingleLayerLinearModel(qengine).eval()
-                linear_model = SingleLayerLinearModel().eval()
-                # copy the weight from eager mode so that we can
-                # compare the result of the two quantized models later
-                linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
-                linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-                model_eager = quantize(annotated_linear_model, test_only_eval_fn,
-                                       self.calib_data)
+        # eager mode
+        annotated_linear_model = AnnotatedSingleLayerLinearModel(torch.backends.quantized.engine).eval()
+        linear_model = SingleLayerLinearModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+        linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+        model_eager = quantize(annotated_linear_model, test_only_eval_fn,
+                                self.calib_data)
 
-                qconfig_dict = {'': torch.quantization.get_default_qconfig(qengine)}
-                model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
-                model_script = torch.jit.script(linear_model)
-                result_eager = model_eager(self.calib_data[0][0])
-                for model_under_test in [model_traced, model_script]:
-                    model_quantized = quantize_script(
-                        model_under_test,
-                        qconfig_dict,
-                        test_only_eval_fn,
-                        [self.calib_data],
-                        inplace=False)
-                    self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+        qconfig_dict = {'': torch.quantization.get_default_qconfig(torch.backends.quantized.engine)}
+        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+        model_script = torch.jit.script(linear_model)
+        result_eager = model_eager(self.calib_data[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
     @skipIfNoFBGEMM
     def test_observer_with_ignored_function(self):
@@ -2670,35 +2673,33 @@ class TestQuantizeScript(QuantizationTestCase):
                     [self.calib_data],
                     inplace=False)
                 self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
-
+    @override_qengines
     def test_conv(self):
         r"""Compare the result of quantizing conv layer in
         eager mode and graph mode
         """
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
-                # eager mode
-                annotated_conv_model = AnnotatedConvModel(qengine).eval()
-                conv_model = ConvModel().eval()
-                # copy the weight from eager mode so that we can
-                # compare the result of the two quantized models later
-                conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
-                model_eager = quantize(annotated_conv_model, default_eval_fn,
-                                       self.img_data)
-                qconfig_dict = {'': torch.quantization.get_default_qconfig(qengine)}
-                model_traced = torch.jit.trace(conv_model, self.img_data[0][0])
-                model_script = torch.jit.script(conv_model)
-                result_eager = model_eager(self.img_data[0][0])
-                for model_under_test in [model_traced, model_script]:
-                    model_quantized = quantize_script(
-                        model_under_test,
-                        qconfig_dict,
-                        default_eval_fn,
-                        [self.img_data],
-                        inplace=False)
-                    self.assertEqual(model_quantized(self.img_data[0][0]), result_eager)
+        # eager mode
+        annotated_conv_model = AnnotatedConvModel(torch.backends.quantized.engine).eval()
+        conv_model = ConvModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
+        model_eager = quantize(annotated_conv_model, default_eval_fn,
+                                self.img_data)
+        qconfig_dict = {'': torch.quantization.get_default_qconfig(torch.backends.quantized.engine)}
+        model_traced = torch.jit.trace(conv_model, self.img_data[0][0])
+        model_script = torch.jit.script(conv_model)
+        result_eager = model_eager(self.img_data[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                default_eval_fn,
+                [self.img_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.img_data[0][0]), result_eager)
 
-    @unittest.skip("This doesn't work right now, re-enable after fold_convbn is fixed")
+    # @unittest.skip("This doesn't work right now, re-enable after fold_convbn is fixed")
     def test_conv_bn(self):
         r"""Compare the result of quantizing conv + bn layer in
         eager mode and graph mode
@@ -2725,106 +2726,103 @@ class TestQuantizeScript(QuantizationTestCase):
         result_script = model_script(self.img_data[0][0])
         self.assertEqual(result_eager, result_script)
 
+    @override_qengines
     def test_nested(self):
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
-                # Eager mode
-                eager_model = AnnotatedNestedModel(qengine).eval()
+        # Eager mode
+        eager_model = AnnotatedNestedModel(torch.backends.quantized.engine).eval()
 
-                # Graph mode
-                script_model = NestedModel().eval()
-                # Copy weights for eager_model
-                script_model.sub1.fc.weight = torch.nn.Parameter(eager_model.sub1.fc.weight.detach())
-                script_model.sub1.fc.bias = torch.nn.Parameter(eager_model.sub1.fc.bias.detach())
-                script_model.sub2.fc1.weight = torch.nn.Parameter(eager_model.sub2.fc1.module.weight.detach())
-                script_model.sub2.fc1.bias = torch.nn.Parameter(eager_model.sub2.fc1.module.bias.detach())
-                script_model.sub2.fc2.weight = torch.nn.Parameter(eager_model.sub2.fc2.weight.detach())
-                script_model.sub2.fc2.bias = torch.nn.Parameter(eager_model.sub2.fc2.bias.detach())
-                script_model.fc3.weight = torch.nn.Parameter(eager_model.fc3.module.weight.detach())
-                script_model.fc3.bias = torch.nn.Parameter(eager_model.fc3.module.bias.detach())
+        # Graph mode
+        script_model = NestedModel().eval()
+        # Copy weights for eager_model
+        script_model.sub1.fc.weight = torch.nn.Parameter(eager_model.sub1.fc.weight.detach())
+        script_model.sub1.fc.bias = torch.nn.Parameter(eager_model.sub1.fc.bias.detach())
+        script_model.sub2.fc1.weight = torch.nn.Parameter(eager_model.sub2.fc1.module.weight.detach())
+        script_model.sub2.fc1.bias = torch.nn.Parameter(eager_model.sub2.fc1.module.bias.detach())
+        script_model.sub2.fc2.weight = torch.nn.Parameter(eager_model.sub2.fc2.weight.detach())
+        script_model.sub2.fc2.bias = torch.nn.Parameter(eager_model.sub2.fc2.bias.detach())
+        script_model.fc3.weight = torch.nn.Parameter(eager_model.fc3.module.weight.detach())
+        script_model.fc3.bias = torch.nn.Parameter(eager_model.fc3.module.bias.detach())
 
-                model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
-                qconfig_dict = {
-                    'sub2.fc1': default_per_channel_qconfig if qengine == 'fbgemm' else default_qconfig,
-                    'fc3': default_qconfig
-                }
-                model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
-                model_script = torch.jit.script(script_model)
-                result_eager = model_eager(self.calib_data[0][0])
-                for model_under_test in [model_traced, model_script]:
-                    model_quantized = quantize_script(
-                        model_under_test,
-                        qconfig_dict,
-                        test_only_eval_fn,
-                        [self.calib_data],
-                        inplace=False)
-                    self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
-
+        model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
+        qconfig_dict = {
+            'sub2.fc1': default_per_channel_qconfig if qengine_is_fbgemm() else default_qconfig,
+            'fc3': default_qconfig
+        }
+        model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
+        model_script = torch.jit.script(script_model)
+        result_eager = model_eager(self.calib_data[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+    @override_qengines
     def test_skip_quant(self):
         """ Test None qconfig
         """
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
-                # Eager mode
-                eager_model = AnnotatedSkipQuantModel(qengine).eval()
+        # Eager mode
+        eager_model = AnnotatedSkipQuantModel(torch.backends.quantized.engine).eval()
 
-                # Graph mode
-                script_model = SkipQuantModel().eval()
-                # Copy weights for eager_model
-                script_model.sub.fc1.weight = torch.nn.Parameter(eager_model.sub.module.fc1.weight.detach())
-                script_model.sub.fc1.bias = torch.nn.Parameter(eager_model.sub.module.fc1.bias.detach())
-                script_model.sub.fc2.weight = torch.nn.Parameter(eager_model.sub.module.fc2.weight.detach())
-                script_model.sub.fc2.bias = torch.nn.Parameter(eager_model.sub.module.fc2.bias.detach())
-                script_model.fc.weight = torch.nn.Parameter(eager_model.fc.weight.detach())
-                script_model.fc.bias = torch.nn.Parameter(eager_model.fc.bias.detach())
+        # Graph mode
+        script_model = SkipQuantModel().eval()
+        # Copy weights for eager_model
+        script_model.sub.fc1.weight = torch.nn.Parameter(eager_model.sub.module.fc1.weight.detach())
+        script_model.sub.fc1.bias = torch.nn.Parameter(eager_model.sub.module.fc1.bias.detach())
+        script_model.sub.fc2.weight = torch.nn.Parameter(eager_model.sub.module.fc2.weight.detach())
+        script_model.sub.fc2.bias = torch.nn.Parameter(eager_model.sub.module.fc2.bias.detach())
+        script_model.fc.weight = torch.nn.Parameter(eager_model.fc.weight.detach())
+        script_model.fc.bias = torch.nn.Parameter(eager_model.fc.bias.detach())
 
-                model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
-                qconfig_dict = {
-                    '': torch.quantization.get_default_qconfig(qengine),
-                    'fc': None
-                }
-                model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
-                model_script = torch.jit.script(script_model)
-                result_eager = model_eager(self.calib_data[0][0])
-                for model_under_test in [model_traced, model_script]:
-                    model_quantized = quantize_script(
-                        model_under_test,
-                        qconfig_dict,
-                        test_only_eval_fn,
-                        [self.calib_data],
-                        inplace=False)
-                    self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+        model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
+        qconfig_dict = {
+            '': torch.quantization.get_default_qconfig(torch.backends.quantized.engine),
+            'fc': None
+        }
+        model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
+        model_script = torch.jit.script(script_model)
+        result_eager = model_eager(self.calib_data[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
+    @override_qengines
     def test_single_linear_dynamic(self):
         r"""Compare the result of dynamic quantization of single linear layer in
         eager mode and graph mode.
         """
-        if 'qnnpack' in supported_qengines:
-            with override_quantized_engine('qnnpack'):
-                # eager mode
-                annotated_linear_model = AnnotatedSingleLayerLinearModel('qnnpack').eval()
-                linear_model = SingleLayerLinearModel().eval()
-                # copy the weight from eager mode so that we can
-                # compare the result of the two quantized models later
-                linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
-                linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-                qconfig_dict = {'': default_dynamic_qconfig}
-                model_eager = quantize_dynamic(annotated_linear_model, qconfig_dict)
+        if qengine_is_qnnpack():
+            # eager mode
+            annotated_linear_model = AnnotatedSingleLayerLinearModel('qnnpack').eval()
+            linear_model = SingleLayerLinearModel().eval()
+            # copy the weight from eager mode so that we can
+            # compare the result of the two quantized models later
+            linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+            linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+            qconfig_dict = {'': default_dynamic_qconfig}
+            model_eager = quantize_dynamic(annotated_linear_model, qconfig_dict)
 
-                model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
-                model_script = torch.jit.script(linear_model)
-                result_eager = model_eager(self.calib_data[0][0])
+            model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+            model_script = torch.jit.script(linear_model)
+            result_eager = model_eager(self.calib_data[0][0])
 
-                for model_under_test in [model_traced, model_script]:
-                    model_quantized = quantize_dynamic_script(
-                        model_under_test,
-                        qconfig_dict)
-                    self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+            for model_under_test in [model_traced, model_script]:
+                model_quantized = quantize_dynamic_script(
+                    model_under_test,
+                    qconfig_dict)
+                self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
-                    # Check to make sure choose_qparams->quant->dequant->linear is numerically
-                    # equivalent to the final quantized model.
-                    model_fake_quantized = quantize_dynamic_script(
-                        model_under_test,
-                        qconfig_dict,
-                        debug=True)
-                    self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
+                # Check to make sure choose_qparams->quant->dequant->linear is numerically
+                # equivalent to the final quantized model.
+                model_fake_quantized = quantize_dynamic_script(
+                    model_under_test,
+                    qconfig_dict,
+                    debug=True)
+                self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
