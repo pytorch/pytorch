@@ -33,17 +33,17 @@ T load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
 }
 
 template <typename scalar_t>
-void store_result(char * C10_RESTRICT data, int64_t stride, int64_t index, scalar_t value) {
+void accumulate_result(char * C10_RESTRICT data, int64_t stride, int64_t index, scalar_t value) {
   auto * ptr = reinterpret_cast<scalar_t*>(data + index * stride);
   *ptr += value;
 }
 
 template <typename scalar_t, size_t numel>
-void store_result(char * C10_RESTRICT data, int64_t stride, int64_t index,
+void accumulate_result(char * C10_RESTRICT data, int64_t stride, int64_t index,
     const std::array<scalar_t, numel> &values) {
   auto *base_ptr = data + stride * index;
   for (int64_t k = 0; k < numel; ++k) {
-    store_result(base_ptr, stride, k, values[k]);
+    accumulate_result(base_ptr, stride, k, values[k]);
   }
 }
 
@@ -83,7 +83,7 @@ A simplified recursive implementation would look like this:
       return sum;
     }
 
-    // Recursively sum chunks of larger elements
+    // Recursively sum larger chunks of elements
     const int64_t chunk_size = std::max(divup(n, min_chunk_size), min_chunk_size);
     for (int64_t i = 0; i < n; i += chunk_size) {
       sum += row_sum(data + i, std::min(chunk_size, n - i));
@@ -197,7 +197,7 @@ void vectorized_inner_sum(
     for (int64_t k = 0; k < vec_t::size(); ++k) {
       final_acc += partials[k];
     }
-    store_result(data[0], out_stride, j, final_acc);
+    accumulate_result(data[0], out_stride, j, final_acc);
   }
 }
 
@@ -208,7 +208,7 @@ void scalar_inner_sum(
   for (int64_t j = 0; j < size1; ++j) {
     const auto *row_in = data[1] + j * in_strides[1];
     scalar_t ans = row_sum<scalar_t>(row_in, in_strides[0], size0);
-    store_result(data[0], out_stride, j, ans);
+    accumulate_result(data[0], out_stride, j, ans);
   }
 }
 
@@ -231,7 +231,7 @@ void vectorized_outer_sum(
 
       std::array<scalar_t, vec_t::size()> ans;
       sums[i].store(ans.data());
-      store_result(data[0], out_stride, base_idx, ans);
+      accumulate_result(data[0], out_stride, base_idx, ans);
     }
   }
 
@@ -241,13 +241,13 @@ void vectorized_outer_sum(
 
     std::array<scalar_t, vec_t::size()> ans;
     sums.store(ans.data());
-    store_result(data[0], out_stride, j, ans);
+    accumulate_result(data[0], out_stride, j, ans);
   }
 
   for (; j < size1; ++j) {
     const auto *row_in = data[1] + j * sizeof(scalar_t);
     scalar_t ans = row_sum<scalar_t>(row_in, inner_stride, size0);
-    store_result(data[0], out_stride, j, ans);
+    accumulate_result(data[0], out_stride, j, ans);
   }
 }
 
@@ -262,13 +262,13 @@ void scalar_outer_sum(
     const auto *row_in = data[1] + j * in_strides[1];
     auto sums = multi_row_sum<scalar_t, nrows>(
         row_in, in_strides[0], in_strides[1], size0);
-    store_result(data[0], out_stride, j, sums);
+    accumulate_result(data[0], out_stride, j, sums);
   }
 
   for (; j < size1; ++j) {
     const auto *row_in = data[1] + j * in_strides[1];
     scalar_t ans = row_sum<scalar_t>(row_in, in_strides[0], size0);
-    store_result(data[0], out_stride, j, ans);
+    accumulate_result(data[0], out_stride, j, ans);
   }
 }
 
