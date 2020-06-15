@@ -13,7 +13,6 @@
 #include <c10/core/TensorOptions.h>
 
 #include <torch/custom_class.h>
-#include <torch/torch.h>
 
 torch::jit::class_<LinearPackedParamsBase> register_linear_params();
 
@@ -242,9 +241,7 @@ CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_p
             scalar_elements.push_back(params->transpose());
           }
 #endif
-          at::Tensor scalars = torch::tensor(
-            scalar_elements,
-            torch::dtype(torch::kLong));
+          at::Tensor scalars = at::tensor(scalar_elements, at::kLong);
 
           // Make empty lists
           torch::List<at::Tensor> placeholder_list;
