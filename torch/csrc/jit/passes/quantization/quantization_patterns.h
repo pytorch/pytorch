@@ -204,14 +204,7 @@ bool input_b_is_scalar(
     const std::unordered_map<std::string, Value*>& vmap) {
   const auto& match_vmap = match.values_map;
   auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-  auto b_scalar_value = toIValue(b_scalar);
-  bool b_is_scalar =
-    b_scalar->type()->isSubtypeOf(NumberType::get()) ||
-    (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
-     b_scalar_value &&
-     b_scalar_value->isTensor() &&
-     b_scalar_value->toTensor().dim() == 0);
-  return b_is_scalar;
+  return isScalar(b_scalar);
 }
 
 } // namespace
