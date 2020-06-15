@@ -225,7 +225,7 @@ if _C_for_compiled_check.__file__ is None:
                 install location appears first in `sys.path`.
             ''').strip())
 
-    raise ImportError(textwrap.dedent(f'''
+    raise ImportError(textwrap.dedent('''
         Failed to load PyTorch C extensions:
             The cause of this failure could not be determined.''').strip())
 
