@@ -242,10 +242,10 @@
           cd workspace
           source ./env
           export COMMIT_TIME=\$(git log --max-count=1 --format=%ct || echo 0)
-          CIRCLE_BUILD_NUM="${CIRCLE_BUILD_NUM}" \
-          CIRCLE_SHA1="${CIRCLE_SHA1}" \
-          CIRCLE_BRANCH="${CIRCLE_BRANCH}" \
-          SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}" \
+          export CIRCLE_BUILD_NUM="${CIRCLE_BUILD_NUM}"
+          export CIRCLE_SHA1="${CIRCLE_SHA1}"
+          export CIRCLE_BRANCH="${CIRCLE_BRANCH}"
+          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           python .circleci/scripts/upload_binary_size_to_scuba.py android
           # ==============================  End Docker  ==============================
           EOL
@@ -343,10 +343,10 @@
           cd workspace
           source ./env
           export COMMIT_TIME=\$(git log --max-count=1 --format=%ct || echo 0)
-          CIRCLE_BUILD_NUM="${CIRCLE_BUILD_NUM}" \
-          CIRCLE_SHA1="${CIRCLE_SHA1}" \
-          CIRCLE_BRANCH="${CIRCLE_BRANCH}" \
-          SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}" \
+          export CIRCLE_BUILD_NUM="${CIRCLE_BUILD_NUM}"
+          export CIRCLE_SHA1="${CIRCLE_SHA1}"
+          export CIRCLE_BRANCH="${CIRCLE_BRANCH}"
+          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           python .circleci/scripts/upload_binary_size_to_scuba.py android
           # ==============================  End Docker  ==============================
           EOL
