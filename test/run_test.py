@@ -68,6 +68,7 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'test_openmp',
     'distributed/nn/jit/test_instantiator',
     'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
