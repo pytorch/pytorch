@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 
+#include <limits>
+
 #include <fmt/format.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -66,6 +68,8 @@ std::unique_ptr<TransportRegistration> makeUvTransport() {
       TransportRegistration{std::move(context), 1, std::move(address)});
 }
 
+// The UV transport is implemented using standard TCP connections. It leverages
+// libuv (https://github.com/libuv/libuv) in order to be cross-platform.
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
 #ifdef TP_ENABLE_SHM
@@ -77,6 +81,10 @@ std::unique_ptr<TransportRegistration> makeShmTransport() {
       TransportRegistration{std::move(context), 0, std::move(address)});
 }
 
+// The SHM implements connections using ringbuffers residing in anonymous shared
+// memory (plus UNIX domain sockets to bootstrap the connection and exchange
+// file descriptors). It is Linux-only due to some advanced features (O_TMPFILE,
+// eventfd, ...).
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
 
 #endif
@@ -87,6 +95,8 @@ std::unique_ptr<ChannelRegistration> makeBasicChannel() {
       ChannelRegistration{std::move(context), 1});
 }
 
+// The basic channel is just a straightforward adapter wrapper that allows any
+// transport to be used as a channel.
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel);
 
 #ifdef TP_ENABLE_CMA
@@ -97,6 +107,11 @@ std::unique_ptr<ChannelRegistration> makeCmaChannel() {
       ChannelRegistration{std::move(context), 0});
 }
 
+// The CMA channel uses the Linux cross-memory attach syscalls (process_vm_readv
+// and _writev), which allow one process to access the private memory of another
+// process (as long as they belong to the same user and other security
+// constraints are satisfied). It does, more or less, what GDB does when it's
+// attached to a running process.
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cma, makeCmaChannel);
 
 #endif
@@ -186,13 +201,13 @@ void TensorPipeAgent::startImpl() {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is starting";
 
   std::vector<std::string> addresses;
-  int lowestPriority = -1;
+  int lowestPriority = std::numeric_limits<int>::max();
   std::string lowestPriorityTransport;
 
   for (auto& key : TensorPipeTransportRegistry()->Keys()) {
     std::unique_ptr<TransportRegistration> reg =
         TensorPipeTransportRegistry()->Create(key);
-    if (reg->priority > lowestPriority) {
+    if (reg->priority < lowestPriority) {
       lowestPriority = reg->priority;
       lowestPriorityTransport = key;
     }
