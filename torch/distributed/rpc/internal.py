@@ -8,7 +8,8 @@ from enum import Enum
 
 import torch
 import torch.distributed as dist
-import torch.distributed.rpc as rpc
+
+from .api import get_worker_info
 
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
@@ -155,9 +156,7 @@ def _run_function(python_udf):
     except Exception as e:
         # except str = exception info + traceback string
         except_str = (
-            f"On {rpc.api.get_worker_info()}:\n"
-            f"{repr(e)}\n"
-            f"{traceback.format_exc()}"
+            f"On {get_worker_info()}:\n" f"{repr(e)}\n" f"{traceback.format_exc()}"
         )
         result = RemoteException(except_str, type(e))
     return result
