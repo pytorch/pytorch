@@ -106,12 +106,10 @@ void UserRRef::tryDel() {
       RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
       deletedOnOwner_ = true;
     } catch (const std::exception& ex) {
-      LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
-                 << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+      LOG(ERROR) << "Error occurred when deleting" << *this << " : "
                  << ex.what();
     } catch (...) {
-      LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
-                 << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+      LOG(ERROR) << "Error occurred when deleting" << *this << " : "
                  << "unknown error";
     }
   }
@@ -133,23 +131,17 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   // see Note [Best-Effort Check on Deleted UserRRefs]
   TORCH_CHECK(
       !deletedOnOwner_,
-      "User RRef with RRefId=",
-      rrefId(),
-      " and ForkId=",
-      forkId(),
+      *this,
       " has been deleted. Cannot call to_here() on it after deletion.");
   TORCH_CHECK(
       !type_->is_module(),
-      "User RRef with RRefId=",
-      rrefId(),
-      " and ForkId=",
-      forkId(),
+      *this,
       " is an RRef to a ScriptModule. "
       "It can't be sent through RPC "
       "from owner, ",
-      ownerName(),
+      ownerWorkerInfo(),
       ", to user, ",
-      RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+      RpcAgent::getCurrentRpcAgent()->getWorkerInfo(),
       ".");
 
   auto agent = RpcAgent::getCurrentRpcAgent();
@@ -218,10 +210,7 @@ RRefForkData UserRRef::fork() const {
   //    worth the complexity.
   TORCH_CHECK(
       !deletedOnOwner_,
-      "User RRef with RRefId=",
-      rrefId(),
-      " and ForkId=",
-      forkId(),
+      *this,
       " has been deleted. Cannot call fork an UserRRef after deletion.");
   return RRef::fork();
 }
@@ -254,6 +243,18 @@ void OwnerRRef::setValue(IValue&& value) {
 
 void OwnerRRef::setError(const std::string& error) {
   future_->setErrorIfNeeded(error);
+}
+
+std::ostream& operator<<(std::ostream& os, const RRef& rref) {
+  if (rref.isOwner()) {
+    return os << "OwnerRRef("
+              << "rref_id=" << rref.rrefId() << ")";
+  } else {
+    return os << "UserRRef("
+              << "rref_id=" << rref.rrefId()
+              << ", fork_id=" << static_cast<const UserRRef*>(&rref)->forkId()
+              << ")";
+  }
 }
 
 } // namespace rpc
