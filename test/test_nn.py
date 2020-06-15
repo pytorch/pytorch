@@ -11593,6 +11593,65 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
+    def test_global_and_local_hooks_order(self):
+        module = nn.Sigmoid()
+
+        global_forward_pre_called = False
+        local_forward_pre_called = False
+        global_forward_called = False
+        local_forward_called = False
+        global_backward_called = False
+        local_backward_called = False
+
+        def global_forward_pre_hook(m, input):
+            nonlocal global_forward_pre_called
+            self.assertTrue(not local_forward_pre_called)
+            global_forward_pre_called = True
+            return input
+
+        def local_forward_pre_hook(m, input):
+            nonlocal local_forward_pre_called
+            self.assertTrue(global_forward_pre_called)
+            local_forward_pre_called = True
+            return input
+
+        def global_forward_hook(m, input, output):
+            nonlocal global_forward_called
+            self.assertTrue(not local_forward_called)
+            global_forward_called = True
+            return output
+
+        def local_forward_hook(m, input, output):
+            nonlocal local_forward_called
+            self.assertTrue(global_forward_called)
+            local_forward_called = True
+            return output
+
+        def global_backward_hook(m, input, output):
+            nonlocal global_backward_called
+            self.assertTrue(not local_backward_called)
+            global_backward_called = True
+            return input
+
+        def local_backward_hook(m, input, output):
+            nonlocal local_backward_called
+            self.assertTrue(global_backward_called)
+            local_backward_called = True
+            return input
+
+        input = torch.randn(5, 5, requires_grad=True)
+        nn.Module.register_global_forward_pre_hook(global_forward_pre_hook)
+        module.register_forward_pre_hook(local_forward_pre_hook)
+        nn.Module.register_global_forward_hook(global_forward_hook)
+        module.register_forward_hook(local_forward_hook)
+        nn.Module.register_global_backward_hook(global_backward_hook)
+        module.register_backward_hook(local_backward_hook)
+
+        output = module(input)
+        self.assertTrue(local_forward_called and local_forward_pre_called and global_forward_called and global_forward_pre_called)
+
+        output.backward(torch.ones(5, 5), retain_graph=True)
+        self.assertTrue(local_backward_called and global_backward_called)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 

@@ -501,10 +501,14 @@ class Module:
         return self._apply(convert)
 
     @classmethod
-    def register_global_backward_hook(cls, hook):
+    def register_global_backward_hook(
+        cls, hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+    ) -> RemovableHandle:
         r"""Registers a backward hook common to all the modules.
 
         .. warning ::
+            This adds global state to the `nn.Module` class
+            and it is only intended for debugging/profiling purposes. 
 
             The current implementation will not have the presented behavior
             for complex :class:`Module` that perform many operations.
@@ -525,7 +529,7 @@ class Module:
         computations. :attr:`grad_input` will only correspond to the inputs given
         as positional arguments.
 
-        Global hooks is calles after hooks registered with `register_backward_hook`
+        Global hooks is called after hooks registered with `register_backward_hook`
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -574,8 +578,13 @@ class Module:
         return handle
 
     @classmethod
-    def register_global_forward_pre_hook(cls, hook):
+    def register_global_forward_pre_hook(cls, hook: Callable[..., None]) -> RemovableHandle:
         r"""Registers a forward pre-hook common to all modules.
+
+        .. warning ::
+
+            This adds global state to the `nn.Module` class
+            and it is only intended for debugging/profiling purposes. 
 
         The hook will be called every time before :func:`forward` is invoked.
         It should have the following signature::
@@ -624,8 +633,13 @@ class Module:
         return handle
 
     @classmethod
-    def register_global_forward_hook(cls, hook):
+    def register_global_forward_hook(cls, hook: Callable[..., None]) -> RemovableHandle:
         r"""Registers a global forward hook for all the modules
+
+        .. warning ::
+
+            This adds global state to the `nn.Module` class
+            and it is only intended for debugging/profiling purposes. 
 
         The hook will be called every time after :func:`forward` has computed an output.
         It should have the following signature::
@@ -674,7 +688,7 @@ class Module:
         return handle
 
     @classmethod
-    def clear_global_hooks(cls):
+    def _clear_global_hooks(cls):
         r"""Clears all the global hooks registered for this module.
 
         All the hooks registered with :func:`register_global_forward_hook`,
@@ -705,13 +719,9 @@ class Module:
         return result
 
     def _call_impl(self, *input, **kwargs):
-        for hook in self._global_forward_pre_hooks.values():
-            result = hook(self, input)
-            if result is not None:
-                if not isinstance(result, tuple):
-                    result = (result,)
-                input = result
-        for hook in self._forward_pre_hooks.values():
+        for hook in itertools.chain(
+                self._global_forward_pre_hooks.values(),
+                self._forward_pre_hooks.values()):
             result = hook(self, input)
             if result is not None:
                 if not isinstance(result, tuple):
@@ -721,11 +731,9 @@ class Module:
             result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)
-        for hook in self._forward_hooks.values():
-            hook_result = hook(self, input, result)
-            if hook_result is not None:
-                result = hook_result
-        for hook in self._global_forward_hooks.values():
+        for hook in itertools.chain(
+                self._global_forward_hooks.values(),
+                self._forward_hooks.values()):
             hook_result = hook(self, input, result)
             if hook_result is not None:
                 result = hook_result
@@ -738,11 +746,9 @@ class Module:
                     var = var[0]
             grad_fn = var.grad_fn
             if grad_fn is not None:
-                for hook in self._global_backward_hooks.values():
-                    wrapper = functools.partial(hook, self)
-                    functools.update_wrapper(wrapper, hook)
-                    grad_fn.register_hook(wrapper)
-                for hook in self._backward_hooks.values():
+                for hook in itertools.chain(
+                        self._global_backward_hooks.values(),
+                        self._backward_hooks.values()):
                     wrapper = functools.partial(hook, self)
                     functools.update_wrapper(wrapper, hook)
                     grad_fn.register_hook(wrapper)
