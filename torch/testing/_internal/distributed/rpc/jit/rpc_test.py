@@ -1,5 +1,5 @@
 import io
-import typing
+import time
 from typing import Dict, Tuple
 
 import torch
