@@ -289,8 +289,8 @@ class InsertObserversHelper {
       std::unordered_set<Value*> graph_observed_values =
           std::unordered_set<Value*>());
 
-  void setDynamicFlag(bool is_dynamic) {
-    is_dynamic_ = is_dynamic;
+  void setQuantType(QuantType quant_type) {
+    quant_type_ = quant_type;
   }
 
  private:
@@ -305,6 +305,10 @@ class InsertObserversHelper {
       bool is_entry_point = false,
       bool is_user_defined_function = false);
 
+  // Record v as "ready for observation" by storing it in values_to_observe.
+  // If v is a part of a delayed observation pattern, record v's descendant
+  // (per delay rules) instead. The observers are inserted at a later stage
+  // by reading the state created by this function.
   void recordObserved(
       Value* v,
       const Module& observer_module,
@@ -341,20 +345,30 @@ class InsertObserversHelper {
       const Module& observer_module,
       NameModuleVector& observer_name_and_modules);
 
+  // Uses the state created by fillBoundaryValueMap and fillValueObserverMap
+  // to return an observer configured for a value, if it is needed.
   c10::optional<Module> getObserverFor(Value* v);
 
+  // Uses the state created by fillPassThroughValueMap to propage observed
+  // property which should pass through from inputs to outputs.
   void propagateObservedProperty(
       Value* output,
       std::unordered_set<Value*>& block_observed_values);
 
-  bool shouldPropagateQuant(
+  // for cat/add/mul we will only observe their output if their input
+  // are observed
+  bool shouldObserve(
       Node* n,
       const std::unordered_set<Value*>& block_observed_values) {
     if (isPropagateQuantSingleInputOp(n)) {
       return isObserved(n->input(0), block_observed_values);
     } else if (isPropagateQuantBinaryOp(n)) {
-      // either both of the tensor inputs are observed, or the first tensor
-      // tensor input is observed and second input is scalar
+      // This checks both of the input should be tensor and observed.
+      // There is one check that we didn't do here, which is
+      // !isScalar(isObserved(n->input(1), block_observed_values)
+      // to make sure input 1 is not a scalar, because scalar tensor input
+      // for add/mul won't be observed with current rule, we can omit
+      // this check here
       return isObserved(n->input(0), block_observed_values) &&
           isObserved(n->input(1), block_observed_values);
     }
@@ -363,6 +377,8 @@ class InsertObserversHelper {
 
   void delayObservingValuesInPattern(Graph& graph, const PatternInfo& pattern);
 
+  // Find and mark known patterns such as conv-relu (and others) where
+  // we should not insert observers in the middle of the pattern.
   void addValuesToDelayObservation(
       const Module& module,
       const std::string& method_name);
@@ -372,14 +388,27 @@ class InsertObserversHelper {
   void fillPassThroughValueMap(const std::shared_ptr<Graph>& graph);
 
   const ModuleQConfigMap& module_qconfig_map_;
+
   // Values we want to delay observation, used to delay the observation for
   // values in the middle of the ops that are supposed to be fused, e.g.
   // the output value of conv in the conv - relu pattern
   // the key is the intermediate output, e.g. output of conv
   // the value is the value we want to observe, e.g. output of relu
+  //
+  // example, assuming we want to delay conv-relu:
+  //   %x1 = conv(%x0)
+  //   %x2 = relu(%x1)
+  //
+  // delay_observation_map_ = {
+  //   %x1: %x2,
+  // }
   std::unordered_map<Value*, Value*> delay_observation_map_;
+
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
+
+  // Map of value to observer module configured for that value.
   std::unordered_map<Value*, Module> observer_for_value_;
+
   // Map from values from callsite into the values in the CallMethod graph
   // key of the map is the value from caller graph, and the value of the map
   // is the list of values in the callee graph (the graph
@@ -387,13 +416,40 @@ class InsertObserversHelper {
   // the reason it is a set is that a value in the caller graph
   // can both correspond to the output of one callee graph and input of another
   // callee graph.
+  //
+  // example:
+  //   // top level module
+  //   %x1 = conv(%x0)
+  //   %x2 = prim::CallFunction(%foo, %x1)
+  //
+  //   // graph of %foo
+  //   %y2 = conv(%y1)
+  //   return %y2
+  //
+  // boundary_value_map = {
+  //   // current module's output values to corresponding return values from
+  //   subgraph %x2: %y2,
+  //   // current module's input values to corresponding input value to subgraph
+  //   %x1: %y1,
+  // }
   std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
+
   std::unordered_set<Value*> observed_values_;
+
   // This is used for the observed values to pass through the ops like flatten,
   // so that output value of flatten does not need to be observed
   // key is the output of the op, value is a vector of values that need
   // to be observed in order to pass the observed property to the output
+  //
+  // example:
+  //   %x1 = flatten(%x0) // pass_through
+  //   %x2 = conv(%x1) // not pass_through
+  //
+  // pass_through_value_map_ = {
+  //   %x1: [%x0],
+  // }
   std::unordered_map<Value*, std::vector<Value*>> pass_through_value_map_;
+
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
   // record the current unique id used to avoid incrementing from 0
@@ -405,8 +461,8 @@ class InsertObserversHelper {
   // want to add to the module instance that has the block
   std::unordered_map<Block*, NameModuleVector> block_observer_map_;
 
-  // Is dynamic quantization enabled for the observer pass.
-  bool is_dynamic_ = false;
+  // Type of quantization for this pass.
+  QuantType quant_type_ = QuantType::STATIC;
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
@@ -426,17 +482,21 @@ graph(%self, %input, %conv, %relu):
     return (%second_output) )",
       {is_conv1d_module, is_relu_module});
 
-  const PatternInfo nn_conv1d_aten_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv1d_aten_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu(%first_output)
-    return (%second_output) )", {is_conv1d_module});
+    return (%second_output) )",
+      {is_conv1d_module});
 
-  const PatternInfo nn_conv1d_aten_relu_ = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv1d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu_(%first_output)
-    return (%second_output) )", {is_conv1d_module});
+    return (%second_output) )",
+      {is_conv1d_module});
 
   const PatternInfo nn_conv2d_f_relu = PatternInfo::parse_from_str(
       R"(
@@ -454,17 +514,21 @@ graph(%self, %input, %conv, %relu):
     return (%second_output) )",
       {is_conv2d_module, is_relu_module});
 
-  const PatternInfo nn_conv2d_aten_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv2d_aten_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu(%first_output)
-    return (%second_output) )", {is_conv2d_module});
+    return (%second_output) )",
+      {is_conv2d_module});
 
-  const PatternInfo nn_conv2d_aten_relu_ = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv2d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu_(%first_output)
-    return (%second_output) )", {is_conv2d_module});
+    return (%second_output) )",
+      {is_conv2d_module});
 
   const PatternInfo nn_conv3d_f_relu = PatternInfo::parse_from_str(
       R"(
@@ -482,17 +546,21 @@ graph(%self, %input, %conv, %relu):
     return (%second_output) )",
       {is_conv3d_module, is_relu_module});
 
-  const PatternInfo nn_conv3d_aten_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv3d_aten_relu = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %conv, %input):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu(%first_output)
-    return (%second_output) )", {is_conv3d_module});
+    return (%second_output) )",
+      {is_conv3d_module});
 
-  const PatternInfo nn_conv3d_aten_relu_ = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_conv3d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
 graph(%self, %input, %conv):
     %first_output = prim::CallMethod[name="forward"](%conv, %input)
     %second_output = aten::relu_(%first_output)
-    return (%second_output) )", {is_conv3d_module});
+    return (%second_output) )",
+      {is_conv3d_module});
 
   const PatternInfo add_nn_relu = PatternInfo::parse_from_str(
       R"(
@@ -550,49 +618,92 @@ graph(%self, %a, %b, %alpha):
      %second_output = aten::relu_(%first_output)
      return (%second_output) )");
 
-  const PatternInfo nn_bn_nn_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %input):
-    %first_module = match::module[name="BatchNorm2d"](%self)
-    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
-    %second_module = match::module[name="ReLU"](%self)
-    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
-    return (%second_output) )");
+  const PatternInfo nn_bn_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %batchnorm, %relu):
+    %first_output = prim::CallMethod[name="forward"](%batchnorm, %input)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_batchnorm2d_module, is_relu_module});
 
-  // TODO: Make fusion support BN+Functional Relu with inplace.
-  const PatternInfo nn_bn_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %input, %inplace):
-    %relu = prim::Constant[name="relu"]()
-    %first_module = match::module[name="BatchNorm2d"](%self)
-    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+  const PatternInfo nn_bn_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %batchnorm, %relu, %inplace):
+    %first_output = prim::CallMethod[name="forward"](%batchnorm, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )");
+    return (%second_output) )",
+      {is_batchnorm2d_module, is_functional_relu});
 
-  const PatternInfo mul_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo nn_bn_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %batchnorm):
+    %first_output = prim::CallMethod[name="forward"](%batchnorm, %input)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )",
+      {is_batchnorm2d_module});
+
+  const PatternInfo nn_bn_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %batchnorm):
+    %first_output = prim::CallMethod[name="forward"](%batchnorm, %input)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )",
+      {is_batchnorm2d_module});
+
+  const PatternInfo mul_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %a, %b, %relu):
+     %first_output = aten::mul(%a, %b)
+     %second_output = prim::CallMethod[name="forward"](%relu, %first_output)
+     return (%second_output) )",
+      {is_relu_module});
+
+  const PatternInfo mul_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %a, %b, %relu, %inplace):
+     %first_output = aten::mul(%a, %b)
+     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )",
+      {is_functional_relu});
+
+  const PatternInfo inplace_mul_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %a, %b, %relu):
+     %first_output = aten::mul_(%a, %b)
+     %second_output = prim::CallMethod[name="forward"](%relu, %first_output)
+     return (%second_output) )",
+      {is_relu_module});
+
+  const PatternInfo inplace_mul_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %a, %b, %relu, %inplace):
+     %first_output = aten::mul_(%a, %b)
+     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )",
+      {is_functional_relu});
+
+  const PatternInfo mul_aten_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b):
      %first_output = aten::mul(%a, %b)
-     %second_module = match::module[name="ReLU"](%self)
-     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     %second_output = aten::relu(%first_output)
      return (%second_output) )");
 
-  const PatternInfo mul_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b, %inplace):
+  const PatternInfo mul_aten_relu_ = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
      %first_output = aten::mul(%a, %b)
-     %relu = prim::Constant[name="relu"]()
-     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     %second_output = aten::relu_(%first_output)
      return (%second_output) )");
 
-  const PatternInfo inplace_mul_nn_relu = PatternInfo::parse_from_str(R"(
+  const PatternInfo inplace_mul_aten_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %a, %b):
      %first_output = aten::mul_(%a, %b)
-     %second_module = match::module[name="ReLU"](%self)
-     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     %second_output = aten::relu(%first_output)
      return (%second_output) )");
 
-  const PatternInfo inplace_mul_f_relu = PatternInfo::parse_from_str(R"(
-graph(%self, %a, %b, %inplace):
+  const PatternInfo inplace_mul_aten_relu_ = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
      %first_output = aten::mul_(%a, %b)
-     %relu = prim::Constant[name="relu"]()
-     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     %second_output = aten::relu_(%first_output)
      return (%second_output) )");
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
@@ -608,8 +719,11 @@ graph(%self, %a, %b, %inplace):
           add_aten_relu,         add_aten_relu_,
           inplace_add_aten_relu, inplace_add_aten_relu_,
           nn_bn_nn_relu,         nn_bn_f_relu,
+          nn_bn_aten_relu,       nn_bn_aten_relu_,
           mul_nn_relu,           mul_f_relu,
           inplace_mul_nn_relu,   inplace_mul_f_relu,
+          mul_aten_relu,         mul_aten_relu_,
+          inplace_mul_aten_relu, inplace_mul_aten_relu_,
   };
 };
 
@@ -823,6 +937,8 @@ void InsertObserversHelper::preprocess(
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
 
+  // fill out various internal state which will be later used in
+  // insertObservers to insert the correct observers
   addValuesToDelayObservation(module, method_name);
   fillValueObserverMap(module, method_name);
   fillBoundaryValueMap(module, method_name);
@@ -837,7 +953,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // For dynamic quantization we only insert observers at the input
   // of the quantizable function.
-  if (!is_dynamic_) {
+  if (quant_type_ == QuantType::STATIC) {
     // Check whether producer is quantizable
     if (nodeQuantizable(v->node()) || isPropagateQuantNode(v->node())) {
       return true;
@@ -845,7 +961,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether node input value is quantizable
   for (const auto& use : v->uses()) {
-    if (useQuantizable(use, is_dynamic_)) {
+    if (useQuantizable(use, quant_type_)) {
       return true;
     }
   }
@@ -979,7 +1095,14 @@ InsertObserversHelper::insertObserversFor(
     }
 
     for (auto* v : block->outputs()) {
-      block_output_observers.push_back(getObserverFor(v));
+      // we need explictly skip the values that are already observed
+      // this might happen in subblocks for `if` since
+      // these subblock has access to all values before the `if` node
+      if (!isObserved(v, block_observed_values)) {
+        block_output_observers.emplace_back(getObserverFor(v));
+      } else {
+        block_output_observers.emplace_back(c10::nullopt);
+      }
     }
   }
 
@@ -1082,8 +1205,8 @@ InsertObserversHelper::insertObserversFor(
           }
         }
       } else if (n->kind() == prim::If) {
-        std::vector<size_t> aggregated_observed_outputs;
-        std::vector<c10::optional<script::Module>> aggregated_output_observers;
+        // a vector recoding whether each output is observed or not
+        std::vector<bool> aggregated_output_observe_state;
         for (Block* subblock : n->blocks()) {
           if (alwaysRaisesException(subblock)) {
             continue;
@@ -1092,39 +1215,46 @@ InsertObserversHelper::insertObserversFor(
           // so subblock_observed_values == block_observed_values
           auto info_from_subblock =
               insertObserversFor(subblock, module, block_observed_values);
+          // subblock for prim::If doesn't have inputs
           auto output_observers = std::get<1>(info_from_subblock);
           auto subblock_observed_outputs = std::get<2>(info_from_subblock);
-          // subblock for prim::If doesn't have inputs
-          if (aggregated_observed_outputs.size() > 0) {
-            TORCH_CHECK(
-                aggregated_observed_outputs == subblock_observed_outputs,
-                "quantization doesn't work for the case where branches "
-                "of `if` doesn't both return quantized/non-quantized "
-                "values");
-          } else {
-            for (auto idx : subblock_observed_outputs) {
-              block_observed_values.insert(n->output(idx));
+
+          // We'll insert output observer for each subblock, and in the end
+          // we will check if output of subblocks are quantized consistently
+          for (size_t i = 0; i < subblock->outputs().size(); ++i) {
+            Value* output = subblock->outputs()[i];
+            if (output_observers[i] && !inputs_outputs.count(output) &&
+                !isObserved(output, block_observed_values)) {
+              recordObserved(
+                  output,
+                  *output_observers[i],
+                  values_to_observe,
+                  block_observed_values);
             }
-            aggregated_observed_outputs = subblock_observed_outputs;
           }
-          if (aggregated_output_observers.size() > 0) {
+          for (auto idx : subblock_observed_outputs) {
+            block_observed_values.insert(subblock->outputs()[idx]);
+          }
+          std::vector<bool> subblock_output_observe_state;
+          for (size_t i = 0; i < subblock->outputs().size(); ++i) {
+            Value* output = subblock->outputs()[i];
+            subblock_output_observe_state.push_back(
+                isObserved(output, block_observed_values));
+          }
+          if (aggregated_output_observe_state.size() > 0) {
             TORCH_CHECK(
-                aggregated_output_observers == output_observers,
-                "quantization doesn't work for the case where branches "
-                "of `if` doesn't both return values quantized the same "
-                "way");
+                aggregated_output_observe_state ==
+                    subblock_output_observe_state,
+                "branches for `if` should return values that are observed "
+                "consistently");
           } else {
-            for (auto i = 0; i < n->outputs().size(); ++i) {
-              if (output_observers[i] && !inputs_outputs.count(n->output(i)) &&
-                  !isObserved(n->output(i), block_observed_values)) {
-                recordObserved(
-                    n->output(i),
-                    *output_observers[i],
-                    values_to_observe,
-                    block_observed_values);
-              }
-            }
-            aggregated_output_observers = output_observers;
+            aggregated_output_observe_state = subblock_output_observe_state;
+          }
+        }
+        // mark the output of if as observed
+        for (size_t i = 0; i < n->outputs().size(); ++i) {
+          if (aggregated_output_observe_state[i]) {
+            block_observed_values.insert(n->output(i));
           }
         }
       }
@@ -1135,7 +1265,7 @@ InsertObserversHelper::insertObserversFor(
           // If the node is one of the propagate quant node, e.g.
           // aten::cat, we should observe its output only
           // if the input of the node is observed
-          if (observer_opt && shouldPropagateQuant(n, block_observed_values)) {
+          if (observer_opt && shouldObserve(n, block_observed_values)) {
             recordObserved(
                 v, *observer_opt, values_to_observe, block_observed_values);
           }
@@ -1192,7 +1322,7 @@ Module InsertObservers(
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
     bool inplace,
-    bool is_dynamic) {
+    QuantType quant_type) {
   ModuleQConfigMap map_before_clone;
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
@@ -1202,9 +1332,9 @@ Module InsertObservers(
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
-  helper.setDynamicFlag(is_dynamic);
+  helper.setQuantType(quant_type);
   helper.preprocess(module, method_name);
-  helper.insertObservers(module, method_name, true);
+  helper.insertObservers(module, method_name, /* is_entry_point */ true);
   return module;
 }
 } // namespace jit

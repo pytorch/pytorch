@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 
 #include <functional>
 #include <regex>
@@ -36,6 +37,9 @@ c10::optional<Use> getClampScalarInputUse(Value* v);
 // `v` is also observed/quantized, since we can derive
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
+
+// Check if a value in the graph is a Scalar value
+TORCH_API bool isScalar(Value* v);
 
 // Check if value is the input of the graph
 TORCH_API bool hitGraphInput(Value* value);
@@ -74,11 +78,13 @@ TORCH_API bool userDefinedCallFunction(Node* n);
 TORCH_API bool hasScalarInput(Node* n);
 
 // Check if a node is quantizable
-TORCH_API bool nodeQuantizable(Node* n, bool is_dynamic = false);
+TORCH_API bool nodeQuantizable(
+    Node* n,
+    QuantType quant_type = QuantType::STATIC);
 
 // Check if a use of the value is quantizable, this depends on
 // both the use node and the offset
-TORCH_API bool useQuantizable(const Use& use, bool is_dynamic);
+TORCH_API bool useQuantizable(const Use& use, QuantType quant_type);
 
 // Given a CallFunction node, extract the graph of the called function
 TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
@@ -101,7 +107,7 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // ==================== filter functions for matches ==============
-// filter to check if the alpha argument of aten::add is constant 1
+// filter to check if the %alpha argument of aten::add is constant 1
 bool aten_add_alpha_is_one(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
@@ -126,6 +132,10 @@ bool is_conv2d_module(
     const std::unordered_map<std::string, Value*>& vmap);
 
 bool is_conv3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_batchnorm2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
