@@ -184,7 +184,7 @@ void unpackQuantizedWeightsHelper(
         auto scalars_tensor = ser_tup->elements()[scalars_idx].toTensor();
 
         torch::List<int64_t> stride_int, padding_int, dilation_int,
-                             output_padding_int;
+            output_padding_int;
         int64_t groups_int;
         uint8_t transpose = 0;
 
@@ -217,7 +217,8 @@ void unpackQuantizedWeightsHelper(
           }
           groups_int = scalars_tensor[1].item<int64_t>();
           switch (version) {
-            case 2: break;
+            case 2:
+              break;
             case 3: {
               for (; idx < 4 * spatial_dims; ++idx) {
                 at::Tensor p = params1_ivalue[idx].toTensor();
