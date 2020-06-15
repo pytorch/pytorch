@@ -156,7 +156,8 @@ def _run_function(python_udf):
     except Exception as e:
         # except str = exception info + traceback string
         except_str = (
-            f"On {_get_current_rpc_agent().get_worker_info()}:\n" f"{repr(e)}\n" f"{traceback.format_exc()}"
+            f"On {_get_current_rpc_agent().get_worker_info()}:\n"
+            f"{repr(e)}\n{traceback.format_exc()}"
         )
         result = RemoteException(except_str, type(e))
     return result
