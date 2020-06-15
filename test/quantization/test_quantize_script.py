@@ -2306,7 +2306,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = F.adaptive_avg_pool2d(x, (1, 1))
                 x = F.adaptive_avg_pool3d(x, (1, 1, 1))
                 x = torch.mean(x)
+                x = torch.mean(x, [2, 3], False)
                 x = x.mean()
+                x = x.mean([2, 3], True)
                 # interpolate node will introduce 3 quantize_per_tensor ops
                 x = F.interpolate(x, 4, mode='nearest')  # interpolate node
                 x = F.upsample(x, (32, 32))  # interpolate node
@@ -2358,7 +2360,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         # mapping from number of quant for the op to the number of these ops
         # for example, for `3` in the key means for this type of op
         # we'll have 3 quantize_per_tensor
-        num_op_by_num_quant = {1: 33, 2: 2, 3: 3}
+        num_op_by_num_quant = {1: 35, 2: 2, 3: 3}
         num_quantize_per_tensor = 1  # for output
         for num_quant, num_op in num_op_by_num_quant.items():
             num_quantize_per_tensor += num_op * num_quant
