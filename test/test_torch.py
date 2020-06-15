@@ -7157,6 +7157,41 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
             self.assertEqual(res1, res2)
 
+    # This test ensures that all CUDA implementations of operations that use the
+    # non-deterministic `atomicAdd` function raise an error when
+    # `torch.get_deterministic() == True`
+    @onlyCUDA
+    def test_not_deterministic_alert_atomicAdd(self, device):
+        deterministic_restore = torch.is_deterministic()
+
+        test_cases = [
+            [
+                torch.nn.functional.adaptive_avg_pool3d,
+                None,
+                [torch.ones(10, 1, 1, 1, 1, device=device, requires_grad=True), (10, 1, 1)],
+                {},
+                'adaptive_avg_pool3d_backward_cuda',
+                [torch.ones(10, 1, 10, 1, 1, device=device)],
+                {},
+            ]
+        ]
+        common_msg = ' does not have a deterministic implementation, but you set'
+
+        for fn, fwd_msg, fwd_args, fwd_kwargs, bwd_msg, bwd_args, bwd_kwargs in test_cases:
+            if fwd_msg:
+                torch.set_deterministic(True)
+                with self.assertRaisesRegex(RuntimeError, fwd_msg + common_msg):
+                    fn(*fwd_args, **fwd_kwargs)
+
+            if bwd_msg:
+                torch.set_deterministic(False)
+                result = fn(*fwd_args, **fwd_kwargs)
+                torch.set_deterministic(True)
+                with self.assertRaisesRegex(RuntimeError, bwd_msg + common_msg):
+                    result.backward(*bwd_args, **bwd_kwargs)
+
+        torch.set_deterministic(deterministic_restore)
+
     @onlyCUDA
     def test_cat_preserve_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8), device=device)
