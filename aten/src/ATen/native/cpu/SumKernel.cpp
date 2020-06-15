@@ -58,7 +58,39 @@ int64_t ceil_log2(int64_t x) {
   return static_cast<int64_t>(llvm::findLastSet(ux - 1)) + 1;
 }
 
-// Simultaneously sum over n rows at once
+/** Simultaneously sum over n rows at once
+
+This algorithm calculates the sum without loss of precision over large axes. It
+does this by chunking the sum into groups of 16 or more elements. The sums of
+these chunks are also summed in chunks and so on until there is just a single sum
+value remaining. This means only numbers of a similar order of magnitude are
+added together, thus minimising rounding errors.
+
+This is done in a single linear pass over the data and with O(1) extra storage.
+A simplified recursive implementation would look like this:
+
+  scalar_t row_sum(const scalar_t * data, int64_t n) {
+    // Note, in practice the chunk size can increase with n
+    // This allows the recursion depth to be limited to O(1).
+    constexpr int64_t min_chunk_size = 16;
+
+    scalar_t sum = 0;
+    if (n <= min_chunk_size) {
+      // Recursive base case, calculate a simple running sum
+      for (int64_t i = 0; i < n; ++i) {
+        sum += data[i];
+      }
+      return sum;
+    }
+
+    // Recursively sum chunks of larger elements
+    const int64_t chunk_size = std::max(divup(n, min_chunk_size), min_chunk_size);
+    for (int64_t i = 0; i < n; i += chunk_size) {
+      sum += row_sum(data + i, std::min(chunk_size, n - i));
+    }
+    return sum;
+  }
+*/
 template <typename scalar_t, int64_t nrows>
 std::array<scalar_t, nrows> multi_row_sum(
     const char * C10_RESTRICT in_data,
