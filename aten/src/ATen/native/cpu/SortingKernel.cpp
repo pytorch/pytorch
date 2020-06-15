@@ -31,6 +31,10 @@ void _dim_apply(
     const std::string& method_name,
     const func_t& f) {
   dim = maybe_wrap_dim(dim, values.dim());
+  TORCH_CHECK(
+    dim >= 0 && dim < values.dim(),
+    method_name, "(): invalid dimension parameter ", dim
+  );
 
   auto iter = TensorIterator();
   iter.check_all_same_dtype(false);
