@@ -19,6 +19,11 @@ class DistAutogradTest : public ::testing::Test {
   static void SetUpTestCase() {
     autogradContainer_ = &DistAutogradContainer::init(0);
   }
+
+  virtual void TearDown() {
+    autogradContainer_->releaseContext(autogradContainer_->currentContext()->contextId());
+  }
+  
   static DistAutogradContainer* autogradContainer_;
 };
 
@@ -52,7 +57,6 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   // grad.
   send_function->setGrads({in1, torch::autograd::Variable()});
   EXPECT_THROW(send_function->apply({}), c10::Error);
-  autogradContainer_->releaseContext(autogradContext->contextId());
 }
 
 TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
@@ -73,7 +77,6 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());
-  autogradContainer_->releaseContext(contextId);
 }
 
 TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
@@ -99,7 +102,6 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());
-  autogradContainer_->releaseContext(context->contextId());
 }
 
 } // namespace autograd
