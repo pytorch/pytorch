@@ -318,17 +318,17 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
     auto iter = TensorIterator();
     iter.add_output(self);
     iter.add_input(p);
-    iter.cast_common_dtype_to_outputs(true);
+    iter.check_all_same_dtype(false);
     iter.build();
     if (p_.scalar_type() == kDouble) {
-      cpu_serial_kernel(iter, [&](const double p_val) -> scalar_t {
+      cpu_serial_kernel(iter, [&](const double p_val) -> self_t {
         at::bernoulli_distribution<double> bernoulli(p_val);
         return static_cast<self_t>(bernoulli(generator));
       });
     } else {
       AT_DISPATCH_FLOATING_TYPES(p_.scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
         using p_t = scalar_t;
-        cpu_serial_kernel(iter, [&](const p_t p_val) -> scalar_t {
+        cpu_serial_kernel(iter, [&](const p_t p_val) -> self_t {
           at::bernoulli_distribution<float> bernoulli(p_val);
           return static_cast<self_t>(bernoulli(generator));
         });
