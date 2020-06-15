@@ -628,7 +628,6 @@ TEST(VmapTest, TestBatchedTensorSize) {
   }
   {
     // multiple batch dims not at front
-    // Single batch dim at front
     Tensor x = at::randn({2, 3, 5, 7, 11});
     Tensor Bx = makeBatched(x, {{0, 3}, {1, 1}});
 
