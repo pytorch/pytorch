@@ -108,6 +108,8 @@ def report_android_sizes(file_dir):
                     "os": "android",
                     # TODO: create dedicated columns
                     "pkg_type": "{}/{}/{}".format(android_build_type, arch, lib),
+                    "cu_ver": "",  # dummy value for derived field `build_name`
+                    "py_ver": "",  # dummy value for derived field `build_name`
                     "pr": os.environ.get("CIRCLE_PR_NUMBER"),
                     "build_num": os.environ.get("CIRCLE_BUILD_NUM"),
                     "sha1": os.environ.get("CIRCLE_SHA1"),
