@@ -722,7 +722,7 @@ class TestDataParallel(TestCase):
                     m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
                     has_half = any(p.dtype is torch.half for p in m.parameters())
                     tol = 1.e-3 if has_half else 1.e-5
-                except:
+                except BaseException:
                     # Prints case-specific debugging info to narrow down failing case.
                     print("Caught exception during model creation for " + model_msg)
                     raise
@@ -741,7 +741,7 @@ class TestDataParallel(TestCase):
                                                                             m_dp_child.parameters())):
                                 named_msg = layer_name + "." + param_name + " " + iter_msg
                                 self.assertEqual(p.grad, p_dp.grad, msg=named_msg, rtol=tol, atol=tol)
-                    except:
+                    except BaseException:
                         # Makes sure we still get info if an error occurred somewhere other than the asserts.
                         print("Caught exception during iterations at " + iter_msg)
                         raise
