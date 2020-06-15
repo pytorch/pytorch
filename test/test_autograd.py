@@ -4519,13 +4519,13 @@ class TestAutogradComplex(TestCase):
     def test_view_as_real(self):
         x = torch.randn(10, dtype=torch.cdouble, requires_grad=True)
         torch.view_as_real(x).sum().backward()
-        self.assertEqual(x.grad, torch.full_like(x, 1-1j))
+        self.assertEqual(x.grad, torch.full_like(x, 1 - 1j))
 
     # remove this test after gradcheck support is added for non-holomoprphic functions
     def test_view_as_complex(self):
         x = torch.randn(10, 2, dtype=torch.double, requires_grad=True)
         torch.view_as_complex(x).sum().backward()
-        self.assertEqual(x.grad, torch.tensor([1, 0]).expand_as(x))
+        self.assertEqual(x.grad, torch.tensor([1, 0], dtype=torch.double).expand_as(x))
 
     def test_view_func_for_complex_views(self):
         # case 1: both parent and child have view_func
