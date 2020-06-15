@@ -235,6 +235,8 @@ If you don't see an operation listed here, but it would help your use case, plea
    :func:`torch.var_mean`,:ref:`removes_dimensions-doc`
    :meth:`Tensor.zero_`,None
    :func:`torch.zeros`,:ref:`factory-doc`
+   :func:`torch.count_nonzero`, See documentation
+   :meth:`Tensor.count_nonzero`, See documentation
 
 
 .. _keeps_input_names-doc:
