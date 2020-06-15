@@ -7,6 +7,11 @@
 
 version: 2.1
 
+parameters:
+  run_binary_tests:
+    type: boolean
+    default: false
+
 docker_config_defaults: &docker_config_defaults
   user: jenkins
   aws_auth:

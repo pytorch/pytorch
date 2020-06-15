@@ -118,68 +118,164 @@ def _get_random_tensor_and_q_params(shapes, rand_scale, torch_type):
 
 class TestQuantizedOps(TestCase):
 
+    """Helper function to test quantized activation functions."""
+    def _test_activation_function(self, X, fn_name, test_configs):
+        r"""
+            When writing a unit test for the activation function,
+            instead of specifying the test routines only applicable to the activation function itself,
+            you utilize the _test_activation_function that provides general testing.
+            To utilize the helper function, a test config must be provided.
+            A test config is a list that contains metadata about the quantized activation
+            functions that will be tested and how the tests need to be set up; it allows simpler and
+            more concise unit tests to be written by specifying the configurations needed
+            and calling the provided helper function _test_activation_function.
+            Inside the list, each config (as a dictionary) represents a suite of tests that assert the
+            correctness of various quantization functions.
+            You can check out the test_qrelu, test_qrelu6, test_qsigmoid, and test_qhardsigmoid for
+            how their test configs are specified.
+            Here's a list of the fields that can be included in a test config:
+            quantized_fn: a list of the quantized functions to be tested
+            reference_fn: the original reference function to be called on the
+            the dequantized X
+            inplace_kwarg: the additional inplace keyword argument to test in-place
+            for each test entry in ops_under_test, it must have at least the fields
+            for quantized_fn and reference_fn. If inplace_kwarg is missing, the
+            quantized function is assumed to be either inplace by default or the
+            test is not testing an inplace function.
+            output_range: the output range the operator will map to. By default, if it is
+            no specified, the range will not be controlled and depend on Xmin and Xmax.
+            change_zero_point: a boolean flag indicating if the zero point parameter should
+            be determined based on torch_type during quantization (see sigmoid/hardsigmoid for
+            examples). By default, if it is not specified, change_zero_point is assumed to be
+            False and zero point will just take on the default value from X.
+        """
+        # Retrives the default parameters from X.
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X)
+        # Quantizes the reference to account for max error.
+        # q_min and q_max only depend on the initial torch_type.
+        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
+
+        for op_group in test_configs:
+            ref_op = op_group['reference_fn']
+            for q_op in op_group['quantized_fn']:
+                # Quantizes and dequantizes to account for max error.
+                qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                               dtype=torch_type)
+                dqX = qX.dequantize()
+                dqY_hat = ref_op(dqX.clone())
+
+                # Retrieves the inplace keyword arguments
+                # some functions require inplace=True to test in-place.
+                inplace_kwarg = op_group.get('inplace_kwarg', dict())
+
+                # Adjusts output_scale if needed.
+                # The output_scale determines the quantization scale for functions that
+                # have a constrained output range. e.x. sigmoid ranges from 0 to 1.
+                output_scale = scale
+                if 'output_range' in op_group:
+                    (f_min, f_max) = op_group['output_range']
+                    output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
+
+                # Adjusts output_zero_point if needed (see explanation for the
+                # change_zero_point parameter above).
+                # output_zero_point determines the additional offset that will be
+                # added to a scaled value during quantization.
+                if op_group.get('change_zero_point', False):
+                    output_zero_point = 0 if torch_type == torch.qint32 else q_min
+                else:
+                    output_zero_point = zero_point
+
+                # Quantizes the dequantized version of Y_hat.
+                qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
+                                                   zero_point=output_zero_point,
+                                                   dtype=torch_type)
+
+                # Finds qY using in-place or non-in-place quantized operators.
+                qY = q_op(qX, **inplace_kwarg)
+
+                self.assertEqual(qY, qY_hat, msg='{} - {} failed: ({} vs. {})'.format(
+                    fn_name, q_op, qY, qY_hat
+                ))
+
     """Tests the correctness of the quantized::relu op."""
+    @override_qengines
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
     def test_qrelu(self, X):
-        X, (scale, zero_point, torch_type) = X
+        relu_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.relu,
+                    torch.relu_,
+                    torch.nn.functional.relu,
+                    torch.nn.quantized.functional.relu,
+                ],
+                'reference_fn': torch.nn.functional.relu
+            },
+            {
+                'quantized_fn': [
+                    torch.nn.functional.relu,
+                    torch.nn.quantized.functional.relu,
+                ],
+                'reference_fn': torch.nn.functional.relu,
+                'inplace_kwarg': {
+                    'inplace': True
+                }
+            }
+        ]
+        self._test_activation_function(X, 'relu', relu_test_configs)
 
-        Y = X.copy()
-        Y[Y < 0] = 0
-        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
-        X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
-
-        ops_under_test = {
-            'native': torch.relu,
-            'nn.functional': torch.nn.functional.relu,
-        }
-
-        for name, op in ops_under_test.items():
-            qY_hat = op(qX)
-            self.assertEqual(qY, qY_hat, msg="{} relu failed".format(name))
-
-        ops_under_test_inplace = {
-            'inplace native': torch.relu_,
-            'inplace nn.functional': torch.nn.functional.relu_,
-        }
-
-        for name, op_ in ops_under_test_inplace.items():
-            qY_hat = qX.clone()
-            op_(qY_hat)
-            self.assertEqual(qY, qY_hat, msg="{} relu failed".format(name))
-
-    """Tests the correctness of the quantized::relu op."""
+    """Tests the correctness of the quantized::relu6 op."""
+    @override_qengines
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
     def test_qrelu6(self, X):
-        X, (scale, zero_point, torch_type) = X
+        relu6_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.ops.quantized.relu6,
+                    torch.nn.quantized.ReLU6(inplace=False),
+                    torch.nn.quantized.ReLU6(inplace=True)
+                ],
+                'reference_fn': torch.nn.functional.relu6
+            }
+        ]
+        self._test_activation_function(X, 'relu6', relu6_test_configs)
 
-        Y = X.copy()
-        Y[Y < 0] = 0
-        Y[Y > 6.0] = 6.0
-        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
-        X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
+    """Tests the correctness of the quantized::sigmoid op."""
+    @override_qengines
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qsigmoid(self, X):
+        sigmoid_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.sigmoid
+                ],
+                'reference_fn': torch.sigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True
+            }
+        ]
+        self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
 
-        ops_under_test = {
-            'ops.quantized': torch.ops.quantized.relu6,
-            'module': torch.nn.quantized.ReLU6(),
-        }
-
-        for name, op in ops_under_test.items():
-            for inplace in (True, False):
-                if hasattr(op, 'inplace'):
-                    op.inplace = inplace
-                    qY_hat = op(qX)
-                else:
-                    qY_hat = op(qX, inplace=inplace)
-                self.assertEqual(qY, qY_hat,
-                                 msg="{} relu failed".format(name))
+    """Tests the correctness of the quantized::hardsigmoid op."""
+    @override_qengines
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qhardsigmoid(self, X):
+        hardsigmoid_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.nn.quantized.functional.hardsigmoid
+                ],
+                'reference_fn': torch.nn.functional.hardsigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True
+            }
+        ]
+        self._test_activation_function(X, 'hardsigmoid', hardsigmoid_test_configs)
 
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -238,91 +334,23 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qYout, qY_hat,
                          msg="F.elu.out failed ({} vs {})".format(qY, qY_hat))
 
-    """Tests the correctness of the quantized::qnnpack_sigmoid op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qsigmoid(self, X):
-        # Note: QNNPACK is tested separately in TestQNNPackOps
-        X, (scale, zero_point, torch_type) = X
-
-        X = torch.from_numpy(X)
-        Y = torch.sigmoid(X)
-
-        qX = torch.quantize_per_tensor(X, scale=scale,
-                                       zero_point=zero_point,
-                                       dtype=torch_type)
-
-        # Quantize the reference to account for max error.
-        # Note that the output scale has +1, because we use scale of 1.0/2^BITS
-        # in the implementations.
-        f_min, f_max = 0.0, 1.0
-        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
-        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
-        output_zero_point = output_zero_point = 0 if torch_type == torch.qint32 else q_min
-        qY = torch.quantize_per_tensor(Y, scale=output_scale,
-                                       zero_point=output_zero_point,
-                                       dtype=torch_type)
-        qY_hat = torch.sigmoid(qX)
-        self.assertEqual(qY, qY_hat,
-                         msg="Sigmoid failed: {} vs. {}".format(qY, qY_hat))
-
-    """Tests the correctness of the quantized::qhardsigmoid op."""
-    @override_qengines
-    def test_qhardsigmoid(self):
-        max_sides = (3, 5)
-        side_lens = (1, 7, 8)
-        torch_types = (torch.quint8, torch.qint8)
-        combined = [max_sides, side_lens, torch_types]
-        test_cases = itertools.product(*combined)
-        for test_case in test_cases:
-            max_side, side_len, torch_type = test_case
-
-            if torch.backends.quantized.engine == 'qnnpack' and torch_type != torch.quint8:
-                continue
-
-            shapes = [side_len] * max_side
-            X, X_scale, X_zero_point = \
-                _get_random_tensor_and_q_params(shapes, 2.0, torch_type)
-            qX = torch.quantize_per_tensor(X, scale=X_scale,
-                                           zero_point=X_zero_point,
-                                           dtype=torch_type)
-            dqX = qX.dequantize()
-
-
-            # Quantize the reference to account for max error.
-            # Note that the output scale has +1, because we use scale of 1.0/2^BITS
-            # in the implementations.
-            f_min, f_max = 0.0, 1.0
-            q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
-            output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
-            output_zero_point = 0 if torch_type == torch.qint32 else q_min
-            dqY_hat = F.hardsigmoid(dqX)
-            qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale,
-                                               zero_point=output_zero_point,
-                                               dtype=torch_type)
-
-            qY = torch.nn.quantized.functional.hardsigmoid(qX)
-            self.assertEqual(qY, qY_hat,
-                             msg="Hardsigmoid failed: {} vs. {}, {}".format(qY, qY_hat, torch.backends.quantized.engine))
-
-
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
     def test_qlayer_norm(self):
         # hypothesis is flaky for this test, create test cases manually
-        max_sides = (4, 5)
         side_lens = (1, 8, 11)
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
-        combined = [max_sides, side_lens, torch_types, y_scales, y_zero_points]
+        channels_last = (True, False)
+        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                max_side, side_len, torch_type, Y_scale, Y_zero_point = test_case
-                shapes = [side_len] * max_side
+                side_len, torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                shapes = [side_len] * 4
 
                 # In the FP kernel, mean and variance are calculated in floating point.
                 # In the quantized kernel, they are calculated in integer arithmetic.
@@ -346,6 +374,8 @@ class TestQuantizedOps(TestCase):
                 qX = torch.quantize_per_tensor(X, scale=X_scale,
                                                zero_point=X_zero_point,
                                                dtype=torch_type)
+                if channels_last:
+                    qX = qX.contiguous(memory_format=torch.channels_last)
                 dqX = qX.dequantize()
 
                 # Enforce non-homogeneous inputs
@@ -417,6 +447,35 @@ class TestQuantizedOps(TestCase):
         qY_hat = torch.tanh(qX)
         self.assertEqual(qY, qY_hat,
                          msg="TanH failed: {} vs. {}".format(qY, qY_hat))
+
+    """Tests the correctness of the quantized::threshold op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams()),
+           threshold=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+           value=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False))
+    def test_qthreshold(self, X, threshold, value):
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # calculate threshold(dqX) and quantize
+        dqX = qX.dequantize()
+        dqY_hat = dqX.clone()
+        dqY_hat = torch.nn.functional.threshold(dqY_hat, threshold, value)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+
+        ops_under_test = {
+            'native': torch.threshold,
+            'nn.functional': torch.nn.functional.threshold,
+            'nn.quantized.functional': torch.nn.quantized.functional.threshold
+        }
+
+        for name, op in ops_under_test.items():
+            qY = op(qX, threshold, value)
+            self.assertEqual(qY, qY_hat, msg="{} qthreshold failed".format(name))
 
     """Tests the correctness of the quantized::clamp op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
@@ -1401,7 +1460,8 @@ class TestQuantizedOps(TestCase):
                         mode=mode, align_corners=align_corners)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+                                       msg="{} results are off: qX_hat={} X_ref={}"
+                                           .format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1455,7 +1515,8 @@ class TestQuantizedOps(TestCase):
                         mode=mode, align_corners=align_corners)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+                                       msg="{} results are off: qX_hat={}, X_ref={}"
+                                           .format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
@@ -1618,17 +1679,19 @@ class TestQuantizedOps(TestCase):
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
+        channels_last_list = [True, False]
         combined = [batches_list, num_groups_list, channels_per_groups, elements_per_channels,
-                    torch_types, y_scales, y_zero_points]
+                    torch_types, y_scales, y_zero_points, channels_last_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
                 batches, num_groups, channels_per_group, elements_per_channel, \
-                    torch_type, Y_scale, Y_zero_point = test_case
+                    torch_type, Y_scale, Y_zero_point, channels_last = test_case
                 num_channels = num_groups * channels_per_group
-                shapes = (batches, num_channels, elements_per_channel)
+                # minimum rank for for channels_last
+                shapes = (batches, num_channels, elements_per_channel, 1)
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
                 # In the int8 and uint8 versions of the quantized kernel, they are
@@ -1660,6 +1723,8 @@ class TestQuantizedOps(TestCase):
                 eps = 0.001
 
                 qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+                if channels_last:
+                    qX = qX.contiguous(memory_format=torch.channels_last)
                 dqX = qX.dequantize()
 
                 # Enforce non-homogeneous inputs
@@ -1700,14 +1765,15 @@ class TestQuantizedOps(TestCase):
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
-        combined = [max_sides, side_lens, torch_types, y_scales, y_zero_points]
+        channels_last_list = (True, False)
+        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                max_side, side_len, torch_type, Y_scale, Y_zero_point = test_case
-                shapes = [side_len] * max_side
+                side_len, torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                shapes = [side_len] * 4
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
                 # In the int8 and uint8 versions of the quantized kernel, they are
@@ -1738,6 +1804,8 @@ class TestQuantizedOps(TestCase):
                 eps = 0.001
 
                 qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
+                if channels_last:
+                    qX = qX.contiguous(memory_format=torch.channels_last)
                 dqX = qX.dequantize()
 
                 # Enforce non-homogeneous inputs
@@ -1976,10 +2044,6 @@ class TestDynamicQuantizedLinear(TestCase):
         X_value_max = 255
         if reduce_range:
             X_value_max = 127
-        X_q0 = np.round(np.random.rand(batch_size, input_channels) *
-                        (X_value_max - X_value_min)
-                        + X_value_min
-                        ).astype(np.uint8)
         X_q0 = np.round(np.random.rand(batch_size, input_channels) *
                         (X_value_max - X_value_min) + X_value_min).astype(np.uint8)
         X_q0[0, 0] = X_value_min

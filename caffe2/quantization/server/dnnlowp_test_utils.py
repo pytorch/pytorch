@@ -371,7 +371,7 @@ def generate_conv_inputs(
 
 
 def run_conv_or_fc(
-    test_case, init_net, net, X, W, b, op_type, engine, order, gc, outputs
+    test_case, init_net, net, X, W, b, op_type, engine, order, gc, outputs, scale=None, zero_point=None
 ):
     if order:
         # Conv
@@ -389,6 +389,10 @@ def run_conv_or_fc(
     test_case.ws.create_blob("X").feed(X, device_option=gc)
     test_case.ws.create_blob("W").feed(W, device_option=gc)
     test_case.ws.create_blob("b").feed(b, device_option=gc)
+    if scale is not None and zero_point is not None:
+        test_case.ws.create_blob("scale").feed(scale, device_option=gc)
+        test_case.ws.create_blob("zero_point").feed(zero_point, device_option=gc)
+
     if init_net:
         test_case.ws.run(init_net)
     for i in range(1 if engine == "" else 2):
@@ -404,6 +408,10 @@ def run_conv_or_fc(
         workspace.FeedBlob("X", X)
         workspace.FeedBlob("W", W)
         workspace.FeedBlob("b", b)
+        if scale is not None and zero_point is not None:
+            workspace.FeedBlob("scale", scale)
+            workspace.FeedBlob("zero_point", zero_point)
+
         if init_net:
             workspace.RunNetOnce(init_net)
         workspace.CreateNet(net)

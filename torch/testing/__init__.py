@@ -5,6 +5,7 @@ The testing package contains testing-specific utilities.
 import torch
 import random
 import math
+from typing import cast, List, Optional, Tuple, Union
 
 FileCheck = torch._C.FileCheck
 
@@ -18,7 +19,7 @@ randn_like = torch.randn_like
 # Helper function that returns True when the dtype is an integral dtype,
 # False otherwise.
 # TODO: implement numpy-like issubdtype
-def is_integral(dtype):
+def is_integral(dtype: torch.dtype) -> bool:
     # Skip complex/quantized types
     dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
     return dtype in dtypes and not dtype.is_floating_point
@@ -40,6 +41,8 @@ def _unravel_index(flat_index, shape):
         return res[0]
 
     return tuple(res[::-1])
+# (bool, msg) tuple, where msg is None if and only if bool is True.
+_compare_return_type = Tuple[bool, Optional[str]]
 
 # Compares two tensors with the same size on the same device and with the same
 # dtype for equality.
@@ -63,7 +66,8 @@ def _unravel_index(flat_index, shape):
 #
 #   Bool tensors are equal only if they are identical, regardless of
 #   the rtol and atol values.
-def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
+def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, equal_nan: bool) -> _compare_return_type:
+    debug_msg : Optional[str]
     # Integer (including bool) comparisons are identity comparisons
     # when rtol is zero and atol is less than one
     if (is_integral(a.dtype) and rtol == 0 and atol < 1) or a.dtype is torch.bool:
@@ -92,25 +96,24 @@ def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
     # Compares complex tensors' real and imaginary parts separately.
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
-        float_dtype = torch.float32 if a.dtype == torch.complex64 else torch.float64
-        a_real = a.copy_real().to(float_dtype)
-        b_real = b.copy_real().to(float_dtype)
+        a_real = a.real
+        b_real = b.real
         real_result, debug_msg = _compare_tensors_internal(a_real, b_real,
                                                            rtol=rtol, atol=atol,
                                                            equal_nan=equal_nan)
 
         if not real_result:
-            debug_msg = "Real parts failed to compare as equal! " + debug_msg
+            debug_msg = "Real parts failed to compare as equal! " + cast(str, debug_msg)
             return (real_result, debug_msg)
 
-        a_imag = a.copy_imag().to(float_dtype)
-        b_imag = b.copy_imag().to(float_dtype)
+        a_imag = a.imag
+        b_imag = b.imag
         imag_result, debug_msg = _compare_tensors_internal(a_imag, b_imag,
                                                            rtol=rtol, atol=atol,
                                                            equal_nan=equal_nan)
 
         if not imag_result:
-            debug_msg = "Imaginary parts failed to compare as equal! " + debug_msg
+            debug_msg = "Imaginary parts failed to compare as equal! " + cast(str, debug_msg)
             return (imag_result, debug_msg)
 
         return (True, None)
@@ -150,8 +153,8 @@ def _compare_tensors_internal(a, b, *, rtol, atol, equal_nan):
 
 # Checks if two scalars are equal(-ish), returning (True, None)
 # when they are and (False, debug_msg) when they are not.
-def _compare_scalars_internal(a, b, *, rtol, atol, equal_nan):
-    def _helper(a, b, s):
+def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: bool) -> _compare_return_type:
+    def _helper(a, b, s) -> _compare_return_type:
         # Short-circuits on identity
         if a == b or (equal_nan and a != a and b != b):
             return (True, None)
@@ -195,7 +198,7 @@ def _compare_scalars_internal(a, b, *, rtol, atol, equal_nan):
 
     return _helper(a, b, " ")
 
-def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=''):
+def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg='') -> None:
     if not isinstance(actual, torch.Tensor):
         actual = torch.tensor(actual)
     if not isinstance(expected, torch.Tensor):
@@ -219,7 +222,7 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=
 
     raise AssertionError(msg)
 
-def make_non_contiguous(tensor):
+def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     if tensor.numel() <= 1:  # can't make non-contiguous
         return tensor.clone()
     osize = list(tensor.size())
@@ -248,7 +251,7 @@ def make_non_contiguous(tensor):
     return input.data
 
 
-def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, include_complex=True):
+def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, include_complex=True) -> List[torch.dtype]:
     dtypes = get_all_int_dtypes() + get_all_fp_dtypes(include_half=include_half, include_bfloat16=include_bfloat16)
     if include_bool:
         dtypes.append(torch.bool)
@@ -257,20 +260,20 @@ def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, 
     return dtypes
 
 
-def get_all_math_dtypes(device):
+def get_all_math_dtypes(device) -> List[torch.dtype]:
     return get_all_int_dtypes() + get_all_fp_dtypes(include_half=device.startswith('cuda'),
                                                     include_bfloat16=False) + get_all_complex_dtypes()
 
 
-def get_all_complex_dtypes():
+def get_all_complex_dtypes() -> List[torch.dtype]:
     return [torch.complex64, torch.complex128]
 
 
-def get_all_int_dtypes():
+def get_all_int_dtypes() -> List[torch.dtype]:
     return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
 
 
-def get_all_fp_dtypes(include_half=True, include_bfloat16=True):
+def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dtype]:
     dtypes = [torch.float32, torch.float64]
     if include_half:
         dtypes.append(torch.float16)
@@ -279,7 +282,7 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True):
     return dtypes
 
 
-def get_all_device_types():
+def get_all_device_types() -> List[str]:
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
 # 'dtype': (rtol, atol)
@@ -290,7 +293,7 @@ _default_tolerances = {
 }
 
 
-def _get_default_tolerance(a, b=None):
+def _get_default_tolerance(a, b=None) -> Tuple[float, float]:
     if b is None:
         dtype = str(a.dtype).split('.')[-1]  # e.g. "float32"
         return _default_tolerances.get(dtype, (0, 0))

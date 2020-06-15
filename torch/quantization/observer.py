@@ -409,8 +409,6 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
         r"""Calculates the quantization parameters."""
 
         if self.max_val.numel() == 0 or self.min_val.numel() == 0:
-            warnings.warn("Must run observer before calling calculate_qparams.\
-                           Returning default scale and zero point.")
             return torch.tensor([1.0]), torch.tensor([0])
 
         assert self.min_val <= self.max_val, "min {} should be less than max {}".format(

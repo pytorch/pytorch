@@ -139,6 +139,8 @@ enum class DispatchKey : uint8_t {
 
   Profiler,
 
+  Tracer,
+
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
   // (aka Autograd) for operators which have a Variable kernel
   // already registered.  For example, XLA wants to define autograd for
