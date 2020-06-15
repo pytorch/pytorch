@@ -144,6 +144,8 @@ TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 TORCH_CUDA_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
 
+size_t dataTypeSize(DataType type);
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

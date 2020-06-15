@@ -167,19 +167,10 @@ Statement* IndexLowering::mutate(ReductionOp* rop) {
       ir_utils::isTVOp(rop),
       "Cannot have a reduction operation on something other than a tensor view.");
   auto loops = scope_utils::getLoops(active_scope);
-  TORCH_INTERNAL_ASSERT(
-      std::none_of(
-          loops.begin(),
-          loops.end(),
-          [](ForLoop* fl) {
-            return fl->iter_domain()->isBlockDim() &&
-                fl->iter_domain()->isReduction();
-          }),
-      "Reduction on block axes not yet supported.");
 
-  bool is_thread_reduce =
-      std::any_of(loops.begin(), loops.end(), [](ForLoop* fl) {
-        return fl->iter_domain()->isThreadDim() &&
+  bool is_private_reduce =
+      std::none_of(loops.begin(), loops.end(), [](ForLoop* fl) {
+        return fl->iter_domain()->isThread() &&
             fl->iter_domain()->isReduction();
       });
 
@@ -192,7 +183,7 @@ Statement* IndexLowering::mutate(ReductionOp* rop) {
         ir_utils::asTV(rop->out()),
         scope_utils::getLoops(active_scope));
 
-  if (is_thread_reduce)
+  if (!is_private_reduce)
     return new ReductionOp(rop->getReductionOpType(), rop->init(), out, in);
 
   Expr* new_op = new BinaryOp(rop->getReductionOpType(), out, out, in);

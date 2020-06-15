@@ -57,6 +57,11 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
 
   if (fusion->hasRNG())
     os << ", unsigned long long seed, unsigned long long offset";
+
+  if (fusion->hasGridReduction()) {
+    os << ", void* work_buf, unsigned* sync_flags";
+  }
+
   os << "){\n";
   indent_size++;
   if (fusion->hasRNG()) {
@@ -64,6 +69,12 @@ void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
     os << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
     indent();
     os << "Philox rnd(seed, idx, offset);\n";
+  }
+  if (fusion->hasBlockReduction() || fusion->hasGridReduction()) {
+    indent();
+    // TODO: Dynamic sizing possible? blockReduce originally used 1024
+    // values of a given type
+    os << "__shared__ float shared_mem[1024];\n";
   }
 }
 
@@ -370,46 +381,71 @@ void IRPrinter::handle(const ReductionOp* const rop) {
   TensorIndex* out = static_cast<TensorIndex*>(rop->out());
   auto vec_domain = out->view()->domain()->domain();
 
-  IterDomain *tidx = nullptr, *tidy = nullptr, *tidz = nullptr;
-  bool is_thread_reduce = false;
-  for (auto id : vec_domain) {
-    if (id->isThreadDim() && id->isReduction()) {
-      switch (id->parallel_method()) {
-        case (ParallelType::TIDz):
-          tidz = id;
-          break;
-        case (ParallelType::TIDy):
-          tidy = id;
-          break;
-        case (ParallelType::TIDx):
-          tidx = id;
-          break;
-        default:
-          TORCH_INTERNAL_ASSERT(
-              false, "Did not recognize parallel type for reduction.");
-      }
-      is_thread_reduce = true;
-    }
-  }
+  bool has_block_reduce = out->view()->hasBlockReduction();
+  bool has_grid_reduce = out->view()->hasGridReduction();
 
-  if (!is_thread_reduce) {
+  if (!has_block_reduce && !has_grid_reduce) {
     handle(new BinaryOp(rop->getReductionOpType(), out, out, rop->in()));
     return;
   }
+
+  auto par_domains = rop->getParallelReductionDomains();
+  bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
+  bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
+  bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
+  bool bidx = par_domains.find(ParallelType::BIDx) != par_domains.end();
+  bool bidy = par_domains.find(ParallelType::BIDy) != par_domains.end();
+  bool bidz = par_domains.find(ParallelType::BIDz) != par_domains.end();
+
   auto d_type = rop->out()->getDataType().value();
   auto op_type = rop->getReductionOpType();
-  indent();
-  // Thread all reduce.
-  os << "blockReduce< " << (tidx != nullptr ? "true" : "false") << ", "
-     << (tidy != nullptr ? "true" : "false") << ", "
-     << (tidz != nullptr ? "true" : "false") << " >"
-     << " ( ";
-  handle(rop->out());
-  os << ", ";
-  handle(rop->in());
-  os << ", ";
-  os << "reduction_" << op_type << "_" << d_type;
-  os << ");\n";
+  const std::string block_result = "block_result";
+  if (has_block_reduce) {
+    if (has_grid_reduce) {
+      indent();
+      os << d_type << " " << block_result << ";\n";
+    }
+    indent();
+    // Thread all reduce.
+    os << "blockReduce< " << (tidx ? "true" : "false") << ", "
+       << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false") << " >"
+       << " ( ";
+    if (has_grid_reduce) {
+      os << block_result;
+    } else {
+      handle(rop->out());
+    }
+    os << ", ";
+    handle(rop->in());
+    os << ", ";
+    os << "reduction_" << op_type << "_" << d_type;
+    os << ", threadIdx, blockDim";
+    os << ", reinterpret_cast<" << d_type << "*>(shared_mem)";
+    os << ");\n";
+  }
+  if (has_grid_reduce) {
+    indent();
+    // Since block-level reduction is already done, those dimensions
+    // with tidx/y/z being true do not participate in the grid reduction.
+    os << "reduction::gridReduce< " << (bidx ? "true" : "false") << ", "
+       << (bidy ? "true" : "false") << ", " << (bidz ? "true" : "false") << ", "
+       << (!tidx ? "true" : "false") << ", " << (!tidy ? "true" : "false")
+       << ", " << (!tidz ? "true" : "false") << " >"
+       << " ( ";
+    handle(rop->out());
+    os << ", ";
+    if (has_block_reduce) {
+      os << block_result;
+    } else {
+      handle(rop->in());
+    }
+    os << ", ";
+    os << "reduction_" << op_type << "_" << d_type;
+    os << ", static_cast<" << d_type << "*>(work_buf)";
+    os << ", sync_flags";
+    os << ", reinterpret_cast<" << d_type << "*>(shared_mem)";
+    os << ");\n";
+  }
 }
 
 void IRPrinter::handle(const BroadcastOp* const bop) {

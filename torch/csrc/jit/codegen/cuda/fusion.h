@@ -203,8 +203,10 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Indicate to kernel to set itself up to generate random numbers
   bool hasRNG();
 
-  // Indicate to kernel to set itself up to generate random numbers
   bool hasReduction();
+  bool hasBlockReduction();
+  bool hasGridReduction();
+  size_t gridReductionTempBufferSize();
 
  private:
   // Sets of all Vals/Exprs registered with this fusion

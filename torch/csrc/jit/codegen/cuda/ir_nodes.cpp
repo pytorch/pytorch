@@ -206,6 +206,37 @@ bool ReductionOp::sameAs(const ReductionOp* other) const {
       this->init()->sameAs(other->init()));
 }
 
+std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
+  const Val* out_val = out();
+  TORCH_INTERNAL_ASSERT(
+      out_val->getValType() == ValType::TensorView ||
+          out_val->getValType() == ValType::TensorIndex,
+      "Output of reduction must be TensorView or TensorIndex");
+  // out is a TensorIndex after lowering
+  if (out_val->getValType() == ValType::TensorIndex) {
+    out_val = static_cast<const TensorIndex*>(out_val)->view();
+  }
+  auto vec_domain = out_val->as<TensorView>()->domain()->domain();
+  vec_domain.erase(
+      std::remove_if(
+          vec_domain.begin(),
+          vec_domain.end(),
+          [](IterDomain* id) { return !id->isReduction(); }),
+      vec_domain.end());
+  return vec_domain;
+}
+
+std::unordered_map<ParallelType, IterDomain*> ReductionOp::
+    getParallelReductionDomains() const {
+  std::unordered_map<ParallelType, IterDomain*> parallel_domains;
+  for (auto d : getReductionDomains()) {
+    if (d->isThread()) {
+      parallel_domains.insert(std::make_pair(d->parallel_method(), d));
+    }
+  }
+  return parallel_domains;
+}
+
 IterDomain::IterDomain(
     Val* _start,
     Val* _extent,
@@ -431,6 +462,18 @@ bool TensorDomain::sameAs(
 
 bool TensorDomain::hasReduction() const {
   return no_reduction_domain_.size() != domain_.size();
+}
+
+bool TensorDomain::hasBlockReduction() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isReduction() && id->isThreadDim();
+  });
+}
+
+bool TensorDomain::hasGridReduction() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isReduction() && id->isBlockDim();
+  });
 }
 
 bool TensorDomain::hasBroadcast() const {

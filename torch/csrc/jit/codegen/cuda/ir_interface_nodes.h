@@ -199,6 +199,8 @@ struct TORCH_CUDA_API TensorView : public Val {
   }
 
   bool hasReduction() const;
+  bool hasBlockReduction() const;
+  bool hasGridReduction() const;
   bool hasBroadcast() const;
 
   // Is there an active computeAt TensorView/Axis

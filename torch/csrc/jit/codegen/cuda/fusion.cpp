@@ -368,6 +368,26 @@ bool Fusion::hasReduction() {
   return false;
 }
 
+bool Fusion::hasBlockReduction() {
+  for (auto expr : exprs(true))
+    for (auto out : expr->outputs())
+      if (out->getValType() == ValType::TensorView)
+        if (static_cast<TensorView*>(out)->hasBlockReduction())
+          return true;
+
+  return false;
+}
+
+bool Fusion::hasGridReduction() {
+  for (auto expr : exprs(true))
+    for (auto out : expr->outputs())
+      if (out->getValType() == ValType::TensorView)
+        if (static_cast<TensorView*>(out)->hasGridReduction())
+          return true;
+
+  return false;
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

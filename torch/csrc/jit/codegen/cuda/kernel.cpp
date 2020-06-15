@@ -152,7 +152,8 @@ std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
              << code_fp16_support << "\n"
              << code_random_number_gen << "\n"
              << code_helper_funcs << "\n"
-             << code_template_block_reduction << "\n";
+             << code_template_block_reduction << "\n"
+             << code_template_grid_reduction << "\n";
   std::stringstream cdg;
   GPULower gpulw(fusion);
   gpulw.printKernel(str_stream, KERNEL_NAME);
@@ -300,6 +301,73 @@ void validateKernelArgs(
         msg.str());
   }
 }
+
+size_t size(const dim3& d) {
+  return (size_t)d.x * (size_t)d.y * (size_t)d.z;
+}
+
+dim3 dimensionOfReductionBlock(
+    const dim3& block_dim,
+    bool x_thread,
+    bool y_thread,
+    bool z_thread) {
+  return dim3{x_thread ? block_dim.x : 1,
+              y_thread ? block_dim.y : 1,
+              z_thread ? block_dim.z : 1};
+}
+
+int sizeOfReductionBlock(
+    const dim3& block_dim,
+    bool x_thread,
+    bool y_thread,
+    bool z_thread) {
+  return size(
+      dimensionOfReductionBlock(block_dim, x_thread, y_thread, z_thread));
+}
+
+// Returns the total number of reduction segments.
+size_t numberOfReductionSegments(
+    const dim3& grid_dim,
+    bool x_block,
+    bool y_block,
+    bool z_block) {
+  return (x_block ? 1 : grid_dim.x) * (y_block ? 1 : grid_dim.y) *
+      (z_block ? 1 : grid_dim.z);
+}
+
+std::array<size_t, 2> gridReductionTempBufferSizes(CudaKernel* entry) {
+  size_t buffer_size = 0;
+  size_t sync_flag_size = 0;
+  for (auto expr : entry->fusion_->exprs(true)) {
+    if (expr->getExprType() != ExprType::ReductionOp)
+      continue;
+    ReductionOp* rop = static_cast<ReductionOp*>(expr);
+    auto domains = rop->getParallelReductionDomains();
+    bool x_block = domains.find(ParallelType::BIDx) != domains.end();
+    bool y_block = domains.find(ParallelType::BIDy) != domains.end();
+    bool z_block = domains.find(ParallelType::BIDz) != domains.end();
+    // No buffer needed unless it's a grid reduction
+    if (!x_block && !y_block && !z_block)
+      continue;
+    // Assumption here is that reduction along the block-parallel
+    // domains is done prior to this grid reduction, so those domains
+    // do not need to participate in the grid reductions
+    bool x_thread = domains.find(ParallelType::TIDx) == domains.end();
+    bool y_thread = domains.find(ParallelType::TIDy) == domains.end();
+    bool z_thread = domains.find(ParallelType::TIDz) == domains.end();
+    auto rb_size =
+        sizeOfReductionBlock(entry->block_, x_thread, y_thread, z_thread);
+    auto num_blocks = size(entry->grid_);
+    auto element_size = dataTypeSize(*(rop->out()->getDataType()));
+    auto required_temp_buffer_size = num_blocks * rb_size * element_size;
+    buffer_size = std::max(buffer_size, required_temp_buffer_size);
+    auto flag_size = sizeof(unsigned) *
+        numberOfReductionSegments(entry->grid_, x_block, y_block, z_block);
+    sync_flag_size = std::max(sync_flag_size, flag_size);
+  }
+  return {{buffer_size, sync_flag_size}};
+}
+
 } // namespace
 
 bool NaivePWKernelArgsReq::matchKernelSize(const at::ArrayRef<IValue> inputs) {
@@ -583,6 +651,22 @@ void runTestKernel(
     }
     kernel_args.push(philox_engine_inputs.first);
     kernel_args.push(philox_engine_inputs.second);
+  }
+
+  // When the kernel has global reductions, the kernel needs two
+  // additional temporary buffers, one for intermediate results and
+  // another for synchronization among thread blocks.
+  if (entry->fusion_->hasGridReduction()) {
+    auto temp_buf_type = at::kFloat;
+    auto temp_buf_sizes = gridReductionTempBufferSizes(entry);
+    auto options =
+        at::TensorOptions().dtype(temp_buf_type).device(at::kCUDA, 0);
+    at::Tensor reduction_work_buffer = at::empty(
+        {(long)(temp_buf_sizes[0] / c10::elementSize(temp_buf_type))}, options);
+    kernel_args.push(reduction_work_buffer);
+    at::Tensor sync_flags = at::zeros(
+        {(long)(temp_buf_sizes[1] / c10::elementSize(temp_buf_type))}, options);
+    kernel_args.push(sync_flags);
   }
 
   // launch kernel;

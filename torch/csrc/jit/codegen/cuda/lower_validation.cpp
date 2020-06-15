@@ -21,11 +21,6 @@ void IRValidate(Fusion* fusion) {
 
         if (id->isBlockDim()) {
           TORCH_CHECK(
-              !id->isReduction(),
-              "Parallelization across blocks on reduction axes is not support at the moment but found on, ",
-              tv,
-              ".");
-          TORCH_CHECK(
               !id->isBroadcast(),
               "Parallelization across blocks on broadcast axes is not supported, but found on, ",
               tv,

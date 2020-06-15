@@ -159,6 +159,11 @@ struct TORCH_CUDA_API ReductionOp : public Expr {
 
   bool sameAs(const ReductionOp* const other) const;
 
+  std::vector<IterDomain*> getReductionDomains() const;
+
+  std::unordered_map<ParallelType, IterDomain*> getParallelReductionDomains()
+      const;
+
  private:
   const BinaryOpType reduction_op_type_;
   Val* const init_;
@@ -280,10 +285,6 @@ struct TORCH_CUDA_API IterDomain : public Val {
 
   void parallelize(ParallelType t) {
     parallel_method_ = t;
-    if (isBlockDim())
-      TORCH_CHECK(
-          !isReduction(),
-          "Cannot parallelize reductions across a block dimension.");
 
     // Currently a limitation as we allocate shared memory as static (not based
     // off a dynamic size.)
@@ -381,6 +382,8 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   }
 
   bool hasReduction() const;
+  bool hasBlockReduction() const;
+  bool hasGridReduction() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
 

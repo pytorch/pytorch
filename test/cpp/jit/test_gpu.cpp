@@ -2762,6 +2762,435 @@ void testGPU_FusionSimpleBCast() {
   }
 }
 
+// Similar to FusionReduction but uses grid reduction
+void testGPU_FusionGridReduction1() {
+  const int gdimx = 32;
+  const int bdimx = 128;
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  // tv1[I0, R1] = tv0[I0, I1]
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+
+  tv1->split(1, bdimx);
+  // tv1[I0, R1o, R1i{128}] = tv0[I0, I1]
+  tv1->split(1, gdimx);
+  // tv1[I0, R1oo, R1oi{32}, R1i{128}] = tv0[I0, I1]
+
+  TensorView* tv2 = tv1->rFactor({1});
+  // tv2[I0, R1oo, Ir1oi{32}, Ir1i{128}] = tv0[I0, I1]
+  // tv1[I0,        R1oi{32},  R1i{128}] = tv2[I0, R1oo, Ir1oi{32}, Ir1i{128}]
+
+  // Incrementally, can print in between for debugging
+  tv0->computeAt(tv2, 1);
+  tv2->computeAt(tv1, 1);
+
+  // Re do it all at once, because why not.
+  tv0->computeAt(tv1, 1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::BIDx);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  int numel_x = 10000;
+  int numel_y = 65000;
+
+  prog.device_ = 0;
+  prog.grid(gdimx, numel_x);
+  prog.block(bdimx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+  at::Tensor cg_output = at::empty({numel_x}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({1});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
+// Same test as the above but uses BIDy and TIDx for reduction
+void testGPU_FusionGridReduction2() {
+  const int gdimy = 32;
+  const int bdimx = 128;
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  // tv1[I0, R1] = tv0[I0, I1]
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+
+  tv1->split(1, bdimx);
+  // tv1[I0, R1o, R1i{128}] = tv0[I0, I1]
+  tv1->split(1, gdimy);
+  // tv1[I0, R1oo, R1oi{32}, R1i{128}] = tv0[I0, I1]
+
+  TensorView* tv2 = tv1->rFactor({1});
+  // tv2[I0, R1oo, Ir1oi{32}, Ir1i{128}] = tv0[I0, I1]
+  // tv1[I0,        R1oi{32},  R1i{128}] = tv2[I0, R1oo, Ir1oi{32}, Ir1i{128}]
+
+  // Incrementally, can print in between for debugging
+  tv0->computeAt(tv2, 1);
+  tv2->computeAt(tv1, 1);
+
+  // Re do it all at once, because why not.
+  tv0->computeAt(tv1, 1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::BIDy);
+  tv2->axis(2)->parallelize(ParallelType::BIDy);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  int numel_x = 10000;
+  int numel_y = 65000;
+
+  prog.device_ = 0;
+  prog.grid(numel_x, gdimy);
+  prog.block(bdimx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+  at::Tensor cg_output = at::empty({numel_x}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({1});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
+// Same test but uses BIDy and BIDz for reduction. No TID used.
+void testGPU_FusionGridReduction3dim1() {
+  const int gdimz = 32;
+  const int gdimy = 128;
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  // tv1[I0, R1] = tv0[I0, I1]
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+
+  tv1->split(1, gdimy);
+  // tv1[I0, R1o, R1i{128}] = tv0[I0, I1]
+  tv1->split(1, gdimz);
+  // tv1[I0, R1oo, R1oi{32}, R1i{128}] = tv0[I0, I1]
+
+  TensorView* tv2 = tv1->rFactor({1});
+  // tv2[I0, R1oo, Ir1oi{32}, Ir1i{128}] = tv0[I0, I1]
+  // tv1[I0,        R1oi{32},  R1i{128}] = tv2[I0, R1oo, Ir1oi{32}, Ir1i{128}]
+
+  // Incrementally, can print in between for debugging
+  tv0->computeAt(tv2, 1);
+  tv2->computeAt(tv1, 1);
+
+  // Re do it all at once, because why not.
+  tv0->computeAt(tv1, 1);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::BIDz);
+  tv2->axis(2)->parallelize(ParallelType::BIDz);
+
+  tv1->axis(-1)->parallelize(ParallelType::BIDy);
+  tv2->axis(-1)->parallelize(ParallelType::BIDy);
+
+  int numel_x = 100;
+  int numel_y = 6500;
+
+  prog.device_ = 0;
+  prog.grid(numel_x, gdimy, gdimz);
+  // This number should not affect the output as TIDx is not
+  // used. All threads in a thread block redundantly computes the
+  // same value.
+  prog.block(128);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+  at::Tensor cg_output = at::empty({numel_x}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({1});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
+// Same as testGPU_FusionGridReduction3dim1 but reduces dimension 0
+void testGPU_FusionGridReduction3dim0() {
+  const int rdim = 0;
+  const int gdimy = 128;
+  const int gdimz = 32;
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  // tv1[R0, I1] = tv0[I0, I1]
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {rdim}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+
+  tv1->split(rdim, gdimy);
+  // tv1[R0o, R0i{128}, I1] = tv0[I0, I1]
+  tv1->split(rdim, gdimz);
+  // tv1[R0oo, R0oi{32}, R0i{128}, I1] = tv0[I0, I1]
+
+  TensorView* tv2 = tv1->rFactor({rdim});
+  // tv2[R0oo, I0oi{32}, I0i{128}, I1] = tv0[I0, I1]
+  // tv1[      R0oi{32}, R0i{128}, I1] = tv2[R0oo, I0oi{32}, I0i{128}, I1]
+
+  // Note that computeAt isn't going to make anything better as there
+  // is no dynamically sized dimension.
+
+  // Map parallelism as [Serial, BIDz, BIDy, BIDx]
+  tv1->axis(-1)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::BIDx);
+  tv1->axis(-2)->parallelize(ParallelType::BIDy);
+  tv2->axis(-2)->parallelize(ParallelType::BIDy);
+  tv1->axis(-3)->parallelize(ParallelType::BIDz);
+  tv2->axis(-3)->parallelize(ParallelType::BIDz);
+
+  int numel_x = 6500;
+  int numel_y = 100;
+
+  prog.device_ = 0;
+  prog.grid(numel_y, gdimy, gdimz);
+  // This number should not affect the output as TIDx is not
+  // used. All threads in a thread block redundantly computes the
+  // same value.
+  prog.block(1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+  at::Tensor cg_output = at::empty({numel_y}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({0});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
+// This is similar to the FusionReduction, but swaps BIDx and TIDx
+void testGPU_FusionGridReduction4() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  const int bdimx = 128;
+  const int gdimx = 1024;
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  // tv1[I0, R1] = tv0[I0, I1]
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+
+  tv1->split(1, gdimx);
+  // tv1[I0, R1o, R1i{1024}] = tv0[I0, I1]
+  tv1->split(1, 4);
+  // tv1[I0, R1oo, R1oi{4}, R1i{128}] = tv0[I0, I1]
+
+  TensorView* tv2 = tv1->rFactor({1});
+  // tv2[I0, R1oo, Ir1oi{4}, Ir1i{1024}] = tv0[I0, I1]
+  // tv1[I0,        R1oi{4},  R1i{1024}] = tv2[I0, R1oo, Ir1oi{4}, Ir1i{1024}]
+
+  TensorView* tv3 = tv1->rFactor({1});
+  // tv2[I0, R1oo, Ir1oi{4}, Ir1i{1024}] = tv0[I0, I1]
+  // tv3[I0,        R1oi{4}, Ir1i{1024}] = tv2[I0, R1oo, Ir1oi{4}, Ir1i{1024}]
+  // tv1[I0,                  R1i{1024}] = tv3[I0,        R1oi{4}, Ir1i{1024}]
+
+  // Incrementally, can print in between for debugging
+  tv0->computeAt(tv2, 1);
+  tv2->computeAt(tv3, 1);
+  tv3->computeAt(tv1, 1);
+
+  // Re do it all at once, because why not.
+  tv0->computeAt(tv1, 1);
+
+  tv2->axis(2)->parallelize(ParallelType::Unroll);
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+
+  tv1->axis(-1)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::BIDx);
+  tv3->axis(-1)->parallelize(ParallelType::BIDx);
+
+  int numel_x = bdimx;
+  int numel_y = 65000;
+
+  prog.device_ = 0;
+  prog.grid(gdimx);
+  prog.block(bdimx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+  at::Tensor cg_output = at::empty({numel_x}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({1});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
+// Grid reduction with 2D thread blocks but only TIDx and BIDx are
+// mapped to a reduction dim
+void testGPU_FusionGridReduction5() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  const int bdimx = 64;
+  const int bdimy = 16;
+  const int gdimx = 4;
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  // tv1[I0, R1] = tv0[I0, I1]
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+
+  tv1->split(1, bdimx);
+  // tv1[I0, R1o, R1i{64}] = tv0[I0, I1]
+  tv1->split(1, gdimx);
+  // tv1[I0, R1oo, R1oi{4}, R1i{64}] = tv0[I0, I1]
+
+  TensorView* tv2 = tv1->rFactor({1});
+  // tv2[I0, R1oo, Ir1oi{4}, Ir1i{64}] = tv0[I0, I1]
+  // tv1[I0,        R1oi{4},  R1i{64}] = tv2[I0, R1oo, Ir1oi{4}, Ir1i{64}]
+
+  tv0->computeAt(tv1, 1);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv1->axis(-2)->parallelize(ParallelType::BIDx);
+  tv2->axis(-2)->parallelize(ParallelType::BIDx);
+
+  tv1->axis(0)->parallelize(ParallelType::TIDy);
+
+  int numel_x = bdimy;
+  int numel_y = 6500;
+
+  prog.device_ = 0;
+  prog.grid(gdimx);
+  prog.block(bdimx, bdimy);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+  at::Tensor cg_output = at::empty({numel_x}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({1});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
+
+// Similar to FusionGridReduction1 but with 3D tensors
+void testGPU_FusionGridReduction6() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(3);
+  fusion.addInput(tv0);
+
+  // tv1[I0, R1, R2] = tv0[I0, I1, I2]
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1, 2}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
+
+  // Splitting for TID
+  tv1->split(2, 128);
+  // tv1[I0, R1, R2o, R2i{128}] = tv0[I0, I1, I2]
+
+  // Splitting for BID
+  tv1->split(1, 128);
+
+  // tv1[I0, R1o, R1i{128}, R2o, R2i{128}] = tv0[I0, I1, I2]
+
+  TensorView* tv2 = tv1->rFactor({3});
+  // tv2[I0, I1o, I1i{128}, R2o, I2i{128}]
+  // tv1[I0, R1o, R1i{128},      R2i{128}]
+
+  TensorView* tv3 = tv1->rFactor({1});
+  // tv2[I0, I1o, I1i{128}, R2o, I2i{128}]
+  // tv3[I0, R1o, I1i{128},      I2i{128}]
+  // tv1[I0,      R1i{128},      R2i{128}]
+
+  tv3->computeAt(tv1, 1);
+  tv2->computeAt(tv3, 3);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv1->axis(-2)->parallelize(ParallelType::BIDx);
+  tv2->axis(-3)->parallelize(ParallelType::BIDx);
+  tv3->axis(-2)->parallelize(ParallelType::BIDx);
+
+  int numel_x = 6500;
+  int numel_y = 200;
+  int numel_z = numel_y;
+
+  prog.device_ = 0;
+  prog.grid(128, numel_x);
+  prog.block(128);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y, numel_z}, options);
+  at::Tensor cg_output = at::empty({numel_x}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({1, 2});
+  TORCH_CHECK(aten_output.allclose(cg_output));
+}
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
