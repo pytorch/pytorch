@@ -35,7 +35,7 @@ Tensor& addcmul_out(
     const Tensor& tensor2,
     Scalar value) {
   checkBackend("addcmul_cpu", result, self.options().backend());
-  auto iter = at::TensorIterator()
+  auto iter = at::TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(result)
     .add_input(self)
@@ -81,7 +81,7 @@ Tensor& addcdiv_out(
       "(self + value * torch.true_divide(tensor1, tensor2).");
   }
   checkBackend("addcdiv_cpu", result, self.options().backend());
-  auto iter = at::TensorIterator()
+  auto iter = at::TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(result)
     .add_input(self)

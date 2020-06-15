@@ -1070,6 +1070,10 @@ FastSetupType TensorIterator::compute_fast_setup_type(const TensorIteratorConfig
   return FastSetupType::NONE;
 }
 
+TensorIterator::TensorIterator(const TensorIteratorConfig& config) {
+  build(config);
+}
+
 void TensorIterator::build(const TensorIteratorConfig& config) {
   // populate some persistent configuration fields
   is_reduction_ = config.is_reduction_;
