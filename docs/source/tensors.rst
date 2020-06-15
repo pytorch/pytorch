@@ -473,6 +473,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sigmoid_
    .. automethod:: sign
    .. automethod:: sign_
+   .. automethod:: sgn
+   .. automethod:: sgn_
    .. automethod:: sin
    .. automethod:: sin_
    .. automethod:: sinh

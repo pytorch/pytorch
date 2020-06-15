@@ -609,6 +609,7 @@ def get_testing_overrides():
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,
         torch.sign: lambda input, out=None: -1,
+        torch.sgn: lambda input, out=None: -1,
         torch.sin: lambda input, out=None: -1,
         torch.sinh: lambda input, out=None: -1,
         torch.slogdet: lambda input: -1,

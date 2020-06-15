@@ -253,6 +253,7 @@
 - func: sgn.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: sgn_out
+    CUDA: sgn_out
 
 - func: real(Tensor self) -> Tensor
   use_c10_dispatcher: full

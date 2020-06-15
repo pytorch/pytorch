@@ -883,6 +883,9 @@
 - name: sign(Tensor self) -> Tensor
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
+- name: sgn(Tensor self) -> Tensor
+  self: grad / at::abs(self)  # g_x u0 + i g_y v1, u0 = v1 = abs(z)
+
 - name: sin(Tensor self) -> Tensor
   self: grad * self.cos()
 

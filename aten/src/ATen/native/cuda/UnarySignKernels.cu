@@ -7,6 +7,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
+#include <ATen/native/cuda/zmath.cuh>
 
 namespace at { namespace native {
 
@@ -46,14 +47,16 @@ void sign_kernel_cuda(TensorIterator& iter){
 }
 
 template<typename T>
-__host__ __device__ static inline c10::complex<T> sgn_wrapper(c10::complex<T> v) {
-  return v.sgn();
+__host__ __device__ static inline thrust::complex<T> sgn_wrapper(thrust::complex<T> v) {
+  T angle = thrust::arg(v);
+  return thrust::complex<T>(::cos(angle), ::sin(angle));
 }
 
-void sign_kernel_cuda(TensorIterator& iter){
+void sgn_kernel_cuda(TensorIterator& iter){
   AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sgn_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return sgn_wrapper(a);
+      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
+      gpu_kernel(iter, []GPU_LAMBDA(thrust_t a) -> thrust_t {
+        return sgn_wrapper(a);
       });
   });
 }
