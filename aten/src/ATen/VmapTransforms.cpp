@@ -157,18 +157,15 @@ static Tensor alignBatchDimsAtFront(
 
   // align the bdims
   int64_t level = 0;
-  int64_t dim = 0;
   int64_t tensor_dim = 0;
-  for (int64_t level = 0; level < kVmapNumLevels; level++) {
-    if (!requested_levels[level]) {
-      continue;
-    }
+  for (int64_t bdim = 0; bdim < requested_levels.count(); bdim++) {
+    // Determine the level of the bdim
+    while (!requested_levels[level]) level++;
     if (tensor_levels[level]) {
-      aligned_sizes[dim] = physical_sizes[tensor_dim++];
+      aligned_sizes[bdim] = physical_sizes[tensor_dim++];
     }
-    dim++;
+    level++;
   }
-
   return physical_tensor.view(aligned_sizes);
 }
 
