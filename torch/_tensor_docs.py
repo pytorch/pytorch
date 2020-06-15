@@ -883,6 +883,13 @@ Args:
 
 """.format(**common_args))
 
+add_docstr_all('count_nonzero',
+               r"""
+count_nonzero(dim=None) -> Tensor
+
+See :func:`torch.count_nonzero`
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor

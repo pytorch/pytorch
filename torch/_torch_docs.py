@@ -1640,7 +1640,7 @@ add_docstr(torch.count_nonzero,
            r"""
 count_nonzero(input, dim=None) -> Tensor
 
-Counts the number of non-zero values in the tensor :attr:`input`.
+Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
 
 Args:
     {input}
@@ -1649,7 +1649,7 @@ Args:
 
 Example::
 
-    >>> x = torch .zeros(3,3)
+    >>> x = torch.zeros(3,3)
     >>> x[torch.randn(3,3) > 0.5] = 1
     >>> x
     tensor([[0., 1., 1.],
