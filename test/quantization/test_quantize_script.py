@@ -1284,8 +1284,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 checker = FileCheck().check_not("aten::linear") \
                                      .check_not("aten::relu") \
                                      .check_not("quantized::linear(") \
-                                     .check_not("quantized::relu(")
-                checker.run(model.graph)
+                                     .check_not("quantized::relu(") \
+                                     .run(model.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_conv(self):
