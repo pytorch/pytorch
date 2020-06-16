@@ -24,6 +24,7 @@ from torch.testing._internal.common_quantization import (
     AnnotatedSingleLayerLinearModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
+    LSTMwithHiddenDynamicModel,
 )
 from torch.testing._internal.common_quantized import (
     override_quantized_engine,
@@ -132,7 +133,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         # Test dynamic quantization
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                model_list = [SingleLayerLinearDynamicModel(qengine)]
+                model_list = [SingleLayerLinearDynamicModel(qengine), LSTMwithHiddenDynamicModel(qengine)]
                 for model in model_list:
                     model.eval()
                     if hasattr(model, "fuse_model"):
@@ -221,16 +222,22 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                     self.assertTrue(v["float"].shape == v["quantized"].shape)
 
         # Test dynamic quantization
+        lstm_input = torch.rand((1, 1, 2))
+        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
+        lstm_data = (lstm_input, lstm_hidden)
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                model_list = [SingleLayerLinearDynamicModel(qengine)]
-                module_swap_list = [nn.Linear]
+                model_list = [SingleLayerLinearDynamicModel(qengine), LSTMwithHiddenDynamicModel(qengine)]
+                module_swap_list = [nn.Linear, nn.LSTM]
                 for model in model_list:
                     model.eval()
                     if hasattr(model, "fuse_model"):
                         model.fuse_model()
                     q_model = quantize_dynamic(model)
-                    compare_and_validate_results(model, q_model, module_swap_list, linear_data)
+                    if type(model) is LSTMwithHiddenDynamicModel:
+                        compare_and_validate_results(model, q_model, module_swap_list, lstm_data)
+                    else:
+                        compare_and_validate_results(model, q_model, module_swap_list, linear_data)
 
     def test_compare_model_outputs(self):
         r"""Compare the output of conv layer in quantized model and corresponding
@@ -243,12 +250,15 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 expected_act_compare_dict_keys = {"fc1.quant.stats", "fc1.module.stats"}
             elif type(float_model) is SingleLayerLinearDynamicModel:
                 expected_act_compare_dict_keys = {"fc1.stats"}
+            elif type(float_model) is LSTMwithHiddenDynamicModel:
+                print("float model is lstm, act dict is: ", act_compare_dict)
+                expected_act_compare_dict_keys = {"lstm.stats"}
             else:
                 expected_act_compare_dict_keys = {"conv.stats", "quant.stats"}
 
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
-                self.assertTrue(v["float"].shape == v["quantized"].shape)
+                self.assertTrue(v["float"][0].shape == v["quantized"][0].shape)
 
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
@@ -305,12 +315,18 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                     self.assertTrue(v["float"].shape == v["quantized"].shape)
 
         # Test dynamic quantization
+        lstm_input = torch.rand((1, 1, 2))
+        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
+        lstm_data = (lstm_input, lstm_hidden)
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                model_list = [SingleLayerLinearDynamicModel(qengine)]
+                model_list = [SingleLayerLinearDynamicModel(qengine), LSTMwithHiddenDynamicModel(qengine)]
                 for model in model_list:
                     model.eval()
                     if hasattr(model, "fuse_model"):
                         model.fuse_model()
                     q_model = quantize_dynamic(model)
-                    compare_and_validate_results(model, q_model, linear_data)
+                    if type(model) is LSTMwithHiddenDynamicModel:
+                        compare_and_validate_results(model, q_model, lstm_data)
+                    else:
+                        compare_and_validate_results(model, q_model, linear_data)

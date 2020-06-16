@@ -25,7 +25,7 @@ DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
     | _INCLUDE_QCONFIG_PROPAGATE_LIST
 ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
 
-NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {nnqd.Linear, nnq.Linear}
+NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {nnqd.Linear, nnq.Linear, nnqd.LSTM, nn.LSTM}
 
 
 def _find_match(str_list, key_str, postfix):
@@ -92,6 +92,22 @@ def compare_weights(float_dict, quantized_dict):
             weight_dict[key] = {}
             weight_dict[key]["float"] = float_dict[match_key]
             weight_dict[key]["quantized"] = quantized_dict[key][0]
+
+        # For LSTM
+        split_str = key.split(".")
+        if split_str[-1] == "param" and split_str[-3] == "_all_weight_values":
+            layer = split_str[-2]
+            module_name = ".".join(split_str[:-3])
+            float_weight_ih_key = module_name + ".weight_ih_l" + layer
+            float_weight_hh_key = module_name + ".weight_hh_l" + layer
+            print('lstm float ih key is: ', float_weight_ih_key)
+            print('lstm float hh key is: ', float_weight_hh_key)
+            if float_weight_ih_key in float_dict and float_weight_hh_key in float_dict:
+                weight_dict[key] = {}
+                weight_dict[key]["float"] = float_dict[float_weight_ih_key]
+                weight_dict[key]["quantized"] = quantized_dict[key].__getstate__()[0][4][0].__getstate__()[0][0]
+                weight_dict[key]["float"] = float_dict[float_weight_hh_key]
+                weight_dict[key]["quantized"] = quantized_dict[key].__getstate__()[0][4][1].__getstate__()[0][0]
 
     return weight_dict
 
@@ -211,12 +227,18 @@ class Shadow(nn.Module):
         self.dequant = nnq.DeQuantize()
         self.logger = Logger()
 
-    def forward(self, x):
-        output = self.orig_module(x)
-        if x.is_quantized:
-            x = x.dequantize()
-        shadow_output = self.shadow_module(x)
-        self.logger(output, shadow_output)
+    def forward(self, *x):
+        if len(x) > 1:
+            output = self.orig_module(*x)
+            shadow_output = self.shadow_module(*x)
+            self.logger(output[0], shadow_output[0])
+        else:
+            x = x[0]
+            output = self.orig_module(x)
+            if x.is_quantized:
+                x = x.dequantize()
+            shadow_output = self.shadow_module(x)
+            self.logger(output, shadow_output)
         return output
 
     def add(self, x, y):
@@ -337,7 +359,10 @@ def compare_model_stub(
             quantized module and its float shadow module
     """
     prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
-    q_model(data)
+    if type(data) is tuple:
+        q_model(*data)
+    else:
+        q_model(data)
     ob_dict = get_logger_dict(q_model, Logger)
     return ob_dict
 
@@ -426,7 +451,11 @@ def compare_model_outputs(
         containing the matching float and quantized activations
     """
     prepare_model_outputs(float_model, q_model, Logger, white_list)
-    float_model(data)
-    q_model(data)
+    if type(data) is tuple:
+        float_model(*data)
+        q_model(*data)
+    else:
+        float_model(data)
+        q_model(data)
     act_compare_dict = get_matching_activations(float_model, q_model, Logger)
     return act_compare_dict
