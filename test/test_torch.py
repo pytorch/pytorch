@@ -17599,7 +17599,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_count_nonzero(self, device, dtype):
-        for ndims in (0, 2, 1, 3):
+        for ndims in range(0, 4):
             shape = self._rand_shape(ndims, 5, 10)
             for n in range(ndims + 1):
                 for c in combinations(list(range(ndims)), n):
