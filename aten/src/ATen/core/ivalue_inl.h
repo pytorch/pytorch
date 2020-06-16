@@ -318,6 +318,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   const IValue& constValue() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
+    AT_ASSERT(!error_);
     return value_;
   }
 
@@ -364,6 +365,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // Check if the current future has completed
   bool completed() const{
     return completed_;
+  }
+
+  bool hasValue() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return completed_ && !error_;
   }
 
   bool hasError() const {

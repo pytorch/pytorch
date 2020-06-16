@@ -135,7 +135,7 @@ struct CAFFE2_API TensorIterator {
   using PtrVector = SmallVector<char*, 4>;
   using StrideVector = SmallVector<int64_t, 6>;
 
-  TensorIterator(const TensorIteratorConfig&);
+  TensorIterator(TensorIteratorConfig&);
 
   // The inner-loop function operates on the fastest moving dimension. It
   // implements element-wise operations in terms of 1-d strided tensors.
@@ -296,9 +296,10 @@ struct CAFFE2_API TensorIterator {
   }
 
 protected:
-  void build(const TensorIteratorConfig&);
+  void build(TensorIteratorConfig&);
 
-  void populate_operands(const TensorIteratorConfig&);
+  // Mutable reference as it moves tensors out of TensorIteratorConfig
+  void populate_operands(TensorIteratorConfig&);
   void analyze_memory_format();
   void mark_outputs();
   void compute_mem_overlaps(const TensorIteratorConfig&);
@@ -478,6 +479,11 @@ public:
     return *this;
   }
 
+  TensorIteratorConfig& allow_cpu_scalars(const bool _allow_cpu_scalars) {
+    allow_cpu_scalars_ = _allow_cpu_scalars;
+    return *this;
+  }
+
   // Sets the cast_common_dtype_to_outputs_ flag, which is false by default
   // If true, the iterator's "common dtype" must be computatable
   //   (see the [Common Dtype Computation] note) and, on the CPU, temporary
@@ -514,7 +520,7 @@ public:
     return *this;
   }
 
-  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, const int64_t squash_dim){
+  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, const int64_t squash_dim) {
     declare_static_shape(shape);
     if (!static_shape_->size()) return *this;
     TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
@@ -523,6 +529,8 @@ public:
     return *this;
   }
 
+  // It would be better if this was && qualified, but this would be at the cost
+  // of a lot of boilerplate above
   TensorIterator build() {
     return TensorIterator(*this);
   }
