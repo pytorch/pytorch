@@ -2570,7 +2570,6 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
                 graph_params.append((obs.getattr('10_scale_0'), obs.getattr('10_zero_point_0')))
         self.assertEqual(ref_qparams, graph_params)
 
-    @override_qengines
     def test_dynamic_weight_observer(self):
         class M(torch.nn.Module):
             def __init__(self):
