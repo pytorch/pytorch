@@ -1906,6 +1906,34 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, inputs, ref)
         self.assertEqual(dtype, out.dtype)
 
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+        flatmap(lambda dtype: hu.tensor(
+            min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
+        **hu.gcs)
+    def test_constant_fill_from_tensor(self, data, gc, dc):
+        dtype = data.dtype.type
+        if data.dtype == np.dtype(np.bool):
+            dtype = np.bool
+
+        value = np.array([data.item(0)], dtype=dtype)
+        inputs = [data, value]
+        enum_type = _NUMPY_TYPE_TO_ENUM[dtype]
+
+        op = core.CreateOperator(
+            'ConstantFill',
+            ["X", "V"],
+            ["Y"],
+            dtype=enum_type,
+        )
+
+        def ref(x, v):
+            outputs = np.full(shape=data.shape, fill_value=value[0], dtype=dtype)
+            return [outputs]
+
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        out, = self.assertReferenceChecks(gc, op, inputs, ref)
+        self.assertEqual(dtype, out.dtype)
+
     @given(t=st.integers(1, 5),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
