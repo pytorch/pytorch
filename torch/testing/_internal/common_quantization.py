@@ -224,10 +224,11 @@ class QuantizationTestCase(TestCase):
         """
         wt_dtype_map = {torch.qint8: 'quantized_dynamic', torch.float16: 'quantized_fp16'}
         self.assertEqual(type(mod), reference_module_type)
-        if hasattr(mod, '_all_weight_values'):
-            for packed_params in mod._all_weight_values:
-                self.assertEqual(packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype])
+        for packed_params in mod._all_weight_values:
+            self.assertEqual(packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype])
 
+    # calib_data follows the same schema as calib_data for
+    # test_only_eval_fn, i.e. (input iterable, output iterable)
     def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
         scripted = torch.jit.script(orig_mod)
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
@@ -288,34 +289,14 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
         x = self.fc1(x)
         return x
 
-class RNNDynamicModel(torch.nn.Module):
-    def __init__(self, mod_type):
+class LSTMDynamicModel(torch.nn.Module):
+    def __init__(self):
         super().__init__()
         self.qconfig = default_dynamic_qconfig
-        if mod_type == 'GRU':
-            self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
-        if mod_type == 'LSTM':
-            self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+        self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
 
     def forward(self, x):
-        x = self.mod(x)
-        return x
-
-class RNNCellDynamicModel(torch.nn.Module):
-    def __init__(self, mod_type):
-        super().__init__()
-        self.qconfig = default_dynamic_qconfig
-        if mod_type == 'GRUCell':
-            self.mod = torch.nn.GRUCell(2, 2).to(dtype=torch.float)
-        if mod_type == 'LSTMCell':
-            self.mod = torch.nn.LSTMCell(2, 2).to(dtype=torch.float)
-        if mod_type == 'RNNReLU':
-            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='relu').to(dtype=torch.float)
-        if mod_type == 'RNNTanh':
-            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='tanh').to(dtype=torch.float)
-
-    def forward(self, x):
-        x = self.mod(x)
+        x = self.lstm(x)
         return x
 
 class ConvModel(torch.nn.Module):

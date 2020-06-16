@@ -1,11 +1,8 @@
 
 from .linear import Linear
-from .rnn import LSTM, LSTMCell, RNNCell, GRUCell
+from .rnn import LSTM
 
 __all__ = [
     'Linear',
     'LSTM',
-    'LSTMCell',
-    'RNNCell',
-    'GRUCell',
 ]
