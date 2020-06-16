@@ -675,6 +675,19 @@ graph(%a_quant, %r_scale, %r_zero_point, %r_dtype):
          %r_quant = quantized::hardswish(%a_quant, %r_scale, %r_zero_point)
          return (%r_quant) )";
 
+  // quantized::elu
+  std::string elu = R"(
+graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::elu(%a_dequant, %alpha, %scale, %input_scale)
+         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+         return (%r_quant) )";
+
+  std::string quantized_elu = R"(
+graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype):
+         %r_quant = quantized::elu(%a_quant, %r_scale, %r_zero_point, %alpha, %scale, %input_scale)
+         return (%r_quant) )";
+
   // quantized::layer_norm
   std::string layer_norm = R"(
 graph(%a_quant, %normalized_shape, %weight, %bias, %eps, %cudnn_enabled, %output_scale, %output_zero_point, %scalar_type):
@@ -900,6 +913,7 @@ graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %
       {"quantized::mul", mul, quantized_mul},
       {"quantized::mul", inplace_mul, quantized_mul},
       {"quantized::hardswish", hardswish, quantized_hardswish},
+      {"quantized::elu", elu, quantized_elu},
       {"quantized::layer_norm", layer_norm, quantized_layer_norm},
       {"quantized::group_norm", group_norm, quantized_group_norm},
       {"quantized::instance_norm", instance_norm, quantized_instance_norm},
