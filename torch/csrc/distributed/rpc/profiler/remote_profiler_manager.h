@@ -20,12 +20,10 @@ class TORCH_API RemoteProfilerManager {
   // inserts a pair (globallyUniqueId, key) to an in-memory map. The
   // corresponding ID is used in RPC deserialization to prefix remotely profiled
   // events with the right key.
-  void saveRPCKey(
-      GloballyUniqueId globallyUniqueId,
-      std::string rpcProfilingKey);
+  void saveRPCKey(ProfilingId globallyUniqueId, std::string rpcProfilingKey);
   // Retrieves the profiling key corresponding to the given globallyUniqueId.
   // Throws if it is not found.
-  std::string retrieveRPCProfilingKey(GloballyUniqueId globallyUniqueId);
+  std::string retrieveRPCProfilingKey(const ProfilingId& globallyUniqueId);
   // Generates the next unique globally unique ID.
   local_id_t getNextLocalId();
   // Retrieves the currently set thread-local profiling key. Throws if it is not
@@ -33,7 +31,7 @@ class TORCH_API RemoteProfilerManager {
   std::string getCurrentProfilingKey();
   // erases the globallyUniqueId from the map. This can help save memory in the
   // case that many RPCs are being profiled.
-  void eraseKey(GloballyUniqueId globallyUniqueId);
+  void eraseKey(const ProfilingId& globallyUniqueId);
 
  private:
   RemoteProfilerManager();
@@ -42,7 +40,7 @@ class TORCH_API RemoteProfilerManager {
   RemoteProfilerManager operator=(const RemoteProfilerManager& other) = delete;
   RemoteProfilerManager(RemoteProfilerManager&&) = delete;
   RemoteProfilerManager& operator=(RemoteProfilerManager&&) = delete;
-  std::unordered_map<GloballyUniqueId, std::string, GloballyUniqueId::Hash>
+  std::unordered_map<ProfilingId, std::string, ProfilingId::Hash>
       profiledRpcKeys_;
   static thread_local c10::optional<std::string> currentThreadLocalKey_;
   std::mutex mutex_;

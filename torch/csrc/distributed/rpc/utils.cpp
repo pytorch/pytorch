@@ -36,7 +36,7 @@ void processRemoteProfiledEvents(
       " profiler was not propagated.");
   std::vector<torch::autograd::profiler::Event> events =
       rpcWithProfilingResp.getProfiledEvents();
-  auto profilingId = rpcWithProfilingResp.getProfilingId();
+  const auto& profilingId = rpcWithProfilingResp.getProfilingId();
   auto& remoteProfilerManager = RemoteProfilerManager::getInstance();
   auto key = remoteProfilerManager.retrieveRPCProfilingKey(profilingId);
   remoteProfilerManager.eraseKey(profilingId);

@@ -17,7 +17,7 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     rpc::MessageType messageType,
     rpc::Message&& wrappedMessage,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig,
-    rpc::GloballyUniqueId&& profilingKeyId)
+    rpc::ProfilingId&& profilingKeyId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
       profilerConfig_(profilerConfig),
@@ -40,7 +40,7 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     rpc::MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig,
-    rpc::GloballyUniqueId&& profilingKeyId)
+    rpc::ProfilingId&& profilingKeyId)
     : messageType_(messageType),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
@@ -99,7 +99,7 @@ torch::autograd::profiler::ProfilerConfig RpcWithProfilingReq::
   return profilerConfig_;
 }
 
-rpc::GloballyUniqueId RpcWithProfilingReq::getProfilingId() const {
+const rpc::ProfilingId& RpcWithProfilingReq::getProfilingId() const {
   return profilingKeyId_;
 }
 
@@ -125,8 +125,7 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
   torch::autograd::profiler::ProfilerConfig cfg =
       torch::autograd::profiler::ProfilerConfig::fromIValue(tupleElements[1]);
 
-  rpc::GloballyUniqueId profilerId =
-      rpc::GloballyUniqueId::fromIValue(tupleElements[2]);
+  rpc::ProfilingId profilerId = rpc::ProfilingId::fromIValue(tupleElements[2]);
 
   // Create new message type and build wrapped RPC
   rpc::Message wrappedMessage(

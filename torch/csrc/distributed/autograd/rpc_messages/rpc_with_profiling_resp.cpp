@@ -14,7 +14,7 @@ RpcWithProfilingResp::RpcWithProfilingResp(
     rpc::MessageType messageType,
     rpc::Message&& wrappedMessage,
     std::vector<torch::autograd::profiler::Event> profiledEvents,
-    rpc::GloballyUniqueId profilingId)
+    rpc::ProfilingId profilingId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
       profiledEvents_(std::move(profiledEvents)),
@@ -33,7 +33,7 @@ RpcWithProfilingResp::RpcWithProfilingResp(
     rpc::MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
     std::vector<torch::autograd::profiler::Event> profiledEvents,
-    rpc::GloballyUniqueId profilingId)
+    rpc::ProfilingId profilingId)
     : messageType_(messageType),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
@@ -57,7 +57,7 @@ std::vector<torch::autograd::profiler::Event> RpcWithProfilingResp::
   return profiledEvents_;
 }
 
-rpc::GloballyUniqueId RpcWithProfilingResp::getProfilingId() const {
+const rpc::ProfilingId& RpcWithProfilingResp::getProfilingId() const {
   return profilingId_;
 }
 
@@ -117,8 +117,7 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
           tupleElements.size()));
   rpc::MessageType wrappedMsgType =
       static_cast<rpc::MessageType>(tupleElements[0].toInt());
-  rpc::GloballyUniqueId profilingId =
-      rpc::GloballyUniqueId::fromIValue(tupleElements[1]);
+  rpc::ProfilingId profilingId = rpc::ProfilingId::fromIValue(tupleElements[1]);
   int profiledEventsSize = tupleElements[2].toInt();
   std::vector<torch::autograd::profiler::Event> remoteEvents;
   remoteEvents.reserve(profiledEventsSize);
