@@ -8,11 +8,15 @@ PThreadPool::PThreadPool(const size_t thread_count)
 }
 
 size_t PThreadPool::get_thread_count() const {
+  std::lock_guard<std::mutex> lock{mutex_};
+  
   TORCH_INTERNAL_ASSERT(threadpool_.get(), "Invalid threadpool!");
   return pthreadpool_get_threads_count(threadpool_.get());
 }
 
 void PThreadPool::set_thread_count(const size_t thread_count) {
+  std::lock_guard<std::mutex> lock{mutex_};
+
   // As it stands, pthreadpool is an entirely data parallel framework with no
   // support for task parallelism.  Hence, all functions are blocking, and no
   // user-provided tasks can be in flight when the control is returned to the
@@ -25,11 +29,9 @@ void PThreadPool::set_thread_count(const size_t thread_count) {
 void PThreadPool::run(
     const std::function<void(size_t)>& fn,
     const size_t range) {
+  std::lock_guard<std::mutex> lock{mutex_};
+  
   TORCH_INTERNAL_ASSERT(threadpool_.get(), "Invalid threadpool!");
-
-  // Note: Both run() and pthreadpool_parallelize_1d() are blocking functions.
-  // By definition, a reference to fn as the argument to a blocking function,
-  // cannot go out of scope in either case before these functions return.
 
   struct Context final {
     const std::function<void(size_t)>& fn;
@@ -43,14 +45,7 @@ void PThreadPool::run(
       // pointer to this lambda passed on to pthreadpool_parallelize_1d() cannot
       // go out of scope until pthreadpool_parallelize_1d() returns.
       [](void* const context, const size_t item) {
-        const union {
-          void* const as_void_ptr;
-          const Context* const as_context_ptr;
-        } argument{
-          context,
-        };
-
-        argument.as_context_ptr->fn(item);
+        reinterpret_cast<Context*>(context)->fn(item);
       },
       &context,
       range,

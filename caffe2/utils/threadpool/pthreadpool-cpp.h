@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 
 namespace caffe2 {
 
@@ -33,6 +34,7 @@ private:
   friend pthreadpool_t pthreadpool_();
 
 private:
+  mutable std::mutex mutex_;
   std::unique_ptr<pthreadpool, decltype(&pthreadpool_destroy)> threadpool_;
 };
 
