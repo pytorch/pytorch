@@ -15,13 +15,14 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 workspace.GlobalInit(["caffe2", "--glow_global_fp16=1",
                       "--glow_global_fused_scale_offset_fp16=1",
                       "--glow_global_force_sls_fp16_accum=1"])
 
 
-class SparseLengthsSum4BitFakeNNPIFp16Test(unittest.TestCase):
+class SparseLengthsSum4BitFakeNNPIFp16Test(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65535))
     def test_slws_fused_4bit_rowwise_all_same(self, seed):
         np.random.seed(seed)

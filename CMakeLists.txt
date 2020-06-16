@@ -31,9 +31,7 @@ endif()
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
 set(CMAKE_CXX_STANDARD 14)
-if(NOT MSVC)
-  set(CMAKE_C_STANDARD 11)
-endif()
+set(CMAKE_C_STANDARD 11)
 if(DEFINED GLIBCXX_USE_CXX11_ABI)
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
@@ -326,6 +324,14 @@ if(MSVC)
       set(${flag_var} "${${flag_var}} /MP /bigobj")
     else()
       set(${flag_var} "${${flag_var}} /bigobj")
+    endif()
+  endforeach(flag_var)
+
+  foreach(flag_var 
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
+    if(${flag_var} MATCHES "/Z[iI7]")
+      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
     endif()
   endforeach(flag_var)
 

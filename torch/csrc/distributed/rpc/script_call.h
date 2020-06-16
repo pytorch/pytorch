@@ -25,7 +25,8 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   // Constructor for TorchScript function call.
   ScriptCall(
       const c10::QualifiedName& qualifiedName,
-      std::vector<at::IValue>&& stack);
+      std::vector<at::IValue>&& stack,
+      const bool isAsyncExecution = false);
 
   bool hasOp() const;
   std::shared_ptr<Operator> op() const;
@@ -34,6 +35,9 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   // return the argument stack of this builtin operator
   const std::vector<at::IValue>& stack() const;
   std::vector<at::IValue>& stackRef();
+  inline bool isAsyncExecution() const {
+    return isAsyncExecution_;
+  }
 
   Message toMessageImpl() && override;
   static std::unique_ptr<ScriptCall> fromMessage(const Message& message);
@@ -59,6 +63,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   // an annotated torchscript function defined by users.
   c10::optional<const c10::QualifiedName> qualifiedName_;
   std::vector<at::IValue> stack_;
+  const bool isAsyncExecution_;
 };
 
 } // namespace rpc

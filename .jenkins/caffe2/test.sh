@@ -11,6 +11,15 @@ if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
 fi
+# These additional packages are needed for circleci ROCm builds.
+if [[ $BUILD_ENVIRONMENT == pytorch-linux-xenial-rocm* ]]; then
+    # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
+    # defaults installs the most recent networkx version, so we install this lower
+    # version explicitly before scikit-image pulls it in as a dependency
+    pip install networkx==2.0
+    # click - onnx
+    pip install --progress-bar off click protobuf tabulate virtualenv mock typing-extensions
+fi
 
 # Find where cpp tests and Caffe2 itself are installed
 if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
@@ -71,16 +80,24 @@ if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   exit 0
 fi
 
+# If pip is installed as root, we must use sudo.
+# CircleCI docker images could install conda as jenkins user, or use the OS's python package.
+PIP=$(which pip)
+PIP_USER=$(stat --format '%U' $PIP)
+if [[ "$PIP_USER" = root ]]; then
+  MAYBE_SUDO=sudo
+fi
+
 # if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
   # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
   # See comments on
   # https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
-  sudo pip -q uninstall -y hypothesis
+  $MAYBE_SUDO pip -q uninstall -y hypothesis
   # "pip install hypothesis==3.44.6" from official server is unreliable on
   # CircleCI, so we host a copy on S3 instead
-  sudo pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
-  sudo pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
-  sudo pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
+  $MAYBE_SUDO pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
+  $MAYBE_SUDO pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
+  $MAYBE_SUDO pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
 # else
 #   pip install --user --no-cache-dir hypothesis==3.59.0
 # fi
@@ -140,7 +157,9 @@ pip install --user pytest-sugar
 # torchvision tests #
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  pip install -q --user git+https://github.com/pytorch/vision.git@ba63fbdb595f41901f074883abc0084145877cf5
+  # Check out torch/vision at Jun 11 2020 commit
+  # This hash must match one in .jenkins/pytorch/test.sh
+  pip install -q --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
   pip install -q --user ninja
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
@@ -148,7 +167,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
     # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
     # Fix the pip error: Couldn't find a version that satisfies the requirement
     sudo pip install --upgrade pip
-    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.3.0.dev202005121
+    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.3.0.dev202005123
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

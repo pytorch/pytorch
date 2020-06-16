@@ -31,11 +31,10 @@ class MobileJob:
             "build_only": miniutils.quote(str(int(True))),
             "docker_image": self.docker_image,
             "name": full_job_name,
-            "requires": ["setup"],
         }
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branches_only_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
 
         return [{"pytorch_linux_build": props_dict}]
 

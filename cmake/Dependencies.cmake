@@ -11,9 +11,6 @@ set(CMAKE_SKIP_BUILD_RPATH  FALSE)
 # Don't use the install-rpath during the build phase
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
-# Automatically add all linked folders that are NOT in the build directory to
-# the rpath (per library?)
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
  # UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
@@ -41,18 +38,25 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND (NOT INTERN_BUILD_MOBILE OR BUILD_CA
 endif()
 
 # For MSVC,
-# 1. Replace /Zi and /ZI with /Z7
+# 1. Remove /Zi, /ZI and /Z7 for Release, MinSizeRel and Default builds
 # 2. Switch off incremental linking in debug builds
+# 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
+#    for Debug and RelWithDebInfo builds
 if(MSVC)
+  foreach(flag_var 
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
+    if(${flag_var} MATCHES "/Z[iI7]")
+      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
   if(MSVC_Z7_OVERRIDE)
     foreach(flag_var
-        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
-        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+        CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO
+        CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELWITHDEBINFO)
       if(${flag_var} MATCHES "/Z[iI]")
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-      endif(${flag_var} MATCHES "/Z[iI]")
+      endif()
     endforeach(flag_var)
   endif(MSVC_Z7_OVERRIDE)
   foreach(flag_var
@@ -476,161 +480,11 @@ endif()
 
 # ---[ Vulkan deps
 if(USE_VULKAN)
-  if(ANDROID)
-    if(NOT ANDROID_NDK)
-      message(FATAL_ERROR "USE_VULKAN requires ANDROID_NDK set")
-    endif()
-
-    # Vulkan from ANDROID_NDK
-    set(VULKAN_INCLUDE_DIR "${ANDROID_NDK}/sources/third-party/vulkan/src/include")
-    message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
-
-    set(VULKAN_ANDROID_NDK_WRAPPER_DIR "${ANDROID_NDK}/sources/third_party/vulkan/src/common")
-    message(STATUS "Vulkan_ANDROID_NDK_WRAPPER_DIR:${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
-    set(VULKAN_WRAPPER_DIR "${VULKAN_ANDROID_NDK_WRAPPER_DIR}")
-
-    add_library(
-      VulkanWrapper
-      STATIC
-      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
-      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
-
-    target_include_directories(VulkanWrapper PUBLIC .)
-    target_include_directories(VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
-
-    target_link_libraries(VulkanWrapper ${CMAKE_DL_LIBS})
-
-    include_directories(SYSTEM ${VULKAN_WRAPPER_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
-
-    # Shaderc
-    if(USE_VULKAN_SHADERC_RUNTIME)
-      # Shaderc from ANDROID_NDK
-      set(Shaderc_ANDROID_NDK_INCLUDE_DIR "${ANDROID_NDK}/sources/third_party/shaderc/include")
-      message(STATUS "Shaderc_ANDROID_NDK_INCLUDE_DIR:${Shaderc_ANDROID_NDK_INCLUDE_DIR}")
-
-      find_path(
-        GOOGLE_SHADERC_INCLUDE_DIRS
-        NAMES shaderc/shaderc.hpp
-        PATHS "${Shaderc_ANDROID_NDK_INCLUDE_DIR}")
-
-      set(Shaderc_ANDROID_NDK_LIB_DIR "${ANDROID_NDK}/sources/third_party/shaderc/libs/${ANDROID_STL}/${ANDROID_ABI}")
-      message(STATUS "Shaderc_ANDROID_NDK_LIB_DIR:${Shaderc_ANDROID_NDK_LIB_DIR}")
-
-      find_library(
-        GOOGLE_SHADERC_LIBRARIES
-        NAMES shaderc
-        PATHS "${Shaderc_ANDROID_NDK_LIB_DIR}")
-
-      # Shaderc in NDK is not prebuilt
-      if(NOT GOOGLE_SHADERC_LIBRARIES)
-        set(NDK_SHADERC_DIR "${ANDROID_NDK}/sources/third_party/shaderc")
-        set(NDK_BUILD_CMD "${ANDROID_NDK}/ndk-build")
-
-        execute_process(
-          COMMAND ${NDK_BUILD_CMD}
-          NDK_PROJECT_PATH=${NDK_SHADERC_DIR}
-          APP_BUILD_SCRIPT=${NDK_SHADERC_DIR}/Android.mk
-          APP_PLATFORM=${ANDROID_PLATFORM}
-          APP_STL=${ANDROID_STL}
-          APP_ABI=${ANDROID_ABI}
-          libshaderc_combined -j8
-          WORKING_DIRECTORY "${NDK_SHADERC_DIR}"
-          RESULT_VARIABLE error_code)
-
-        if(error_code)
-          message(FATAL_ERROR "Failed to build ANDROID_NDK shaderc error_code:${error_code}")
-        else()
-          unset(GOOGLE_SHADERC_LIBRARIES CACHE)
-          find_library(
-            GOOGLE_SHADERC_LIBRARIES
-            NAMES shaderc
-            HINTS "${Shaderc_ANDROID_NDK_LIB_DIR}")
-        endif()
-      endif(NOT GOOGLE_SHADERC_LIBRARIES)
-
-      if(GOOGLE_SHADERC_INCLUDE_DIRS AND GOOGLE_SHADERC_LIBRARIES)
-        message(STATUS "shaderc FOUND include:${GOOGLE_SHADERC_INCLUDE_DIRS}")
-        message(STATUS "shaderc FOUND libs:${GOOGLE_SHADERC_LIBRARIES}")
-        set(Shaderc_FOUND TRUE)
-      endif()
-
-      include_directories(SYSTEM ${GOOGLE_SHADERC_INCLUDE_DIRS})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${GOOGLE_SHADERC_LIBRARIES})
-    endif(USE_VULKAN_SHADERC_RUNTIME)
-  else()
-    # USE_VULKAN AND NOT ANDROID
-    if(NOT DEFINED ENV{VULKAN_SDK})
-      message(FATAL_ERROR "USE_VULKAN requires environment var VULKAN_SDK set")
-    endif()
-    message(STATUS "VULKAN_SDK:$ENV{VULKAN_SDK}")
-
-    set(VULKAN_INCLUDE_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Headers/include")
-    message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
-
-    if(USE_VULKAN_WRAPPER)
-      # Vulkan wrapper from VULKAN_SDK
-      set(VULKAN_SDK_WRAPPER_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Tools/common")
-      message(STATUS "Vulkan_SDK_WRAPPER_DIR:${VULKAN_SDK_WRAPPER_DIR}")
-      set(VULKAN_WRAPPER_DIR "${VULKAN_SDK_WRAPPER_DIR}")
-
-      add_library(
-        VulkanWrapper
-        STATIC
-        ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
-        ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
-
-      target_include_directories(VulkanWrapper PUBLIC .)
-      target_include_directories(VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
-
-      target_link_libraries(VulkanWrapper ${CMAKE_DL_LIBS})
-
-      include_directories(SYSTEM ${VULKAN_WRAPPER_DIR})
-      list(APPEND Caffe2_DEPENDENCY_LIBS VulkanWrapper)
-    else(USE_VULKAN_WRAPPER)
-      find_library(VULKAN_LIBRARY
-        NAMES vulkan
-        PATHS
-        "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib")
-
-      if(NOT VULKAN_LIBRARY)
-        message(FATAL_ERROR "USE_VULKAN: Vulkan library not found")
-      endif()
-
-      message(STATUS "VULKAN_LIBRARY:${VULKAN_LIBRARY}")
-      message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
-
-      include_directories(SYSTEM ${VULKAN_INCLUDE_DIR})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${VULKAN_LIBRARY})
-    endif(USE_VULKAN_WRAPPER)
-
-    if(USE_VULKAN_SHADERC_RUNTIME)
-      # shaderc from VULKAN_SDK
-      find_path(
-          GOOGLE_SHADERC_INCLUDE_DIRS
-          NAMES shaderc/shaderc.hpp
-          PATHS $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/include)
-
-      find_library(
-          GOOGLE_SHADERC_LIBRARIES
-          NAMES shaderc_combined
-          PATHS $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib)
-
-      find_package_handle_standard_args(
-          Shaderc
-          DEFAULT_MSG
-          GOOGLE_SHADERC_INCLUDE_DIRS
-          GOOGLE_SHADERC_LIBRARIES)
-      if(NOT Shaderc_FOUND)
-        message(FATAL_ERROR "USE_VULKAN: Shaderc not found in VULKAN_SDK")
-      else()
-        message(STATUS "shaderc FOUND include:${GOOGLE_SHADERC_INCLUDE_DIRS}")
-        message(STATUS "shaderc FOUND libs:${GOOGLE_SHADERC_LIBRARIES}")
-      endif()
-      include_directories(SYSTEM ${GOOGLE_SHADERC_INCLUDE_DIRS})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${GOOGLE_SHADERC_LIBRARIES})
-    endif(USE_VULKAN_SHADERC_RUNTIME)
-  endif()
+  set(Vulkan_LIBS)
+  set(Vulkan_INCLUDES)
+  include(${CMAKE_CURRENT_LIST_DIR}/VulkanDependencies.cmake)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${Vulkan_LIBS})
+  include_directories(SYSTEM ${Vulkan_INCLUDES})
 endif()
 
 # ---[ gflags
@@ -1805,6 +1659,7 @@ if(NOT INTERN_BUILD_MOBILE)
     endif(HAVE_MALLOC_USABLE_SIZE)
   endif(UNIX)
 
+  add_definitions(-DUSE_EXTERNAL_MZCRC)
   add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
 
   # Is __thread supported?
