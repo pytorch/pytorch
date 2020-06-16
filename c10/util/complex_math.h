@@ -37,7 +37,7 @@ C10_HOST_DEVICE inline c10::complex<T> log10(const c10::complex<T> &x) {
 template<typename T>
 C10_HOST_DEVICE inline c10::complex<T> log2(const c10::complex<T> &x) {
   const c10::complex<T> log2 = c10::complex<T>(::log(2.0), 0.0);
-  return std::log(x) / log2;
+  return c10_complex_math::log(x) / log2;
 }
 
 // Power functions
