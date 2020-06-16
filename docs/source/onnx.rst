@@ -601,7 +601,7 @@ you can create and register your own custom ops implementation in PyTorch. Here'
             return torch.ops.custom_ops.foo_forward(input1, input2, self.attr1, self.attr2)
 
     model = FooModel(attr1, attr2)
-    torch.onnx.export(model, (dummy_input1, dummy_input2), 'model.onnx', custom_opsets={"custom_ops": 2})
+    torch.onnx.export(model, (dummy_input1, dummy_input2), 'model.onnx', custom_opsets={"custom_domain": 2})
 
 Depending on the custom operator, you can export it as one or a combination of existing ONNX ops.
 You can also export it as a custom op in ONNX as well. In that case, you can specify the custom domain
