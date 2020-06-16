@@ -751,14 +751,6 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
     Operator(
-        "aten::len.str(str s) -> int",
-        [](Stack& stack) {
-          auto string = pop(stack).toStringRef();
-          push(stack, static_cast<int64_t>(string.size()));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
         "aten::__getitem__.str(str s, int index) -> str",
         [](Stack& stack) {
           auto index = pop(stack).toInt();
@@ -766,19 +758,6 @@ RegisterOperators reg2({
           auto norm_index = normalizeIndex(index, string.size());
           char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::list(str t) -> str[]",
-        [](Stack& stack) {
-          auto str = pop(stack).toStringRef();
-          c10::List<std::string> chars;
-          chars.reserve(str.size());
-          for (auto c : str) {
-            chars.push_back(std::string(1, c));
-          }
-          push(stack, std::move(chars));
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -994,34 +973,6 @@ RegisterOperators reg2({
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
-    // only used internally in range() translation
-    Operator(
-        "aten::__range_length(int lo, int hi, int step) -> int",
-        [](Stack& stack) {
-          int64_t lo, hi, step;
-          pop(stack, lo, hi, step);
-          // error handling when step_val = 0 during runtime
-          if (step == 0) {
-            throw std::runtime_error("range() arg 3 must not be zero");
-          }
-          if (step > 0 && lo < hi)
-            push(stack, 1 + (hi - 1 - lo) / step);
-          else if (step < 0 && lo > hi)
-            push(stack, 1 + (lo - 1 - hi) / (0 - step));
-          else
-            push(stack, 0);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::__derive_index(int index, int start, int step) -> int",
-        [](Stack& stack) {
-          int64_t index, start, step;
-          pop(stack, index, start, step);
-          push(stack, start + index * step);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::modf(float a) -> (float, float)",
         [](Stack& stack) {
