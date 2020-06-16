@@ -226,7 +226,10 @@ class BatchSampler(Sampler[List[int]]):
             yield batch
 
     def __len__(self):
-        # Can be called only if the sampler has __len__ implemented
+        # Can only be called if self.sampler has __len__ implemented
+        # We cannot enforce this condition, so we turn off typechecking for the
+        # implementation below.
+        # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
         if self.drop_last:
             return len(self.sampler) // self.batch_size  # type: ignore
         else:
