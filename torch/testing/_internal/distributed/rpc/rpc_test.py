@@ -1161,6 +1161,7 @@ class RpcTest(RpcAgentTestFixture):
                 # Remote event should have a node ID corresponding to the worker
                 # it ran on.
                 self.assertEqual(remote_event.node_id, dst)
+
             # Validate order remote events show up in profiling output.
             def convert_remote_to_local(event_name):
                 return event_name[
