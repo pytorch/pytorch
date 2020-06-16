@@ -7,6 +7,8 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+constexpr int kAutoIncrementBits = 48;
 thread_local c10::optional<std::string>
     RemoteProfilerManager::currentThreadLocalKey_ = c10::nullopt;
 /*static */ RemoteProfilerManager& RemoteProfilerManager::getInstance() {
@@ -69,7 +71,7 @@ void RemoteProfilerManager::saveRPCKey(
 RemoteProfilerManager::RemoteProfilerManager() {
   auto workerId =
       static_cast<int64_t>(RpcAgent::getCurrentRpcAgent()->getWorkerInfo().id_);
-  currentLocalId_ = workerId << 48;
+  currentLocalId_ = workerId << kAutoIncrementBits;
 }
 } // namespace rpc
 } // namespace distributed
