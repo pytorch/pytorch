@@ -1,10 +1,12 @@
+import copy
 import sys
 import io
 import inspect
 import math
+import os
 import random
 import re
-import copy
+import subprocess
 import torch
 import torch.cuda
 import torch.backends.cuda
@@ -114,6 +116,18 @@ class AbstractTestCases:
 
         def test_dir(self):
             dir(torch)
+
+        def test_deterministic_flag(self):
+            deterministic_restore = torch.is_deterministic()
+
+            for deterministic in [True, False]:
+                torch.set_deterministic(deterministic)
+                self.assertEqual(deterministic, torch.is_deterministic())
+
+            with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
+                torch.set_deterministic(1)
+
+            torch.set_deterministic(deterministic_restore)
 
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
@@ -1363,7 +1377,8 @@ class AbstractTestCases:
             except RuntimeError:
                 pass
             with mp.Pool(1) as pool:
-                self.assertTrue(pool.map(method, [arg]))
+                out: list = pool.map(method, [arg])
+                self.assertTrue(out[0])
 
         @staticmethod
         def _test_multinomial_invalid_probs(probs):
@@ -1372,7 +1387,7 @@ class AbstractTestCases:
                 torch.multinomial(probs.to('cpu'), 2)
                 return False  # Should not be reached
             except RuntimeError as e:
-                return 'invalid multinomial distribution' in str(e)
+                return 'probability tensor contains either `inf`, `nan` or element < 0' in str(e)
 
         @slowTest
         @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
@@ -1384,7 +1399,6 @@ class AbstractTestCases:
             self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
             self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
             self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
-            self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
         @suppress_warnings
         def test_range(self):
@@ -8023,26 +8037,25 @@ class TestTorchDeviceType(TestCase):
         for i in range(1, rand_dim):
             # Check all combinations of `i` axis.
             for flip_dim in combinations(range(rand_dim), i):
-                data = torch.randn(*shape, dtype=dtype).tolist()
+                data = torch.randn(*shape, device=device, dtype=dtype)
                 torch_fn = partial(torch.flip, dims=flip_dim)
                 np_fn = partial(np.flip, axis=flip_dim)
-                self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+                self.compare_with_numpy(torch_fn, np_fn, data)
 
-    def _test_fliplr_flipud(self, funcs, min_dim, max_dim, device, dtype):
+    def _test_fliplr_flipud(self, torch_fn, np_fn, min_dim, max_dim, device, dtype):
         for dim in range(min_dim, max_dim + 1):
             shape = self._rand_shape(dim, 5, 10)
             # Randomly scale the input
-            data = (torch.randn(*shape).to(dtype) * random.randint(50, 100)).tolist()
-            # Use _np_compare_func as it copies the output of np_func,
-            # which takes care of negative strides if present.
-            torch_fn, np_fn = funcs
-            self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+            if dtype.is_floating_point or dtype.is_complex:
+                data = torch.randn(*shape, device=device, dtype=dtype)
+            else:
+                data = torch.randint(0, 10, shape, device=device, dtype=dtype)
+            self.compare_with_numpy(torch_fn, np_fn, data)
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_fliplr(self, device, dtype):
-        funcs = (torch.fliplr, np.fliplr)
-        self._test_fliplr_flipud(funcs, 2, 4, device, dtype)
+        self._test_fliplr_flipud(torch.fliplr, np.fliplr, 2, 4, device, dtype)
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_fliplr_invalid(self, device, dtype):
@@ -8050,18 +8063,17 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(x)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
-            torch.fliplr(torch.tensor(42, dtype=dtype))
+            torch.fliplr(torch.tensor(42, device=device, dtype=dtype))
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_flipud(self, device, dtype):
-        funcs = (torch.flipud, np.flipud)
-        self._test_fliplr_flipud(funcs, 1, 4, device, dtype)
+        self._test_fliplr_flipud(torch.flipud, np.flipud, 1, 4, device, dtype)
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_flipud_invalid(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 1-d."):
-            torch.flipud(torch.tensor(42, dtype=dtype))
+            torch.flipud(torch.tensor(42, device=device, dtype=dtype))
 
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
@@ -8101,10 +8113,10 @@ class TestTorchDeviceType(TestCase):
     def test_complex_rot90(self, device, dtype):
         shape = self._rand_shape(random.randint(2, 4), 5, 10)
         for rot_times in range(4):
-            data = torch.randn(*shape, dtype=dtype).tolist()
+            data = torch.randn(*shape, device=device, dtype=dtype)
             torch_fn = partial(torch.rot90, k=rot_times, dims=[0, 1])
             np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
-            self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+            self.compare_with_numpy(torch_fn, np_fn, data)
 
     def test_signal_window_functions(self, device):
         if not TEST_SCIPY:
@@ -9432,7 +9444,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
-    def test_reduction_vectorized_corner(self, device, dtype):
+    def test_reduction_vectorize_along_input_corner(self, device, dtype):
         # 1D case: sum
         size = 1024 * 1024 * 64 + 3
         shift = 1
@@ -9528,23 +9540,40 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(xs1[j].item(), size[1] - i)
                 self.assertEqual(xs2[j].item(), size[1] - i)
 
+    @onlyCUDA
+    @dtypes(torch.half, torch.float, torch.double)
+    def test_reduction_vectorize_along_output(self, device, dtype):
+        def run_test(input_):
+            M, N = input_.shape
+            input_.zero_()
+            for i in range(min(M, N)):
+                input_[i][i] = 1
+            output1 = input_.argmax(dim=0)
+            output2 = input_.sum(dim=0)
+            for i in range(min(M, N)):
+                self.assertEqual(output1[i], i)
+                self.assertEqual(output2[i], 1)
+        # vec 4
+        run_test(torch.zeros(64, 64, dtype=dtype, device=device))
+        # vec 2
+        run_test(torch.zeros(64 * 64 + 2, dtype=dtype, device=device)[2:].view(64, 64))
+        run_test(torch.zeros(64, 62, dtype=dtype, device=device))
+        run_test(torch.zeros(64, 2, dtype=dtype, device=device))
+        # vec 1
+        run_test(torch.zeros(64 * 64 + 1, dtype=dtype, device=device)[1:].view(64, 64))
+        run_test(torch.zeros(64, 61, dtype=dtype, device=device))
+        run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
     @slowTest
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
-        # Requires > 8 GB of memory. So, if allocation fails just skip it.
-        try:
-            x = torch.zeros((2, 2**32), device=device, dtype=torch.int8)
-            x[:, -1] = 1
-            self.assertEqual(x.argmax(1), [x.shape[1] - 1] * 2)
-            self.assertEqual(x.max(1).indices, [x.shape[1] - 1] * 2)
-            x[:, -1] = -1
-            self.assertEqual(x.argmin(1), [x.shape[1] - 1] * 2)
-            self.assertEqual(x.min(1).indices, [x.shape[1] - 1] * 2)
-        except RuntimeError as e:
-            if 'memory' in str(e):
-                raise unittest.SkipTest('Insufficient memory')
-            raise
+        x = torch.zeros(2**31, device=device, dtype=torch.int8)
+        x[-1] = 1
+        self.assertEqual(x.argmax(0), x.shape[0] - 1)
+        self.assertEqual(x.max(0).indices, x.shape[0] - 1)
+        x[-1] = -1
+        self.assertEqual(x.argmin(0), x.shape[0] - 1)
+        self.assertEqual(x.min(0).indices, x.shape[0] - 1)
 
     def test_argminmax_axis_with_dim_one(self, device):
         # See: https://github.com/pytorch/pytorch/issues/38922
@@ -10918,18 +10947,20 @@ class TestTorchDeviceType(TestCase):
         t.bernoulli_(0.5)
         self.assertTrue(isBinary(t))
 
-        p = torch.rand(10, dtype=torch.float32, device=device).expand(10, 10)
-        t.fill_(2)
-        t.bernoulli_(p)
-        self.assertTrue(isBinary(t))
+        for p_dtype in torch.testing.get_all_fp_dtypes(include_half=device.startswith('cuda'),
+                                                       include_bfloat16=False):
+            p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
+            t.fill_(2)
+            t.bernoulli_(p)
+            self.assertTrue(isBinary(t))
 
-        t.fill_(2)
-        torch.bernoulli(torch.rand_like(t, dtype=torch.float32), out=t)
-        self.assertTrue(isBinary(t))
+            t.fill_(2)
+            torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
+            self.assertTrue(isBinary(t))
 
-        t.fill_(2)
-        t.bernoulli_(torch.rand_like(t, dtype=torch.float32))
-        self.assertTrue(isBinary(t))
+            t.fill_(2)
+            t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
+            self.assertTrue(isBinary(t))
 
     @slowTest
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
@@ -11462,7 +11493,7 @@ class TestTorchDeviceType(TestCase):
         # complex
         m1 = torch.tensor((4.0000 + 4.0000j), dtype=torch.complex64)
         m2 = torch.tensor(4., dtype=torch.float64)
-        self.assertRaisesRegex(RuntimeError, r"result type ComplexDouble can't be cast to the desired output type Double",
+        self.assertRaisesRegex(RuntimeError, r"result type ComplexFloat can't be cast to the desired output type Double",
                                lambda: torch.add(m1, m1, out=m2))
 
 
@@ -14111,7 +14142,7 @@ class TestTorchDeviceType(TestCase):
     @deviceCountAtLeast(2)
     @onlyCUDA
     def test_cross_device_binary_ops(self, devices):
-        vals = (1, (2,))
+        vals = (1., (2.,))
         cpu_tensor = torch.randn(2, 2)
         for op in (operator.add, torch.add,
                    operator.sub, torch.sub,
@@ -14122,14 +14153,32 @@ class TestTorchDeviceType(TestCase):
                 a = torch.tensor(a, device=devices[0])
                 b = torch.tensor(b, device=devices[1])
 
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(a, b)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(b, a)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(a, cpu_tensor)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(cpu_tensor, a)
+
+    # This test ensures that a scalar Tensor can be safely used
+    # in a binary operation in conjunction with a Tensor on all
+    # available CUDA devices
+    @deviceCountAtLeast(2)
+    @onlyCUDA
+    def test_binary_op_scalar_device_unspecified(self, devices):
+        scalar_val = torch.tensor(1.)
+        for default_device in devices:
+            with torch.cuda.device(default_device):
+                for device in devices:
+                    device_obj = torch.device(device)
+                    x = torch.rand(3, device=device)
+                    y0 = x * scalar_val
+                    self.assertEqual(y0.device, device_obj)
+                    y1 = scalar_val * x
+                    self.assertEqual(y1.device, device_obj)
+                    self.assertEqual(y0, y1)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
     # binary operations with CUDA tensors.
@@ -17500,6 +17549,49 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             a = np.array(val, dtype=torch_to_numpy_dtype_dict[dtype])
             self.assertEqual(t, torch.from_numpy(a))
 
+    def test_multinomial_invalid(self, device):
+        def test(probs):
+            with self.assertRaisesRegex(RuntimeError,
+                                        'probability tensor contains either `inf`, `nan` or element < 0'):
+                torch.multinomial(probs.to(device), 2)
+                torch.cuda.synchronize()
+
+        test(torch.Tensor([1, -1, 1]))
+        test(torch.Tensor([1, inf, 1]))
+        test(torch.Tensor([1, -inf, 1]))
+        test(torch.Tensor([1, 1, nan]))
+
+    def test_multinomial_invalid_distribution(self, device):
+        def test(probs, replacement):
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"invalid multinomial distribution \(sum of probabilities <= 0\)"):
+                torch.multinomial(probs, 2, replacement)
+                torch.cuda.synchronize()
+
+        x = torch.zeros(3, device=device)
+        y = torch.zeros(3, 3, device=device)
+        z = torch.zeros(3, 3, device=device)
+        z[1, :] = 1
+
+        test(x, False)
+        test(y, False)
+        test(z, False)
+
+        # Verify only for CPU as replacement=True
+        # throws device side assert triggered.
+        if self.device_type == 'cpu':
+            test(x, True)
+            test(y, True)
+            test(z, True)
+
+    def test_multinomial_empty(self, device):
+        probs = torch.ones(0, 3)
+        num_samples = 1
+        expected = torch.empty(0, num_samples, dtype=torch.int64)
+        for replacement in (True, False):
+            out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
+            self.assertEqual(out, expected)
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
@@ -17780,7 +17872,7 @@ class TestDevicePrecision(TestCase):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
 
-        err_string = "output with device cpu doesn't match the desired device {0}".format(device)
+        err_string = "Expected all tensors to be on the same device, but found at least two devices, {0}".format(device)
 
         with self.assertRaisesRegex(RuntimeError, err_string):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
@@ -19138,6 +19230,29 @@ class TestTorchMathOps(TestCase):
 
 class TestTorch(AbstractTestCases._TestTorchMixin):
     exact_dtype = True
+
+class TestRPATH(TestCase):
+    @unittest.skipIf(not sys.platform.startswith('linux'), "linux-only test")
+    def test_rpath(self):
+        """
+        Make sure RPATH (or RUNPATH) in nvrtc does not contain a cuda path
+        issue gh-35418
+        """
+        libdir = os.path.join(os.path.dirname(torch._C.__file__), 'lib')
+        caffe2_nvrtc = os.path.join(libdir, 'libcaffe2_nvrtc.so')
+        if os.path.exists(caffe2_nvrtc):
+            output = subprocess.check_output(['objdump', '-x', caffe2_nvrtc])
+            nRPATHfound = 0
+            for line in output.split(b'\n'):
+                if b'RPATH' in line or b'RUNPATH' in line:
+                    # If CMake adds a path, it will be after $ORIGIN
+                    # The before-$origin paths are ones added via -L linkpaths
+                    # in $CFLAGS
+                    segments = line.split(b'$ORIGIN')
+                    if len(segments) > 1:
+                        self.assertFalse(b'cuda' in segments[-1])
+                    nRPATHfound += 1
+            self.assertNotEqual(nRPATHfound, 0)
 
 
 # Generates tests
