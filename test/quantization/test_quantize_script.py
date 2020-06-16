@@ -1214,12 +1214,10 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 return self.conv(x)
 
         options = itertools.product([1, 2, 3], [True, False])
-        input_data = {1 : self.img_data_1d,
-                      2 : self.img_data,
-                      3 : self.img_data_3d}
         for dim, tracing in options:
             model = self.checkGraphModeOp(
-                Conv(dim), input_data[dim], "quantized::conv{}d".format(dim), tracing)
+                Conv(dim), self.img_data_dict[dim],
+                "quantized::conv{}d".format(dim), tracing)
             # make sure there is only one quantize_per_tensor for input
             # and conv2d_prepack is folded
             FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
@@ -1258,7 +1256,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             def forward(self, x):
                 return F.relu(self.conv(x), True)
 
-        input_data = {1 : self.img_data_1d, 2 : self.img_data, 3 : self.img_data_3d}
         options = itertools.product([1, 2, 3], [True, False])
         for dim, tracing in options:
             for orig_m in [ConvNdRelu(dim, True),
@@ -1266,9 +1263,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                            ConvNdFunctionalRelu(dim),
                            ConvNdInplaceFunctionalRelu(dim)]:
                 conv_name = "conv{}d".format(dim)
-                data = input_data[dim]
                 m = self.checkGraphModeOp(
-                    orig_m, data, "quantized::conv{}d_relu(".format(dim), tracing=tracing)
+                    orig_m, self.img_data_dict[dim], "quantized::conv{}d_relu(".format(dim), tracing=tracing)
 
                 FileCheck().check_not("aten::conv{}d(".format(dim)) \
                            .check_not("aten::relu") \
@@ -1741,52 +1737,58 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_qbatch_norm(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(M, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
                 return self.bn(x)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        for tracing in [True, False]:
-            model = self.checkGraphModeOp(M(), data, "quantized::batch_norm2d", tracing)
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            model = self.checkGraphModeOp(M(dim), self.img_data_dict[dim], "quantized::batch_norm", tracing)
 
             FileCheck().check_not("aten::batch_norm") \
                        .run(model.graph)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+
         class BNRelu(torch.nn.Module):
-            def __init__(self, inplace):
+            def __init__(self, dim, inplace):
                 super(BNRelu, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
                 self.relu = torch.nn.ReLU(inplace=inplace)
 
             def forward(self, x):
                 return self.relu(self.bn(x))
 
         class BNFuncRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(BNFuncRelu, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
                 return F.relu(self.bn(x), False)
 
         class BNFuncInplaceRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(BNFuncInplaceRelu, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
                 return F.relu(self.bn(x), True)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        for instance in [BNRelu(True), BNRelu(False), BNFuncRelu(), BNFuncInplaceRelu()]:
-            for tracing in [True, False]:
-                model = self.checkGraphModeOp(instance, data, "quantized::batch_norm2d_relu", tracing)
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            for instance in [BNRelu(dim, True), BNRelu(dim, False),
+                             BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
+                model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
+                                              "quantized::batch_norm_relu", tracing)
                 FileCheck().check_not("aten::batch_norm") \
                            .check_not("aten::relu") \
                            .check_not("aten::relu_") \
@@ -2152,7 +2154,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                        .run(m.graph)
 
-    def test_quantize_general_shape_ops(self):
+    def test_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general shape ops like aten::flatten
         without actually checking for execution of these ops
@@ -2178,8 +2180,14 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
                 x = x.view(-1)
+                # prim::ListConstruct
                 xs = [x, x]
-                y, x = xs
+                # prim::ListUnpack
+                x, y = xs
+                # prim::TupleConstruct
+                xs = (x, x)
+                # prim::TupleUnpack
+                x, y = xs
                 x = x.transpose(1, 2)
                 x = x.contiguous()
                 x, y = torch.chunk(x, 2)
@@ -2191,6 +2199,12 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.relu(x)
                 x = F.relu(x)
                 x.relu_()
+                x = x.squeeze(0)
+                x.squeeze_(0)
+                x = torch.squeeze(x, 0)
+                x = x.unsqueeze(0)
+                x.unsqueeze_(0)
+                x = torch.unsqueeze(x, 0)
                 y = []
                 y.append(x)
                 x, _ = y
@@ -2219,7 +2233,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                    .check("aten::dequantize") \
                    .run(m.graph)
 
-    def test_quantize_general_value_ops(self):
+    def test_general_value_ops(self):
         """ A test that checks correct patterns are produced for
         all supported general value ops like aten::avg_pool2d \
         without actually checking for execution of these ops
