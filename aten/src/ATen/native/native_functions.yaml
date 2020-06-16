@@ -813,9 +813,6 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: count_nonzero.dim_DimnameList(Tensor self, Dimname[] dim) -> Tensor
-  variants: function, method
-
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   use_c10_dispatcher: full
   dispatch:
