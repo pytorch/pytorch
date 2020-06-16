@@ -294,28 +294,19 @@ Tensor& sum_out(Tensor& result, const Tensor& self, DimnameList dim,
 
 Tensor& nansum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
                        bool keepdim, optional<ScalarType> opt_dtype) {
-
-  auto get_computation_dtype = [](const Tensor& self) {
-    ScalarType src_type = self.scalar_type();
-    if (at::isIntegralType(src_type, /*includeBool=*/true)) {
-      return c10::typeMetaToScalarType(c10::get_default_dtype());
-    }
-    return src_type;
-  };
-
-  ScalarType scalarType =
-      opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
-  // numpy promotes all integral types to `Long` and preserver the floating types.
-  const auto result_type = at::isIntegralType(scalarType) ? ScalarType::Long : scalarType;
-  // use default float type for computation if `self.dtype()` is integral
-  const auto dtype = get_computation_dtype(self);
+  // For integral types, use existing sum as
+  // integral types don't have `Nan`.
+  auto dtype = self.scalar_type();
+  if (c10::isIntegralType(dtype, true)){
+    return at::sum_out(result, self, dim, keepdim, opt_dtype);
+  }
 
   auto iter = make_reduction("nansum", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
-    result = result.zero_().toType(result_type);
+    result = result.zero_();
   } else {
     nansum_stub(iter.device_type(), iter);
-    result = result.toType(result_type);
+    result = result;
   }
   return result;
 }
