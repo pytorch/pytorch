@@ -2901,3 +2901,13 @@ Tensor stack_forward(TensorList tensors, int64_t dim) {
 
   return out_fw_grad;
 }
+
+Tensor max_forward(const Tensor& self_fw_grad, const Tensor& self, const Tensor& result) {
+  Tensor out_fw_grad;
+  if (self_fw_grad.defined()) {
+    auto first_value_idx = (self == result).nonzero().select(0, 0);
+    out_fw_grad = self_fw_grad.index(first_value_idx);
+  }
+  return out_fw_grad;
+}
+

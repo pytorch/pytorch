@@ -255,6 +255,7 @@
 
 - name: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
+  result: linear
 
 - name: asin(Tensor self) -> Tensor
   self: grad * (-self * self + 1).rsqrt()
@@ -448,6 +449,7 @@
 
 - name: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   self: at::sum_to(grad, self.sizes())
+  result: linear
 
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
@@ -685,6 +687,7 @@
 
 - name: max(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
+  result: "self_fw_grad.defined()? select_first_equal_backward(self_fw_grad, self, result) : Tensor()"
 
 - name: max.other(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self <= other, 0)
