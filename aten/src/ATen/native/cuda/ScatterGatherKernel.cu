@@ -249,7 +249,7 @@ struct cuda_scatter_fill_base_kernel {
     auto iter = TensorIterator();
     iter.check_all_same_dtype(false);
     iter.dont_resize_outputs();
-    iter.add_output(self_restrided, self.device(), self.scalar_type());
+    iter.add_output(self_restrided);
     iter.add_input(index);
     iter.build();
 
