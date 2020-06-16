@@ -1906,6 +1906,40 @@ class _DistTestBase(object):
         # a module without gradients shouldn't be accepted
         self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))
 
+    @unittest.skipIf(BACKEND != "nccl", "Requires NCCL backend")
+    @skip_if_lt_x_gpu(2)
+    def test_DistributedDataParallel_non_default_stream(self):
+        stream = torch.cuda.Stream()
+        rank = self.rank
+        with torch.cuda.stream(stream):
+            net = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(1, 1, bias=False).cuda(rank), device_ids=[rank]
+            )
+            for i in range(1000):
+                # Clear gradients manually
+                grad = net.module.weight.grad
+                if grad is not None:
+                    grad.detach_()
+                    grad.zero_()
+                # Forward + BW
+                batch = torch.tensor([rank]).float().cuda(rank)
+                loss = net(batch).sum()
+                loss.backward()
+                # For each worker, the gradient on the weight should be worker_rank.
+                grad = net.module.weight.grad
+                avg = grad.clone()
+                # All-reducing the gradient averages should give us the gradient
+                # average. If not, then one of the workers has not correctly
+                # written back the averaged gradient before this all-reduce call.
+                dist.all_reduce(avg)
+                avg.div_(2)
+                expected_grad = 0.5
+                self.assertEqual(
+                    avg[0, 0],
+                    expected_grad,
+                    msg=f"Expected gradient of {expected_grad} but {avg} on rank {self.rank}",
+                )
+
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_gpu
@@ -2168,6 +2202,7 @@ class _DistTestBase(object):
         res50_model_sync = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(res50_model), process_group)
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
+
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
