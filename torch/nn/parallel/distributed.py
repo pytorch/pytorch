@@ -149,7 +149,7 @@ class DistributedDataParallel(Module):
         0, to all other replicas in the system in every iteration.
 
     .. note::
-        If you are using DistributedDataParallel in conjuction with the
+        If you are using DistributedDataParallel in conjunction with the
         :ref:`distributed-rpc-framework`, you should always use
         :meth:`torch.distributed.autograd.backward` to compute gradients and
         :class:`torch.distributed.optim.DistributedOptimizer` for optimizing
