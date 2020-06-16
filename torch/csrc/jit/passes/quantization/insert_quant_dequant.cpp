@@ -70,7 +70,10 @@ bool isWeight(Module& module, Value* v) {
 
 Node* insertChooseQParams(Graph* graph, Value* original_val) {
   std::string choose_qparams_func = "_choose_qparams_per_tensor";
-  auto reduce_range = graph->insertConstant(false);
+  // Set the reduce range to default to true, since qnnpack backend ignores this
+  // argument.
+  bool reduce_range_param = true;
+  auto reduce_range = graph->insertConstant(reduce_range_param);
   // choose_qparams_per_tensor has 2 outputs, (scale, zero_point).
   Node* choose_qparams = graph->create(
       at::Symbol::aten(choose_qparams_func),

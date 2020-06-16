@@ -65,7 +65,7 @@ accreal THCTensor_(std_all)(THCState *state, THCTensor *self, bool unbiased)
 accreal THCTensor_(var_all)(THCState *state, THCTensor *self, bool unbiased)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  accreal mean = THCTensor_(meanall)(state, self);
+  accreal mean = THTensor_wrap(self).mean().item<accreal>();
 
   accreal val;
   if (!THC_reduceAll<scalar_t>(state, self,
@@ -86,13 +86,6 @@ accreal THCTensor_(var_all)(THCState *state, THCTensor *self, bool unbiased)
 }
 
 #endif
-
-accreal THCTensor_(meanall)(THCState *state, THCTensor *self)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  return THTensor_wrap(self).sum().item<accreal>()/THCTensor_(nElement)(state, self);
-}
-
 
 #endif
 
