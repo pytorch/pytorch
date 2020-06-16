@@ -244,19 +244,11 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             qconfig_spec = {
                 nn.Linear : default_dynamic_qconfig,
                 nn.LSTM : default_dynamic_qconfig,
-                nn.GRU : default_dynamic_qconfig,
-                nn.LSTMCell : default_dynamic_qconfig,
-                nn.RNNCell : default_dynamic_qconfig,
-                nn.GRUCell : default_dynamic_qconfig,
             }
         elif dtype == torch.float16:
             qconfig_spec = {
                 nn.Linear : float16_dynamic_qconfig,
                 nn.LSTM : float16_dynamic_qconfig,
-                nn.GRU : float16_dynamic_qconfig,
-                nn.LSTMCell : float16_dynamic_qconfig,
-                nn.RNNCell : float16_dynamic_qconfig,
-                nn.GRUCell : float16_dynamic_qconfig,
             }
         else:
             raise ValueError(

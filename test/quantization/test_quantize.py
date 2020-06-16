@@ -55,8 +55,7 @@ from torch.testing._internal.common_quantization import (
     TwoLayerLinearModel,
     NestedModel,
     ResNetBase,
-    RNNDynamicModel,
-    RNNCellDynamicModel,
+    LSTMDynamicModel,
     ModelForFusionWithBias,
     ActivationsTestModel,
     ActivationsQATTestModel,
@@ -682,7 +681,8 @@ class TestPostTrainingDynamic(QuantizationTestCase):
     def test_quantized_rnn(self, qconfig, dtype):
         r"""Test dynamic quantization, scriptability and serialization for dynamic quantized lstm modules on int8 and fp16
         """
-        model = RNNDynamicModel('LSTM').eval()
+        d_in, d_hid = 2, 2
+        model = LSTMDynamicModel().eval()
         niter = 10
         x = torch.tensor([[100, -155],
                           [-155, 100],
@@ -690,6 +690,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         qconfig_dict = {
             torch.nn.LSTM : qconfig
         }
+
         if dtype == torch.float16:
             model_quantized = quantize_dynamic(model=model, dtype=dtype)
         else:
@@ -697,7 +698,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
 
         # Smoke test extra reprs
         self.assertTrue('DynamicQuantizedLSTM' in str(model_quantized))
-        self.checkDynamicQuantizedModule(model_quantized.mod, torch.nn.quantized.dynamic.LSTM, dtype)
+        self.checkDynamicQuantizedModule(model_quantized.lstm, torch.nn.quantized.dynamic.LSTM, dtype)
         self.checkScriptable(model_quantized, [(x, x)], check_save_load=True)
 
         class ScriptWrapperPacked(torch.nn.Module):
@@ -712,56 +713,10 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                 return self.cell(x)
 
         packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
-        model_with_packed_input = ScriptWrapperPacked(model_quantized.mod)
+        model_with_packed_input = ScriptWrapperPacked(model_quantized.lstm)
         scripted = torch.jit.script(model_with_packed_input)
         # We cannot trace with input dtype being a packed sequence
         self._checkScriptable(model_with_packed_input, scripted, [(packed_input, x)], True)
-
-
-    @given(qconfig=st.sampled_from([per_channel_dynamic_qconfig, default_dynamic_qconfig]),
-           dtype=st.sampled_from([torch.qint8, torch.float16]))
-    def test_quantized_rnn_cell(self, qconfig, dtype):
-        r"""Test dynamic quantization, scriptability and serialization for dynamic quantized rnn cell modules on int8 and fp16
-        """
-        qconfig_dict = {
-            torch.nn.LSTMCell : qconfig,
-            torch.nn.GRUCell : qconfig,
-            torch.nn.RNNCell : qconfig
-        }
-
-        for module_type in ['LSTMCell', 'GRUCell', 'RNNTanh', 'RNNReLU']:
-            model = RNNCellDynamicModel(module_type).eval()
-            x = torch.tensor([[100, -155],
-                             [-155, 100],
-                             [100, -155]], dtype=torch.float)
-
-            if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
-                continue
-                # fp16 dynamic quant is not supported for qnnpack
-
-            if dtype == torch.float16:
-                model_quantized = quantize_dynamic(model=model, dtype=dtype)
-            else:
-                model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=dtype)
-
-            def checkQuantized(model, module_type):
-                mod_type_map = {'LSTMCell': torch.nn.quantized.dynamic.LSTMCell,
-                                'GRUCell': torch.nn.quantized.dynamic.GRUCell,
-                                'RNNTanh': torch.nn.quantized.dynamic.RNNCell,
-                                'RNNReLU': torch.nn.quantized.dynamic.RNNCell}
-
-                mod_repr_map = {'LSTMCell': 'DynamicQuantizedLSTMCell',
-                                'GRUCell': 'DynamicQuantizedGRUCell',
-                                'RNNTanh': 'DynamicQuantizedRNNCell',
-                                'RNNReLU': 'DynamicQuantizedRNNCell'}
-
-                self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
-                self.checkDynamicQuantizedModule(model_quantized.mod, mod_type_map[module_type], dtype)
-
-            # Smoke test extra reprs
-            checkQuantized(model_quantized, module_type)
-            self.checkScriptable(model_quantized, [(x, x)], check_save_load=True)
-
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):
