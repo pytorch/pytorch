@@ -278,7 +278,7 @@ class IrParser {
           out_tv->axis(0)->parallelize(ParallelType::BIDx);
         } else {
           out_tv->axis(0)->parallelize(ParallelType::BIDx);
-          out_tv->axis(1)->parallelize(ParallelType::TIDy);
+          out_tv->axis(1)->parallelize(ParallelType::TIDx);
         }
       }
       // Run through intermediates, unroll, and bind their axes
