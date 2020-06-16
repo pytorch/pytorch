@@ -2184,7 +2184,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                        .run(m.graph)
 
-    def test_quantize_general_shape_ops(self):
+    def test_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general shape ops like aten::flatten
         without actually checking for execution of these ops
@@ -2210,8 +2210,14 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
                 x = x.view(-1)
+                # prim::ListConstruct
                 xs = [x, x]
-                y, x = xs
+                # prim::ListUnpack
+                x, y = xs
+                # prim::TupleConstruct
+                xs = (x, x)
+                # prim::TupleUnpack
+                x, y = xs
                 x = x.transpose(1, 2)
                 x = x.contiguous()
                 x, y = torch.chunk(x, 2)
@@ -2251,7 +2257,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                    .check("aten::dequantize") \
                    .run(m.graph)
 
-    def test_quantize_general_value_ops(self):
+    def test_general_value_ops(self):
         """ A test that checks correct patterns are produced for
         all supported general value ops like aten::avg_pool2d \
         without actually checking for execution of these ops
