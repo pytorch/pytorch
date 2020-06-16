@@ -21,16 +21,20 @@ list(APPEND Caffe2_CPU_SRCS
   utils/proto_convert.cc
   utils/proto_utils.cc
   utils/proto_wrap.cc
-  utils/threadpool/pthreadpool-cpp.cc
   utils/threadpool/ThreadPool.cc
   utils/signal_handler.cc
   utils/smart_tensor_printer.cc
   utils/string_utils.cc)
 
-if(USE_INTERNAL_PTHREADPOOL_IMPL)
+if (USE_PTHREADPOOL)
   list(APPEND Caffe2_CPU_SRCS
-    utils/threadpool/pthreadpool.cc
-    utils/threadpool/pthreadpool_impl.cc)
+    utils/threadpool/pthreadpool-cpp.cc)
+  
+  if(USE_INTERNAL_PTHREADPOOL_IMPL)
+    list(APPEND Caffe2_CPU_SRCS
+      utils/threadpool/pthreadpool.cc
+      utils/threadpool/pthreadpool_impl.cc)
+  endif()
 endif()
 
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}

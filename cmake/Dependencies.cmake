@@ -266,6 +266,8 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
     set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
     set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
   endif()
+else()
+  set(DISABLE_NNPACK_AND_FAMILY ON)
 endif()
 
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
@@ -281,7 +283,10 @@ if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
 endif()
 
 # ---[ pthreadpool
-if(NOT USE_SYSTEM_PTHREADPOOL AND (INTERN_BUILD_MOBILE OR USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK))
+if(NOT USE_SYSTEM_PTHREADPOOL AND (INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY))
+  set(USE_PTHREADPOOL ON CACHE BOOL "" FORCE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PTHREADPOOL")
+
   # Opt for custom Caffe2 implementation on MSVC.  Windows support seems to have
   # been added to pthreadpool recently but the current third party revision we are
   # using right now does not suppor it.  Should unify later after updating pthreadpool.
@@ -315,6 +320,8 @@ if(NOT USE_SYSTEM_PTHREADPOOL AND (INTERN_BUILD_MOBILE OR USE_NNPACK OR USE_QNNP
   if(USE_INTERNAL_PTHREADPOOL_IMPL)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_INTERNAL_PTHREADPOOL_IMPL")
   endif()
+else()
+  set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
 endif()
 
 # ---[ Caffe2 uses cpuinfo library in the thread pool

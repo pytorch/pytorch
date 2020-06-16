@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_PTHREADPOOL
+
 #ifdef USE_INTERNAL_PTHREADPOOL_IMPL
 #include <caffe2/utils/threadpool/pthreadpool.h>
 #else
@@ -48,3 +50,5 @@ PThreadPool* pthreadpool();
 pthreadpool_t pthreadpool_();
 
 } // namespace caffe2
+
+#endif /* USE_PTHREADPOOL */

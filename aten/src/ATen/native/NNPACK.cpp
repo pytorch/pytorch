@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <thread>
 
