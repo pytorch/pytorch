@@ -122,7 +122,8 @@ class DataLoader(object):
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
                  batch_sampler=None, num_workers=0, collate_fn=None,
                  pin_memory=False, drop_last=False, timeout=0,
-                 worker_init_fn=None, multiprocessing_context=None):
+                 worker_init_fn=None, multiprocessing_context=None,
+                 generator=None):
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
@@ -201,10 +202,9 @@ class DataLoader(object):
             drop_last = False
         elif batch_size is None:
             # no auto_collation
-            if shuffle or drop_last:
+            if drop_last:
                 raise ValueError('batch_size=None option disables auto-batching '
-                                 'and is mutually exclusive with '
-                                 'shuffle, and drop_last')
+                                 'and is mutually exclusive with drop_last')
 
         if sampler is None:  # give default samplers
             if self._dataset_kind == _DatasetKind.Iterable:
@@ -212,7 +212,7 @@ class DataLoader(object):
                 sampler = _InfiniteConstantSampler()
             else:  # map-style
                 if shuffle:
-                    sampler = RandomSampler(dataset)
+                    sampler = RandomSampler(dataset, generator=generator)
                 else:
                     sampler = SequentialSampler(dataset)
 
@@ -224,6 +224,7 @@ class DataLoader(object):
         self.drop_last = drop_last
         self.sampler = sampler
         self.batch_sampler = batch_sampler
+        self.generator = generator
 
         if collate_fn is None:
             if self._auto_collation:
@@ -337,7 +338,7 @@ class _BaseDataLoaderIter(object):
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
-        self._base_seed = torch.empty((), dtype=torch.int64).random_().item()
+        self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._num_yielded = 0
 
     def __iter__(self):
@@ -1062,7 +1063,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     if self._workers_status[worker_id]:
                         self._shutdown_worker(worker_id)
                 for w in self._workers:
-                    w.join()
+                    w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+                    if w.is_alive():
+                        # Existing mechanisms try to make the workers exit
+                        # peacefully, but in case that we unfortunately reach
+                        # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
+                        # we kill the worker.
+                        w.terminate()
                 for q in self._index_queues:
                     q.cancel_join_thread()
                     q.close()

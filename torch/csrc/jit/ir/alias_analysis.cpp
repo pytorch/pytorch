@@ -1081,9 +1081,9 @@ void AliasDb::replaceWithNewValue(Value* existing, Value* new_value) {
       *unshapedType(existing->type()) == *unshapedType(new_value->type()),
       "Types must be strictly equal if you are replacing aliasing information. ",
       "Got existing: '",
-      existing->type()->python_str(),
+      existing->type()->repr_str(),
       "', new_value: '",
-      new_value->type()->python_str(),
+      new_value->type()->repr_str(),
       "'");
   if (!isMutableTypeInternal(existing)) {
     return;
@@ -1099,9 +1099,9 @@ void AliasDb::copyValue(Value* from, Value* to) {
       *unshapedType(from->type()) == *unshapedType(to->type()),
       "Types must be strictly equal if you are copying aliasing information. ",
       "Got from: '",
-      from->type()->python_str(),
+      from->type()->repr_str(),
       "', to: '",
-      to->type()->python_str(),
+      to->type()->repr_str(),
       "'");
   if (!isMutableTypeInternal(to)) {
     return;
@@ -1348,8 +1348,28 @@ bool AliasDb::tryMove(
   }
 
   auto curNode = toMove->next_in_graph[direction];
+
+  bool toMoveIsOnMoveSide =
+      (moveSide == MoveSide::BEFORE && toMove->isBefore(movePoint)) ||
+      (moveSide == MoveSide::AFTER && toMove->isAfter(movePoint));
+
+  if (toMoveIsOnMoveSide && curNode == movePoint) {
+    return true;
+  }
+
+  // it is never valid to move reorder a node with side effects
+  if (toMove->hasSideEffects() ||
+      (!toMoveIsOnMoveSide && movePoint->hasSideEffects())) {
+    return false;
+  }
+
   // Move forward one node at a time
   while (curNode != movePoint) {
+    // never valid to reorder around a node with side effects
+    if (curNode->hasSideEffects()) {
+      return false;
+    }
+
     if (workingSet.dependsOn(curNode)) {
       // If we can't move past this node, add it to the working set
       workingSet.add(curNode);
@@ -1537,8 +1557,8 @@ void Lint(const AliasDb* db) {
     auto it = db->elementMap_.find(v);
     if (it == db->elementMap_.end()) {
       failed = true;
-      ss << "Value %" << v->debugName() << " of type "
-         << v->type()->python_str() << " wasn't found in the element map.\n"
+      ss << "Value %" << v->debugName() << " of type " << v->type()->repr_str()
+         << " wasn't found in the element map.\n"
          << "It was defined in " << *v->node();
     }
   }

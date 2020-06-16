@@ -8,6 +8,14 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// An enum denoting common RPC errors to allow specific error handling for them.
+enum RPCErrorType {
+  UNKNOWN_ERROR = 0, /* Indicates that error type could not be parsed */
+  TIMEOUT = 1, /* Indicates that the RPC has timed out */
+  INTENTIONAL_FAILURE = 2 /* Deliberate failure, such as those injected by
+                             FaultyProcessGroupAgent for testing */
+};
+
 enum MessageType {
   // messages for dist.rpc on builtin operators
   SCRIPT_CALL = 0,
@@ -20,7 +28,7 @@ enum MessageType {
   // messages for dist.remote on builtin operators and Python UDF
   SCRIPT_REMOTE_CALL = 4, // A remote call on a builtin operator
   PYTHON_REMOTE_CALL = 5, // A remote call on a Python UDF
-  REMOTE_RET = 6, // A remote call on a Python UDF
+  REMOTE_RET = 6, // Response for remote calls for UDF, builtin, or script
 
   // RRef related internal messages
   SCRIPT_RREF_FETCH_CALL = 7, // A UserRRef<IValue> fetches value from owner
