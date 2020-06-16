@@ -158,6 +158,7 @@ class HybridModel(nn.Module):
             self.fc2 = DistributedDataParallel(
                 self.fc2,
                 check_reduction=True,
+                process_group=process_group_for_ddp,
             )
 
         gLogger.info(
@@ -193,7 +194,7 @@ class Trainer:
         self.hybrid_module = HybridModel(
             self.remote_em_rref,
             self.remote_net_rref,
-            trainer_group
+            self.trainer_group
             if ddp_mode in (DdpMode.INSIDE,)
             else None,
         )
