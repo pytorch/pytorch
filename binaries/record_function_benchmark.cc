@@ -18,7 +18,6 @@ const int kSmallTensorSize = 1;
 const float kSampingProb = 0.1;
 }
 
-using namespace torch::autograd;
 
 void setupCallbacks() {
   // non-sampled callback
