@@ -195,11 +195,11 @@ def get_analytical_jacobian_fw(fn, input, output):
             for lin_idx, inp_idx in enumerate(product(*[range(m) for m in inp.size()])):
                 fw_grad[inp_idx] = 1
                 grad = fn(input).fw_grad
-                fw_grad[inp_idx] = 0
                 if grad is None:
                     jacobian[i][lin_idx].zero_()
                 else:
                     jacobian[i][lin_idx].copy_(grad.contiguous().view(-1))
+                fw_grad[inp_idx] = 0
         finally:
             inp.fw_grad = None
     return jacobian

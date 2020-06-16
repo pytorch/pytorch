@@ -215,7 +215,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
 
-  if (FwGradMode::is_enabled()) {
+  if (FwGradMode::is_enabled() && src.fw_grad().defined()) {
     auto new_fw_grad = src.fw_grad();
     self.set_fw_grad(new_fw_grad);
   }
@@ -270,7 +270,7 @@ Tensor detach(const Tensor & self) {
   namedinference::propagate_names(result, self);
 
   // detach only backward gradients
-  if (FwGradMode::is_enabled()) {
+  if (FwGradMode::is_enabled() && self.fw_grad().defined()) {
     auto new_fw_grad = self.fw_grad();
     result.set_fw_grad(new_fw_grad);
   }
