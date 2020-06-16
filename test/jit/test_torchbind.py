@@ -192,6 +192,7 @@ class TestTorchbind(JitTestCase):
         for expected in [7, 3, 3, 1]:
             assert copied.f.pop() == expected
 
+    @skipIfRocm
     def test_torchbind_python_deepcopy(self):
         class FooBar4321(torch.nn.Module):
             def __init__(self):

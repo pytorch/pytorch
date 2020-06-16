@@ -846,7 +846,7 @@ void initJitScriptBindings(PyObject* module) {
     }
   }
 
-  object_class.def("__deepcopy__", [](const Object& self, py::dict memo) {
+  object_class.def("__deepcopy__", [](const Object& self, const py::dict& memo) {
     // TODO: Figure out if memoization makes any sense in this context
     return Object(IValue(self._ivalue()).deepcopy().toObject());
   });
