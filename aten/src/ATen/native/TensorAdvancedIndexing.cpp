@@ -234,7 +234,8 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
 static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   auto iter = TensorIterator();
   iter.check_all_same_dtype(false);
-  iter.add_output(Tensor(), info.src.device(), info.src.scalar_type());
+  iter.declare_static_dtype_and_device(info.src.scalar_type(), info.src.device());
+  iter.add_output(Tensor());
   iter.add_input(info.src);
   for (auto& index : info.indices) {
     iter.add_input(index);

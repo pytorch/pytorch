@@ -295,9 +295,10 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
       inputs.push_back(output);
     }
     return inputs;
-  } else if (n->kind() == prim::ListUnpack) {
+  } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
     return {n->input(0)};
-  } else if (n->kind() == prim::ListConstruct) {
+  } else if (
+      n->kind() == prim::ListConstruct || n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -472,6 +473,14 @@ bool alwaysRaisesException(Block* block) {
   return false;
 }
 
+// Check if a value in the graph is a Scalar value
+bool isScalar(Value* v) {
+  auto iv = toIValue(v);
+  return v->type()->isSubtypeOf(NumberType::get()) ||
+      (v->type()->isSubtypeOf(TensorType::get()) && iv && iv->isTensor() &&
+       iv->toTensor().dim() == 0);
+}
+
 // =================== Graph/Module analysis helper functions ============
 // Check if value is the input of the graph
 bool hitGraphInput(Value* value) {
@@ -605,10 +614,21 @@ bool is_conv3d_module(
 bool is_batchnorm2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
-  return is_module(match,
-                   vmap,
-                   "batchnorm",
-                   "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
+  return is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
+}
+
+bool is_batchnorm3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
 }
 
 } // namespace jit

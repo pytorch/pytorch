@@ -115,6 +115,18 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_deterministic_flag(self):
+            deterministic_restore = torch.is_deterministic()
+
+            for deterministic in [True, False]:
+                torch.set_deterministic(deterministic)
+                self.assertEqual(deterministic, torch.is_deterministic())
+
+            with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
+                torch.set_deterministic(1)
+
+            torch.set_deterministic(deterministic_restore)
+
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
             self.assertEqual(x.byte().dtype, torch.uint8)
@@ -8023,26 +8035,25 @@ class TestTorchDeviceType(TestCase):
         for i in range(1, rand_dim):
             # Check all combinations of `i` axis.
             for flip_dim in combinations(range(rand_dim), i):
-                data = torch.randn(*shape, dtype=dtype).tolist()
+                data = torch.randn(*shape, device=device, dtype=dtype)
                 torch_fn = partial(torch.flip, dims=flip_dim)
                 np_fn = partial(np.flip, axis=flip_dim)
-                self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+                self.compare_with_numpy(torch_fn, np_fn, data)
 
-    def _test_fliplr_flipud(self, funcs, min_dim, max_dim, device, dtype):
+    def _test_fliplr_flipud(self, torch_fn, np_fn, min_dim, max_dim, device, dtype):
         for dim in range(min_dim, max_dim + 1):
             shape = self._rand_shape(dim, 5, 10)
             # Randomly scale the input
-            data = (torch.randn(*shape).to(dtype) * random.randint(50, 100)).tolist()
-            # Use _np_compare_func as it copies the output of np_func,
-            # which takes care of negative strides if present.
-            torch_fn, np_fn = funcs
-            self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+            if dtype.is_floating_point or dtype.is_complex:
+                data = torch.randn(*shape, device=device, dtype=dtype)
+            else:
+                data = torch.randint(0, 10, shape, device=device, dtype=dtype)
+            self.compare_with_numpy(torch_fn, np_fn, data)
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_fliplr(self, device, dtype):
-        funcs = (torch.fliplr, np.fliplr)
-        self._test_fliplr_flipud(funcs, 2, 4, device, dtype)
+        self._test_fliplr_flipud(torch.fliplr, np.fliplr, 2, 4, device, dtype)
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_fliplr_invalid(self, device, dtype):
@@ -8050,18 +8061,17 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
             torch.fliplr(x)
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
-            torch.fliplr(torch.tensor(42, dtype=dtype))
+            torch.fliplr(torch.tensor(42, device=device, dtype=dtype))
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_flipud(self, device, dtype):
-        funcs = (torch.flipud, np.flipud)
-        self._test_fliplr_flipud(funcs, 1, 4, device, dtype)
+        self._test_fliplr_flipud(torch.flipud, np.flipud, 1, 4, device, dtype)
 
     @dtypes(torch.int64, torch.double, torch.cdouble)
     def test_flipud_invalid(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, "Input must be >= 1-d."):
-            torch.flipud(torch.tensor(42, dtype=dtype))
+            torch.flipud(torch.tensor(42, device=device, dtype=dtype))
 
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
@@ -8101,10 +8111,10 @@ class TestTorchDeviceType(TestCase):
     def test_complex_rot90(self, device, dtype):
         shape = self._rand_shape(random.randint(2, 4), 5, 10)
         for rot_times in range(4):
-            data = torch.randn(*shape, dtype=dtype).tolist()
+            data = torch.randn(*shape, device=device, dtype=dtype)
             torch_fn = partial(torch.rot90, k=rot_times, dims=[0, 1])
             np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
-            self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+            self.compare_with_numpy(torch_fn, np_fn, data)
 
     def test_signal_window_functions(self, device):
         if not TEST_SCIPY:
@@ -9535,7 +9545,7 @@ class TestTorchDeviceType(TestCase):
             M, N = input_.shape
             input_.zero_()
             for i in range(min(M, N)):
-                input_[i][i] = 1    
+                input_[i][i] = 1
             output1 = input_.argmax(dim=0)
             output2 = input_.sum(dim=0)
             for i in range(min(M, N)):
@@ -10941,18 +10951,20 @@ class TestTorchDeviceType(TestCase):
         t.bernoulli_(0.5)
         self.assertTrue(isBinary(t))
 
-        p = torch.rand(10, dtype=torch.float32, device=device).expand(10, 10)
-        t.fill_(2)
-        t.bernoulli_(p)
-        self.assertTrue(isBinary(t))
+        for p_dtype in torch.testing.get_all_fp_dtypes(include_half=device.startswith('cuda'),
+                                                       include_bfloat16=False):
+            p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
+            t.fill_(2)
+            t.bernoulli_(p)
+            self.assertTrue(isBinary(t))
 
-        t.fill_(2)
-        torch.bernoulli(torch.rand_like(t, dtype=torch.float32), out=t)
-        self.assertTrue(isBinary(t))
+            t.fill_(2)
+            torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
+            self.assertTrue(isBinary(t))
 
-        t.fill_(2)
-        t.bernoulli_(torch.rand_like(t, dtype=torch.float32))
-        self.assertTrue(isBinary(t))
+            t.fill_(2)
+            t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
+            self.assertTrue(isBinary(t))
 
     @slowTest
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
@@ -14155,22 +14167,22 @@ class TestTorchDeviceType(TestCase):
                     op(cpu_tensor, a)
 
     # This test ensures that a scalar Tensor can be safely used
-    # in a binary operation in conjuction with a Tensor on all
+    # in a binary operation in conjunction with a Tensor on all
     # available CUDA devices
     @deviceCountAtLeast(2)
     @onlyCUDA
     def test_binary_op_scalar_device_unspecified(self, devices):
         scalar_val = torch.tensor(1.)
         for default_device in devices:
-            torch.cuda.set_device(default_device)
-            for device in devices:
-                device_obj = torch.device(device)
-                x = torch.rand(3, device=device)
-                y0 = x * scalar_val
-                self.assertEqual(y0.device, device_obj)
-                y1 = scalar_val * x
-                self.assertEqual(y1.device, device_obj)
-                self.assertEqual(y0, y1)
+            with torch.cuda.device(default_device):
+                for device in devices:
+                    device_obj = torch.device(device)
+                    x = torch.rand(3, device=device)
+                    y0 = x * scalar_val
+                    self.assertEqual(y0.device, device_obj)
+                    y1 = scalar_val * x
+                    self.assertEqual(y1.device, device_obj)
+                    self.assertEqual(y0, y1)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
     # binary operations with CUDA tensors.

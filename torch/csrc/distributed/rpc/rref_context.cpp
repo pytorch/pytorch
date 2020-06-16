@@ -339,11 +339,11 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
           ownerRRef->type()->repr_str());
     } else {
       TORCH_INTERNAL_ASSERT(
-          ownerRRef->type() == type,
+          *ownerRRef->type() == *type,
           "OwnerRRef type is ",
           ownerRRef->type()->repr_str(),
           ", expected type is ",
-          type);
+          type->repr_str());
     }
     return ownerRRef;
   }

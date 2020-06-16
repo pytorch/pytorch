@@ -10,7 +10,7 @@ REGISTER_CPU_OPERATOR(Int8FC, int8::Int8FCOp);
 
 using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FC)
-    .NumInputs(3)
+    .NumInputs(3, 5)
     .NumOutputs(1, 4)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false))
@@ -43,6 +43,16 @@ will throw errors.
         "A tensor that is coerced into a 2D blob of size (KxN) "
         "containing fully connected weight matrix")
     .Input(2, "b", "1D blob containing bias vector")
+    .Input(
+        3,
+        "Scale qparam",
+        "Optional scale quantization param computed on activation histogram data"
+        "Will overwrite Y_scale argument if specified")
+    .Input(
+        4,
+        "Zero-point qparam",
+        "Optionsl zero-point quantization param computed on activation data"
+        "Will overwrite Y_zero_point argument if specified")
     .Output(0, "Y", "2D output tensor");
 
 } // namespace caffe2
