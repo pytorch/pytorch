@@ -221,7 +221,7 @@ void Fusion::print() {
 void Fusion::printMath() {
   FusionGuard fg(this);
   for (auto expr : exprs(true))
-    std::cout << expr << std::endl;
+    std::cout << expr;
 }
 
 void Fusion::printTransforms() {
