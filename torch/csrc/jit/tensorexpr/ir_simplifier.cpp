@@ -251,6 +251,23 @@ const Expr* PolynomialTransformer::mutate(const Add* v) {
     }
   }
 
+  const Expr* scalar = nullptr;
+  const Expr* variable = nullptr;
+  if (lhs_new->isConstant()) {
+    scalar = evaluateOp(lhs_new);
+    variable = rhs_new;
+  } else if (rhs_new->isConstant()) {
+    scalar = evaluateOp(rhs_new);
+    variable = lhs_new;
+  }
+
+  // If there is a scalar, and it's zero: short circuit and return the other
+  // side.
+  if (scalar && immediateEquals(scalar, 0)) {
+    auto* c = new Cast(v->dtype(), variable);
+    return c->accept_mutator(this);
+  }
+
   // If this is a floating point Add then order of operations is important, we
   // dont want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
@@ -294,22 +311,6 @@ const Expr* PolynomialTransformer::mutate(const Add* v) {
     // terms.
     return new Polynomial(
         hasher_, getImmediateByType(v->dtype(), 0), lhsTerm, rhsTerm);
-  }
-
-  const Expr* scalar = nullptr;
-  const Expr* variable = nullptr;
-  if (lhs_new->isConstant()) {
-    scalar = evaluateOp(lhs_new);
-    variable = rhs_new;
-  } else if (rhs_new->isConstant()) {
-    scalar = evaluateOp(rhs_new);
-    variable = lhs_new;
-  }
-
-  // If there is a scalar, and it's zero: short circuit and return the other
-  // side.
-  if (scalar && immediateEquals(scalar, 0)) {
-    return variable;
   }
 
   // Adds are commutative.
@@ -449,6 +450,11 @@ const Expr* PolynomialTransformer::mutate(const Sub* v) {
     if (auto* ret = combineMultilane<Sub>(lhs_new, rhs_new)) {
       return ret->accept_mutator(this);
     }
+  }
+
+  if (rhs_new->isConstant() && immediateEquals(rhs_new, 0)) {
+    auto* c = new Cast(v->dtype(), lhs_new);
+    return c->accept_mutator(this);
   }
 
   // If this is a floating point Sub then order of operations is important, we
@@ -696,6 +702,9 @@ const Expr* PolynomialTransformer::isRoundOff(
   }
 
   if (div->rhs()->isConstant() && other->isConstant()) {
+    if (immediateEquals(div->rhs(), 0) || immediateEquals(other, 0)) {
+      return nullptr;
+    }
     // If they are both scalar we may be able to find a common factor.
     if (immediateEquals(evaluateOp(new Mod(other, div->rhs())), 0)) {
       Expr* scalar = evaluateOp(new Div(other, div->rhs()));
@@ -751,11 +760,34 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
     }
   }
 
+  // Order doesn't matter.
+  const Expr* scalar = nullptr;
+  const Expr* variable = nullptr;
+  if (lhs_new->isConstant()) {
+    scalar = lhs_new;
+    variable = rhs_new;
+  } else if (rhs_new->isConstant()) {
+    scalar = rhs_new;
+    variable = lhs_new;
+  }
+
+  // Handle special case mul by 1 since thats safe for floating point, even if
+  // it's Nan/Inf.
+  if (scalar && immediateEquals(scalar, 1)) {
+    auto* c = new Cast(v->dtype(), variable);
+    return c->accept_mutator(this);
+  }
+
   // If this is a floating point Mul then order of operations is important, we
   // dont want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return new Mul(lhs_new, rhs_new);
+  }
+
+  // Handle special case mul by 0.
+  if (scalar && immediateEquals(scalar, 0)) {
+    return getImmediateByType(v->dtype(), 0);
   }
 
   // Catch cases of rounding (Div(A/B) * B).
@@ -785,21 +817,6 @@ const Expr* PolynomialTransformer::mutate(const Mul* v) {
 
   if (lhsTerm && rhsTerm) {
     return mulTerms(lhsTerm, rhsTerm);
-  }
-
-  const Expr* scalar = nullptr;
-  const Expr* variable = nullptr;
-  if (lhs_new->isConstant()) {
-    scalar = lhs_new;
-    variable = rhs_new;
-  } else if (rhs_new->isConstant()) {
-    scalar = rhs_new;
-    variable = lhs_new;
-  }
-
-  // If there is a scalar and its zero then return zero.
-  if (scalar && immediateEquals(scalar, 0)) {
-    return scalar;
   }
 
   if (scalar && lhsTerm) {
@@ -971,6 +988,10 @@ const Expr* PolynomialTransformer::mutate(const Cast* v) {
     return evaluateOp(new Cast(v->dtype(), node));
   }
 
+  if (v->dtype() == node->dtype()) {
+    return node;
+  }
+
   return new Cast(v->dtype(), node);
 }
 
@@ -1004,7 +1025,7 @@ const Expr* PolynomialTransformer::mutate(const IfThenElse* v) {
   return new IfThenElse(condition_new, true_value_new, false_value_new);
 }
 
-Stmt* PolynomialTransformer::mutate(const Cond* v) {
+Stmt* IRSimplifierBase::mutate(const Cond* v) {
   const Expr* cond_old = v->condition();
   Stmt* true_old = v->true_stmt();
   Stmt* false_old = v->false_stmt();
@@ -1028,6 +1049,15 @@ Stmt* PolynomialTransformer::mutate(const Cond* v) {
     return Stmt::clone(true_new);
   }
 
+  Block* true_block = dynamic_cast<Block*>(true_new);
+  Block* false_block = dynamic_cast<Block*>(false_new);
+  bool true_empty = !true_new || (true_block && true_block->nstmts() == 0);
+  bool false_empty = !false_new || (false_block && false_block->nstmts() == 0);
+
+  if (true_empty && false_empty) {
+    return new Block({});
+  }
+
   if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
     return (Stmt*)v;
   }
@@ -1042,7 +1072,7 @@ Stmt* PolynomialTransformer::mutate(const Cond* v) {
   return new Cond(cond_new, true_new, false_new);
 }
 
-Stmt* PolynomialTransformer::mutate(const For* v) {
+Stmt* IRSimplifierBase::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
   const Expr* stop = v->stop();
@@ -1071,6 +1101,12 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
     return new Block({});
   }
 
+  if (auto* block = dynamic_cast<Block*>(body_new)) {
+    if (block->nstmts() == 0) {
+      return new Block({});
+    }
+  }
+
   if (var == var_new && start == start_new && stop == stop_new &&
       body == body_new) {
     return (Stmt*)v;
@@ -1081,16 +1117,24 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
-Stmt* PolynomialTransformer::mutate(const Block* v) {
+Stmt* IRSimplifierBase::mutate(const Block* v) {
+  auto vars = v->varBindings();
   std::vector<Stmt*> stmts;
-  for (Stmt* stmt : v->stmts()) {
+  for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt_new == nullptr) {
       continue;
     }
 
     if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
-      for (auto* s : subBlock->stmts()) {
+      for (auto& pair : subBlock->varBindings()) {
+        vars.emplace_back(pair.first, pair.second);
+      }
+
+      for (Block::iterator I = subBlock->begin(), E = subBlock->end();
+           I != E;) {
+        // Be careful to avoid invalidating the iterator.
+        Stmt* s = *(I++);
         subBlock->remove_stmt(s);
         stmts.push_back(s);
       }
@@ -1099,7 +1143,7 @@ Stmt* PolynomialTransformer::mutate(const Block* v) {
     }
   }
 
-  return new Block(stmts);
+  return new Block(vars, stmts);
 }
 
 // TermExpander
@@ -1439,6 +1483,53 @@ const Expr* TermExpander::mutate(const RoundOff* v) {
       new Div(v->lhs(), v->rhs()),
       v->rhs());
   return term->accept_mutator(this);
+}
+
+Stmt* TermExpander::mutate(const Allocate* v) {
+  const Var* buffer_var_old = v->buffer_var();
+  const Var* buffer_var_new =
+      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+  bool any_change = buffer_var_new == buffer_var_old;
+
+  const Expr* flattened = getImmediateByType(kInt, 1);
+  std::vector<const Expr*> dims_old = v->dims();
+  std::vector<const Expr*> dims_new(dims_old.size());
+  for (size_t i = 0; i < dims_old.size(); i++) {
+    dims_new[i] = dims_old[i]->accept_mutator(this);
+    any_change |= (dims_new[i] == dims_old[i]);
+    flattened = new Mul(flattened, dims_new[i]);
+  }
+
+  // Safe to do this as there can't be an Allocate inside an Allocate:
+  flattened = IRSimplifier::simplify(flattened);
+
+  if (flattened->isConstant() && immediateEquals(flattened, 0)) {
+    eliminated_allocations_.insert(buffer_var_new);
+    return nullptr;
+  }
+
+  if (!any_change) {
+    return (Stmt*)v;
+  }
+
+  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+}
+
+Stmt* TermExpander::mutate(const Free* v) {
+  const Expr* buffer_var_old = v->buffer_var();
+  const Var* buffer_var_new =
+      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+
+  if (eliminated_allocations_.count(buffer_var_new)) {
+    eliminated_allocations_.erase(buffer_var_new);
+    return nullptr;
+  }
+
+  if (buffer_var_new == buffer_var_old) {
+    return (Stmt*)v;
+  }
+
+  return new Free(buffer_var_new);
 }
 
 } // namespace tensorexpr

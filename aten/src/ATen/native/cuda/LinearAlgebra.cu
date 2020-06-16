@@ -5,23 +5,53 @@
 namespace at { namespace native {
 
 Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  return legacy::cuda::_th_baddbmm(self, batch1, batch2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  return legacy::cuda::_th_baddbmm(b_self, batch1, batch2, beta, alpha);
 }
 
 Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  return legacy::cuda::_th_baddbmm_out(result, self, batch1, batch2, beta, alpha);
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out");
+  return legacy::cuda::_th_baddbmm_out(result, b_self, batch1, batch2, beta, alpha);
+}
+
+Tensor addmm_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+  return legacy::cuda::_th_addmm(b_self, mat1, mat2, beta, alpha);
+}
+
+Tensor& addmm_cuda_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return legacy::cuda::_th_addmm_out(result, b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  return legacy::cuda::_th_baddbmm_out(self, self, batch1, batch2, beta, alpha);
+  return baddbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
 }
 
-Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
-  return legacy::cuda::_th_bmm(self, mat2);
+Tensor addbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm");
+  return legacy::cuda::_th_addbmm(b_self, batch1, batch2, beta, alpha);
+}
+
+Tensor& addbmm_cuda_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
+  return legacy::cuda::_th_addbmm_out(result, self, batch1, batch2, beta, alpha);
 }
 
 Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
+  result.resize_({ batch1.size(0), batch1.size(1), batch2.size(2) });
   return legacy::cuda::_th_bmm_out(result, batch1, batch2);
+}
+
+Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({0}, self.options());
+  return native::bmm_out_cuda(result, self, mat2);
 }
 
 Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
@@ -40,26 +70,6 @@ Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
   }
 
   return tensor_;
-}
-
-// Check https://github.com/pytorch/pytorch/issues/22078
-// for information about the bug. We don't know the exact conditions that trigger it,
-// but using Sgemm or Hgemm on Maxwell or Pascal seems to be a
-// necessary condition.
-static void checkCuda90Bug(int i_m, int i_n, int i_k)
-{
-#if CUDA_VERSION < 9200 && CUDA_VERSION >= 9000
-  static std::once_flag alreadyWarned;
-  const int LIMIT = 1 << 21;
-  if (i_m > LIMIT || i_n > LIMIT || i_k > LIMIT) {
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    if (prop->major == 5 || prop->major == 6) {
-      std::call_once(alreadyWarned, []() {
-        TORCH_WARN("Matrix multiplication for dimensions larger than 2^21 has known bugs on your combination of CUDA version and device type. Please consider upgrading to CUDA 9.2 or later.");
-      });
-    }
-  }
-#endif
 }
 
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
@@ -113,9 +123,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   at::ScalarType scalar_type = self.scalar_type();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
-    if (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::Float) {
-      checkCuda90Bug(static_cast<int>(m), static_cast<int>(n), static_cast<int>(k));
-    }
     scalar_t alpha_val = alpha.to<scalar_t>();
     scalar_t beta_val = beta.to<scalar_t>();
     scalar_t* mat1_ptr = mat1_.data_ptr<scalar_t>();

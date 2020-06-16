@@ -109,7 +109,7 @@ inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
     return;
   }
   for (int64_t i = 0; i < n; i++) {
-    if (a == 0) {
+    if (a == scalar_t(0)) {
       x[i * incx] = 0;
     } else {
       x[i * incx] *= a;
@@ -140,14 +140,14 @@ bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
       for (int64_t j = 0; j < m; j++) {
         sum += x[j * incx] * row_[j];
       }
-      if (beta == 0) {
+      if (beta == scalar_t(0)) {
         y[i * incy] = alpha * sum;
       } else {
         y[i * incy] = beta * y[i * incy] + alpha * sum;
       }
     }
   } else {
-    if (beta != 1) scal<scalar_t>(m, beta, y, incy);
+    if (beta != scalar_t(1)) scal<scalar_t>(m, beta, y, incy);
 
     for (int64_t j = 0; j < n; j++) {
       scalar_t *column_ = a + lda * j;
@@ -163,6 +163,7 @@ bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
 #define INSTANTIATE(scalar_t, _) \
 template bool gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
 AT_FORALL_SCALAR_TYPES_AND(BFloat16, INSTANTIATE);
+AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 #undef INSTANTIATE
 
 }} // namespace at::native

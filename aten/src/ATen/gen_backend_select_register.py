@@ -36,8 +36,7 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 Tensor ${function_name}(${method_formals}) {
   static OperatorHandle OP = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${name}", "${overload_name}");
   ${dispatch_key_init}
-  globalLegacyTypeDispatch().initForDispatchKey(_dk);
-  return OP.callUnboxedWithDispatchKey<${formals_types}>(_dk, ${type_method_actuals});
+  return OP.callWithDispatchKey<${formals_types}>(_dk, ${actuals});
 }
 """)
 
@@ -76,7 +75,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                                                             overload_name=option['overload_name'],
                                                             dispatch_key_init=dispatch_key_init,
                                                             formals_types=option['formals_types_with_return'],
-                                                            type_method_actuals=option['type_method_actuals'])
+                                                            actuals=option['actuals'])
 
                 backend_select_function_registrations.append(func_reg)
                 backend_select_method_definitions.append(method_def)

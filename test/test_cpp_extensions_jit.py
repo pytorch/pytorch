@@ -13,6 +13,7 @@ import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
+from torch.autograd.gradcheck import gradcheck
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -145,10 +146,10 @@ class TestCppExtensionJIT(common.TestCase):
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
             expected_arches = ['sm_' + xx for xx in expected_values]
             self.assertEqual(actual_arches, expected_arches,
-                             message="Flags: {},  Actual: {},  Expected: {}\n"
-                                     "Stderr: {}\nOutput: {}".format(
-                                         flags, actual_arches, expected_arches,
-                                         err, output))
+                             msg="Flags: {},  Actual: {},  Expected: {}\n"
+                                 "Stderr: {}\nOutput: {}".format(
+                                     flags, actual_arches, expected_arches,
+                                     err, output))
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
@@ -807,6 +808,32 @@ class TestCppExtensionJIT(common.TestCase):
         inp = torch.rand(20, requires_grad=True)
         loss = MyFn.apply(inp).sum()
         test_backward_deadlock.run_back_no_gil(loss)
+
+    def test_custom_compound_op_autograd(self):
+        # Test that a custom compound op (i.e. a custom op that just calls other aten ops)
+        # correctly returns gradients of those other ops
+
+        source = """
+        #include <torch/library.h>
+        torch::Tensor my_add(torch::Tensor x, torch::Tensor y) {
+          return x + y;
+        }
+        TORCH_LIBRARY(my, m) {
+            m.def("add", &my_add);
+        }
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="is_python_module",
+            cpp_sources=source,
+            verbose=True,
+            is_python_module=False,
+        )
+
+        a = torch.randn(5, 5, requires_grad=True)
+        b = torch.randn(5, 5, requires_grad=True)
+
+        gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
 
 if __name__ == "__main__":

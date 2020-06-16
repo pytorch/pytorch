@@ -1,4 +1,3 @@
-import sys
 import ast
 import inspect
 import re
@@ -14,8 +13,7 @@ from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
-
-PY35 = sys.version_info >= (3, 5)
+from typing import Callable
 
 
 class Module(object):
@@ -54,18 +52,15 @@ class EvalEnv(object):
         return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc, is_method):
-    # Python 3.5 adds support for the nice annotation syntax, so try that first.
-    signature = None
-    if PY35:
-        signature = try_real_annotations(fn, loc)
-        if signature is not None and is_method:
-            # If this is a method, then the signaure will include a type for
-            # `self`, but type comments do not contain a `self`. So strip it
-            # away here so everything is consistent (`inspect.ismethod` does
-            # not work here since `fn` is unbound at this point)
-            param_types, return_type = signature
-            param_types = param_types[1:]
-            signature = (param_types, return_type)
+    signature = try_real_annotations(fn, loc)
+    if signature is not None and is_method:
+        # If this is a method, then the signature will include a type for
+        # `self`, but type comments do not contain a `self`. So strip it
+        # away here so everything is consistent (`inspect.ismethod` does
+        # not work here since `fn` is unbound at this point)
+        param_types, return_type = signature
+        param_types = param_types[1:]
+        signature = (param_types, return_type)
 
     if signature is None:
         type_line, source = None, None
@@ -244,51 +239,60 @@ def try_real_annotations(fn, loc):
 def try_ann_to_type(ann, loc):
     if ann is None:
         return TensorType.get()
-    elif ann is torch.Tensor:
+    if inspect.isclass(ann) and issubclass(ann, torch.Tensor):
         return TensorType.get()
-    elif is_tuple(ann):
+    if is_tuple(ann):
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
-    elif is_list(ann):
-        return ListType(try_ann_to_type(ann.__args__[0], loc))
-    elif is_dict(ann):
+    if is_list(ann):
+        elem_type = try_ann_to_type(ann.__args__[0], loc)
+        if elem_type:
+            return ListType(elem_type)
+    if is_dict(ann):
         key = try_ann_to_type(ann.__args__[0], loc)
         value = try_ann_to_type(ann.__args__[1], loc)
         return DictType(key, value)
-    elif is_optional(ann):
+    if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
             return OptionalType(try_ann_to_type(ann.__args__[0], loc))
         else:
             return OptionalType(try_ann_to_type(ann.__args__[1], loc))
-    elif is_rref(ann):
+    if is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
-    elif is_future(ann):
+    if is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
-    elif ann is float:
+    if ann is float:
         return FloatType.get()
-    elif ann is int:
+    if ann is int:
         return IntType.get()
-    elif ann is str:
+    if ann is str:
         return StringType.get()
-    elif ann is bool:
+    if ann is bool:
         return BoolType.get()
-    elif ann is Any:
+    if ann is Any:
         return AnyType.get()
-    elif ann is type(None):
+    if ann is type(None):
         return NoneType.get()
-    elif inspect.isclass(ann) and hasattr(ann, "__torch_script_class__"):
-        return ClassType(_qualified_name(ann))
-    elif inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
+    if inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
         return InterfaceType(_qualified_name(ann))
-    elif ann is torch.device:
+    if ann is torch.device:
         return DeviceObjType.get()
-    else:
-        # Maybe resolve a NamedTuple to a Tuple Type
-        def fake_rcb(key):
-            return None
-        the_type = torch._C._resolve_type_from_object(ann, loc, fake_rcb)
-        if the_type is not None:
-            return the_type
-    return None
+    if ann is torch.dtype:
+        return IntType.get()  # dtype not yet bound in as its own type
+    if inspect.isclass(ann):
+        if hasattr(ann, "__torch_script_class__"):
+            return ClassType(_qualified_name(ann))
+        # Why Callable?  forward is declared to be a Callable so that
+        # people can define it without mypy complaining.  But we shouldn't
+        # try to recursively compile it!
+        ignored_builtin_classes = (torch.nn.Module, tuple, list, Callable)
+        if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
+            torch.jit._recursive_compile_class(ann, loc)
+            return ClassType(_qualified_name(ann))
+
+    # Maybe resolve a NamedTuple to a Tuple Type
+    def fake_rcb(key):
+        return None
+    return torch._C._resolve_type_from_object(ann, loc, fake_rcb)
 
 
 def ann_to_type(ann, loc):

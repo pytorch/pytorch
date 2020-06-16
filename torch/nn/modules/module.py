@@ -7,6 +7,16 @@ import torch
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
+from torch import Tensor, device, dtype
+from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict
+from ...utils.hooks import RemovableHandle
+
+_grad_t = Union[Tuple[Tensor, ...], Tensor]
+# See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
+# of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
+# the type of the subclass, not the looser type of `Module`.
+T = TypeVar('T', bound='Module')
+
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
@@ -36,7 +46,7 @@ def _addindent(s_, numSpaces):
     return s
 
 
-class Module(object):
+class Module:
     r"""Base class for all neural network modules.
 
     Your models should also subclass this class.
@@ -61,7 +71,7 @@ class Module(object):
     parameters converted too when you call :meth:`to`, etc.
     """
 
-    dump_patches = False
+    dump_patches: bool = False
 
     r"""This allows better BC support for :meth:`load_state_dict`. In
     :meth:`state_dict`, the version number will be saved as in the attribute
@@ -73,9 +83,11 @@ class Module(object):
     be bumped, and the module's `_load_from_state_dict` method can compare the
     version number and do appropriate changes if the state dict is from before
     the change."""
-    _version = 1
+    _version: int = 1
 
-    def __init__(self):
+    training: bool
+
+    def __init__(self) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
@@ -84,6 +96,7 @@ class Module(object):
         self.training = True
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
+        self._non_persistent_buffers_set = set()
         self._backward_hooks = OrderedDict()
         self._forward_hooks = OrderedDict()
         self._forward_pre_hooks = OrderedDict()
@@ -91,25 +104,35 @@ class Module(object):
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
 
-    def forward(self, *input):
-        r"""Defines the computation performed at every call.
-
-        Should be overridden by all subclasses.
-
-        .. note::
-            Although the recipe for forward pass needs to be defined within
-            this function, one should call the :class:`Module` instance afterwards
-            instead of this since the former takes care of running the
-            registered hooks while the latter silently ignores them.
-        """
+    # Trick mypy into not applying contravariance rules to inputs by defining
+    # forward as a value, rather than a function.  See also
+    # https://github.com/python/mypy/issues/8795
+    def _forward_unimplemented(self, *input: Any) -> None:
         raise NotImplementedError
 
-    def register_buffer(self, name, tensor):
-        r"""Adds a persistent buffer to the module.
+    r"""Defines the computation performed at every call.
+
+    Should be overridden by all subclasses.
+
+    .. note::
+        Although the recipe for forward pass needs to be defined within
+        this function, one should call the :class:`Module` instance afterwards
+        instead of this since the former takes care of running the
+        registered hooks while the latter silently ignores them.
+    """
+    forward: Callable[..., Any] = _forward_unimplemented
+
+    def register_buffer(self, name: str, tensor: Tensor, persistent: bool = True) -> None:
+        r"""Adds a buffer to the module.
 
         This is typically used to register a buffer that should not to be
         considered a model parameter. For example, BatchNorm's ``running_mean``
-        is not a parameter, but is part of the persistent state.
+        is not a parameter, but is part of the module's state. Buffers, by
+        default, are persistent and will be saved alongside parameters. This
+        behavior can be changed by setting :attr:`persistent` to ``False``. The
+        only difference between a persistent buffer and a non-persistent buffer
+        is that the latter will not be a part of this module's
+        :attr:`state_dict`.
 
         Buffers can be accessed as attributes using given names.
 
@@ -117,12 +140,17 @@ class Module(object):
             name (string): name of the buffer. The buffer can be accessed
                 from this module using the given name
             tensor (Tensor): buffer to be registered.
+            persistent (bool): whether the buffer is part of this module's
+                :attr:`state_dict`.
 
         Example::
 
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
+        if persistent is False and isinstance(self, torch.jit.ScriptModule):
+            raise RuntimeError("ScriptModule does not support non-persistent buffers")
+
         if '_buffers' not in self.__dict__:
             raise AttributeError(
                 "cannot assign buffer before Module.__init__() call")
@@ -141,8 +169,12 @@ class Module(object):
                             .format(torch.typename(tensor), name))
         else:
             self._buffers[name] = tensor
+            if persistent:
+                self._non_persistent_buffers_set.discard(name)
+            else:
+                self._non_persistent_buffers_set.add(name)
 
-    def register_parameter(self, name, param):
+    def register_parameter(self, name: str, param: Parameter) -> None:
         r"""Adds a parameter to the module.
 
         The parameter can be accessed as an attribute using given name.
@@ -181,7 +213,7 @@ class Module(object):
         else:
             self._parameters[name] = param
 
-    def add_module(self, name, module):
+    def add_module(self, name: str, module: 'Module') -> None:
         r"""Adds a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
@@ -254,7 +286,7 @@ class Module(object):
 
         return self
 
-    def apply(self, fn):
+    def apply(self: T, fn: Callable[['Module'], None]) -> T:
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
         (see also :ref:`nn-init-doc`).
@@ -297,7 +329,7 @@ class Module(object):
         fn(self)
         return self
 
-    def cuda(self, device=None):
+    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
         r"""Moves all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -313,7 +345,7 @@ class Module(object):
         """
         return self._apply(lambda t: t.cuda(device))
 
-    def cpu(self):
+    def cpu(self: T) -> T:
         r"""Moves all model parameters and buffers to the CPU.
 
         Returns:
@@ -321,7 +353,7 @@ class Module(object):
         """
         return self._apply(lambda t: t.cpu())
 
-    def type(self, dst_type):
+    def type(self: T, dst_type: Union[dtype, str]) -> T:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
         Arguments:
@@ -332,7 +364,7 @@ class Module(object):
         """
         return self._apply(lambda t: t.type(dst_type))
 
-    def float(self):
+    def float(self: T) -> T:
         r"""Casts all floating point parameters and buffers to float datatype.
 
         Returns:
@@ -340,7 +372,7 @@ class Module(object):
         """
         return self._apply(lambda t: t.float() if t.is_floating_point() else t)
 
-    def double(self):
+    def double(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
         Returns:
@@ -348,7 +380,7 @@ class Module(object):
         """
         return self._apply(lambda t: t.double() if t.is_floating_point() else t)
 
-    def half(self):
+    def half(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
 
         Returns:
@@ -356,13 +388,26 @@ class Module(object):
         """
         return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
-    def bfloat16(self):
+    def bfloat16(self: T) -> T:
         r"""Casts all floating point parameters and buffers to ``bfloat16`` datatype.
 
         Returns:
             Module: self
         """
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
+
+    @overload
+    def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
+           non_blocking: bool = ...) -> T:
+        ...
+
+    @overload
+    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T:
+        ...
+
+    @overload
+    def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T:
+        ...
 
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
@@ -449,7 +494,9 @@ class Module(object):
 
         return self._apply(convert)
 
-    def register_backward_hook(self, hook):
+    def register_backward_hook(
+        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+    ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
         .. warning ::
@@ -483,7 +530,7 @@ class Module(object):
         self._backward_hooks[handle.id] = hook
         return handle
 
-    def register_forward_pre_hook(self, hook):
+    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
 
         The hook will be called every time before :func:`forward` is invoked.
@@ -506,7 +553,7 @@ class Module(object):
         self._forward_pre_hooks[handle.id] = hook
         return handle
 
-    def register_forward_hook(self, hook):
+    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
         The hook will be called every time after :func:`forward` has computed an output.
@@ -549,7 +596,7 @@ class Module(object):
                 tracing_state.pop_scope()
         return result
 
-    def __call__(self, *input, **kwargs):
+    def _call_impl(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
             result = hook(self, input)
             if result is not None:
@@ -579,6 +626,8 @@ class Module(object):
                     grad_fn.register_hook(wrapper)
         return result
 
+    __call__ : Callable[..., Any] = _call_impl
+
     def __setstate__(self, state):
         self.__dict__.update(state)
         # Support loading old checkpoints that don't have the following attrs:
@@ -589,7 +638,7 @@ class Module(object):
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
             _parameters = self.__dict__['_parameters']
             if name in _parameters:
@@ -605,18 +654,21 @@ class Module(object):
         raise ModuleAttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
-    def __setattr__(self, name, value):
-        def remove_from(*dicts):
-            for d in dicts:
+    def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
+        def remove_from(*dicts_or_sets):
+            for d in dicts_or_sets:
                 if name in d:
-                    del d[name]
+                    if isinstance(d, dict):
+                        del d[name]
+                    else:
+                        d.discard(name)
 
         params = self.__dict__.get('_parameters')
         if isinstance(value, Parameter):
             if params is None:
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
-            remove_from(self.__dict__, self._buffers, self._modules)
+            remove_from(self.__dict__, self._buffers, self._modules, self._non_persistent_buffers_set)
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
@@ -630,7 +682,7 @@ class Module(object):
                 if modules is None:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
-                remove_from(self.__dict__, self._parameters, self._buffers)
+                remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
@@ -654,6 +706,7 @@ class Module(object):
             del self._parameters[name]
         elif name in self._buffers:
             del self._buffers[name]
+            self._non_persistent_buffers_set.discard(name)
         elif name in self._modules:
             del self._modules[name]
         else:
@@ -687,8 +740,22 @@ class Module(object):
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
-            if buf is not None:
+            if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
+
+    # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
+    # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
+    T_destination = TypeVar('T_destination', bound=Mapping[str, Tensor])
+
+    @overload
+    def state_dict(self, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
+        ...
+
+    # TODO: annotate with OrderedDict not Dict, but there is a problem:
+    # https://docs.python.org/3/library/typing.html#typing.OrderedDict
+    @overload
+    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Tensor]:
+        ...
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
@@ -766,7 +833,8 @@ class Module(object):
         for hook in self._load_state_dict_pre_hooks.values():
             hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
-        local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
+        persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
+        local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
 
         for name, param in local_state.items():
@@ -805,7 +873,8 @@ class Module(object):
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
 
-    def load_state_dict(self, state_dict, strict=True):
+    def load_state_dict(self, state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
+                        strict: bool = True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
@@ -872,7 +941,7 @@ class Module(object):
                 name = module_prefix + ('.' if module_prefix else '') + k
                 yield name, v
 
-    def parameters(self, recurse=True):
+    def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         r"""Returns an iterator over module parameters.
 
         This is typically passed to an optimizer.
@@ -896,7 +965,7 @@ class Module(object):
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, prefix='', recurse=True):
+    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
         r"""Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself.
 
@@ -922,7 +991,7 @@ class Module(object):
         for elem in gen:
             yield elem
 
-    def buffers(self, recurse=True):
+    def buffers(self, recurse: bool = True) -> Iterator[Tensor]:
         r"""Returns an iterator over module buffers.
 
         Args:
@@ -944,7 +1013,7 @@ class Module(object):
         for name, buf in self.named_buffers(recurse=recurse):
             yield buf
 
-    def named_buffers(self, prefix='', recurse=True):
+    def named_buffers(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
         r"""Returns an iterator over module buffers, yielding both the
         name of the buffer as well as the buffer itself.
 
@@ -970,7 +1039,7 @@ class Module(object):
         for elem in gen:
             yield elem
 
-    def children(self):
+    def children(self) -> Iterator['Module']:
         r"""Returns an iterator over immediate children modules.
 
         Yields:
@@ -979,7 +1048,7 @@ class Module(object):
         for name, module in self.named_children():
             yield module
 
-    def named_children(self):
+    def named_children(self) -> Iterator[Tuple[str, 'Module']]:
         r"""Returns an iterator over immediate children modules, yielding both
         the name of the module as well as the module itself.
 
@@ -999,7 +1068,7 @@ class Module(object):
                 memo.add(module)
                 yield name, module
 
-    def modules(self):
+    def modules(self) -> Iterator['Module']:
         r"""Returns an iterator over all modules in the network.
 
         Yields:
@@ -1026,7 +1095,7 @@ class Module(object):
         for name, module in self.named_modules():
             yield module
 
-    def named_modules(self, memo=None, prefix=''):
+    def named_modules(self, memo: Optional[Set['Module']] = None, prefix: str = ''):
         r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
 
@@ -1064,7 +1133,7 @@ class Module(object):
                 for m in module.named_modules(memo, submodule_prefix):
                     yield m
 
-    def train(self, mode=True):
+    def train(self: T, mode: bool = True) -> T:
         r"""Sets the module in training mode.
 
         This has any effect only on certain modules. See documentations of
@@ -1084,7 +1153,7 @@ class Module(object):
             module.train(mode)
         return self
 
-    def eval(self):
+    def eval(self: T) -> T:
         r"""Sets the module in evaluation mode.
 
         This has any effect only on certain modules. See documentations of
@@ -1099,7 +1168,7 @@ class Module(object):
         """
         return self.train(False)
 
-    def requires_grad_(self, requires_grad=True):
+    def requires_grad_(self: T, requires_grad: bool = True) -> T:
         r"""Change if autograd should record operations on parameters in this
         module.
 
@@ -1120,7 +1189,7 @@ class Module(object):
             p.requires_grad_(requires_grad)
         return self
 
-    def zero_grad(self):
+    def zero_grad(self) -> None:
         r"""Sets gradients of all model parameters to zero."""
         if getattr(self, '_is_replica', False):
             warnings.warn(
@@ -1134,13 +1203,13 @@ class Module(object):
                 p.grad.detach_()
                 p.grad.zero_()
 
-    def share_memory(self):
+    def share_memory(self: T) -> T:
         return self._apply(lambda t: t.share_memory_())
 
     def _get_name(self):
         return self.__class__.__name__
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         r"""Set the extra representation of the module
 
         To print customized extra information, you should reimplement

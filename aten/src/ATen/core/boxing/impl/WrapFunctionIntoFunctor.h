@@ -7,7 +7,7 @@ namespace impl {
     template<class FuncType, FuncType* kernel_func, class ReturnType, class... Parameters>
     class WrapFunctionIntoFunctor_<FuncType, kernel_func, ReturnType, guts::typelist::typelist<Parameters...>> final : public c10::OperatorKernel {
     public:
-      auto operator()(Parameters... args) -> decltype((*kernel_func)(std::forward<Parameters>(args)...)) {
+      decltype(auto) operator()(Parameters... args) {
         return (*kernel_func)(std::forward<Parameters>(args)...);
       }
     };

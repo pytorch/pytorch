@@ -91,12 +91,12 @@ class ProcessGroupAgent : public RpcAgent {
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
 
+  // put SendWork into a queue and notify the worker thread
+  virtual void enqueueSend(SendWork work);
+  // Bypass handleSend() logic and send a message to self rank
+  virtual void sendToSelf(Message&& message);
+
  private:
-  using steady_clock_time_point =
-      std::chrono::time_point<std::chrono::steady_clock>;
-
-  static const steady_clock_time_point kInfiniteTimeoutTimePoint;
-
   class MessageCounter {
    public:
     explicit MessageCounter(int worldSize);
@@ -145,8 +145,6 @@ class ProcessGroupAgent : public RpcAgent {
   };
 
   void collectNames();
-  // put SendWork into a queue and notify the worker thread
-  void enqueueSend(SendWork work);
   // handle a SendWork request. This serializes the payload inside the work
   // object, and sends the message to the receiver using the underlying
   // ProcessGroup.

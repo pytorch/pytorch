@@ -32,20 +32,12 @@ inline bool KernelFunction::isFallthrough() const {
 }
 
 inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* stack) const {
-    if (C10_UNLIKELY(boxed_kernel_func_ == nullptr)) {
-        if (unboxed_kernel_func_ == nullptr) {
-            TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction.");
-        } else {
-            // TODO We want to introduce the invariant that all kernels must be callable in a boxed way, then this case should be impossible.
-            TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::callUnboxed().");
-        }
-    }
-
+    checkBoxedKernel(opHandle);
     (*boxed_kernel_func_)(functor_.get(), opHandle, stack);
 }
 
 template<class Return, class... Args>
-inline Return KernelFunction::callUnboxed(const OperatorHandle& opHandle, Args... args) const {
+inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
@@ -56,7 +48,7 @@ inline Return KernelFunction::callUnboxed(const OperatorHandle& opHandle, Args..
         return (*func)(functor_.get(), std::forward<Args>(args)...);
     }
 
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::call() on an uninitialized KernelFunction.");
     return impl::boxAndCallBoxedFunc<Return, Args...>(boxed_kernel_func_, functor_.get(), opHandle, std::forward<Args>(args)...);
 }
 
@@ -73,6 +65,14 @@ inline KernelFunction KernelFunction::makeFallthrough() {
     return KernelFunction(
         nullptr,  // no functor_ object
         &fallthrough_kernel,
+        nullptr  // no unboxed function pointer
+    );
+}
+
+inline KernelFunction KernelFunction::makeNamedNotSupported() {
+    return KernelFunction(
+        nullptr,  // no functor_ object
+        &named_not_supported_kernel,
         nullptr  // no unboxed function pointer
     );
 }
@@ -161,6 +161,10 @@ inline KernelFunction KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
 }
 
 inline void KernelFunction::setManuallyBoxedKernel_(InternalBoxedKernelFunction* func) {
+    if (boxed_kernel_func_ == &fallthrough_kernel) {
+      // special case no-op
+      return;
+    }
     TORCH_INTERNAL_ASSERT(boxed_kernel_func_ == nullptr, "Tried to set a manually boxed kernel for a kernel that already has a boxed kernel set.");
     TORCH_INTERNAL_ASSERT(unboxed_kernel_func_ != nullptr, "Tried to set a manually boxed kernel for an invalid KernelFunction.");
     boxed_kernel_func_ = func;

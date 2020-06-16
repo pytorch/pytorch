@@ -33,6 +33,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         preserve_weight_sparsity=st.booleans(),
         fuse_relu=st.booleans(),
         output_packed_bias=st.booleans(),
+        use_input_qparam=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_fully_connected_int(
@@ -48,6 +49,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         preserve_weight_sparsity,
         fuse_relu,
         output_packed_bias,
+        use_input_qparam,
         gc,
         dc,
     ):
@@ -135,7 +137,10 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
             )
             w_q_param = None
             if do_quantize_weight:
-                int8_given_tensor_fill, w_q_param = dnnlowp_utils.create_int8_given_tensor_fill(
+                (
+                    int8_given_tensor_fill,
+                    w_q_param,
+                ) = dnnlowp_utils.create_int8_given_tensor_fill(
                     W, "W_q", preserve_weight_sparsity
                 )
                 init_net.Proto().op.extend([int8_given_tensor_fill])
@@ -153,29 +158,51 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 pack = core.CreateOperator(
                     "Int8FCPackWeight",
                     inputs,
-                    ["W_packed", "B_q32"] if do_dequantize and output_packed_bias else ["W_packed"],
+                    ["W_packed", "B_q32"]
+                    if do_dequantize and output_packed_bias
+                    else ["W_packed"],
                     preserve_weight_sparsity=preserve_weight_sparsity,
                     in_scale=x_q_param.scale,
                     engine=engine,
                 )
                 init_net.Proto().op.extend([pack])
 
-            fc = core.CreateOperator(
-                op_type,
-                [
-                    "X_q" if do_quantize else "X",
-                    "W_packed"
-                    if do_prepack_weight
-                    else ("W_q" if do_quantize_weight else "W"),
-                    "b_q" if do_quantize_weight else "b",
-                ],
-                ["Y_q" if do_dequantize else "Y"],
-                dequantize_output=not do_dequantize,
-                preserve_activation_sparsity=preserve_activation_sparsity,
-                preserve_weight_sparsity=preserve_weight_sparsity,
-                engine=engine,
-                device_option=gc,
-            )
+            if use_input_qparam and do_dequantize and op_type != "FC":
+                fc = core.CreateOperator(
+                    op_type,
+                    [
+                        "X_q" if do_quantize else "X",
+                        "W_packed"
+                        if do_prepack_weight
+                        else ("W_q" if do_quantize_weight else "W"),
+                        "b_q" if do_quantize_weight else "b",
+                        "scale",
+                        "zero_point",
+                    ],
+                    ["Y_q" if do_dequantize else "Y"],
+                    dequantize_output=not do_dequantize,
+                    preserve_activation_sparsity=preserve_activation_sparsity,
+                    preserve_weight_sparsity=preserve_weight_sparsity,
+                    engine=engine,
+                    device_option=gc,
+                )
+            else:
+                fc = core.CreateOperator(
+                    op_type,
+                    [
+                        "X_q" if do_quantize else "X",
+                        "W_packed"
+                        if do_prepack_weight
+                        else ("W_q" if do_quantize_weight else "W"),
+                        "b_q" if do_quantize_weight else "b",
+                    ],
+                    ["Y_q" if do_dequantize else "Y"],
+                    dequantize_output=not do_dequantize,
+                    preserve_activation_sparsity=preserve_activation_sparsity,
+                    preserve_weight_sparsity=preserve_weight_sparsity,
+                    engine=engine,
+                    device_option=gc,
+                )
             if do_quantize_weight or do_prepack_weight:
                 # When quantized weight is provided, we can't rescale the
                 # output dynamically by looking at the range of output of each
@@ -184,6 +211,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 dnnlowp_utils.add_quantization_param_args(
                     fc, outputs[0][0], preserve_activation_sparsity
                 )
+
             net.Proto().op.extend([fc])
             if fuse_relu and "DNNLOWP" not in engine:
                 net.Relu(["Y"], "Y")
@@ -194,14 +222,39 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            run_conv_or_fc(
-                self, init_net, net, X, W, b, op_type, engine, None, gc, outputs
-            )
+            if use_input_qparam and do_dequantize and op_type != "FC":
+                ref_output = outputs[0][0]
+                ref_output_min = 0 if ref_output.size == 0 else ref_output.min()
+                ref_output_max = 0 if ref_output.size == 0 else ref_output.max()
+                q_param = dnnlowp_utils.choose_quantization_params(
+                    ref_output_min, ref_output_max, preserve_activation_sparsity
+                )
+                run_conv_or_fc(
+                    self,
+                    init_net,
+                    net,
+                    X,
+                    W,
+                    b,
+                    op_type,
+                    engine,
+                    None,
+                    gc,
+                    outputs,
+                    np.array([q_param.scale]).astype(np.float32),
+                    np.array([q_param.zero_point]).astype(np.int32),
+                )
+            else:
+                run_conv_or_fc(
+                    self, init_net, net, X, W, b, op_type, engine, None, gc, outputs
+                )
 
             if output_packed_bias and do_prepack_weight and do_dequantize:
                 bias_int32 = self.ws.blobs["B_q32"].fetch()
                 if do_quantize_weight:
-                    np.testing.assert_equal(bias_int32[0], np.round(b / (x_q_param.scale * w_q_param.scale)))
+                    np.testing.assert_equal(
+                        bias_int32[0], np.round(b / (x_q_param.scale * w_q_param.scale))
+                    )
                 np.testing.assert_equal(bias_int32[0].dtype, np.int32)
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)

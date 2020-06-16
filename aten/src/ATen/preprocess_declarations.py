@@ -28,7 +28,7 @@ type_map = {
 all_types = type_map['floating_point'] + type_map['integral'] + type_map['quantized']
 type_map['all'] = all_types
 
-all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'MkldnnCPU', 'QuantizedCPU', 'QuantizedCUDA']
+all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'MkldnnCPU', 'QuantizedCPU', 'QuantizedCUDA', 'Vulkan']
 default_backends = ['CPU', 'CUDA']
 
 
@@ -167,40 +167,6 @@ def sanitize_return(option):
 def set_mode(option):
     option['mode'] = option.get('mode', 'TH')
 
-# To enable 0-dim support in TH operations
-# we find all places where a single Scalar replaced with a Tensor
-# as an argument is still a valid function
-# we then mark the tensor variant with a key zero_dim_dispatch_when_scalar: name
-# where 'name' is the name of the argument that should be a scalar
-# during dispatch, if that argument is marked internally as holding a scalar
-# then the method will dispatch to that function.
-
-
-def discover_zero_dim_tensor_operations(declaration):
-    def signature(option, i=None, value=None):
-        elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
-                    if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])]
-        return '#'.join(elements)
-    signature_to_option = {signature(option): option
-                           for option in declaration['options']}
-
-    for option in declaration['options']:
-        for i, arg in enumerate(option['arguments']):
-            if arg['type'] == 'real':
-                signature_of_tensor_version = signature(option, i, 'Tensor &')
-                if signature_of_tensor_version in signature_to_option:
-                    tensor_version = \
-                        signature_to_option[signature_of_tensor_version]
-                    names = [arg['name'] for arg in tensor_version['arguments']]
-                    tensor_version['zero_dim_dispatch_when_scalar'] = names[i]
-                    # print("FOUND "+str(i)   )
-                    # print("Scalar Version ===== ")
-                    # print(yaml.dump(option))
-                    # print("Tensor Version ===== ")
-                    # print(yaml.dump(tensor_version))
-                    # print("SHARED "+names[i])
-
 
 def is_extended_method(option):
     if 'method' in option['variants']:
@@ -222,8 +188,6 @@ def run(declarations):
             remove_self=True)
 
         common_with_cwrap.sort_by_number_of_args(declaration)
-
-        discover_zero_dim_tensor_operations(declaration)
 
         for option in declaration['options']:
             set_mode(option)

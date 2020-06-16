@@ -4,10 +4,12 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
-#include <torch/csrc/jit/passes/quantization.h>
+#include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 
@@ -19,6 +21,9 @@ namespace jit {
 namespace {
 
 void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
+  // fuse decomposed linear into aten::linear
+  FuseLinear(graph);
+
   std::string linear_before_inline = R"(
     graph(%linear, %input, %weight, %bias):
         %r = prim::CallFunction(%linear, %input, %weight, %bias)
@@ -65,7 +70,7 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
 
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   // Replace _convolution with conv2d
-  graph_rewrite_helper::replaceConvolutionWithConv2d(graph);
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
   std::string conv_2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
@@ -298,24 +303,24 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& m,
-    const std::map<MobileOptimizerType, bool>& whitelist_optimizers) {
+    const std::unordered_set<MobileOptimizerType>& optimization_blacklist) {
   auto cloned_module = m.clone();
   cloned_module.eval();
 
-  auto bn_it =
-      whitelist_optimizers.find(MobileOptimizerType::FOLD_CONV_BATCH_NORM);
-  if (bn_it == whitelist_optimizers.end() ||
-      (bn_it != whitelist_optimizers.end() && bn_it->second)) {
+  if (!optimization_blacklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
     cloned_module = FoldConvBatchNorm2d(cloned_module);
   }
 
-  auto prepack_it =
-      whitelist_optimizers.find(MobileOptimizerType::INSERT_FOLD_PREPACK_OPS);
-  if (prepack_it == whitelist_optimizers.end() ||
-      (prepack_it != whitelist_optimizers.end() && prepack_it->second)) {
+  if (!optimization_blacklist.count(
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
     insertPrePackedOps(cloned_module);
     cloned_module = freeze_module(cloned_module);
+    fusePrePackedLinearConvWithClamp(cloned_module);
     FoldPrePackingOps(cloned_module);
+  }
+
+  if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
+    removeDropout(cloned_module);
   }
 
   return cloned_module;
@@ -345,7 +350,7 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& module,
-    const std::unordered_map<MobileOptimizerType, bool>& whitelist_optimizers) {
+    const std::unordered_set<MobileOptimizerType>& blacklist) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");

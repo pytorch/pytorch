@@ -11,7 +11,7 @@ def _as_tuple(inp, arg_name, fn_name):
         is_inp_tuple = False
 
     for i, el in enumerate(inp):
-        if not torch.is_tensor(el):
+        if not isinstance(el, torch.Tensor):
             if is_inp_tuple:
                 raise TypeError("The {} given to {} must be either a Tensor or a tuple of Tensors but the"
                                 " value at index {} has type {}.".format(arg_name, fn_name, i, type(el)))
@@ -64,7 +64,7 @@ def _grad_preprocess(inputs, create_graph, need_graph):
 def _grad_postprocess(inputs, create_graph):
     # Postprocess the generated Tensors to avoid returning Tensors with history when the user did not
     # request it.
-    if torch.is_tensor(inputs[0]):
+    if isinstance(inputs[0], torch.Tensor):
         if not create_graph:
             return tuple(inp.detach() for inp in inputs)
         else:
@@ -190,32 +190,33 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
 # Public API
 
 def vjp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Function that computes the dot product between a vector ``v`` and the Jacobian of
-    the given function at the point given by the inputs.
+    r"""Function that computes the dot product between a vector ``v`` and the
+    Jacobian of the given function at the point given by the inputs.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a tuple of Tensors or a Tensor.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        v (tuple of Tensors or Tensor): The vector for which the vector Jacobian product is computed.
-            Must be the same size as the output of ``func``. This argument is optional when
-            ``func``'s output contains a single element and (if it is not provided) will be set as a Tensor
-            containing a single ``1``.
-        create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when ``strict`` is ``False``, the result can not
-            require gradients or be disconnected from the inputs.
-            Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+        v (tuple of Tensors or Tensor): The vector for which the vector
+            Jacobian product is computed.  Must be the same size as the output
+            of ``func``. This argument is optional when the output of ``func``
+            contains a single element and (if it is not provided) will be set
+            as a Tensor containing a single ``1``.
+        create_graph (bool, optional): If ``True``, both the output and result
+            will be computed in a differentiable way. Note that when ``strict``
+            is ``False``, the result can not require gradients or be
+            disconnected from the inputs.  Defaults to ``False``.
+        strict (bool, optional): If ``True``, an error will be raised when we
+            detect that there exists an input such that all the outputs are
+            independent of it. If ``False``, we return a Tensor of zeros as the
             vjp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
-        vjp (tuple of Tensors or Tensor): result of the dot product with the same shape
-            as the inputs.
+        vjp (tuple of Tensors or Tensor): result of the dot product with
+        the same shape as the inputs.
 
-    Example::
+    Example:
 
         >>> def exp_reducer(x):
         ...   return x.exp().sum(dim=1)
@@ -257,7 +258,8 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
         _validate_v(v, outputs, is_outputs_tuple)
     else:
         if len(outputs) != 1 or outputs[0].nelement() != 1:
-            raise RuntimeError("The vector v can only be None if the user-provided function returns "
+            raise RuntimeError("The vector v can only be None if the "
+                               "user-provided function returns "
                                "a single Tensor with a single element.")
 
     grad_res = _autograd_grad(outputs, inputs, v, create_graph=create_graph)
@@ -279,25 +281,26 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         func (function): a Python function that takes Tensor inputs and returns
             a tuple of Tensors or a Tensor.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        v (tuple of Tensors or Tensor): The vector for which the Jacobian vector product is computed. Must be the
-            same size as the input of ``func``. This argument is optional when
-            ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
-            containing a single ``1``.
-        create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when ``strict`` is ``False``, the result can not
-            require gradients or be disconnected from the inputs.
-            Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+        v (tuple of Tensors or Tensor): The vector for which the Jacobian
+            vector product is computed. Must be the same size as the input of
+            ``func``. This argument is optional when the input to ``func``
+            contains a single element and (if it is not provided) will be set
+            as a Tensor containing a single ``1``.
+        create_graph (bool, optional): If ``True``, both the output and result
+            will be computed in a differentiable way. Note that when ``strict``
+            is ``False``, the result can not require gradients or be
+            disconnected from the inputs.  Defaults to ``False``.
+        strict (bool, optional): If ``True``, an error will be raised when we
+            detect that there exists an input such that all the outputs are
+            independent of it. If ``False``, we return a Tensor of zeros as the
             jvp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
-        jvp (tuple of Tensors or Tensor): result of the dot product with the same shape
-            as the output.
+        jvp (tuple of Tensors or Tensor): result of the dot product with
+        the same shape as the output.
 
-    Example::
+    Example:
 
         >>> def exp_reducer(x):
         ...   return x.exp().sum(dim=1)
@@ -319,10 +322,10 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         (tensor([2.2399, 2.5005]),
          tensor([5., 5.]))
 
-    Note::
-
-        The jvp is currently computed by using the backward of the backward (sometimes called the double
-        backwards trick) as we don't have support for forward mode AD in PyTorch at the moment.
+    Note:
+        The jvp is currently computed by using the backward of the backward
+        (sometimes called the double backwards trick) as we don't have support
+        for forward mode AD in PyTorch at the moment.
     """
 
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
@@ -334,14 +337,16 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         _validate_v(v, inputs, is_inputs_tuple)
     else:
         if len(inputs) != 1 or inputs[0].nelement() != 1:
-            raise RuntimeError("The vector v can only be None if the input to the user-provided function "
-                               "is a single Tensor with a single element.")
+            raise RuntimeError("The vector v can only be None if the input to "
+                               "the user-provided function is a single Tensor "
+                               "with a single element.")
 
     outputs = func(*inputs)
     is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
     _check_requires_grad(outputs, "outputs", strict=strict)
-    # The backward is linear so the value of grad_outputs is not important as it won't appear in the double
-    # backward graph. We only need to ensure that it does not contain inf or nan.
+    # The backward is linear so the value of grad_outputs is not important as
+    # it won't appear in the double backward graph. We only need to ensure that
+    # it does not contain inf or nan.
     grad_outputs = tuple(torch.zeros_like(out, requires_grad=True) for out in outputs)
 
     grad_inputs = _autograd_grad(outputs, inputs, grad_outputs, create_graph=True)
@@ -365,25 +370,28 @@ def jacobian(func, inputs, create_graph=False, strict=False):
         func (function): a Python function that takes Tensor inputs and returns
             a tuple of Tensors or a Tensor.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        create_graph (bool, optional): If ``True``, the Jacobian will be computed in
-            a differentiable manner. Note that when ``strict`` is ``False``, the result can not
-            require gradients or be disconnected from the inputs.
-            Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+        create_graph (bool, optional): If ``True``, the Jacobian will be
+            computed in a differentiable manner. Note that when ``strict`` is
+            ``False``, the result can not require gradients or be disconnected
+            from the inputs.  Defaults to ``False``.
+        strict (bool, optional): If ``True``, an error will be raised when we
+            detect that there exists an input such that all the outputs are
+            independent of it. If ``False``, we return a Tensor of zeros as the
             jacobian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
-        Jacobian (Tensor or nested tuple of Tensors) if there are a single input
-            and output, this will be a single Tensor containing the Jacobian for the
-            linearized inputs and output. If one of the two is a tuple, then the Jacobian
-            will be a tuple of Tensors. If both of them are tuples, then the Jacobian will
-            be a tuple of tuple of Tensors where ``Jacobian[i][j]`` will contain the Jacobian
-            of the ``i``th output and ``j``th input and will have as size the concatenation of the
-            sizes of the corresponding output and the corresponding input.
+        Jacobian (Tensor or nested tuple of Tensors): if there are a single
+            input and output, this will be a single Tensor containing the
+            Jacobian for the linearized inputs and output. If one of the two is
+            a tuple, then the Jacobian will be a tuple of Tensors. If both of
+            them are tuples, then the Jacobian will be a tuple of tuple of
+            Tensors where ``Jacobian[i][j]`` will contain the Jacobian of the
+            ``i``\th output and ``j``\th input and will have as size the
+            concatenation of the sizes of the corresponding output and the
+            corresponding input.
 
-    Example::
+    Example:
 
         >>> def exp_reducer(x):
         ...   return x.exp().sum(dim=1)
@@ -416,7 +424,9 @@ def jacobian(func, inputs, create_graph=False, strict=False):
     inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
 
     outputs = func(*inputs)
-    is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jacobian")
+    is_outputs_tuple, outputs = _as_tuple(outputs,
+                                          "outputs of the user-provided function",
+                                          "jacobian")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
     jacobian = tuple()
@@ -424,18 +434,23 @@ def jacobian(func, inputs, create_graph=False, strict=False):
 
         jac_i = tuple([] for _ in range(len(inputs)))
         for j in range(out.nelement()):
-            vj = _autograd_grad((out.reshape(-1)[j],), inputs, retain_graph=True, create_graph=create_graph)
+            vj = _autograd_grad((out.reshape(-1)[j],), inputs,
+                                retain_graph=True, create_graph=create_graph)
 
             for el_idx, (jac_i_el, vj_el, inp_el) in enumerate(zip(jac_i, vj, inputs)):
                 if vj_el is not None:
                     if strict and create_graph and not vj_el.requires_grad:
-                        raise RuntimeError("The jacobian of the user-provided function is independent of "
-                                           "input {}. This is not allowed in strict mode when create_graph=True.".format(i))
+                        msg = ("The jacobian of the user-provided function is "
+                               "independent of input {}. This is not allowed in "
+                               "strict mode when create_graph=True.".format(i))
+                        raise RuntimeError(msg)
                     jac_i_el.append(vj_el)
                 else:
                     if strict:
-                        raise RuntimeError("Output {} of the user-provided function is independent of "
-                                           "input {}. This is not allowed in strict mode.".format(i, el_idx))
+                        msg = ("Output {} of the user-provided function is "
+                               "independent of input {}. This is not allowed in "
+                               "strict mode.".format(i, el_idx))
+                        raise RuntimeError(msg)
                     jac_i_el.append(torch.zeros_like(inp_el))
 
         jacobian += (tuple(torch.stack(jac_i_el, dim=0).view(out.size()
@@ -466,11 +481,11 @@ def hessian(func, inputs, create_graph=False, strict=False):
         Hessian (Tensor or a tuple of tuple of Tensors) if there are a single input,
             this will be a single Tensor containing the Hessian for the input.
             If it is a tuple, then the Hessian will be a tuple of tuples where
-            ``Hessian[i][j]`` will contain the Hessian of the ``i``th input
-            and ``j``th input with size the sum of the size of the ``i``th input plus
-            the size of the ``j``th input.
+            ``Hessian[i][j]`` will contain the Hessian of the ``i``\th input
+            and ``j``\th input with size the sum of the size of the ``i``\th input plus
+            the size of the ``j``\th input.
 
-    Example::
+    Example:
 
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
@@ -525,7 +540,7 @@ def hessian(func, inputs, create_graph=False, strict=False):
         is_out_tuple, t_out = _as_tuple(out, "outputs of the user-provided function", "hessian")
         _check_requires_grad(t_out, "outputs", strict=strict)
 
-        if is_out_tuple or not torch.is_tensor(out):
+        if is_out_tuple or not isinstance(out, torch.Tensor):
             raise RuntimeError("The function given to hessian should return a single Tensor")
 
         if out.nelement() != 1:
@@ -567,9 +582,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
         func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
         vhp (tuple of Tensors or Tensor): result of the dot product with the same shape
             as the inputs.
-
     Example::
-
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
@@ -578,13 +591,10 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
        (tensor(0.5591),
         tensor([[1.0689, 1.2431],
                 [3.0989, 4.4456]]))
-
         >>> vhp(pow_reducer, inputs, v, create_graph=True)
         (tensor(0.5591, grad_fn=<SumBackward0>),
          tensor([[1.0689, 1.2431],
                  [3.0989, 4.4456]], grad_fn=<MulBackward0>))
-
-
         >>> def pow_adder_reducer(x, y):
         ...   return (2 * x.pow(2) + 3 * y.pow(2)).sum()
         >>> inputs = (torch.rand(2), torch.rand(2))
@@ -593,7 +603,6 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
         (tensor(4.8053),
          (tensor([0., 0.]),
           tensor([6., 6.])))
-
     """
 
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "vhp")
@@ -612,7 +621,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
     is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "vhp")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
-    if is_outputs_tuple or not torch.is_tensor(outputs[0]):
+    if is_outputs_tuple or not isinstance(outputs[0], torch.Tensor):
         raise RuntimeError("The function given to vhp should return a single Tensor")
 
     if outputs[0].nelement() != 1:
@@ -639,25 +648,26 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
         inputs (tuple of Tensors or Tensor): inputs to the function ``func``.
-        v (tuple of Tensors or Tensor): The vector for which the Hessian vector product is computed. Must be the
-            same size as the input of ``func``. This argument is optional when
-            ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
-            containing a single ``1``.
+        v (tuple of Tensors or Tensor): The vector for which the Hessian vector
+            product is computed. Must be the same size as the input of
+            ``func``. This argument is optional when ``func``'s input contains
+            a single element and (if it is not provided) will be set as a
+            Tensor containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when ``strict`` is ``False``, the result can not
-            require gradients or be disconnected from the inputs.
-            Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
+            computed in a differentiable way. Note that when ``strict`` is
+            ``False``, the result can not require gradients or be disconnected
+            from the inputs.  Defaults to ``False``.
+        strict (bool, optional): If ``True``, an error will be raised when we
+            detect that there exists an input such that all the outputs are
+            independent of it. If ``False``, we return a Tensor of zeros as the
             hvp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
-
     Returns:
         func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
-        hvp (tuple of Tensors or Tensor): result of the dot product with the same shape
-            as the inputs.
+            hvp (tuple of Tensors or Tensor): result of the dot product with
+            the same shape as the inputs.
 
-    Example::
+    Example:
 
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
@@ -683,7 +693,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
          (tensor([0., 0.]),
           tensor([6., 6.])))
 
-    Note::
+    Note:
 
         This function is significantly slower than `vhp` due to backward mode AD constraints.
         If your functions is twice continuously differentiable, then hvp = vhp.t(). So if you
@@ -708,7 +718,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
     is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "hvp")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
-    if is_outputs_tuple or not torch.is_tensor(outputs[0]):
+    if is_outputs_tuple or not isinstance(outputs[0], torch.Tensor):
         raise RuntimeError("The function given to hvp should return a single Tensor")
 
     if outputs[0].nelement() != 1:

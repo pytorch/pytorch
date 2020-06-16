@@ -17,13 +17,14 @@ inline at::Tensor dummyTensor(c10::DispatchKeySet ks) {
   auto* allocator = c10::GetCPUAllocator();
   int64_t nelements = 1;
   auto dtype = caffe2::TypeMeta::Make<float>();
+  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<c10::StorageImpl>(
-    dtype,
-    nelements,
-    allocator->allocate(nelements * dtype.itemsize()),
-    allocator,
-    /*resizable=*/true);
-  return at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks);
+      c10::StorageImpl::use_byte_size_t(),
+      size_bytes,
+      allocator->allocate(size_bytes),
+      allocator,
+      /*resizable=*/true);
+  return at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks, dtype);
 }
 
 inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key) {
@@ -40,13 +41,13 @@ inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... ar
 template<class Result, class... Args>
 inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
   return c10::Dispatcher::singleton()
-      .template callUnboxed<Result, Args...>(op, std::forward<Args>(args)...);
+      .template call<Result, Args...>(op, std::forward<Args>(args)...);
 }
 
 template<class Result, class... Args>
 inline Result callOpUnboxedWithDispatchKey(const c10::OperatorHandle& op, c10::DispatchKey dispatchKey, Args... args) {
   return c10::Dispatcher::singleton()
-      .template callUnboxedWithDispatchKey<Result, Args...>(op, dispatchKey, std::forward<Args>(args)...);
+      .template callWithDispatchKey<Result, Args...>(op, dispatchKey, std::forward<Args>(args)...);
 }
 
 inline void expectDoesntFindKernel(const char* op_name, c10::DispatchKey dispatch_key) {

@@ -18,7 +18,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // to calculate the mode for --> we do this by manually doing the stride
   // calculations to get an offset
   scalar_t *data = THCTensor_(data)(state, input);
-  for (int i = 0; i < THLongStorage_size(position); ++i) {
+  for (int i = 0; i < (position->nbytes() / sizeof(int64_t)); ++i) {
     data += THLongStorage_data(position)[i] * THTensor_strideLegacyNoScalars(input, i);
   }
 
@@ -121,7 +121,7 @@ void THCTensor_(calculateMode)(THCState *state,
   ptrdiff_t valuesOffset = THCTensor_(storageOffset)(state, values);
   int64_t indicesOffset = THCudaLongTensor_storageOffset(state, indices);
 
-  for (int i = 0; i < THLongStorage_size(position); ++i) {
+  for (int i = 0; i < (position->nbytes() / sizeof(int64_t)); ++i) {
     int64_t pos = THLongStorage_data(position)[i];
     valuesOffset += THTensor_strideLegacyNoScalars(values, i) * pos;
     indicesOffset += THTensor_strideLegacyNoScalars(indices, i) * pos;
@@ -269,7 +269,7 @@ void THCTensor_(mode)(THCState *state,
         break;
       case 1:
       default:
-        assert(false);
+        TORCH_INTERNAL_ASSERT(false);
     }
     THCudaCheck(cudaGetLastError());
 

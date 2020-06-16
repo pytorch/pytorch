@@ -76,7 +76,7 @@ class ProcessGroupShareTensorTest(TestCase):
             self.assertEqual(
                 expected,
                 result,
-                (
+                msg=(
                     "Expect rank {} to receive tensor {} but got {}."
                 ).format(pid, expected, result)
             )

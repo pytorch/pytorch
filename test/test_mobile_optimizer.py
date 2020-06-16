@@ -83,7 +83,7 @@ class TestOptimizer(unittest.TestCase):
 
         optimized_scripted_model = optimize_for_mobile(scripted_model)
         optimized_result = optimized_scripted_model(input_data)
-
+        print("no blacklist optimized_scripted_model graph = {}".format(optimized_scripted_model.graph))
         FileCheck().check_not("Tensor = aten::conv2d") \
                    .check_not("Tensor = prim::CallFunction") \
                    .check_not("prepacked::conv2d_clamp_prepack") \
@@ -91,25 +91,19 @@ class TestOptimizer(unittest.TestCase):
                    .check_not("prepacked::linear_clamp_prepack") \
                    .check_count("prepacked::linear_clamp_run", 1, exactly=True) \
                    .run(optimized_scripted_model.graph)
-
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
-        whitelist_optimizer_dict = {
-            MobileOptimizerType.FOLD_CONV_BATCH_NORM: True,
-            MobileOptimizerType.INSERT_FOLD_PREPACK_OPS: True
-        }
-        optimized_scripted_model_with_dict = optimize_for_mobile(scripted_model, whitelist_optimizer_dict)
-        optimized_result_with_dict = optimized_scripted_model_with_dict(input_data)
 
-        FileCheck().check_not("Tensor = aten::conv2d") \
-                   .check_not("Tensor = prim::CallFunction") \
-                   .check_not("prepacked::conv2d_clamp_prepack") \
-                   .check_count("prepacked::conv2d_clamp_run", 1, exactly=True) \
-                   .check_not("prepacked::linear_clamp_prepack") \
-                   .check_count("prepacked::linear_clamp_run", 1, exactly=True) \
-                   .run(optimized_scripted_model_with_dict.graph)
+        optimization_blacklist_no_prepack = {MobileOptimizerType.INSERT_FOLD_PREPACK_OPS}
+        optimized_scripted_model_no_prepack = optimize_for_mobile(scripted_model, optimization_blacklist_no_prepack)
+        optimized_result_no_prepack = optimized_scripted_model_no_prepack(input_data)
 
-        torch.testing.assert_allclose(initial_result, optimized_result_with_dict, rtol=1e-2, atol=1e-3)
+        FileCheck().check_count("Tensor = aten::conv2d", 1, exactly=True) \
+                   .check_not("prepacked::linear_clamp_run") \
+                   .check_not("prepacked::conv2d_clamp_run") \
+                   .run(optimized_scripted_model_no_prepack.graph)
+        torch.testing.assert_allclose(initial_result, optimized_result_no_prepack, rtol=1e-2, atol=1e-3)
+
 
         bn_test_module = BNTestModule()
         bn_scripted_module = torch.jit.script(bn_test_module)
@@ -118,16 +112,20 @@ class TestOptimizer(unittest.TestCase):
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(str(get_forward(bn_scripted_module._c).graph))
 
-        whitelist_optimizer_dict_with_bn_fold = {
-            MobileOptimizerType.FOLD_CONV_BATCH_NORM: True,
-            MobileOptimizerType.INSERT_FOLD_PREPACK_OPS: False
-        }
-        bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, whitelist_optimizer_dict_with_bn_fold)
+        optimization_blacklist_no_prepack = {MobileOptimizerType.INSERT_FOLD_PREPACK_OPS}
+        bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, optimization_blacklist_no_prepack)
         self.assertEqual(len(torch.jit.export_opnames(bn_fold_scripted_module)), 1)
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
                    .run(str(get_forward_graph(bn_fold_scripted_module._c)))
         bn_input = torch.rand(1, 1, 6, 6)
         torch.testing.assert_allclose(bn_scripted_module(bn_input), bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
+
+        optimization_blacklist_no_fold_bn = {MobileOptimizerType.CONV_BN_FUSION}
+        no_bn_fold_scripted_module = optimize_for_mobile(bn_scripted_module, optimization_blacklist_no_fold_bn)
+        FileCheck().check_count("aten::batch_norm", 1, exactly=True) \
+                   .run(str(get_forward_graph(no_bn_fold_scripted_module._c)))
+        bn_input = torch.rand(1, 1, 6, 6)
+        torch.testing.assert_allclose(bn_scripted_module(bn_input), no_bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):

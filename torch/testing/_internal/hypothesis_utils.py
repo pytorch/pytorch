@@ -3,6 +3,7 @@ import numpy as np
 import torch
 
 import hypothesis
+from functools import reduce
 from hypothesis import assume
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -46,6 +47,28 @@ def _get_valid_min_max(qparams):
 # in 3.67.0
 def _floats_wrapper(*args, **kwargs):
     if 'width' in kwargs and hypothesis.version.__version_info__ < (3, 67, 0):
+        # As long as nan, inf, min, max are not specified, reimplement the width
+        # parameter for older versions of hypothesis.
+        no_nan_and_inf = (
+            (('allow_nan' in kwargs and not kwargs['allow_nan']) or
+             'allow_nan' not in kwargs) and
+            (('allow_infinity' in kwargs and not kwargs['allow_infinity']) or
+             'allow_infinity' not in kwargs))
+        min_and_max_not_specified = (
+            len(args) == 0 and
+            'min_value' not in kwargs and
+            'max_value' not in kwargs
+        )
+        if no_nan_and_inf and min_and_max_not_specified:
+            if kwargs['width'] == 16:
+                kwargs['min_value'] = torch.finfo(torch.float16).min
+                kwargs['max_value'] = torch.finfo(torch.float16).max
+            elif kwargs['width'] == 32:
+                kwargs['min_value'] = torch.finfo(torch.float32).min
+                kwargs['max_value'] = torch.finfo(torch.float32).max
+            elif kwargs['width'] == 64:
+                kwargs['min_value'] = torch.finfo(torch.float64).min
+                kwargs['max_value'] = torch.finfo(torch.float64).max
         kwargs.pop('width')
     return st.floats(*args, **kwargs)
 
@@ -133,7 +156,7 @@ Example:
     some_test(self, Q):...
 """
 @st.composite
-def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None):
+def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None, max_numel=None):
     """Return a strategy for array shapes (tuples of int >= 1)."""
     assert(min_dims < 32)
     if max_dims is None:
@@ -141,9 +164,10 @@ def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None):
     assert(max_dims < 32)
     if max_side is None:
         max_side = min_side + 5
-    return draw(st.lists(
-        st.integers(min_side, max_side), min_size=min_dims, max_size=max_dims
-    ).map(tuple))
+    candidate = st.lists(st.integers(min_side, max_side), min_size=min_dims, max_size=max_dims)
+    if max_numel is not None:
+        candidate = candidate.filter(lambda x: reduce(int.__mul__, x, 1) <= max_numel)
+    return draw(candidate.map(tuple))
 
 
 """Strategy for generating test cases for tensors.

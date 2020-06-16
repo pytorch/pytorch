@@ -31,7 +31,7 @@ void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
       elem_type != BoolType::get()) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
-          << "got " << elem_type->python_str();
+          << "got " << elem_type->repr_str();
     // special case empty list torch.tensor([])
     if (elem_type->isSubtypeOf(TensorType::get())) {
       if (empty_list) {
@@ -220,11 +220,11 @@ int createTensorFromList(Stack& stack) {
       tensor.numel() == 0) {
     TORCH_WARN(
         "Creating a tensor from an empty ",
-        elem_type->python_str(),
+        elem_type->repr_str(),
         "list will create a tensor of default floating point type  (currently ",
         default_type,
         ") in python but a tensor of type ",
-        elem_type->python_str(),
+        elem_type->repr_str(),
         " in torchscript.\n",
         "Pass in a dtype argument to ensure consistent behavior");
   }
@@ -250,57 +250,10 @@ RegisterOperators reg({
           return 0;
         },
         aliasAnalysisFromSchema()),
-    // not currently being generated, here for BC
-    Operator(
-        "aten::list_with_default(int[] list, int[] defaults) -> int[]",
-        [](Stack& stack) {
-          RECORD_FUNCTION("sizes", last(stack, 2));
-
-          auto list = peek(stack, 0, 2).toIntList().copy();
-          auto defaults = peek(stack, 1, 2).toIntVector();
-          drop(stack, 2);
-
-          AT_ASSERT(defaults.size() > list.size());
-
-          // TODO: allow list of optionals to be filled in with defaults
-          // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
-
-          push(stack, std::move(list));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::_infer_size(int[] a, int[] b) -> int[]",
-        [](Stack& stack) {
-          auto a = pop(stack);
-          auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
-        [](Stack& stack) {
-          at::Tensor weight;
-          at::Tensor input;
-          double max_norm;
-          double norm_type;
-          pop(stack, weight, input, max_norm, norm_type);
-
-          // TODO: remove when script supports setting grad mode
-          torch::NoGradGuard no_grad;
-
-          at::Tensor result =
-              at::embedding_renorm_(weight, input, max_norm, norm_type);
-          push(stack, std::move(result));
-
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)  \
   Operator(                                                                \
-      "aten::tensor(" #operator_type                                       \
+      "aten::tensor." #operator_type "(" #operator_type                    \
       " t, *, ScalarType? dtype=None, Device? device=None"                 \
       ", bool requires_grad=False) -> Tensor",                             \
       [](Stack& stack) {                                                   \
@@ -317,7 +270,7 @@ RegisterOperators reg({
       },                                                                   \
       aliasAnalysisFromSchema()),                                          \
       Operator(                                                            \
-          "aten::as_tensor(" #operator_type                                \
+          "aten::as_tensor." #operator_type "(" #operator_type             \
           " t, *, ScalarType? dtype=None, Device? device=None) -> Tensor", \
           [](Stack& stack) {                                               \
             c_type scalar_val;                                             \
@@ -396,7 +349,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::as_tensor(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
+        "aten::as_tensor.list(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
         createTensorFromList<false>,
         aliasAnalysisFromSchema()),
     Operator(

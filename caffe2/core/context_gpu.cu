@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 
+#include <ATen/Context.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include "cub/util_allocator.cuh"
 
@@ -279,6 +280,8 @@ static void Caffe2SetCUDAMemoryPool() {
     SetUpCub();
   } else if (FLAGS_caffe2_cuda_memory_pool == "thc") {
     g_cuda_memory_pool_type = CudaMemoryPoolType::THC;
+    // Initialize caching allocator
+    at::globalContext().lazyInitCUDA();
   } else {
     CAFFE_THROW(
         "Unrecognized cuda memory pool type: ", FLAGS_caffe2_cuda_memory_pool);
@@ -321,6 +324,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
           "Failed to swap deleter (already swapped?)");
     } else {
       CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
+      profiledCPUMemoryReporter().New(data, nbytes);
       data_ptr = {data, data, &Delete, at::Device(CPU)};
     }
     memset(data, 0, nbytes);
@@ -347,6 +351,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
       GetDefaultCPUAllocator()->raw_deleter()(data);
     } else {
       cudaError_t err = cudaFreeHost(data);
+      profiledCPUMemoryReporter().Delete(data);
       if (err == cudaErrorInvalidValue) {
         free(data);
         // Calling cudaGetLastError will reset the cuda error.
@@ -380,7 +385,13 @@ void Caffe2UsePinnedCPUAllocator() {
     return;
   }
   VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
-  SetCPUAllocator(&g_pinned_cpu_alloc);
+
+  // If CUDA is enabled, using CPU allocators other than PinnedCPUAllocator
+  // will cause memory corruptions. Therefore, we need to set the priority
+  // to highest to avoid being overwritten.
+  SetCPUAllocator(
+      &g_pinned_cpu_alloc,
+      std::numeric_limits<uint8_t>::max() /* priority */);
 #endif
 }
 

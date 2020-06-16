@@ -23,7 +23,12 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("cuda", [
-            ("9.2", [X("3.6")]),
+            ("9.2", [
+                X("3.6"),
+                ("3.6", [
+                    ("cuda_gcc_override", [X("gcc5.4")])
+                ])
+            ]),
             ("10.1", [X("3.6")]),
             ("10.2", [
                 XImportant("3.6"),
@@ -39,6 +44,9 @@ CONFIG_TREE_DATA = [
                     ("android_abi", [X("x86_64")]),
                     ("android_abi", [X("arm-v7a")]),
                     ("android_abi", [X("arm-v8a")]),
+                    ("vulkan", [
+                        ("android_abi", [XImportant("x86_32")]),
+                    ]),
                 ])
             ]),
         ]),
@@ -46,10 +54,16 @@ CONFIG_TREE_DATA = [
     ("bionic", [
         ("clang", [
             ("9", [
+                XImportant("3.6"),
+            ]),
+            ("9", [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
                 ]),
             ]),
+        ]),
+        ("gcc", [
+            ("9", [XImportant("3.8")]),
         ]),
     ]),
 ]
@@ -122,7 +136,10 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
+            "build_only": BuildOnlyConfigNode,
             "android_abi": AndroidAbiConfigNode,
+            "vulkan": VulkanConfigNode,
+            "cuda_gcc_override": CudaGccOverrideConfigNode
         }
         return next_nodes[experimental_feature]
 
@@ -137,6 +154,7 @@ class XlaConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
+
 class ParallelTBBConfigNode(TreeConfigNode):
     def modify_label(self, label):
         return "PARALLELTBB=" + str(label)
@@ -146,6 +164,7 @@ class ParallelTBBConfigNode(TreeConfigNode):
 
     def child_constructor(self):
         return ImportantConfigNode
+
 
 class ParallelNativeConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -157,6 +176,7 @@ class ParallelNativeConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
+
 class LibTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):
         return "BUILD_TEST_LIBTORCH=" + str(label)
@@ -167,6 +187,7 @@ class LibTorchConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
+
 class AndroidAbiConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
@@ -174,6 +195,32 @@ class AndroidAbiConfigNode(TreeConfigNode):
 
     def child_constructor(self):
         return ImportantConfigNode
+
+class VulkanConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "Vulkan=" + str(label)
+
+    def init2(self, node_name):
+        self.props["vulkan"] = node_name
+
+    def child_constructor(self):
+        return AndroidAbiConfigNode
+
+class CudaGccOverrideConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["cuda_gcc_override"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+class BuildOnlyConfigNode(TreeConfigNode):
+
+    def init2(self, node_name):
+        self.props["build_only"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
 
 class ImportantConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -199,6 +246,7 @@ class XenialCompilerConfigNode(TreeConfigNode):
 
         return XenialCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
 
+
 class BionicCompilerConfigNode(TreeConfigNode):
 
     def modify_label(self, label):
@@ -212,6 +260,7 @@ class BionicCompilerConfigNode(TreeConfigNode):
 
         return BionicCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
 
+
 class XenialCompilerVersionConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["compiler_version"] = node_name
@@ -219,6 +268,7 @@ class XenialCompilerVersionConfigNode(TreeConfigNode):
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
         return PyVerConfigNode
+
 
 class BionicCompilerVersionConfigNode(TreeConfigNode):
     def init2(self, node_name):

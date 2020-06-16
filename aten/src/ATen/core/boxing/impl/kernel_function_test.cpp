@@ -5,6 +5,8 @@
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
+#include <ATen/core/LegacyTypeDispatch.h>
+
 using c10::RegisterOperators;
 using c10::DispatchKey;
 using c10::Stack;
@@ -649,7 +651,7 @@ void expectCannotCallConcatBoxed(DispatchKey dispatch_key) {
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>(
     [&] {callOp(*op, dummyTensor(dispatch_key), "1", "2", 3);},
-    "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::callUnboxed()."
+    "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()."
   );
 }
 

@@ -14,6 +14,10 @@ add_library(caffe2_observers
     "${CMAKE_CURRENT_SOURCE_DIR}/observer_config.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/perf_observer.cc"
     )
+if(HAVE_SOVERSION)
+  set_target_properties(caffe2_observers PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 target_link_libraries(caffe2_observers PUBLIC torch_library)
 target_include_directories(caffe2_observers PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_compile_options(caffe2_observers PRIVATE "-DCAFFE2_BUILD_OBSERVER_LIB")
