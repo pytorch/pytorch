@@ -31,7 +31,7 @@ source "$PYTORCH_ANDROID_DIR/common.sh"
 
 check_android_sdk
 check_gradle
-parse_abis_list $@
+parse_abis_list "$@"
 build_android
 
 # To set proxy for gradle add following lines to ./gradle/gradle.properties:
