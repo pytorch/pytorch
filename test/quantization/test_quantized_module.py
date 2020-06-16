@@ -798,12 +798,69 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                                                       bidirectional=bidirectional,
                                                       dtype=dtype)
             _all_params = ([m.param for m in cell_dq._all_weight_values])
-            result = torch.quantized_lstm(x, (h, c), _all_params, cell_dq.bias, cell_dq.num_layers,
-                                          float(cell_dq.dropout), False, bidirectional,
-                                          False, dtype=dtype, use_dynamic=True)
+            result = torch.quantized_lstm(x, (h, c),
+                                          _all_params,
+                                          cell_dq.bias,
+                                          cell_dq.num_layers,
+                                          float(cell_dq.dropout),
+                                          False,
+                                          bidirectional,
+                                          False,
+                                          dtype=dtype,
+                                          use_dynamic=True)
 
 
             y, (h, c) = cell_dq(x, (h, c))
             self.assertEqual(result[0], y)
             self.assertEqual(result[1], h)
             self.assertEqual(result[2], c)
+
+    @override_qengines
+    def test_cell_api(self):
+        r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
+        """
+        # Check that module matches the numerics of the op and ensure that module can be
+        # instantiated for all engines and dtypes
+
+        batch = 7
+        input_size = 3
+        hidden_size = 7
+        bias = True
+
+        x = torch.rand(batch, input_size)
+        h = torch.rand(batch, hidden_size)
+        cell_dict = {'LSTMCell': torch.nn.quantized.dynamic.LSTMCell,
+                     'GRUCell': torch.nn.quantized.dynamic.GRUCell,
+                     'RNNTanh': torch.nn.quantized.dynamic.RNNCell,
+                     'RNNReLU': torch.nn.quantized.dynamic.RNNCell
+                     }
+        state = {'LSTMCell': (h, h),
+                 'GRUCell': h,
+                 'RNNTanh': h,
+                 'RNNReLU': h}
+
+        qfn_dict = {'LSTMCell': torch.ops.quantized.quantized_lstm_cell_dynamic,
+                    'GRUCell': torch.ops.quantized.quantized_gru_cell_dynamic,
+                    'RNNTanh': torch.ops.quantized.quantized_rnn_tanh_cell_dynamic,
+                    'RNNReLU': torch.ops.quantized.quantized_rnn_relu_cell_dynamic}
+
+        for rnn_type in cell_dict.keys():
+            for dtype in [torch.qint8, torch.float16]:
+                if dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack":
+                    # fp16 dynamic quant is not supported for qnnpack
+                    continue
+                    # Test default instantiation
+
+                kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias, 'dtype': dtype}
+                if rnn_type == 'RNNReLU':
+                    kwargs['nonlinearity'] = "relu"
+                elif rnn_type == 'RNNTanh':
+                    kwargs['nonlinearity'] = "tanh"
+
+                cell_dq = cell_dict[rnn_type](**kwargs)
+                result = qfn_dict[rnn_type](x, state[rnn_type],
+                                            cell_dq._packed_weight_ih, cell_dq._packed_weight_hh,
+                                            cell_dq.bias_ih, cell_dq.bias_hh)
+                result_module = cell_dq(x, state[rnn_type])
+                self.assertEqual(result[0], result_module[0], msg="RNNCell module API failed")
+                self.assertEqual(result[1], result_module[1], msg="RNNCell module API failed")
