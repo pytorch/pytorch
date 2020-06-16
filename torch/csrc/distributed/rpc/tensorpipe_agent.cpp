@@ -734,10 +734,6 @@ void TensorPipeAgent::shutdownImpl() {
   // FIXME Isn't it too verbose for a library to print logs in normal operation?
   LOG(INFO) << "RPC agent for " << workerInfo_.name_ << " is shutting down";
 
-  threadPool_.waitWorkComplete();
-  VLOG(1) << "RPC agent for " << workerInfo_.name_
-          << " done waiting for thread pool to complete work";
-
   // Join the Timeout Thread
   timeoutThreadCV_.notify_one();
   if (timeoutThread_.joinable()) {
@@ -751,6 +747,17 @@ void TensorPipeAgent::shutdownImpl() {
   context_->join();
   VLOG(1) << "RPC agent for " << workerInfo_.name_
           << " done waiting for TensorPipe context to join";
+
+  // NOTE: We need to call waitWorkComplete in the end after we have shutdown
+  // all listeners for Tensorpipe. This is to drain any already accepted work
+  // in the ThreadPool. If this is done before we shutdown the listeners,
+  // additional work could be added after this call and before we shutdown
+  // listeners. This work would continue executing in the threadpool and might
+  // cause issues during shutdown of the system.
+  threadPool_.waitWorkComplete();
+  VLOG(1) << "RPC agent for " << workerInfo_.name_
+          << " done waiting for thread pool to complete work";
+
 }
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
