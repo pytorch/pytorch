@@ -209,13 +209,16 @@ void initJITBindings(PyObject* module) {
           [](Module& module,
              const std::string& method_name,
              bool inplace,
+             bool debug,
              int quant_type_int) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertQuantDeQuant(module, method_name, inplace, quant_type);
+            return InsertQuantDeQuant(
+                module, method_name, inplace, debug, quant_type);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("inplace"),
+          py::arg("debug"),
           py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_insert_prepack_unpack",
@@ -837,11 +840,17 @@ void initJITBindings(PyObject* module) {
           [](Argument& self) -> py::object {
             return (self.N()) ? py::cast(*self.N()) : py::none();
           })
-      .def_property_readonly("default_value", [](Argument& self) -> py::object {
-        if (!self.default_value())
-          return py::none();
-        IValue v = *self.default_value();
-        return toPyObject(std::move(v));
+      .def_property_readonly(
+          "default_value",
+          [](Argument& self) -> py::object {
+            if (!self.default_value()) {
+              return py::none();
+            }
+            IValue v = *self.default_value();
+            return toPyObject(std::move(v));
+          })
+      .def("has_default_value", [](Argument& self) -> py::bool_ {
+        return self.default_value().has_value();
       });
   m.def("_jit_get_all_schemas", []() {
     const std::vector<std::shared_ptr<Operator>>& operations =
@@ -955,6 +964,22 @@ void initJITBindings(PyObject* module) {
   m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
     return fut->wait();
   });
+
+  m.def(
+      "_collect_all",
+      [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
+          -> std::shared_ptr<jit::PythonFutureWrapper> {
+        auto typePtr =
+            futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
+        c10::List<c10::intrusive_ptr<c10::ivalue::Future>> asList(
+          c10::FutureType::create(typePtr));
+        asList.reserve(futures.size());
+        for (const auto& f : futures) {
+          asList.push_back(f->fut);
+        }
+        return std::make_shared<jit::PythonFutureWrapper>(
+            c10::collectAll(asList));
+      });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);
