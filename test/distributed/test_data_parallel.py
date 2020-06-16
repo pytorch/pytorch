@@ -406,7 +406,7 @@ class TestDataParallel(TestCase):
         net = nn.DataParallel(l)
         out = net(i)
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -425,7 +425,7 @@ class TestDataParallel(TestCase):
         n = nn.DataParallel(Net())
         out = n(input=i)
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -444,7 +444,7 @@ class TestDataParallel(TestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': []})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -463,7 +463,7 @@ class TestDataParallel(TestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': {}})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -482,7 +482,7 @@ class TestDataParallel(TestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': ()})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_device_args(self):
@@ -631,9 +631,9 @@ class TestDataParallel(TestCase):
         for devices in [(0, 1), [0, 1]]:
             replicas = dp.replicate(net, devices)
             for i, replica in enumerate(replicas):
-                self.assertEqual(replica.bn.running_mean.get_device(), i, 'buffer on wrong device')
-                self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
-                self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
+                self.assertEqual(replica.bn.running_mean.get_device(), i, msg='buffer on wrong device')
+                self.assertEqual(replica.bn.running_var.get_device(), i, msg='buffer on wrong device')
+                self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, msg='buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_zero_grad(self):

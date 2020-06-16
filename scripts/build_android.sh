@@ -117,6 +117,10 @@ if [ "${ANDROID_DEBUG_SYMBOLS:-}" == '1' ]; then
   CMAKE_ARGS+=("-DANDROID_DEBUG_SYMBOLS=1")
 fi
 
+if [ -n "${USE_VULKAN}" ]; then
+  CMAKE_ARGS+=("-DUSE_VULKAN=ON")
+fi
+
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 

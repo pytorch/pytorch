@@ -134,6 +134,10 @@ namespace c10 {
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
+  _(prim, is_cuda)                   \
+  _(aten, abs_)                      \
+  _(aten, absolute)                  \
+  _(aten, absolute_)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

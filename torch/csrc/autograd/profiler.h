@@ -171,7 +171,8 @@ struct TORCH_API Event final {
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
-    if (device.type() == c10::DeviceType::CUDA) {
+    if (device.type() == c10::DeviceType::CUDA ||
+        device.type() == c10::DeviceType::HIP) {
       cuda_memory_usage_ = alloc_size;
     } else if (device.type() == c10::DeviceType::CPU ||
         device.type() == c10::DeviceType::MKLDNN ||

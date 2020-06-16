@@ -46,28 +46,26 @@ double getScaleFromInput(Node* input_node) {
     scale = toIValue(input_node->inputs()[1]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::linear") {
-    // %r = quantized::linear(%input, %unpacked_weight, %bias, %w_scale,
-    // %w_zero_point)
+    // %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
     TORCH_CHECK(
-        input_node->inputs().size() > 3,
-        "quantized::linear expected scale to be 4th input");
-    scale = toIValue(input_node->inputs()[3]);
+        input_node->inputs().size() > 2,
+        "quantized::linear expected scale to be 3rd input");
+    scale = toIValue(input_node->inputs()[2]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::conv2d") {
-    // %r = quantized::conv2d(%input, %unpacked_weight, %bias, %stride,
-    // %padding, %dilation, %groups, %w_scale, %w_zero_point)
+    // %r = quantized::conv2d(%input, %packed_weight, %w_scale, %w_zero_point)
     TORCH_CHECK(
-        input_node->inputs().size() > 7,
-        "quantized::conv2d expected scale to be 8th input");
+        input_node->inputs().size() > 2,
+        "quantized::conv2d expected scale to be 3rd input");
     auto num_inputs = input_node->inputs().size();
     scale = toIValue(input_node->inputs()[num_inputs - 2]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::conv2d_relu") {
-    // %r = quantized::conv2d_relu(%input, %unpacked_weight, %stride,
-    // %padding, %dilation, %groups, %w_scale, %w_zero_point)
+    // %r = quantized::conv2d_relu(%input, %packed_weight, %w_scale,
+    // %w_zero_point)
     TORCH_CHECK(
-        input_node->inputs().size() > 6,
-        "quantized::conv2d_relu expected scale to be 7th input");
+        input_node->inputs().size() > 2,
+        "quantized::conv2d_relu expected scale to be 3rd input");
     auto num_inputs = input_node->inputs().size();
     scale = toIValue(input_node->inputs()[num_inputs - 2]);
     return scale.value().toDouble();

@@ -83,6 +83,7 @@ namespace jit {
 //            | Sub()                                                   TK_MINUS_EQ
 //            | Mul()                                                   TK_TIMES_EQ
 //            | Div()                                                   TK_DIV_EQ
+//            | Mod()                                                   TK_MOD_EQ
 //
 
 // Each subclass of TreeView should provide:
@@ -562,6 +563,7 @@ struct AugAssignKind : public TreeView {
       case '-':
       case '*':
       case '/':
+      case '%':
         return;
       default:
         throw ErrorReport(tree) << "is not a valid AugAssignKind";
@@ -937,8 +939,10 @@ struct Subscript : public Expr {
       const SourceRange& range,
       const Expr& value,
       const List<Expr>& subscript_exprs) {
+    auto whole_range = SourceRange(
+        range.source(), range.start(), subscript_exprs.range().end() + 1);
     return Subscript(
-        Compound::create(TK_SUBSCRIPT, range, {value, subscript_exprs}));
+        Compound::create(TK_SUBSCRIPT, whole_range, {value, subscript_exprs}));
   }
 };
 

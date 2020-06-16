@@ -63,7 +63,6 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
             qmin, qmax = 0, 127
         else:
             qmin, qmax = 0, 255
-    n_levels = 255.0
     min_val = X.min()
     max_val = X.max()
     if min_val == max_val:
@@ -72,7 +71,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     else:
         max_val = max(max_val, 0.0)
         min_val = min(min_val, 0.0)
-        scale = (max_val - min_val) / n_levels
+        scale = (max_val - min_val) / (qmax - qmin)
         scale = max(scale, np.finfo(np.float32).eps)
         zero_point = qmin - round(min_val / scale)
         zero_point = max(qmin, zero_point)
@@ -124,3 +123,6 @@ def override_qengines(qfunction):
                 # qfunction should not return anything.
                 qfunction(*args, **kwargs)
     return test_fn
+
+def qengine_is_fbgemm():
+    return torch.backends.quantized.engine == 'fbgemm'

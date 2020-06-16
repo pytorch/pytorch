@@ -1,6 +1,6 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.6"
+producer_version: "XXX"
 graph {
   node {
     output: "3"

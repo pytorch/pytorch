@@ -6,8 +6,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
-#include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -51,6 +51,10 @@ struct TypeHash {
 struct Fusion;
 struct TensorView;
 
+namespace cuda {
+struct CudaKernel;
+}
+
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
 struct TORCH_CUDA_API FusionGuard {
@@ -59,6 +63,7 @@ struct TORCH_CUDA_API FusionGuard {
 
   // Set the active fusion so it can be manipulated.
   FusionGuard(Fusion* fusion);
+  FusionGuard(const cuda::CudaKernel* cuda_kernel);
 
   ~FusionGuard();
 
@@ -81,15 +86,13 @@ struct ExprSort : public IterVisitor {
 };
 
 struct InputsOf : public IterVisitor {
-  using IterVisitor::handle;
-
  private:
-  std::set<Val*> inputs;
+  std::unordered_set<Val*> inputs;
 
-  std::vector<Statement*> next(Val* v) final;
+  void handle(Val* v) final;
 
  public:
-  static std::set<Val*> output(Fusion* fusion, Val* output_);
+  static std::unordered_set<Val*> output(Fusion* fusion, Val* output_);
 };
 
 /*
@@ -152,7 +155,7 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
       bool from_outputs_only = false,
       bool breadth_first = false);
 
-  std::set<Val*> inputsOf(Val* val);
+  std::unordered_set<Val*> inputsOf(Val* val);
 
   // Assert that all leaves found from outputs are registered as an input.
   void validateInputs();
@@ -181,15 +184,15 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   bool used(Val* val) const;
 
   // Return the set of Vals registered with this fusion
-  const std::set<Val*>& vals() const noexcept;
+  const std::unordered_set<Val*>& vals() const noexcept;
   // Return in insertion order
   const std::deque<Val*>& deterministic_vals() const noexcept;
 
   // Return the set of Exprs registered with this fusion
-  const std::set<Expr*>& unordered_exprs() const noexcept;
+  const std::unordered_set<Expr*>& unordered_exprs() const noexcept;
 
   // Return all Exprs that use val
-  std::set<Expr*> uses(Val* val) const;
+  std::unordered_set<Expr*> unordered_uses(Val* val) const;
 
   // Return the Expr that produces val
   Expr* origin(Val* val) const;
@@ -197,15 +200,17 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Return the Expr that produces val (const version)
   const Expr* origin(const Val* val) const;
 
-  void setRandom(bool r);
+  // Indicate to kernel to set itself up to generate random numbers
+  bool hasRNG();
 
-  bool random() const noexcept;
+  // Indicate to kernel to set itself up to generate random numbers
+  bool hasReduction();
 
  private:
   // Sets of all Vals/Exprs registered with this fusion
-  std::set<Val*> val_set_;
+  std::unordered_set<Val*> val_set_;
   std::deque<Val*> val_deque_;
-  std::set<Expr*> expr_set_;
+  std::unordered_set<Expr*> expr_set_;
 
   // Return an int that monotonically increases for each val/expr, some are
   // explicitly incremented by type.
@@ -225,10 +230,7 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
 
   // Dependency tracking for Vals. Where did it come from? Where is it used?
   std::unordered_map<Val*, Expr*> origin_;
-  std::unordered_map<Val*, std::set<Expr*>> uses_;
-
-  // Indicate to kernel to set itself up to generate random numbers
-  bool random_ = false;
+  std::unordered_map<Val*, std::unordered_set<Expr*>> uses_;
 };
 
 } // namespace fuser

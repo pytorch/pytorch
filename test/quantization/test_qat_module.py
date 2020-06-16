@@ -344,13 +344,13 @@ class TestQATModule(TestCase):
                 running_var_actual = qat_op.bn.running_var
                 num_batches_tracked_actual = qat_op.bn.num_batches_tracked
                 precision = 1e-10
-                self.assertEqual(input_grad_ref, input_grad_actual, atol=precision)
-                self.assertEqual(weight_grad_ref, weight_grad_actual, atol=precision)
-                self.assertEqual(gamma_grad_ref, gamma_grad_actual, atol=precision)
-                self.assertEqual(beta_grad_ref, beta_grad_actual, atol=precision)
-                self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, atol=precision)
-                self.assertEqual(running_mean_ref, running_mean_actual, atol=precision)
-                self.assertEqual(running_var_ref, running_var_actual, atol=precision)
+                self.assertEqual(input_grad_ref, input_grad_actual, atol=precision, rtol=0)
+                self.assertEqual(weight_grad_ref, weight_grad_actual, atol=precision, rtol=0)
+                self.assertEqual(gamma_grad_ref, gamma_grad_actual, atol=precision, rtol=0)
+                self.assertEqual(beta_grad_ref, beta_grad_actual, atol=precision, rtol=0)
+                self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, atol=precision, rtol=0)
+                self.assertEqual(running_mean_ref, running_mean_actual, atol=precision, rtol=0)
+                self.assertEqual(running_var_ref, running_var_actual, atol=precision, rtol=0)
 
     @given(batch_size=st.integers(2, 4),
            input_channels_per_group=st.sampled_from([2, 3, 4]),
@@ -497,13 +497,13 @@ class TestQATModule(TestCase):
                 num_batches_tracked_actual = qat_op.bn.num_batches_tracked
 
                 precision = 1e-5
-                self.assertEqual(input_grad_ref, input_grad_actual, atol=precision)
-                self.assertEqual(weight_grad_ref, weight_grad_actual, atol=precision)
-                self.assertEqual(gamma_grad_ref, gamma_grad_actual, atol=precision)
-                self.assertEqual(beta_grad_ref, beta_grad_actual, atol=precision)
-                self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, atol=precision)
-                self.assertEqual(running_mean_ref, running_mean_actual, atol=precision)
-                self.assertEqual(running_var_ref, running_var_actual, atol=precision)
+                self.assertEqual(input_grad_ref, input_grad_actual, atol=precision, rtol=0)
+                self.assertEqual(weight_grad_ref, weight_grad_actual, atol=precision, rtol=0)
+                self.assertEqual(gamma_grad_ref, gamma_grad_actual, atol=precision, rtol=0)
+                self.assertEqual(beta_grad_ref, beta_grad_actual, atol=precision, rtol=0)
+                self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, atol=precision, rtol=0)
+                self.assertEqual(running_mean_ref, running_mean_actual, atol=precision, rtol=0)
+                self.assertEqual(running_var_ref, running_var_actual, atol=precision, rtol=0)
 
                 qat_op_optim.step()
                 qat_ref_op_optim.step()

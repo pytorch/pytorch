@@ -171,21 +171,58 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     from . import TensorPipeAgent
 
     if not isinstance(store, dist.Store):
-        raise RuntimeError("`store` must be a c10d::Store. {}".format(store))
+        raise TypeError("`store` must be a c10d::Store. {}".format(store))
 
     if not isinstance(
         rpc_backend_options, TensorPipeRpcBackendOptions
     ):
-        raise RuntimeError(
+        raise TypeError(
             "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {}".format(
                 rpc_backend_options
             )
         )
 
-    agent = TensorPipeAgent(
-        store, name, rank, world_size, rpc_backend_options
+    # The agent's join method is required to behave like a barrier and perform
+    # collective operations, for which it relies on a process group, instead of
+    # re-implementing this on top of RPCs.
+
+    # Initialize ProcessGroup.
+    if dist.is_initialized():
+        raise RuntimeError(
+            "Default process group must not be initialized before init_rpc."
+        )
+
+    process_group_timeout = rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
+
+    dist.init_process_group(
+        backend=dist.Backend.GLOO,
+        store=store,
+        rank=rank,
+        world_size=world_size,
+        timeout=process_group_timeout,
     )
-    return agent
+
+    try:
+        group = dc10d._get_default_group()
+        assert group is not None, "Failed to initialize default ProcessGroup."
+
+        if (rank != -1) and (rank != group.rank()):
+            raise RuntimeError(
+                "rank argument {} doesn't match pg rank {}".format(rank, group.rank())
+            )
+        if (world_size != -1) and (world_size != group.size()):
+            raise RuntimeError(
+                "world_size argument {} doesn't match pg size {}".format(
+                    world_size, group.size()
+                )
+            )
+        # TODO: add try-except and destroy _agent in all processes if any fails.
+        return TensorPipeAgent(
+            store, name, rank, world_size, group, rpc_backend_options
+        )
+    except Exception as ex:
+        dist.destroy_process_group()
+        raise ex
 
 
 register_backend(
