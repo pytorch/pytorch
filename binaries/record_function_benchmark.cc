@@ -18,7 +18,6 @@ const int kSmallTensorSize = 1;
 const float kSampingProb = 0.1;
 }
 
-
 void setupCallbacks() {
   // non-sampled callback
   at::addGlobalCallback(at::RecordFunctionCallback(
@@ -62,6 +61,8 @@ int main(int argc, char** argv) {
   }
 
   setupCallbacks();
+
+  at::enableRecordFunction();
 
   auto duration = runBench(kSmallTensorSize, FLAGS_warmup_iter);
   std::cout << "Warmup time: " << duration << " us." << std::endl;
