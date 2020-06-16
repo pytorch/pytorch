@@ -88,19 +88,19 @@ torchNcclDataType_t get_data_type(const Tensor& t) {
   }
   switch (t.scalar_type()) {
     case at::kFloat:
-      return ncclFloat;
+      return torchNcclDataType_t::ncclFloat;
     case at::kHalf:
-      return ncclHalf;
+      return torchNcclDataType_t::ncclHalf;
     case at::kDouble:
-      return ncclDouble;
+      return torchNcclDataType_t::ncclDouble;
     case at::kLong:
-      return ncclInt64;
+      return torchNcclDataType_t::ncclInt64;
     case at::kInt:
-      return ncclInt;
+      return torchNcclDataType_t::ncclInt;
     case at::kChar:
-      return ncclChar;
+      return torchNcclDataType_t::ncclChar;
     case at::kByte:
-      return ncclChar;
+      return torchNcclDataType_t::ncclChar;
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
