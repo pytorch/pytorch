@@ -1,3 +1,4 @@
+#include "hip/hip_runtime.h"
 namespace torch {
 namespace jit {
 namespace fuser {

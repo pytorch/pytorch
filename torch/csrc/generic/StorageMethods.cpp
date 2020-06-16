@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 
-#ifdef USE_CUDA
-#include <cuda_runtime.h>
+#ifdef USE_ROCM
+#include <hip/hip_runtime.h>
 #endif
 
 #ifdef _MSC_VER
@@ -34,7 +34,7 @@ static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *k
 static PyObject * THPStorage_(isPinned)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-#if defined(USE_CUDA)
+#if defined(USE_ROCM)
   return PyBool_FromLong(at::globalContext().isPinnedPtr(THWStorage_(data)(LIBRARY_STATE self->cdata)));
 #else
   Py_RETURN_FALSE;

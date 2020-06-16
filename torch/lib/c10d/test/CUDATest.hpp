@@ -1,11 +1,11 @@
 #pragma once
 
-#include <c10/cuda/CUDAStream.h>
+#include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 
 namespace c10d {
 namespace test {
 
-void cudaSleep(at::cuda::CUDAStream& stream, uint64_t clocks);
+void cudaSleep(at::hip::HIPStreamMasqueradingAsCUDA& stream, uint64_t clocks);
 
 int cudaNumDevices();
 

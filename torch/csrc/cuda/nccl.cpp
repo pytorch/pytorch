@@ -4,10 +4,10 @@
 #include <torch/csrc/utils/hash.h>
 
 #include <ATen/ATen.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #include <c10/util/Exception.h>
 
-#include <THC/THC.h>
+#include <THH/THH.h>
 
 #include <limits>
 #include <sstream>
@@ -40,7 +40,7 @@ struct NcclCommList {
     if (comms) {
       for (int i = 0; i < ndevices; i++) {
         int dummy_var;
-        if (cudaGetDevice(&dummy_var) != cudaSuccess) {
+        if (hipGetDevice(&dummy_var) != hipSuccess) {
           /* there are cases when this destructor is called after the
            CUDA driver is already unloaded from the process.
            In these cases, skip ncclCommDestroy */
@@ -269,13 +269,13 @@ void broadcast(
                                         : ArrayRef<ncclComm_t>(user_comms);
 
   AutoNcclGroup nccl_group_guard;
-  at::cuda::OptionalCUDAGuard device_guard;
+  at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
     int device = tensors[i].get_device();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
-        ? at::cuda::getCurrentCUDAStream(device).stream()
+        ? at::hip::getCurrentHIPStreamMasqueradingAsCUDA(device).stream()
         : streams[i]->stream();
     TORCH_CHECK(
         static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
@@ -315,13 +315,13 @@ void reduce(
                                       : ArrayRef<ncclComm_t>(user_comms);
 
   AutoNcclGroup nccl_group_guard;
-  at::cuda::OptionalCUDAGuard device_guard;
+  at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;
   for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
-        ? at::cuda::getCurrentCUDAStream(device).stream()
+        ? at::hip::getCurrentHIPStreamMasqueradingAsCUDA(device).stream()
         : streams[i]->stream();
 
     NCCL_CHECK(ncclReduce(
@@ -366,13 +366,13 @@ void all_reduce(
                                       : ArrayRef<ncclComm_t>(user_comms);
 
   AutoNcclGroup nccl_group_guard;
-  at::cuda::OptionalCUDAGuard device_guard;
+  at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;
   for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
-        ? at::cuda::getCurrentCUDAStream(device).stream()
+        ? at::hip::getCurrentHIPStreamMasqueradingAsCUDA(device).stream()
         : streams[i]->stream();
 
     NCCL_CHECK(ncclAllReduce(
@@ -407,13 +407,13 @@ void reduce_scatter(
                                       : ArrayRef<ncclComm_t>(user_comms);
 
   AutoNcclGroup nccl_group_guard;
-  at::cuda::OptionalCUDAGuard device_guard;
+  at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;
   for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
-        ? at::cuda::getCurrentCUDAStream(device).stream()
+        ? at::hip::getCurrentHIPStreamMasqueradingAsCUDA(device).stream()
         : streams[i]->stream();
 
     NCCL_CHECK(ncclReduceScatter(
@@ -447,13 +447,13 @@ void all_gather(
                                       : ArrayRef<ncclComm_t>(user_comms);
 
   AutoNcclGroup nccl_group_guard;
-  at::cuda::OptionalCUDAGuard device_guard;
+  at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard;
   for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])
-        ? at::cuda::getCurrentCUDAStream(device).stream()
+        ? at::hip::getCurrentHIPStreamMasqueradingAsCUDA(device).stream()
         : streams[i]->stream();
 
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)

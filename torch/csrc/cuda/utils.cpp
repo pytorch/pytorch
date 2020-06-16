@@ -6,21 +6,21 @@
 #include <torch/csrc/cuda/override_macros.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.cpp"
-#include <THC/THCGenerateAllTypes.h>
+#include <THH/THHGenerateAllTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.cpp"
-#include <THC/THCGenerateComplexTypes.h>
+#include <THH/THHGenerateComplexTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.cpp"
-#include <THC/THCGenerateBoolType.h>
+#include <THH/THHGenerateBoolType.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.cpp"
-#include <THC/THCGenerateBFloat16Type.h>
+#include <THH/THHGenerateBFloat16Type.h>
 
-#ifdef USE_CUDA
-// NB: It's a list of *optional* CUDAStream; when nullopt, that means to use
+#ifdef USE_ROCM
+// NB: It's a list of *optional* HIPStreamMasqueradingAsCUDA; when nullopt, that means to use
 // whatever the current stream of the device the input is associated with was.
-std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj) {
+std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj) {
   if (!PySequence_Check(obj)) {
     throw std::runtime_error("Expected a sequence in THPUtils_PySequence_to_CUDAStreamList");
   }
@@ -29,14 +29,14 @@ std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStre
     throw std::runtime_error("expected PySequence, but got " + std::string(THPUtils_typename(obj)));
   }
 
-  std::vector<c10::optional<at::cuda::CUDAStream>> streams;
+  std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>> streams;
   Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject *stream = PySequence_Fast_GET_ITEM(seq.get(), i);
 
     if (PyObject_IsInstance(stream, THCPStreamClass)) {
       // Spicy hot reinterpret cast!!
-      streams.emplace_back( at::cuda::CUDAStream::unpack((reinterpret_cast<THCPStream*>(stream))->cdata) );
+      streams.emplace_back( at::hip::HIPStreamMasqueradingAsCUDA::unpack((reinterpret_cast<THCPStream*>(stream))->cdata) );
     } else if (stream == Py_None) {
       streams.emplace_back();
     } else {

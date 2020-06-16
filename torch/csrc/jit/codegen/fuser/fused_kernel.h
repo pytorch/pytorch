@@ -37,7 +37,7 @@ struct FusedKernel {
   // arguments is a list of pointers to the arguments for the compiled CUDA/CPU
   // code.
   // The format of arguments is suitable for directly passing to a call to
-  // cuLaunchKernel as the kernel arguments.
+  // hipModuleLaunchKernel as the kernel arguments.
   // Currently the first argument is a pointer to numel (for passing to
   // CUDA code), and the remainder are pointers to the TensorInfo<T> structs
   // that compiled code uses to load Tensor data.

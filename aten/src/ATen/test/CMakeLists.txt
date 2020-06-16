@@ -58,6 +58,20 @@ if(CAFFE2_USE_CUDNN)
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
 endif()
 
+list(APPEND ATen_HIP_TEST_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_math_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_integer_divider_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_apply_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_half_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_distributions_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_optional_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_packedtensoraccessor_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_tensor_interop_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_vectorized_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_generator_test.cu)
+
 list(APPEND ATen_VULKAN_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_test.cpp)
 

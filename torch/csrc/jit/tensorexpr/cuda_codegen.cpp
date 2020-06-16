@@ -1,8 +1,9 @@
+#include "hip/hip_runtime.h"
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/cuda_half_support.h>
 
 #include <ATen/CUDAGeneratorImpl.h>
-#include <c10/cuda/CUDAFunctions.h>
+#include <c10/hip/HIPFunctions.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/cuda_random.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -69,13 +70,13 @@ static const at::cuda::NVRTC& nvrtc() {
 }
 
 static void getMajorMinor(
-    const cudaDeviceProp* const prop,
+    const hipDeviceProp_t* const prop,
     int& major,
     int& minor) {
   using CudaVersion = std::pair<int, int>;
   CudaVersion nvrtc_version;
   AT_CUDA_NVRTC_CHECK(
-      nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
+      nvrtc().hiprtcVersion(&nvrtc_version.first, &nvrtc_version.second));
 
   AT_ASSERT(nvrtc_version.first >= 6);
 
@@ -916,13 +917,13 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     ptr_to_args[buffer_args.size()] = &rand_seed;
     ptr_to_args[buffer_args.size() + 1] = &rand_offset;
   }
-  const auto prior_device = at::cuda::current_device();
+  const auto prior_device = at::hip::current_device();
   if (prior_device != this->device().index()) {
-    at::cuda::set_device(this->device().index());
+    at::hip::set_device(this->device().index());
   }
   // Launch the kernels
-  auto stream = at::cuda::getCurrentCUDAStream();
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
+  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipModuleLaunchKernel(
       function_,
       gpu_block_extents_v[0],
       gpu_block_extents_v[1],
@@ -937,32 +938,32 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(cuda_codegen_executed);
 
   if (prior_device != this->device().index()) {
-    at::cuda::set_device(prior_device);
+    at::hip::set_device(prior_device);
   }
 }
 
 void CudaCodeGen::CompileToNVRTC(
     const std::string& code,
     const std::string& func_name) {
-  CUcontext pctx = 0;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  hipCtx_t pctx = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipCtxGetCurrent(&pctx));
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
-  const auto prior_device = at::cuda::current_device();
+  const auto prior_device = at::hip::current_device();
   if (prior_device != this->device().index()) {
-    at::cuda::set_device(this->device().index());
+    at::hip::set_device(this->device().index());
   }
-  // cudaSetDevice does not have to really change the underlying device if it
-  // doesn't have to, so calling cudaFree to force that change
+  // hipSetDevice does not have to really change the underlying device if it
+  // doesn't have to, so calling hipFree to force that change
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(nullptr);
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+        *(c10::hip::HIPCachingAllocator::getFreeMutex()));
+    hipFree(nullptr);
+    AT_CUDA_DRIVER_CHECK(nvrtc().hipCtxGetCurrent(&pctx));
   }
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  hipDeviceProp_t* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
   getMajorMinor(prop, major, minor);
 
@@ -972,8 +973,8 @@ void CudaCodeGen::CompileToNVRTC(
 #endif
 
   // Creates the NVRTC program
-  nvrtcProgram program;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
+  hiprtcProgram program;
+  AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -986,12 +987,12 @@ void CudaCodeGen::CompileToNVRTC(
 #endif
 
   const auto result =
-      nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
-  if (result != NVRTC_SUCCESS) {
+      nvrtc().hiprtcCompileProgram(program, args.size(), args.data());
+  if (result != HIPRTC_SUCCESS) {
     size_t logsize;
-    AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
+    AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcGetProgramLogSize(program, &logsize));
     std::vector<char> log(logsize);
-    AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
+    AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcGetProgramLog(program, log.data()));
     std::stringstream cu;
     cu << log.data() << std::endl;
     cu << "nvrtc compilation failed: " << std::endl;
@@ -999,21 +1000,21 @@ void CudaCodeGen::CompileToNVRTC(
     throw std::runtime_error(cu.str());
   }
   ResourceGuard holdProgram(
-      [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
+      [&] { AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
+  AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcGetCodeSize(program, &ptx_size));
   std::vector<char> ptx;
   ptx.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx.data()));
+  AT_CUDA_NVRTC_CHECK(nvrtc().hiprtcGetCode(program, ptx.data()));
 
-  CUmodule module;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));
+  hipModule_t module;
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipModuleLoadData(&module, ptx.data()));
   AT_CUDA_DRIVER_CHECK(
-      nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
+      nvrtc().hipModuleGetFunction(&function_, module, func_name.c_str()));
 
   if (prior_device != this->device().index()) {
-    at::cuda::set_device(prior_device);
+    at::hip::set_device(prior_device);
   }
 }
 

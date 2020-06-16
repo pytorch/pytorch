@@ -4,10 +4,10 @@
 #include <unordered_set>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/HIPContext.h>
+#include <ATen/hip/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -95,14 +95,14 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
       : CodeGen(
             stmt,
             std::vector<BufferArg>({BufferArg(ts)...}),
-            at::Device(at::kCUDA, at::cuda::current_device())) {
+            at::Device(at::kCUDA, at::hip::current_device())) {
     Initialize();
   }
 
   CudaCodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
-      at::Device device = at::Device(at::kCUDA, at::cuda::current_device()))
+      at::Device device = at::Device(at::kCUDA, at::hip::current_device()))
       : CodeGen(stmt, buffer_args, device) {
     Initialize();
   }
@@ -135,7 +135,7 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
   std::ostringstream oss_;
   std::unique_ptr<CudaPrinter> printer_;
   std::unique_ptr<CudaAnalysis> cuda_analysis_;
-  CUfunction function_;
+  hipFunction_t function_;
   bool has_random_ = false;
 
   std::string GetUniqueFuncName(const std::string& func_prefix);

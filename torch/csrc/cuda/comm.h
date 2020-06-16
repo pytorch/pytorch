@@ -2,8 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <ATen/cuda/ATenCUDAGeneral.h>
-#include <ATen/cuda/CUDAContext.h>
+#include <ATen/hip/ATenHIPGeneral.h>
+#include <ATen/hip/HIPContext.h>
 #include <c10/util/Optional.h>
 
 #include <cstddef>
@@ -22,7 +22,7 @@ TORCH_CUDA_API std::vector<at::Tensor> scatter(
     at::IntArrayRef devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes = c10::nullopt,
     int64_t dim = 0,
-    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams =
+    const c10::optional<std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>>>& streams =
         c10::nullopt);
 
 TORCH_CUDA_API at::Tensor gather(

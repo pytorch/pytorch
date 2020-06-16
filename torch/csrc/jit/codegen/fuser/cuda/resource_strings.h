@@ -62,8 +62,8 @@ struct TensorInfo<T, 0> {
 )");
 #endif
 
-// We rewrite the code for philox RNG from curand as nvrtc couldn't resolve the
-// curand header correctly.
+// We rewrite the code for philox RNG from hiprand as nvrtc couldn't resolve the
+// hiprand header correctly.
 constexpr auto rand_support_literal = R"(
 
   class Philox {
@@ -230,7 +230,7 @@ constexpr auto half_support_literal =
   };
 
   /* All intrinsic functions are only available to nvcc compilers */
-  #if defined(__CUDACC__)
+  #if defined(__HIPCC__)
     /* Definitions of intrinsics */
     __device__ __half __float2half(const float f) {
       __half val;
@@ -252,7 +252,7 @@ constexpr auto half_support_literal =
     // This workaround uses string-pasting to separate the " and the #endif into
     // different strings
     R"(
-  #endif /* defined(__CUDACC__) */
+  #endif /* defined(__HIPCC__) */
 #endif /* defined(__cplusplus) */
 #undef __HALF_TO_US
 #undef __HALF_TO_CUS

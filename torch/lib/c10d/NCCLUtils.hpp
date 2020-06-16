@@ -6,7 +6,7 @@
 #include <memory>
 #include <mutex>
 
-#include <nccl.h>
+#include <rccl.h>
 
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.

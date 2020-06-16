@@ -25,6 +25,7 @@ TEST(TestDlconvertor, TestDlconvertorNoStrides) {
   Tensor a = rand({3, 4});
   DLManagedTensor* dlMTensor = toDLPack(a);
   dlMTensor->dl_tensor.strides = nullptr;
+  std::cout << "###test device id" << dlMTensor->dl_tensor.ctx.device_type << "\n";
 
   Tensor b = fromDLPack(dlMTensor);
 

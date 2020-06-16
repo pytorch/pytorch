@@ -14,14 +14,14 @@
 #include <torch/csrc/cuda/override_macros.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.h"
-#include <THC/THCGenerateAllTypes.h>
+#include <THH/THHGenerateAllTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.h"
-#include <THC/THCGenerateComplexTypes.h>
+#include <THH/THHGenerateComplexTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.h"
-#include <THC/THCGenerateBoolType.h>
+#include <THH/THHGenerateBoolType.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.h"
-#include <THC/THCGenerateBFloat16Type.h>
+#include <THH/THHGenerateBFloat16Type.h>
 #endif

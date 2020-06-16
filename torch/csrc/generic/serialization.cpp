@@ -3,7 +3,7 @@
 #else
 
 #ifdef THC_GENERIC_FILE
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #endif
 
 // save_save is necessary since the old eager format saved storages as
@@ -13,7 +13,7 @@ template <class io>
 void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
 {
 #ifdef THC_GENERIC_FILE
-  c10::cuda::CUDAGuard guard(self->device());
+  c10::hip::HIPGuardMasqueradingAsCUDA guard(self->device());
 #endif
 
   scalar_t *data;
@@ -24,11 +24,11 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size)
 #else
   std::unique_ptr<char[]> cpu_data(new char[size_bytes]);
   data = (scalar_t*)cpu_data.get();
-  THCudaCheck(cudaMemcpy(
+  THCudaCheck(hipMemcpy(
       data,
       THWStorage_(data)(LIBRARY_STATE self),
       size_bytes,
-      cudaMemcpyDeviceToHost));
+      hipMemcpyDeviceToHost));
 #endif
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
@@ -85,7 +85,7 @@ template <class io>
 THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
 {
 #ifdef THC_GENERIC_FILE
-  c10::cuda::OptionalCUDAGuard guard;
+  c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard;
   if (_storage != nullptr) {
     guard.set_device(_storage->device());
   }
@@ -158,7 +158,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
   }
 
 #ifdef THC_GENERIC_FILE
-  THCudaCheck(cudaMemcpy(THWStorage_(data)(LIBRARY_STATE storage), data, size * sizeof(scalar_t), cudaMemcpyHostToDevice));
+  THCudaCheck(hipMemcpy(THWStorage_(data)(LIBRARY_STATE storage), data, size * sizeof(scalar_t), hipMemcpyHostToDevice));
 #endif
   return storage.release();
 }

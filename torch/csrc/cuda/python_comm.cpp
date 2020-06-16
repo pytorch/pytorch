@@ -7,7 +7,7 @@
 
 #include <ATen/ATen.h>
 
-#include <THC/THC.h>
+#include <THH/THH.h>
 
 #include <cstddef>
 #include <vector>
@@ -39,7 +39,7 @@ void initCommMethods(PyObject *module) {
              c10::optional<std::vector<int64_t>> chunk_sizes,
              int64_t dim,
              c10::optional<py::object> py_streams) {
-            c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams;
+            c10::optional<std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>>> streams;
             if (py_streams) {
               py::handle handle = *py_streams;
               streams = THPUtils_PySequence_to_CUDAStreamList(handle.ptr());

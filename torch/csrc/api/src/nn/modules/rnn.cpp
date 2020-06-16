@@ -24,7 +24,7 @@ namespace torch {
 namespace nn {
 
 /// These must line up with the CUDNN mode codes:
-/// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
+/// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#miopenRNNMode_t
 enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
 CuDNNMode get_cudnn_mode_for_rnn(detail::RNNOptionsBase::rnn_options_base_mode_t mode) {

@@ -8,13 +8,13 @@
 #include <memory>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/serialization.cpp"
-#include <THC/THCGenerateAllTypes.h>
+#include <THH/THHGenerateAllTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/serialization.cpp"
-#include <THC/THCGenerateComplexTypes.h>
+#include <THH/THHGenerateComplexTypes.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/serialization.cpp"
-#include <THC/THCGenerateBoolType.h>
+#include <THH/THHGenerateBoolType.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/serialization.cpp"
-#include <THC/THCGenerateBFloat16Type.h>
+#include <THH/THHGenerateBFloat16Type.h>

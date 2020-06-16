@@ -71,11 +71,11 @@ void initCudnnBindings(PyObject* module) {
 
   auto cudnn = m.def_submodule("_cudnn", "libcudnn.so bindings");
 
-  py::enum_<cudnnRNNMode_t>(cudnn, "RNNMode")
-    .value("rnn_relu", CUDNN_RNN_RELU)
-    .value("rnn_tanh", CUDNN_RNN_TANH)
-    .value("lstm", CUDNN_LSTM)
-    .value("gru", CUDNN_GRU);
+  py::enum_<miopenRNNMode_t>(cudnn, "RNNMode")
+    .value("rnn_relu", miopenRNNRELU)
+    .value("rnn_tanh", miopenRNNTANH)
+    .value("lstm", miopenLSTM)
+    .value("gru", miopenGRU);
 
   // The runtime version check in python needs to distinguish cudnn from miopen
 #ifdef USE_CUDNN

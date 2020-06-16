@@ -149,7 +149,7 @@ struct ProfilerThreadLocalState
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
-      cuda_stubs->nvtxMarkA(name.c_str());
+      cuda_stubs->roctxMarkA(name.c_str());
     } else {
       getEventList().record(
           EventKind::Mark,
@@ -169,7 +169,7 @@ struct ProfilerThreadLocalState
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
-      cuda_stubs->nvtxRangePushA(getNvtxStr(
+      cuda_stubs->roctxRangePushA(getNvtxStr(
           name, msg, sequence_nr, shapes).c_str());
     } else {
       getEventList().record(
@@ -187,7 +187,7 @@ struct ProfilerThreadLocalState
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
-      cuda_stubs->nvtxRangePop();
+      cuda_stubs->roctxRangePop();
     } else {
       // In some cases RecordFunction (and popRange) may be
       // called on a different thread than pushRange

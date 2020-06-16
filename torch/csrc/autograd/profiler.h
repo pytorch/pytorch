@@ -20,7 +20,7 @@
 
 #include <ATen/record_function.h>
 
-typedef struct CUevent_st* CUDAEventStub;
+typedef struct ihipEvent_t* CUDAEventStub;
 
 namespace torch { namespace autograd {
 
@@ -36,13 +36,13 @@ struct TORCH_API CUDAStubs {
     fail();
     return 0.f;
   }
-  virtual void nvtxMarkA(const char* name) {
+  virtual void roctxMarkA(const char* name) {
     fail();
   }
-  virtual void nvtxRangePushA(const char* name) {
+  virtual void roctxRangePushA(const char* name) {
     fail();
   }
-  virtual void nvtxRangePop() {
+  virtual void roctxRangePop() {
     fail();
   }
   virtual bool enabled() {
@@ -206,7 +206,7 @@ private:
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  struct CUevent_st* cuda_event = nullptr;
+  struct ihipEvent_t* cuda_event = nullptr;
 };
 
 // a linked-list of fixed sized vectors, to avoid

@@ -410,7 +410,7 @@ TEST(ProcessGroupGlooTest, testRecv) {
   }
 }
 
-#ifdef USE_CUDA
+#ifdef USE_ROCM
 // CUDA-only tests
 TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
   {

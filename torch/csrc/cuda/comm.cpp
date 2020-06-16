@@ -8,8 +8,8 @@
 #endif
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/HIPContext.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -115,7 +115,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
     o.reserve(tensors.size());
 
   unique_type_checker type_checker;
-  at::cuda::CUDAGuard device_guard(devices[0]);
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard(devices[0]);
   for (auto & chunk : utils::take_tensors(tensors, buffer_size)) {
     auto & type = chunk.type();
     type_checker.show(type);
@@ -164,7 +164,7 @@ std::vector<at::Tensor> scatter(
     at::IntArrayRef devices,
     const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const c10::optional<std::vector<c10::optional<at::cuda::CUDAStream>>>& streams) {
+    const c10::optional<std::vector<c10::optional<at::hip::HIPStreamMasqueradingAsCUDA>>>& streams) {
   std::vector<at::Tensor> chunks;
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
@@ -186,7 +186,7 @@ std::vector<at::Tensor> scatter(
   } else {
     chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
-  at::cuda::OptionalCUDAStreamGuard cuda_guard;
+  at::hip::OptionalHIPStreamGuardMasqueradingAsCUDA cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int16_t>(devices[chunk]);
     if (streams && (*streams)[chunk]) {

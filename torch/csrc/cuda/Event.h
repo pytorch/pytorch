@@ -1,9 +1,9 @@
 #ifndef THCP_EVENT_INC
 #define THCP_EVENT_INC
 
-#include <ATen/cuda/CUDAEvent.h>
+#include <ATen/hip/HIPEvent.h>
 #include <torch/csrc/python_headers.h>
-#include <THC/THC.h>
+#include <THH/THH.h>
 
 struct THCPEvent {
   PyObject_HEAD

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/cuda/CUDAContext.h>
+#include <ATen/hip/HIPContext.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
@@ -47,17 +47,17 @@ class CudaKernel {
 
   CudaKernel() = default;
 
-  CUmodule& getModule() {
+  hipModule_t& getModule() {
     return module_;
   }
 
-  CUfunction& getFunction() {
+  hipFunction_t& getFunction() {
     return function_;
   }
 
   int16_t device_;
-  CUmodule module_;
-  CUfunction function_;
+  hipModule_t module_;
+  hipFunction_t function_;
   int max_blocks_;
   int unroll_factor_ = 1;
 

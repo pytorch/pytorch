@@ -1,4 +1,4 @@
-#ifdef USE_CUDA
+#ifdef USE_ROCM
 #include <torch/csrc/CudaIPCTypes.h>
 #include <TH/THAllocator.h>
 #include <map>
@@ -140,23 +140,23 @@ CudaIPCSentData::CudaIPCSentData(
     // because the main thread may have queued extra work on the stream, which
     // this event will consequently wait for (uselessly).
     cuda_ipc_global_entities.sync_events_used_ ++;
-    C10_CUDA_CHECK(cudaEventCreateWithFlags(
+    C10_HIP_CHECK(hipEventCreateWithFlags(
         &event_,
-        cudaEventDisableTiming | cudaEventInterprocess |
-            cudaEventBlockingSync));
-    C10_CUDA_CHECK(cudaEventRecord(
-        event_, c10::cuda::getCurrentCUDAStream(device.index())));
+        hipEventDisableTiming | hipEventInterprocess |
+            hipEventBlockingSync));
+    C10_HIP_CHECK(hipEventRecord(
+        event_, c10::hip::getCurrentHIPStreamMasqueradingAsCUDA(device.index())));
     event_sync_required_ = true;
   } else {
-    auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    auto stream = c10::hip::getCurrentHIPStreamMasqueradingAsCUDA(device.index());
+    C10_HIP_CHECK(hipStreamSynchronize(stream));
     event_sync_required_ = false;
   }
 #else
-  // cuIpcGetEventHandle with HIP is not supported, so we have to sync
+  // hipIpcGetEventHandle with HIP is not supported, so we have to sync
   // stream instead of passing event
-  auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  auto stream = c10::hip::getCurrentHIPStreamMasqueradingAsCUDA(device.index());
+  C10_HIP_CHECK(hipStreamSynchronize(stream));
   event_sync_required_ = false;
 #endif
 }
@@ -166,8 +166,8 @@ CudaIPCSentData::~CudaIPCSentData() {
 #ifndef __HIP_PLATFORM_HCC__
   try {
     if (event_sync_required_) {
-      at::cuda::CUDAGuard device_guard(device_.index());
-      cudaEventDestroy(event_);
+      at::hip::HIPGuardMasqueradingAsCUDA device_guard(device_.index());
+      hipEventDestroy(event_);
       cuda_ipc_global_entities.sync_events_used_ --;
     }
   } catch (...) { /* No throw */
