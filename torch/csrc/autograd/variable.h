@@ -248,14 +248,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     return fw_grad_;
   }
 
-  void set_fw_grad(Variable& new_grad, bool inplace) override {
-    if (inplace and fw_grad_.defined()) {
-      // They are always the same size as the current Tensor
-      fw_grad_.copy_(new_grad);
-    } else {
-      fw_grad_ = new_grad;
-    }
-  }
+  void set_fw_grad(Variable& new_grad, bool inplace, const Variable& self) override;
 
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
     grad_fn_ = std::move(gradient_edge.function);

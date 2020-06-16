@@ -488,4 +488,48 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
   }
 }
 
+void AutogradMeta::set_fw_grad(Variable& new_grad, bool inplace, const Variable& self) {
+  at::NoFwGradGuard guard;
+  if (is_view_) {
+    TORCH_CHECK(inplace, "The forward grad of a view can only be changed inplace.");
+    auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+    // For views, the fw_grad **must** be a view of the base's fw_grad
+    if (!fw_grad_.defined()) {
+      if (!this_view_meta->base_.fw_grad().defined()) {
+        // If no other view created it, create a full fw_grad on the base
+        auto& base = this_view_meta->base_;
+        auto new_fw_grad = at::empty_strided(base.sizes(), base.strides(), base.options());
+        new_fw_grad.fill_(0);
+
+        this_view_meta->base_.set_fw_grad(new_fw_grad);
+      }
+      // Update this view's fw_grad as a view of the base
+      if (this_view_meta->has_view_fn()) {
+        fw_grad_ = this_view_meta->view_fn()(this_view_meta->base_.fw_grad());
+      } else {
+        auto offset = self.storage_offset() - this_view_meta->base_.storage_offset();
+        fw_grad_ = this_view_meta->base_.fw_grad().as_strided(self.sizes(), self.strides(), offset);
+      }
+    } else {
+      // Nothing to do. Just sanity checks
+      TORCH_CHECK(fw_grad_.is_view(), "Forward grad of a view should be a view but it is not.");
+      auto fw_grad_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(fw_grad_));
+      TORCH_CHECK(fw_grad_view_meta->base_.data_ptr() == this_view_meta->base_.fw_grad().data_ptr(), "Forward grad of "
+                  "a view is not a view of its base's forward grad");
+    }
+  }
+
+  if (inplace and fw_grad_.defined()) {
+    if (new_grad.defined()) {
+      // They are always the same size as the current Tensor
+      fw_grad_.copy_(new_grad);
+    } else {
+      fw_grad_.fill_(0);
+    }
+  } else {
+    fw_grad_ = new_grad;
+  }
+}
+
+
 }} // namespace torch::autograd

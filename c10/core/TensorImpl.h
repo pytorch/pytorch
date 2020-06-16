@@ -138,7 +138,7 @@ struct C10_API AutogradMetaInterface {
   virtual const at::Tensor& grad() const = 0;
   virtual at::Tensor& fw_grad() = 0;
   virtual const at::Tensor& fw_grad() const = 0;
-  virtual void set_fw_grad(at::Tensor& new_grad, bool inplace) = 0;
+  virtual void set_fw_grad(at::Tensor& new_grad, bool inplace, const at::Tensor& self) = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -607,7 +607,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  void set_fw_grad(at::Tensor& new_grad, bool inplace=true);
+  void set_fw_grad(at::Tensor& new_grad, bool inplace, const at::Tensor& self);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.

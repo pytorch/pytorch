@@ -553,7 +553,7 @@ class CAFFE2_API Tensor {
   }
 
   void set_fw_grad(Tensor& new_grad, bool inplace=true) {
-    impl_->set_fw_grad(new_grad, inplace);
+    impl_->set_fw_grad(new_grad, inplace, *this);
   }
   const Tensor& fw_grad() const {
     return impl_->fw_grad();
