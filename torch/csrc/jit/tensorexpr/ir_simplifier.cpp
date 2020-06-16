@@ -1025,7 +1025,7 @@ const Expr* PolynomialTransformer::mutate(const IfThenElse* v) {
   return new IfThenElse(condition_new, true_value_new, false_value_new);
 }
 
-Stmt* PolynomialTransformer::mutate(const Cond* v) {
+Stmt* IRSimplifierBase::mutate(const Cond* v) {
   const Expr* cond_old = v->condition();
   Stmt* true_old = v->true_stmt();
   Stmt* false_old = v->false_stmt();
@@ -1049,6 +1049,15 @@ Stmt* PolynomialTransformer::mutate(const Cond* v) {
     return Stmt::clone(true_new);
   }
 
+  Block* true_block = dynamic_cast<Block*>(true_new);
+  Block* false_block = dynamic_cast<Block*>(false_new);
+  bool true_empty = !true_new || (true_block && true_block->nstmts() == 0);
+  bool false_empty = !false_new || (false_block && false_block->nstmts() == 0);
+
+  if (true_empty && false_empty) {
+    return new Block({});
+  }
+
   if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
     return (Stmt*)v;
   }
@@ -1063,7 +1072,7 @@ Stmt* PolynomialTransformer::mutate(const Cond* v) {
   return new Cond(cond_new, true_new, false_new);
 }
 
-Stmt* PolynomialTransformer::mutate(const For* v) {
+Stmt* IRSimplifierBase::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
   const Expr* stop = v->stop();
@@ -1108,7 +1117,7 @@ Stmt* PolynomialTransformer::mutate(const For* v) {
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
-Stmt* PolynomialTransformer::mutate(const Block* v) {
+Stmt* IRSimplifierBase::mutate(const Block* v) {
   auto vars = v->varBindings();
   std::vector<Stmt*> stmts;
   for (Stmt* stmt : *v) {
@@ -1474,6 +1483,53 @@ const Expr* TermExpander::mutate(const RoundOff* v) {
       new Div(v->lhs(), v->rhs()),
       v->rhs());
   return term->accept_mutator(this);
+}
+
+Stmt* TermExpander::mutate(const Allocate* v) {
+  const Var* buffer_var_old = v->buffer_var();
+  const Var* buffer_var_new =
+      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+  bool any_change = buffer_var_new == buffer_var_old;
+
+  const Expr* flattened = getImmediateByType(kInt, 1);
+  std::vector<const Expr*> dims_old = v->dims();
+  std::vector<const Expr*> dims_new(dims_old.size());
+  for (size_t i = 0; i < dims_old.size(); i++) {
+    dims_new[i] = dims_old[i]->accept_mutator(this);
+    any_change |= (dims_new[i] == dims_old[i]);
+    flattened = new Mul(flattened, dims_new[i]);
+  }
+
+  // Safe to do this as there can't be an Allocate inside an Allocate:
+  flattened = IRSimplifier::simplify(flattened);
+
+  if (flattened->isConstant() && immediateEquals(flattened, 0)) {
+    eliminated_allocations_.insert(buffer_var_new);
+    return nullptr;
+  }
+
+  if (!any_change) {
+    return (Stmt*)v;
+  }
+
+  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+}
+
+Stmt* TermExpander::mutate(const Free* v) {
+  const Expr* buffer_var_old = v->buffer_var();
+  const Var* buffer_var_new =
+      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+
+  if (eliminated_allocations_.count(buffer_var_new)) {
+    eliminated_allocations_.erase(buffer_var_new);
+    return nullptr;
+  }
+
+  if (buffer_var_new == buffer_var_old) {
+    return (Stmt*)v;
+  }
+
+  return new Free(buffer_var_new);
 }
 
 } // namespace tensorexpr

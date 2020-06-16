@@ -445,6 +445,7 @@ Y:
 REGISTER_CPU_OPERATOR(
     SigmoidFakeFp16NNPI,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, SigmoidEmulatorFunctor>);
+OPERATOR_SCHEMA(SigmoidFakeFp16NNPI).NumInputs(1).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(
     SigmoidFakeFp16,
@@ -573,6 +574,7 @@ Y:
 REGISTER_CPU_OPERATOR(
     TanhFakeFp16NNPI,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, TanhEmulatorFunctor>);
+OPERATOR_SCHEMA(TanhFakeFp16NNPI).NumInputs(1).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(
     TanhFakeFp16,
@@ -580,7 +582,6 @@ REGISTER_CPU_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         TanhFakeIdealFp16Functor>);
-
 OPERATOR_SCHEMA(TanhFakeFp16)
     .NumInputs(1)
     .NumOutputs(1)

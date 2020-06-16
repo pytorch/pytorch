@@ -179,6 +179,18 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   void exec_post_processing();
 };
 
+// The guard that sets and restores current_graph_task.
+class GraphTaskGuard {
+ public:
+  explicit GraphTaskGuard(std::shared_ptr<GraphTask> graph_task);
+  ~GraphTaskGuard();
+
+  void restore_current_graph_task();
+
+ private:
+  std::shared_ptr<GraphTask> last_graph_task_;
+};
+
 struct NodeTask {
   std::weak_ptr<GraphTask> base_;
   std::shared_ptr<Node> fn_;
@@ -318,7 +330,11 @@ struct TORCH_API Engine {
   // start device threads (CUDA, XLA, etc.) in Engine,
   // note that it does NOT start CPU thread.
   void start_device_threads();
-  virtual void thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue);
+  void increment_non_reentrant_thread_count();
+  virtual void thread_init(
+      int device,
+      const std::shared_ptr<ReadyQueue>& ready_queue,
+      bool should_increment = true);
   virtual void thread_main(
       const std::shared_ptr<GraphTask>& task,
       bool reentrant_thread);
@@ -327,7 +343,7 @@ struct TORCH_API Engine {
 
   // Ensures device_ready_queues_ are initialized only once
   std::once_flag start_device_threads_flag_;
-  // Safe to read device_ready_queues_ without synchronization after intialization
+  // Safe to read device_ready_queues_ without synchronization after initialization
   std::vector<std::shared_ptr<ReadyQueue>> device_ready_queues_;
 
   std::vector<std::function<void()>> final_callbacks_;
@@ -364,8 +380,8 @@ private:
   // Number of non-reentrant threads
   std::atomic<uint32_t> non_reentrant_device_thread_count_;
   // Destructor will wait for non-reentrant threads to finish
-  std::condition_variable non_reentrant_device_thread_finish_;
-  std::mutex non_reentrant_device_thread_finish_mutex_;
+  std::condition_variable non_reentrant_device_thread_condvar_;
+  std::mutex non_reentrant_device_thread_mutex_;
 
 };
 

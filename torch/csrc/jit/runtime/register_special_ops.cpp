@@ -31,7 +31,7 @@ void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
       elem_type != BoolType::get()) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
-          << "got " << elem_type->python_str();
+          << "got " << elem_type->repr_str();
     // special case empty list torch.tensor([])
     if (elem_type->isSubtypeOf(TensorType::get())) {
       if (empty_list) {
@@ -220,11 +220,11 @@ int createTensorFromList(Stack& stack) {
       tensor.numel() == 0) {
     TORCH_WARN(
         "Creating a tensor from an empty ",
-        elem_type->python_str(),
+        elem_type->repr_str(),
         "list will create a tensor of default floating point type  (currently ",
         default_type,
         ") in python but a tensor of type ",
-        elem_type->python_str(),
+        elem_type->repr_str(),
         " in torchscript.\n",
         "Pass in a dtype argument to ensure consistent behavior");
   }
@@ -247,34 +247,6 @@ RegisterOperators reg({
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
           pack(stack, std::move(result));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::_infer_size(int[] a, int[] b) -> int[]",
-        [](Stack& stack) {
-          auto a = pop(stack);
-          auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
-        [](Stack& stack) {
-          at::Tensor weight;
-          at::Tensor input;
-          double max_norm;
-          double norm_type;
-          pop(stack, weight, input, max_norm, norm_type);
-
-          // TODO: remove when script supports setting grad mode
-          torch::NoGradGuard no_grad;
-
-          at::Tensor result =
-              at::embedding_renorm_(weight, input, max_norm, norm_type);
-          push(stack, std::move(result));
-
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -377,7 +349,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::as_tensor(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
+        "aten::as_tensor.list(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
         createTensorFromList<false>,
         aliasAnalysisFromSchema()),
     Operator(

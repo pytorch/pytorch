@@ -61,7 +61,7 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
     }
   }
 
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, in_tensor.scalar_type(), "flip_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, in_tensor.scalar_type(), "flip_cpu", [&] {
     flip_cpu_kernel<scalar_t>(
       total_dims,
       stride_contiguous_v,
@@ -128,6 +128,18 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
     default:
       return self.clone(at::MemoryFormat::Contiguous);
   }
+}
+
+Tensor fliplr(const Tensor& self) {
+  TORCH_CHECK(self.dim() >= 2, "Input must be >= 2-d.");
+
+  return self.flip({1});
+}
+
+Tensor flipud(const Tensor& self) {
+  TORCH_CHECK(self.dim() >= 1, "Input must be >= 1-d.");
+
+  return self.flip({0});
 }
 
 }} // namespace at::native
