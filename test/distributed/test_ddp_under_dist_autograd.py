@@ -4,6 +4,7 @@ from typing import NamedTuple
 import enum
 import logging
 import os
+import threading
 
 import torch
 from torch.distributed import rpc
@@ -17,14 +18,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.dist_utils import dist_init
-from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
-from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-import torch.distributed.distributed_c10d as dist_c10d
 import torch.nn as nn
 import unittest
-
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
+    RpcAgentTestFixture,
+)
 
 NUM_EM_ROW = 2
 D_SPARSE = 3
@@ -157,8 +157,8 @@ class HybridModel(nn.Module):
             gLogger.info("Use DDP for the second local net.")
             self.fc2 = DistributedDataParallel(
                 self.fc2,
-                process_group=process_group_for_ddp,
                 check_reduction=True,
+                process_group=process_group_for_ddp,
             )
 
         gLogger.info(
@@ -187,17 +187,14 @@ class Trainer:
         ddp_mode: DdpMode,
         rank: int,
     ):
-        gLogger.info(
-            f"Initing trainer process group by trainer #{rank} with ranks {TRAINER_RANKS}"
-        )
-        self.process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
-
+        self.rank = rank
+        self.trainer_group = dist.new_group(TRAINER_RANKS)
         self.remote_em_rref = remote_em_rref
         self.remote_net_rref = remote_net_rref
         self.hybrid_module = HybridModel(
             self.remote_em_rref,
             self.remote_net_rref,
-            self.process_group_for_ddp
+            self.trainer_group
             if ddp_mode in (DdpMode.INSIDE,)
             else None,
         )
@@ -211,8 +208,8 @@ class Trainer:
             self.non_ddp_params = ()
             self.hybrid_module = DistributedDataParallel(
                 self.hybrid_module,
-                process_group=self.process_group_for_ddp,
                 check_reduction=True,
+                process_group=self.trainer_group,
             )
         gLogger.info(
             f"Succeeded in creating a HybridModel instance with "
@@ -220,8 +217,8 @@ class Trainer:
             f"other local params."
         )
 
-    def __del__(self):
-        dist.destroy_process_group(self.process_group_for_ddp)
+    def destroy_pg(self):
+        dist.destroy_process_group(self.trainer_group)
 
     def train_batch(self, mini_batch: FeatureSet):
         grads_dict = None
@@ -280,13 +277,18 @@ def get_training_examples():
     ]
 
 
+shutdown_signal = threading.Condition()
+
+def set_shutdown_signal():
+    global shutdown_signal
+    with shutdown_signal:
+        shutdown_signal.notify()
+
 @unittest.skipIf(
     TEST_WITH_ASAN,
     "Skip ASAN as torch + multiprocessing spawn have known issues",
 )
-class TestDdpUnderDistAutograd(MultiProcessTestCase):
-    rpc_backend = rpc.backend_registry.BackendType.PROCESS_GROUP
-    rpc_backend_options = None
+class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
 
     @property
     def world_size(self) -> int:
@@ -303,25 +305,50 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
     def setUp(self):
         super(TestDdpUnderDistAutograd, self).setUp()
 
-        os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
-        os.environ["MASTER_PORT"] = str(MASTER_PORT)
         self._spawn_processes()
 
     def tearDown(self):
         super(TestDdpUnderDistAutograd, self).tearDown()
 
     def _remote_worker_process(self):
-        process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
         gLogger.info("The remote worker is running.")
-        dist.destroy_process_group(process_group_for_ddp)
+        dist.init_process_group(
+            backend="gloo",
+            init_method="file://{}".format(self.file_name),
+            world_size=self.world_size,
+            rank=self.rank)
+        global shutdown_signal
+        with shutdown_signal:
+            shutdown_signal.wait()
         gLogger.info("Exiting remote worker.")
+        dist.destroy_process_group()
 
     def _trainer_process(self, rank: int):
         gLogger.info(f"Running the trainer #{rank}...")
+        gLogger.info(
+            f"Initing trainer process group by trainer #{rank} with ranks {TRAINER_RANKS}"
+        )
+        dist.init_process_group(
+            backend="gloo",
+            init_method="file://{}".format(self.file_name),
+            world_size=self.world_size,
+            rank=self.rank)
+
+        gLogger.info(f"Waiting for shutdown signal on trainer #{rank}...")
+
+        global shutdown_signal
+        with shutdown_signal:
+            shutdown_signal.wait()
+        gLogger.info(f"Exiting the trainer #{rank}...")
+        dist.destroy_process_group()
 
     def _master_process(self, ddp_mode: DdpMode):
         gLogger.info("Running the master process...")
-        process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
+        dist.init_process_group(
+            backend="gloo",
+            init_method="file://{}".format(self.file_name),
+            world_size=self.world_size,
+            rank=self.rank)
         remote_em_rref = rpc.remote(
             self.remote_worker_name(), RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
         )
@@ -332,7 +359,6 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
         )
         gLogger.info("Created remote rrefs on master")
         self.do_test_on_master(ddp_mode, remote_em_rref, remote_net_rref)
-        dist.destroy_process_group(process_group_for_ddp)
 
     def do_test_on_master(
         self,
@@ -379,6 +405,20 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
                         msg="The grad for any non-ddp parameter shouldn't be zeros",
                     )
 
+        # Destroy process groups
+        for idx, trainer_rref in enumerate(trainer_rrefs):
+            _remote_method_async(
+                Trainer.destroy_pg,
+                trainer_rref,
+            ).wait()
+
+        # Send shutdown signals.
+        for rank in TRAINER_RANKS:
+            trainer = self.trainer_name(rank)
+            rpc.rpc_sync(trainer, set_shutdown_signal, args=())
+
+        rpc.rpc_sync(self.remote_worker_name(), set_shutdown_signal, args=())
+
     def _do_test(self, ddp_mode):
         if self.rank == MASTER_RANK:
             self._master_process(ddp_mode)
@@ -409,9 +449,7 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase):
     TEST_WITH_ASAN,
     "Skip ASAN as torch + multiprocessing spawn have known issues",
 )
-class TestDdpComparison(MultiProcessTestCase):
-    rpc_backend = rpc.backend_registry.BackendType.PROCESS_GROUP
-    rpc_backend_options = None
+class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
 
     @property
     def world_size(self) -> int:
@@ -424,8 +462,6 @@ class TestDdpComparison(MultiProcessTestCase):
     def setUp(self):
         super(TestDdpComparison, self).setUp()
 
-        os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
-        os.environ["MASTER_PORT"] = str(MASTER_PORT)
         self._spawn_processes()
 
     def tearDown(self):
@@ -440,10 +476,14 @@ class TestDdpComparison(MultiProcessTestCase):
         # therefore grads. That means the grads will be the same before and
         # after DDP's all-reduce.
         torch.manual_seed(self.rank)
-        process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
+        dist.init_process_group(
+            backend="gloo",
+            init_method="file://{}".format(self.file_name),
+            world_size=self.world_size,
+            rank=self.rank)
         net = nn.Linear(2, 3)
         ddp_net = DistributedDataParallel(
-            net, process_group=process_group_for_ddp
+            net
         )
         inputs = torch.rand((3, 2))
 
@@ -471,7 +511,7 @@ class TestDdpComparison(MultiProcessTestCase):
                 msg=f"The grads for param {param} are different under local "
                 f"and dist autograd: {param.grad} \n---\n {grads_dict[param]}",
             )
-        dist.destroy_process_group(process_group_for_ddp)
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
