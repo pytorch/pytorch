@@ -242,7 +242,8 @@ Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, IntArrayRef dims, bo
   }
 }
 
-Tensor nansum_backward(const Tensor & grad, const Tensor & self, IntArrayRef sizes, IntArrayRef dims, bool keepdim) {
+Tensor nansum_backward(const Tensor & grad, const Tensor & self, IntArrayRef dims, bool keepdim) {
+  auto sizes = self.sizes();
   if (!keepdim && sizes.size() > 0) {
     if (dims.size()==1) {
       return grad.unsqueeze(dims[0]).expand(sizes) * self.isnan().logical_not();
