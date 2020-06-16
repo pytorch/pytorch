@@ -849,6 +849,7 @@ void initJitScriptBindings(PyObject* module) {
   struct DeepCopyMemoTable {
     std::shared_ptr<IValue::HashAliasedIValueMap> map;
   };
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
 
   object_class.def(
