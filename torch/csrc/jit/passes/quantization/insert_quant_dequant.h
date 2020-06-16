@@ -41,7 +41,6 @@ TORCH_API Module InsertQuantDeQuant(
     Module& module,
     const std::string& method_name,
     bool inplace,
-    bool debug,
     QuantType quant_type = QuantType::STATIC);
 
 } // namespace jit
