@@ -845,8 +845,7 @@ Use external data format
 ``use_external_data_format`` argument in export API enables export of models in ONNX external
 data format. With this option enabled, the exporter stores some model parameters in external
 binary files, rather than the ONNX file itself. These external binary files are stored in the
-same location as the ONNX file. Argument 'f' must be a string specifying the location of the model. ```
-be provided to the export API as argument 'f'. ::
+same location as the ONNX file. Argument 'f' must be a string specifying the location of the model. ``` ::
 
     model = torchvision.models.mobilenet_v2(pretrained=True)
     input = torch.randn(2, 3, 224, 224, requires_grad=True)
