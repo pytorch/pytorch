@@ -62,7 +62,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
         outputH, input.size(2), output.size(2), poolSizeH);
 
     scalar_t maxVal = at::numeric_limits<scalar_t>::lower_bound();
-    int maxIndex = -1;
+    int maxIndex = poolH * input.size(3) + poolW;
 
     for (int h = poolH; h < poolH + poolSizeH; ++h) {
       if (poolSizeW < 2 || poolSizeW > 7) {

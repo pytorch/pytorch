@@ -88,7 +88,7 @@ __global__ void adaptivemaxpool(
       T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output_dt + oh*osizeW + ow;
       int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
-      int64_t argmax = -1;
+      int64_t argmax = istartT*isizeH*isizeW + istartH*isizeW + istartW;
       T max = at::numeric_limits<T>::lower_bound(); // -Infinity
 
       int it, ih, iw;
