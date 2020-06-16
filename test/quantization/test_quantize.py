@@ -678,119 +678,69 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
-    @override_qengines
-    def test_quantized_rnn(self):
+    @given(qconfig=st.sampled_from([per_channel_dynamic_qconfig, default_dynamic_qconfig]),
+           dtype=st.sampled_from([torch.qint8, torch.float16]))
+    def test_quantized_rnn(self, qconfig, dtype):
         r"""Test dynamic quantization, scriptability and serialization for dynamic quantized lstm modules on int8 and fp16
         """
-        for module_type in ['LSTM', 'GRU']:
-            model = RNNDynamicModel(module_type).eval()
-            niter = 10
-            x = torch.tensor([[100, -155],
-                             [-155, 100],
-                             [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
-
-
-            for dtype in [torch.qint8, torch.float16]:
-                if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
-                    continue                            # fp16 dynamic quant is not supported for qnnpack
-
-                print(dtype)
-                model_quantized = quantize_dynamic(model=model, dtype=dtype)
-
-                def checkQuantized(model, module_type):
-                    mod_type_map = {'LSTM': torch.nn.quantized.dynamic.LSTM,
-                                    'GRU': torch.nn.quantized.dynamic.GRU}
-                    mod_repr_map = {'LSTM': 'DynamicQuantizedLSTM',
-                                    'GRU': 'DynamicQuantizedGRU'}
-                    self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
-                    self.checkDynamicQuantizedModule(model_quantized.mod, mod_type_map[module_type], dtype)
-
-                # Smoke test extra reprs
-                checkQuantized(model_quantized, module_type)
-                self.checkScriptable(model_quantized, [(x, x)], check_save_load=True)
-
-                class ScriptWrapperPacked(torch.nn.Module):
-                    def __init__(self, cell):
-                        super(ScriptWrapperPacked, self).__init__()
-                        self.cell = cell
-
-                    def forward(self,
-                                x  # type: PackedSequence
-                                ):
-                        # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
-                        return self.cell(x)
-
-                class ScriptWrapperPackedGRU(torch.nn.Module):
-                    def __init__(self, cell):
-                        super(ScriptWrapperPackedGRU, self).__init__()
-                        self.cell = cell
-
-                    def forward(self,
-                                x  # type: PackedSequence
-                                ):
-                        # type: (...) -> Tuple[PackedSequence, torch.Tensor]
-                        return self.cell(x)
-
-                script_wrapper_map = {'LSTM': ScriptWrapperPacked,
-                                        'GRU': ScriptWrapperPackedGRU}
-                packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
-                model_with_packed_input = script_wrapper_map[module_type](model_quantized.mod)
-                model_with_packed_input(packed_input)
-                scripted = torch.jit.script(model_with_packed_input)
-                scripted(packed_input)
-                # We cannot trace with input dtype being a packed sequence
-                self._checkScriptable(model_with_packed_input, scripted, [(packed_input, x)], True)
-
-    def test_per_channel_lstm_quantize(self):
-        d_hid = 2
-        num_chunks = 4
-        model = RNNDynamicModel('LSTM').eval()
-        cell = model.mod
-        vals = [[100, -155],
-                [100, -155],
-                [-155, 100],
-                [-155, 100],
-                [100, -155],
-                [-155, 100],
-                [-155, 100],
-                [100, -155]]
-
-        vals = vals[:d_hid * num_chunks]
-        cell.weight_ih_l0 = torch.nn.Parameter(
-            torch.tensor(vals, dtype=torch.float),
-            requires_grad=False)
-        cell.weight_hh_l0 = torch.nn.Parameter(
-            torch.tensor(vals, dtype=torch.float),
-            requires_grad=False)
-        ref = copy.deepcopy(cell)
-        qconfig_dict = {
-            torch.nn.LSTM : per_channel_dynamic_qconfig
-        }
-        model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=torch.qint8)
-
         niter = 10
-
         x = torch.tensor([[100, -155],
                           [-155, 100],
                           [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+        qconfig_dict = {
+            torch.nn.LSTM : qconfig,
+            torch.nn.GRU: qconfig
+        }
+        for module_type in ['LSTM', 'GRU']:
+            model = RNNDynamicModel(module_type).eval()
 
-        h0_vals = [[-155, 100],
-                   [-155, 155],
-                   [100, -155]]
-        hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
-        cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
-        hiddens = (hx, cx)
-        quant_out, quant_hidden = model_quantized(x)
-        ref_out, ref_hidden = ref(x)
+            if dtype == torch.float16:
+                model_quantized = quantize_dynamic(model=model, dtype=dtype)
+            else:
+                model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=dtype)
 
-        def checkQuantized(model):
-            self.assertTrue('DynamicQuantizedLSTM' in str(model))
-            self.checkDynamicQuantizedLSTM(model.mod, torch.nn.quantized.dynamic.LSTM, dtype=torch.qint8)
-            self.checkScriptable(model, [(x, x)], check_save_load=True)
-        checkQuantized(model_quantized)
+            def checkQuantized(model, module_type):
+                mod_type_map = {'LSTM': torch.nn.quantized.dynamic.LSTM,
+                                'GRU': torch.nn.quantized.dynamic.GRU}
+                mod_repr_map = {'LSTM': 'DynamicQuantizedLSTM',
+                                'GRU': 'DynamicQuantizedGRU'}
+                self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
+                self.checkDynamicQuantizedModule(model_quantized.mod, mod_type_map[module_type], dtype)
 
-        self.assertEqual(quant_out, ref_out)
+            checkQuantized(model_quantized, module_type)
+            self.checkScriptable(model_quantized, [(x, x)], check_save_load=True)
 
+            class ScriptWrapperPacked(torch.nn.Module):
+                def __init__(self, cell):
+                    super(ScriptWrapperPacked, self).__init__()
+                    self.cell = cell
+
+                def forward(self,
+                            x  # type: PackedSequence
+                            ):
+                    # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
+                    return self.cell(x)
+
+            class ScriptWrapperPackedGRU(torch.nn.Module):
+                def __init__(self, cell):
+                    super(ScriptWrapperPackedGRU, self).__init__()
+                    self.cell = cell
+
+                def forward(self,
+                            x  # type: PackedSequence
+                            ):
+                    # type: (...) -> Tuple[PackedSequence, torch.Tensor]
+                    return self.cell(x)
+
+            script_wrapper_map = {'LSTM': ScriptWrapperPacked,
+                                  'GRU': ScriptWrapperPackedGRU}
+            packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
+            model_with_packed_input = script_wrapper_map[module_type](model_quantized.mod)
+            model_with_packed_input(packed_input)
+            scripted = torch.jit.script(model_with_packed_input)
+            scripted(packed_input)
+            # We cannot trace with input dtype being a packed sequence
+            self._checkScriptable(model_with_packed_input, scripted, [(packed_input, x)], True)
 
     @override_qengines
     def test_quantized_rnn_cell(self):

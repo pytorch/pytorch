@@ -2202,7 +2202,7 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 if dtype == torch.qint8:
                     packed_ih = torch.ops.quantized.linear_prepack(Wq1, b1)
                     packed_hh = torch.ops.quantized.linear_prepack(Wq2, b2)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh, b1, b2)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh, b1, b2, True)
                     W_ref1 = Wq1.dequantize()
                     W_ref2 = Wq2.dequantize()
 
