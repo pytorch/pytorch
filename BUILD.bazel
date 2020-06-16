@@ -326,6 +326,7 @@ filegroup(
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
         "aten/src/TH/THTensorEvenMoreMath.cpp",
+        "aten/src/TH/THTensorFill.cpp",
         "aten/src/TH/THTensorLapack.cpp",
         "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
