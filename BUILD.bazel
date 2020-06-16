@@ -19,7 +19,6 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
-    "-DAT_PARALLEL_NATIVE=1",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -545,6 +544,9 @@ template_rule(
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
         "@USE_BLAS@": "1",
+        "@AT_PARALLEL_OPENMP@": "0",
+        "@AT_PARALLEL_NATIVE@": "1",
+        "@AT_PARALLEL_NATIVE_TBB@": "0",
     },
 )
 

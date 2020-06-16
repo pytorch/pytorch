@@ -173,9 +173,22 @@ test_aten() {
 }
 
 test_torchvision() {
+  # pytorch extensions require including torch/extension.h which includes all.h
+  # which includes utils.h which includes Parallel.h.
+  # So you can call for instance parallel_for() from your extension,
+  # but the compilation will fail because of Parallel.h has only declarations
+  # and definitions are conditionally included Parallel.h(see last lines of Parallel.h).
+  # I tried to solve it #39612 and #39881 by including Config.h into Parallel.h
+  # But if Pytorch is built with TBB it provides Config.h
+  # that has AT_PARALLEL_NATIVE_TBB=1(see #3961 or #39881) and it means that if you include
+  # torch/extension.h which transitively includes Parallel.h
+  # which transitively includes tbb.h which is not available!
+  if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
+    BUILD_EXT_OPTS='--global-option=build_ext --global-option=-Ithird_party/tbb/include/tbb/tbb.h'
+  fi
   # Check out torch/vision at Jun 11 2020 commit
   # This hash must match one in .jenkins/caffe2/test.sh
-  pip_install --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
+  pip_install $BUILD_EXT_OPTS --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
 }
 
 test_libtorch() {
