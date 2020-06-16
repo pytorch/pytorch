@@ -472,8 +472,8 @@ def threshold(input, threshold, value):
         raise ValueError("Input to 'value' must be specified!")
     return torch._ops.ops.quantized.threshold(input, threshold, value)
 
-def elu(input, scale, zero_point, alpha=1., inplace=False):
-    # type: (Tensor, float, int, Optional[float], bool) -> Tensor
+def elu(input, scale, zero_point, alpha=1.):
+    # type: (Tensor, float, int, float) -> Tensor
     r"""
     Applies the quantized ELU function element-wise:
 
