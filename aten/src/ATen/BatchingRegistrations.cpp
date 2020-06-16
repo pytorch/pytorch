@@ -54,6 +54,12 @@ Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, opt
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor mul_batching_rule(const Tensor& self, const Tensor& other) {
+  auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
+  auto result = at::mul(physical_args[0].tensor(), physical_args[1].tensor());
+  return physical_args[0].newLogicalFromPhysical(result);
+}
+
 void batchedTensorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_CHECK(false, "NYI: Calling ", op.schema().name(), " inside of vmap");
 }
@@ -64,6 +70,7 @@ TORCH_LIBRARY_IMPL(_, Batched, m) {
 
 TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
+  m.impl_UNBOXED("mul.Tensor", mul_batching_rule);
 }
 
 } // namespace at
