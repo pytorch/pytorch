@@ -31,6 +31,9 @@ class TORCH_API RemoteProfilerManager {
   // Retrieves the currently set thread-local profiling key. Throws if it is not
   // set.
   std::string getCurrentProfilingKey();
+  // erases the globallyUniqueId from the map. This can help save memory in the
+  // case that many RPCs are being profiled.
+  void eraseKey(GloballyUniqueId globallyUniqueId);
 
  private:
   RemoteProfilerManager();

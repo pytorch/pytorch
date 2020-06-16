@@ -29,6 +29,13 @@ void RemoteProfilerManager::unsetCurrentKey() {
   currentThreadLocalKey_ = c10::nullopt;
 }
 
+void RemoteProfilerManager::eraseKey(GloballyUniqueId globallyUniqueId) {
+  std::lock_guard<std::mutex> guard(mutex_);
+  auto it = profiledRpcKeys_.find(globallyUniqueId);
+  TORCH_INTERNAL_ASSERT(it != profiledRpcKeys_.end());
+  profiledRpcKeys_.erase(it);
+}
+
 std::string RemoteProfilerManager::retrieveRPCProfilingKey(
     GloballyUniqueId globallyUniqueId) {
   std::lock_guard<std::mutex> guard(mutex_);
