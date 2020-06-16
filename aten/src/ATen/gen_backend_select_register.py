@@ -24,6 +24,7 @@ from function_wrapper import gen_dispatch_key_init
 GENERATED_COMMENT = CodeTemplate(
     "@" + "generated from ${filename}")
 
+# See NOTE[UnboxedOnly] in function_wrapper.py
 UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
   m.impl_UNBOXED("aten::${op_name_with_overload_name}", ${function_name});
 """)
@@ -43,6 +44,7 @@ Tensor ${function_name}(${method_formals}) {
 }
 """)
 
+# See NOTE[UnboxedOnly] in function_wrapper.py
 UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
 // ${schema_string}
 Tensor ${function_name}(${method_formals}) {

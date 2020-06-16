@@ -93,8 +93,16 @@ SCHEMA_REGISTRATION = CodeTemplate("""\
 m.def("${unqual_schema_string}");
 """)
 
+# NOTE[UnboxedOnly] Many of our codegen templates currently exist twice, once
+# in an _UNBOXEDONLY_ variant and once without _UNBOXEDONLY_. This is because
+# ops that are `use_c10_dispatcher: full` need different c++ code than ops
+# that aren't `use_c10_dispatcher: full` yet. The _UNBOXEDONLY_ variants
+# are for ops that aren't `use_c10_dispatcher: full` yet and those code templates
+# can be deleted once all ops are `use_c10_dispatcher: full`.
+
 # NB: Specifiction of the namespace is handled by the enclosing
 # TORCH_LIBRARY macro invocation
+# See NOTE[UnboxedOnly]
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::CppFunction::makeUnboxedOnly(&TypeDefault::${type_wrapper_name}));
@@ -146,6 +154,7 @@ ${return_type} Tensor::${api_name}(${method_formals}) const {
 #endif
 }
 """)
+# See NOTE[UnboxedOnly]
 UNBOXEDONLY_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
@@ -186,6 +195,7 @@ ${return_type} ${api_name}(${formals}) {
 #endif
 }
 """)
+# See NOTE[UnboxedOnly]
 UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
