@@ -211,7 +211,6 @@ if _C_for_compiled_check.__file__ is None:
 
     if any(__file__ == os.path.join(i, 'torch', '__init__.py') for i in sys.path):
         _torch_root_path = os.path.split(os.path.split(__file__)[0])[0]
-        print(_torch_root_path)
         raise ImportError(textwrap.dedent(f'''
             Failed to load PyTorch C extensions:
                 `{_torch_root_path}`` appears in `sys.path`
