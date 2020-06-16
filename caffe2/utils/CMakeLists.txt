@@ -26,7 +26,7 @@ list(APPEND Caffe2_CPU_SRCS
   utils/smart_tensor_printer.cc
   utils/string_utils.cc)
 
-if (USE_PTHREADPOOL)
+if(USE_PTHREADPOOL)
   list(APPEND Caffe2_CPU_SRCS
     utils/threadpool/pthreadpool-cpp.cc)
   

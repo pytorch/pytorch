@@ -97,6 +97,10 @@ class Reducer {
   // Work handle for allreduce on local_used_maps_
   std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
+  void verify_replicas_within_process();
+
+  void verify_replica0_across_processes();
+
   void mark_variable_ready_dense(VariableIndex index);
 
   void mark_variable_ready_sparse(VariableIndex index);
@@ -147,6 +151,14 @@ class Reducer {
   struct BucketReplica {
     // Flattened (1 dimensional) contents of bucket.
     at::Tensor contents;
+
+    // Views into contents for each grad.  Each view will be created with
+    // layout (sizes + strides) matching the grad's expected layout
+    // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
+    // grad.copy_(bucket_views[i]) and
+    // bucket_views[i].copy_(grad)
+    // provide convenient ways to move grad data in/out of contents.
+    std::vector<at::Tensor> bucket_views;
 
     // Variables that contribute to this bucket replica. Use refcounted value
     // here so that we can easily unflatten the bucket contents into the
