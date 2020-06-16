@@ -846,6 +846,11 @@ void initJitScriptBindings(PyObject* module) {
     }
   }
 
+  object_class.def("__deepcopy__", [](const Object& self, py::dict memo) {
+    // TODO: Figure out if memoization makes any sense in this context
+    return Object(IValue(self._ivalue()).deepcopy().toObject());
+  });
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
