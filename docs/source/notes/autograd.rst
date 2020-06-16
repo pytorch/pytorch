@@ -120,6 +120,63 @@ an error is raised. This ensures that if you're using in-place
 functions and not seeing any errors, you can be sure that the computed
 gradients are correct.
 
+How does Autograd work for Complex
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+PyTorch supports gradients for both holomorphic and non-holomorphic functions.
+We follow the `HIPS/autograd <https://github.com/HIPS/autograd/blob/master/docs/tutorial.md#complex-numbers>`_
+convention to compute derivatives for complex numbers.
+Consider a `C → C function, f, expressed in terms of R → R functions, u and v`:
+
+.. code::
+
+    def f(z):
+            x, y = real(z), imag(z)
+            return u(x, y) + v(x, y) * 1j
+
+We define grad of f as:
+
+.. code::
+
+    def grad_f(z):
+        x, y = real(z), imag(z)
+        return grad(u, 0)(x, y) - i * grad(u, 1)(x, y)
+
+This convention covers three important cases:
+
+1. If f is holomorphic, then we get the usual complex derivative,
+   since `grad(u, 0) equals grad(v, 1)` and `grad(u, 1) equals - grad(v, 0)`.
+
+2. If f is a real-valued loss function of a complex parameter z,
+   then we get a result that we can use in a gradient-based optimizer,
+   by taking steps in the direction of the complex conjugate of grad(f)(z).
+
+3. If f is a real-to-real function that happens to use complex primitives internally,
+   some of which must necessarily be non-holomorphic (for example, FFTs to implement convolutions),
+   then we get the same result that a purely real implementation would have given.
+
+Our convention doesn't handle the case where f is a non-holomorphic function and
+when all of du/dx, du/dy, dv/dx and dv/dy are of interest to you because the answer
+would have to contain four real values and there would be no way to express it as
+a single complex number.
+
+We define primitive vector-Jacobian products of complex functions as:
+
+.. code::
+
+    def f_vjp(g, z):
+        z_x, z_y = real(z), imag(z)
+        g_x, g_y = real(g), imag(g)
+        return (       g_x * grad(u, 0)(x, y)
+                - i * g_x * grad(u, 1)(x, y)
+                -     g_y * grad(v, 0)(x, y)
+                + i * g_y * grad(v, 1)(x, y))
+
+For holomorphic primitives, this is just the regular complex derivative multiplied by g,
+so most simple math primitives don't need to be changed from their real implementations.
+For non-holomorphic primitives, it preserves all four real partial derivatives as if we were
+treating complex numbers as real 2-tuples. The negative signs are just to take care of
+complex conjugation, and the fact that we’re working with covectors.
 
 Multithreaded Autograd
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -142,7 +199,7 @@ does not block on the concurrent backward computations, example code could be:
         y.sum().backward()
         # potential optimizer update
 
-    
+
     # User write their own threading code to drive the train_fn
     threads = []
     for _ in range(10):

@@ -95,7 +95,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // triggered in this context because it conflicts with the struct
           // torch::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
-          .def(py::detail::hash(py::self));
+          .def(py::detail::hash(py::self)) // NOLINT
+          .def("__repr__", [](const WorkerInfo& workerInfo) {
+            std::ostringstream os;
+            os << workerInfo;
+            return os.str();
+          });
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
