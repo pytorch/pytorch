@@ -281,7 +281,7 @@ if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
 endif()
 
 # ---[ pthreadpool
-if(NOT USE_SYSTEM_PTHREADPOOL)
+if(NOT USE_SYSTEM_PTHREADPOOL AND (INTERN_BUILD_MOBILE OR USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK))
   # Opt for custom Caffe2 implementation on MSVC.  Windows support seems to have
   # been added to pthreadpool recently but the current third party revision we are
   # using right now does not suppor it.  Should unify later after updating pthreadpool.
