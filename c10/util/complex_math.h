@@ -224,6 +224,7 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T> &x) {
 using c10_complex_math::exp;
 using c10_complex_math::log;
 using c10_complex_math::log10;
+using c10_complex_math::log2;
 using c10_complex_math::sqrt;
 using c10_complex_math::pow;
 using c10_complex_math::sin;
@@ -244,6 +245,7 @@ namespace std {
 using c10_complex_math::exp;
 using c10_complex_math::log;
 using c10_complex_math::log10;
+using c10_complex_math::log2;
 using c10_complex_math::sqrt;
 using c10_complex_math::pow;
 using c10_complex_math::sin;
