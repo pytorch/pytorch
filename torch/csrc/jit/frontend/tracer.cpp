@@ -367,7 +367,7 @@ static IValue addInput(
     AT_ERROR(
         "Only tensors or (possibly nested) dict or tuples of tensors can be "
         "inputs to traced functions. Got ",
-        type->python_str());
+        type->repr_str());
   }
 }
 

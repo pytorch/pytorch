@@ -4378,6 +4378,7 @@ def foo(x):
         torch._jit_internal.is_optional(ann)
 
     def test_interpreter_fuzz(self):
+        import builtins
         # This test generates random tree-like programs to fuzz test
         # that the interpreter does not have a bug in its stack manipulation
         # code. An assert in that code ensures individual operators are
@@ -4427,7 +4428,7 @@ def foo(x):
         for i in range(100):
             g = {'torch': torch}
             code = gen_code()
-            torch._six.exec_(code, g, None)
+            builtins.exec(code, g, None)
             cu = torch.jit.CompilationUnit(code)
             with freeze_rng_state():
                 o1 = g['f']()
@@ -6509,11 +6510,16 @@ a")
         loop_inputs = list(loop_body.inputs())
         loop_outputs = list(loop_body.outputs())
 
-
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            self.assertTrue(loop_inputs[2].requires_grad())
+            # TODO: simplify this test as it's very sensitive
+            # the optimized graph will have 3 loops
+            # the original loop is peeled
+            # peeled loop also gets unrolled
+            index_of_x_in_peeled_unrolled_loop = -2
+            self.assertTrue(loop_inputs[index_of_x_in_peeled_unrolled_loop].requires_grad())
             bailouts_in_outer_block = graph.findAllNodes("prim::BailOut", False)
-            self.assertFalse(bailouts_in_outer_block[0].output().requires_grad())
+            last_bailout_index_on_loops_output = -1
+            self.assertFalse(bailouts_in_outer_block[last_bailout_index_on_loops_output].output().requires_grad())
         else:
             self.assertTrue(loop_inputs[1].requires_grad())
             self.assertTrue(loop.output().requires_grad())
@@ -10877,37 +10883,34 @@ a")
         m_c = m.copy()
 
     def test_script_forward_method_replacement(self):
-        # We want to support the use case of having a different `forward` method
-        # when we are not in scripting mode.
+        # We want to support the use case of attaching a different `forward` method
         class LowLevelModule(torch.nn.Module):
             def __init__(self):
                 super(LowLevelModule, self).__init__()
 
-            def forward(self, *args, **kwargs):
-                # Generic forward dispatch, when we are not in scripting mode
-                assert not torch.jit.is_scripting()
-                return self.forward_pytorch(*args, **kwargs) * 2
+            def forward(self, input: torch.Tensor):
+                # Generic forward dispatch
+                return self.forward_pytorch(input) * 2
 
         class TestModule(LowLevelModule):
             def __init__(self):
                 super(TestModule, self).__init__()
-                # Replace the forward method if we know we are not in scripting mode
-                if not torch.jit.is_scripting():
-                    self.forward = types.MethodType(LowLevelModule.forward, self)
+                # Replace the forward method
+                self.forward = types.MethodType(LowLevelModule.forward, self)
 
             def forward_pytorch(self, input: torch.Tensor):
                 return torch.tensor(123)
 
             def forward(self, input: torch.Tensor):
-                # Scripting should only use this forward method
-                assert torch.jit.is_scripting()
+                # Should not use this forward method
+                raise AssertionError("This method should not be used")
                 return self.forward_pytorch(input)
 
         m = TestModule()
         self.assertEqual(m(torch.tensor(1)), torch.tensor(246))
 
         m_scripted = torch.jit.script(m)
-        self.assertEqual(m_scripted(torch.tensor(1)), torch.tensor(123))
+        self.assertEqual(m_scripted(torch.tensor(1)), torch.tensor(246))
 
     # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
     @suppress_warnings
@@ -17623,7 +17626,8 @@ a")
         def foo(a):
             return a
 
-        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+        with self.assertRaisesRegex(RuntimeError, (r"Expected a value of type \'Tensor \(inferred\)\'"
+                                                   r"[\S\s]*Inferred \'a\' to be of type \'Tensor\'")):
             foo(1)
 
     def test_type_comments_in_body(self):
