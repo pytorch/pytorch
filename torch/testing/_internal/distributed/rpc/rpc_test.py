@@ -835,8 +835,7 @@ class RpcTest(RpcAgentTestFixture):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
 
-            for fut in futs:
-                fut.wait()
+            for fut in torch.futures.collect_all(futs).wait():
                 self.assertEqual(fut.wait(), 0)
 
             # Phase 2: Only worker2 has workload.
@@ -848,9 +847,8 @@ class RpcTest(RpcAgentTestFixture):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
 
-            for fut in futs:
-                fut.wait()
-                self.assertEqual(fut.wait(), 0)
+            for val in torch.futures.wait_all(futs):
+                self.assertEqual(val, 0)
 
     def test_wait_all_workers(self):
         rpc.init_rpc(
@@ -1485,9 +1483,9 @@ class RpcTest(RpcAgentTestFixture):
             futs.append(fut)
 
         j = 0
-        for fut in futs:
+        for val in torch.futures.wait_all(futs):
             self.assertEqual(
-                fut.wait(), my_tensor_function(torch.ones(j, j), torch.ones(j, j))
+                val, my_tensor_function(torch.ones(j, j), torch.ones(j, j))
             )
             j += 1
 
@@ -1553,8 +1551,8 @@ class RpcTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(worker_name(dst_rank), f, args=args)
             futs.append(fut)
 
-        for fut in futs:
-            self.assertEqual(fut.wait(), 0)
+        for val in torch.futures.wait_all(futs):
+            self.assertEqual(val, 0)
         tok = time.time()
         print(
             "Rank {} finished testing {} times in {} seconds.".format(
@@ -1813,7 +1811,13 @@ class RpcTest(RpcAgentTestFixture):
             worker_name(next_rank), torch.add, args=(torch.ones(1), torch.ones(1))
         )
         with self.assertRaisesRegex(
-            RuntimeError, "Call it on worker{}".format(next_rank)
+            RuntimeError, (
+                fr"For UserRRef\(rref_id=GloballyUniqueId\(created_on={self.rank}, local_id=0\), "
+                fr"fork_id=GloballyUniqueId\(created_on={self.rank}, local_id=1\)\), "
+                r"can't call localValue\(\) on user "
+                fr"WorkerInfo\(id={self.rank}, name={worker_name(self.rank)}\). "
+                fr"Call it on owner WorkerInfo\(id={next_rank}, name={worker_name(next_rank)}\)"
+            )
         ):
             rref.local_value()
 
@@ -2113,7 +2117,7 @@ class RpcTest(RpcAgentTestFixture):
         rref1 = RRef(self.rank)
         id_class = "GloballyUniqueId"
         self.assertEqual(
-            "OwnerRRef({}({}, 0))".format(id_class, self.rank), rref1.__str__()
+            "OwnerRRef({}(created_on={}, local_id=0))".format(id_class, self.rank), rref1.__str__()
         )
 
         dst_rank = (self.rank + 1) % self.world_size
@@ -2122,7 +2126,7 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(
             rref2.__str__(),
-            "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(
+            "UserRRef(RRefId = {0}(created_on={1}, local_id=1), ForkId = {0}(created_on={1}, local_id=2))".format(
                 id_class, self.rank
             ),
         )
