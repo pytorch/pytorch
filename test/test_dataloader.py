@@ -320,8 +320,6 @@ def set_faulthander_if_available(_=None):
 set_faulthander_if_available()
 
 # Process `pid` must have called `set_faulthander_if_available`
-
-
 def print_traces_of_all_threads(pid):
     if HAS_FAULTHANDLER:
         if not IS_WINDOWS:
@@ -666,6 +664,8 @@ def test_worker_info_init_fn(worker_id):
         worker_info.a = 3
     except RuntimeError as e:
         assert str(e) == "Cannot assign attributes to WorkerInfo objects"
+    for k in ['id', 'num_workers', 'seed', 'dataset']:
+        assert "{}=".format(k) in repr(worker_info)
     dataset.value = [worker_id, os.getpid()]
 
 
