@@ -9,6 +9,7 @@ from torch._C import parse_ir
 # torch.quantization
 from torch.quantization import QConfig
 from torch.quantization import default_dynamic_qconfig
+from torch.quantization import per_channel_dynamic_qconfig
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
@@ -2183,7 +2184,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                        .run(m.graph)
 
-    def test_quantize_general_shape_ops(self):
+    def test_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general shape ops like aten::flatten
         without actually checking for execution of these ops
@@ -2209,8 +2210,14 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
                 x = x.view(-1)
+                # prim::ListConstruct
                 xs = [x, x]
-                y, x = xs
+                # prim::ListUnpack
+                x, y = xs
+                # prim::TupleConstruct
+                xs = (x, x)
+                # prim::TupleUnpack
+                x, y = xs
                 x = x.transpose(1, 2)
                 x = x.contiguous()
                 x, y = torch.chunk(x, 2)
@@ -2250,7 +2257,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                    .check("aten::dequantize") \
                    .run(m.graph)
 
-    def test_quantize_general_value_ops(self):
+    def test_general_value_ops(self):
         """ A test that checks correct patterns are produced for
         all supported general value ops like aten::avg_pool2d \
         without actually checking for execution of these ops
@@ -2427,27 +2434,29 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
             def forward(self, x):
                 x = self.fc1(x)
                 return self.fc2(x)
+        for is_per_channel in [True, False]:
+            m = torch.jit.script(M())
+            qconfig = per_channel_dynamic_qconfig if is_per_channel is True else default_dynamic_qconfig
+            m = prepare_dynamic_script(m, {'': qconfig})
+            m = convert_dynamic_script(m, debug=True)
+            assert len(m._modules._c.items()) == 2, \
+                'Expected to have two submodule of linear'
 
-        m = torch.jit.script(M())
-        m = prepare_dynamic_script(m, {'': default_dynamic_qconfig})
-        m = convert_dynamic_script(m, debug=True)
-        assert len(m._modules._c.items()) == 2, \
-            'Expected to have two submodule of linear'
-
-        quant_func = "aten::quantize_per_tensor"
-
-        # quantizing activations
-        FileCheck().check("aten::_choose_qparams_per_tensor") \
-                   .check_next(quant_func) \
-                   .check_next("aten::dequantize") \
-                   .check("aten::_choose_qparams_per_tensor") \
-                   .check_next(quant_func) \
-                   .check_next("aten::dequantize") \
-                   .check(quant_func) \
-                   .check_next("aten::dequantize") \
-                   .check_not(quant_func) \
-                   .check("return") \
-                   .run(m.graph)
+            wt_quant_func = "aten::quantize_per_channel" if is_per_channel \
+                else "aten::quantize_per_tensor"
+            act_quant_func = "aten::quantize_per_tensor"
+            # quantizing activations
+            FileCheck().check("aten::_choose_qparams_per_tensor") \
+                       .check_next(act_quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("aten::_choose_qparams_per_tensor") \
+                       .check_next(act_quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check(wt_quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check_not(wt_quant_func) \
+                       .check("return") \
+                       .run(m.graph)
 
     def test_finalize_for_linear_dynamic(self):
         class M(torch.nn.Module):
