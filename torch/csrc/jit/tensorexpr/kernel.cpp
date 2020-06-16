@@ -599,10 +599,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sigmoid: {
-      return computeOneOperand("aten_sigmoid", v, [](const ExprHandle& a) {
-        return ExprHandle(1.0f) /
-            (ExprHandle(1.0f) + exp(ExprHandle(-0.0f) - a));
-      });
+      return computeOneOperand(
+          "aten_sigmoid", v, [](const ExprHandle& a) { return sigmoid(a); });
     } break;
 
     case aten::reciprocal: {
@@ -801,11 +799,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::tanh: {
-      return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
-        // return
-        // (ExprHandle(-.67436811832e-5f)+(ExprHandle(.2468149110712040f)+(ExprHandle(.583691066395175e-1f)+ExprHandle(.3357335044280075e-1f)*a)*a)*a)/(ExprHandle(.2464845986383725f)+(ExprHandle(.609347197060491e-1f)+(ExprHandle(.1086202599228572f)+ExprHandle(.2874707922475963e-1f)*a)*a)*a);
-        return tanh(a);
-      });
+      return computeOneOperand(
+          "aten_tanh", v, [](const ExprHandle& a) { return tanh(a); });
     } break;
 
     case aten::sqrt: {
@@ -1139,14 +1134,16 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
       For* split1;
       For* tail1;
 
-      l.splitWithTail(loop, 8, &outer1, &split1, &tail1);
+      static const int kBodyVectorWidth = 8;
+      l.splitWithTail(loop, kBodyVectorWidth, &outer1, &split1, &tail1);
       l.vectorize(split1);
 
       if (tail1) {
         For* outer2;
         For* split2;
         For* tail2;
-        l.splitWithTail(tail1, 4, &outer2, &split2, &tail2);
+        static const int kTailVectorWidth = 4;
+        l.splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
         l.vectorize(split2);
       }
     }

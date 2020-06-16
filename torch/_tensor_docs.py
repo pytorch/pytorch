@@ -1243,6 +1243,20 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
+add_docstr_all('fliplr',
+               r"""
+fliplr() -> Tensor
+
+See :func:`torch.fliplr`
+""")
+
+add_docstr_all('flipud',
+               r"""
+flipud() -> Tensor
+
+See :func:`torch.flipud`
+""")
+
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -3167,7 +3181,7 @@ In-place version of :meth:`~Tensor.tanh`
 """)
 
 add_docstr_all('tolist',
-               r""""
+               r"""
 tolist() -> list or number
 
 Returns the tensor as a (nested) list. For scalars, a standard

@@ -20,7 +20,7 @@ import cimodel.data.simple.bazel_definitions
 import cimodel.data.simple.ge_config_tests
 import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.ios_definitions
-import cimodel.data.simple.android_gradle
+import cimodel.data.simple.android_definitions
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
 import cimodel.lib.miniutils as miniutils
@@ -83,7 +83,7 @@ def gen_build_workflows_tree():
     build_workflows_functions = [
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
-        cimodel.data.simple.android_gradle.get_workflow_jobs,
+        cimodel.data.simple.android_definitions.get_workflow_jobs,
         cimodel.data.simple.ios_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.ge_config_tests.get_workflow_jobs,
@@ -93,13 +93,14 @@ def gen_build_workflows_tree():
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
         windows_build_definitions.get_windows_workflows,
-        binary_build_definitions.get_binary_smoke_test_jobs,
     ]
 
     binary_build_functions = [
         binary_build_definitions.get_binary_build_jobs,
         binary_build_definitions.get_nightly_tests,
         binary_build_definitions.get_nightly_uploads,
+        binary_build_definitions.get_post_upload_jobs,
+        binary_build_definitions.get_binary_smoke_test_jobs,
     ]
 
     return {
@@ -140,7 +141,6 @@ YAML_SOURCES = [
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
 
-    File("workflows/workflows-s3-html.yml"),
     File("workflows/workflows-docker-builder.yml"),
     File("workflows/workflows-ecr-gc.yml"),
     File("workflows/workflows-promote.yml"),

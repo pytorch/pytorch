@@ -1,7 +1,6 @@
 from __future__ import print_function
 import os
 import collections
-import glob
 import yaml
 import re
 import argparse
@@ -342,26 +341,6 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
 
     return type_hints
 
-def gen_nn_modules(out):
-    def replace_forward(m):
-        # We instruct mypy to not emit errors for the `forward` and `__call__` declarations since mypy
-        # would otherwise correctly point out that Module's descendants' `forward` declarations
-        # conflict with `Module`s. Specifically, `Module` defines `forward(self, *args)` while the
-        # descandantes define more specific forms, such as `forward(self, input: Tensor)`, which
-        # violates Liskov substitutability. The 'mypy' team recommended this solution for now.
-        forward_def = m.group(0) + "  # type: ignore"
-        call_def = re.sub(r'def forward', 'def __call__', forward_def)
-        new_def = "{}\n{}".format(forward_def, call_def)
-        return new_def
-    pattern = re.compile(r'^\s*def forward\(self.*$', re.MULTILINE)
-    for fname in glob.glob("torch/nn/modules/*.pyi.in"):
-        with open(fname, 'r') as f:
-            src = f.read()
-        res = pattern.sub(replace_forward, src)
-        fname_out = fname[:-3]
-        with open(os.path.join(out, fname_out), 'w') as f:
-            f.write(res)
-
 def gen_nn_functional(out):
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
@@ -421,7 +400,6 @@ def gen_nn_functional(out):
 
 def gen_nn_pyi(out):
     gen_nn_functional(out)
-    gen_nn_modules(out)
 
 def gen_pyi(declarations_path, out):
     """gen_pyi()
