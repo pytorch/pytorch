@@ -143,8 +143,8 @@ public:
    * > Tensor unboxed_func(Tensor a, Tensor b) {...}
    * > KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(unboxed_func), &unboxed_func>();
    */
-  template<class FuncPtr, bool AllowLegacyTypes = false>
-  static KernelFunction makeFromUnboxedFunction(FuncPtr);
+  template<class FuncType, FuncType* func, bool AllowLegacyTypes = false>
+  static KernelFunction makeFromUnboxedFunction();
 
   /**
    * Create a KernelFunction from an unboxed function and prevent creation of an
@@ -160,8 +160,8 @@ public:
    * > Tensor unboxed_func(Tensor a, Tensor b) {...}
    * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(unboxed_func), &unboxed_func>();
    */
-  template<class FuncPtr>
-  static KernelFunction makeFromUnboxedOnlyFunction(FuncPtr);
+  template<class FuncType, FuncType* func>
+  static KernelFunction makeFromUnboxedOnlyFunction();
 
   /**
    * Create a KernelFunction from an unboxed function.

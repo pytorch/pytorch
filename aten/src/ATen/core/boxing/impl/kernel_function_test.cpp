@@ -4,7 +4,6 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
-#include <torch/library.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
 
@@ -57,19 +56,6 @@ void expectCallsDecrement(DispatchKey dispatch_key) {
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(incrementKernel), &incrementKernel>(DispatchKey::CPU));
-  expectCallsIncrement(DispatchKey::CPU);
-}
-
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredWithTorchLibraryAndTorchFn_thenCanBeCalled) {
-  auto m = MAKE_TORCH_LIBRARY(_test);
-  m.def("my_op(Tensor dummy, int input) -> int");
-  m.impl("my_op", DispatchKey::CPU, TORCH_FN(incrementKernel));
-  expectCallsIncrement(DispatchKey::CPU);
-}
-
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenCatchAllKernel_whenRegisteredWithTorchLibraryAndTorchFn_thenCanBeCalled) {
-  auto m = MAKE_TORCH_LIBRARY(_test);
-  m.def("my_op(Tensor dummy, int input) -> int", TORCH_FN(incrementKernel));
   expectCallsIncrement(DispatchKey::CPU);
 }
 

@@ -153,7 +153,7 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
     return splits;
   });
 
-  m.impl("slice.str", TORCH_FN(stringSlice));
+  m.impl("slice.str", stringSlice);
 
   // upper and lower require there to be at least one alpha character,
   // and ignore all other characters

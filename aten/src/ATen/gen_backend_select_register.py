@@ -25,7 +25,10 @@ GENERATED_COMMENT = CodeTemplate(
     "@" + "generated from ${filename}")
 
 FUNCTION_REGISTRATION = CodeTemplate("""\
-  m.impl_UNBOXED("aten::${op_name_with_overload_name}", ${function_name});
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyKernel<decltype(${function_name}), &${function_name}>(DispatchKey::BackendSelect)
+  .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 FUNCTION_DEFINITION = CodeTemplate("""\
@@ -57,13 +60,10 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
 
                 name = option['name']
-                op_name_with_overload_name = option['name']
                 if option.get('overload_name', '') != '':
                     name = "{0}_{1}".format(name, option['overload_name'])
-                    op_name_with_overload_name = "{0}.{1}".format(op_name_with_overload_name, option['overload_name'])
 
                 func_reg = FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
-                                                            op_name_with_overload_name=op_name_with_overload_name,
                                                             function_name=name)
 
                 dispatch_key_init = gen_dispatch_key_init('_dk', option['formals_list'])
