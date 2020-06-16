@@ -83,7 +83,7 @@ class TestOptimizer(unittest.TestCase):
 
         optimized_scripted_model = optimize_for_mobile(scripted_model)
         optimized_result = optimized_scripted_model(input_data)
-        print("no blacklist optimized_scripted_model graph = {}".format(optimized_scripted_model.graph))
+
         FileCheck().check_not("Tensor = aten::conv2d") \
                    .check_not("Tensor = prim::CallFunction") \
                    .check_not("prepacked::conv2d_clamp_prepack") \
