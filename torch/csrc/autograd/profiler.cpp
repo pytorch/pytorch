@@ -335,7 +335,8 @@ void pushProfilingCallbacks() {
         }
         state_ptr->popRange(fn.getStartCallbacksThreadId(), fn.handle());
       })
-    .needsInputs(state_ptr->config().report_input_shapes));
+    .needsInputs(state_ptr->config().report_input_shapes)
+    .needsIds(true));
   state_ptr->setCallbackHandle(handle);
 }
 

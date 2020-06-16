@@ -87,8 +87,10 @@ class CallbackManager {
     auto scope = rec_fn.scope();
     bool found_active_cb = false;
     bool found_needs_inputs = false;
-    auto init_handles = [scope, &found_active_cb, &found_needs_inputs](
-        CallbackHandles& handles, RecordFunctionCallbacks& cbs) {
+    bool found_needs_ids = false;
+    auto init_handles = [
+        scope, &found_active_cb, &found_needs_inputs, &found_needs_ids](
+          CallbackHandles& handles, RecordFunctionCallbacks& cbs) {
       handles.clear();
       for (const auto& cb : cbs) {
         if (cb.first.shouldRun(scope)) {
@@ -96,6 +98,9 @@ class CallbackManager {
           found_active_cb = true;
           if (cb.first.needsInputs()) {
             found_needs_inputs = true;
+          }
+          if (cb.first.needsIds()) {
+            found_needs_ids = true;
           }
         }
       }
@@ -105,7 +110,9 @@ class CallbackManager {
     init_handles(rec_fn.sorted_active_global_handles_, sorted_global_callbacks_);
     rec_fn.active = found_active_cb;
     rec_fn.needs_inputs = found_needs_inputs;
-    rec_fn.setHandle(next_unique_record_function_handle());
+    if (found_needs_ids && found_active_cb) {
+      rec_fn.setHandle(next_unique_record_function_handle());
+    }
   }
 
   void runStartCallbacks(RecordFunction& rf) {

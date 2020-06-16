@@ -23,23 +23,18 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("cuda", [
-            ("9.2", [X("3.6")]),
+            ("9.2", [
+                X("3.6"),
+                ("3.6", [
+                    ("cuda_gcc_override", [X("gcc5.4")])
+                ])
+            ]),
             ("10.1", [X("3.6")]),
             ("10.2", [
                 XImportant("3.6"),
                 ("3.6", [
                     ("libtorch", [XImportant(True)])
                 ]),
-            ]),
-        ]),
-        ("android", [
-            ("r19c", [
-                ("3.6", [
-                    ("android_abi", [XImportant("x86_32")]),
-                    ("android_abi", [X("x86_64")]),
-                    ("android_abi", [X("arm-v7a")]),
-                    ("android_abi", [X("arm-v8a")]),
-                ])
             ]),
         ]),
     ]),
@@ -53,6 +48,9 @@ CONFIG_TREE_DATA = [
                     ("xla", [XImportant(True)]),
                 ]),
             ]),
+        ]),
+        ("gcc", [
+            ("9", [XImportant("3.8")]),
         ]),
     ]),
 ]
@@ -125,7 +123,8 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
-            "android_abi": AndroidAbiConfigNode,
+            "build_only": BuildOnlyConfigNode,
+            "cuda_gcc_override": CudaGccOverrideConfigNode
         }
         return next_nodes[experimental_feature]
 
@@ -174,10 +173,17 @@ class LibTorchConfigNode(TreeConfigNode):
         return ImportantConfigNode
 
 
-class AndroidAbiConfigNode(TreeConfigNode):
+class CudaGccOverrideConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["cuda_gcc_override"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+class BuildOnlyConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
-        self.props["android_abi"] = node_name
+        self.props["build_only"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

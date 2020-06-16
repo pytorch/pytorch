@@ -74,16 +74,18 @@ class RandomSampler(Sampler):
         replacement (bool): samples are drawn with replacement if ``True``, default=``False``
         num_samples (int): number of samples to draw, default=`len(dataset)`. This argument
             is supposed to be specified only when `replacement` is ``True``.
+        generator (Generator): Generator used in sampling.
     """
 
-    def __init__(self, data_source, replacement=False, num_samples=None):
+    def __init__(self, data_source, replacement=False, num_samples=None, generator=None):
         self.data_source = data_source
         self.replacement = replacement
         self._num_samples = num_samples
+        self.generator = generator
 
         if not isinstance(self.replacement, bool):
-            raise ValueError("replacement should be a boolean value, but got "
-                             "replacement={}".format(self.replacement))
+            raise TypeError("replacement should be a boolean value, but got "
+                            "replacement={}".format(self.replacement))
 
         if self._num_samples is not None and not replacement:
             raise ValueError("With replacement=False, num_samples should not be specified, "
@@ -103,8 +105,9 @@ class RandomSampler(Sampler):
     def __iter__(self):
         n = len(self.data_source)
         if self.replacement:
-            return iter(torch.randint(high=n, size=(self.num_samples,), dtype=torch.int64).tolist())
-        return iter(torch.randperm(n).tolist())
+            rand_tensor = torch.randint(high=n, size=(self.num_samples,), dtype=torch.int64, generator=self.generator)
+            return iter(rand_tensor.tolist())
+        return iter(torch.randperm(n, generator=self.generator).tolist())
 
     def __len__(self):
         return self.num_samples
@@ -115,13 +118,15 @@ class SubsetRandomSampler(Sampler):
 
     Arguments:
         indices (sequence): a sequence of indices
+        generator (Generator): Generator used in sampling.
     """
 
-    def __init__(self, indices):
+    def __init__(self, indices, generator=None):
         self.indices = indices
+        self.generator = generator
 
     def __iter__(self):
-        return (self.indices[i] for i in torch.randperm(len(self.indices)))
+        return (self.indices[i] for i in torch.randperm(len(self.indices), generator=self.generator))
 
     def __len__(self):
         return len(self.indices)
@@ -136,6 +141,7 @@ class WeightedRandomSampler(Sampler):
         replacement (bool): if ``True``, samples are drawn with replacement.
             If not, they are drawn without replacement, which means that when a
             sample index is drawn for a row, it cannot be drawn again for that row.
+        generator (Generator): Generator used in sampling.
 
     Example:
         >>> list(WeightedRandomSampler([0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True))
@@ -144,7 +150,7 @@ class WeightedRandomSampler(Sampler):
         [0, 1, 4, 3, 2]
     """
 
-    def __init__(self, weights, num_samples, replacement=True):
+    def __init__(self, weights, num_samples, replacement=True, generator=None):
         if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
             raise ValueError("num_samples should be a positive integer "
@@ -155,9 +161,11 @@ class WeightedRandomSampler(Sampler):
         self.weights = torch.as_tensor(weights, dtype=torch.double)
         self.num_samples = num_samples
         self.replacement = replacement
+        self.generator = generator
 
     def __iter__(self):
-        return iter(torch.multinomial(self.weights, self.num_samples, self.replacement).tolist())
+        rand_tensor = torch.multinomial(self.weights, self.num_samples, self.replacement, generator=self.generator)
+        return iter(rand_tensor.tolist())
 
     def __len__(self):
         return self.num_samples

@@ -26,12 +26,13 @@ constexpr int ALIGN_BYTES = 16;
 template<typename T, typename AccumT, typename OutT>
 struct LogSoftMaxForwardEpilogue {
   __device__ __forceinline__ LogSoftMaxForwardEpilogue(AccumT max_input, AccumT sum)
-    : logsum(max_input + std::log(sum)) {}
+    : max_input(max_input),  logsum(std::log(sum)) {}
 
   __device__ __forceinline__ OutT operator()(T input) const {
-    return static_cast<OutT>(input - logsum);
+    return static_cast<OutT>(input - max_input - logsum);
 }
 
+  const AccumT max_input;
   const AccumT logsum;
 };
 
@@ -126,8 +127,8 @@ void SpatialSoftMax_getLaunchSizes(
   uint32_t block_threads = block.x * block.y;
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
   int max_active_blocks;
-#ifdef __HIP_PLATFORM_HCC__
-  // XXX HIP function signature is not compatible yet.
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION < 305
+  // HIP function signature is not compatible yet.
   uint32_t max_blocks;
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks,
                                                 k, block_threads, smem_size);

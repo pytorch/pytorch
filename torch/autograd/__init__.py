@@ -3,6 +3,8 @@
 differentiation of arbitrary scalar valued functions. It requires minimal
 changes to the existing code - you only need to declare :class:`Tensor` s
 for which gradients should be computed with the ``requires_grad=True`` keyword.
+As of now, we only support autograd for floating point :class:`Tensor` types (
+half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdouble).
 """
 import torch
 import warnings

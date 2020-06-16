@@ -79,6 +79,7 @@ namespace jit {
   _(TK_MINUS_EQ, "-=", "-=")                     \
   _(TK_TIMES_EQ, "*=", "*=")                     \
   _(TK_DIV_EQ, "/=", "/=")                       \
+  _(TK_MOD_EQ, "%=", "%=")                       \
   _(TK_GLOBAL, "global", "global")               \
   _(TK_BUILT_IN, "built-in", "")                 \
   _(TK_SUBSCRIPT, "subscript", "")               \

@@ -115,6 +115,21 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
+  void insert_stmt_before(Stmt* s, Stmt* before) {
+    if (s->get_parent()) {
+      throw malformed_input("Block append Stmt with existing parent", s);
+    }
+
+    auto pos = std::find(stmts_.begin(), stmts_.end(), before);
+    if (pos == stmts_.end()) {
+      throw malformed_input(
+          "Inserting after statement that is not in block", s);
+    }
+
+    stmts_.insert(pos, s);
+    set_parent(s, this);
+  }
+
   void insert_stmt_after(Stmt* s, Stmt* after) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
@@ -438,9 +453,17 @@ class TORCH_API Cond : public StmtNode<Cond> {
 
 class TORCH_API LoopOptions {
  public:
+  enum {
+    IDX_UNSET = -1,
+    IDX_X = 0,
+    IDX_Y = 1,
+    IDX_Z = 2,
+    IDX_W = 3,
+    IDX_MAX = IDX_W,
+  };
   // GPU Block Index
   bool is_gpu_block_index() const {
-    return gpu_block_index_ != -1;
+    return gpu_block_index_ != IDX_UNSET;
   }
 
   int gpu_block_index() const {
@@ -459,7 +482,7 @@ class TORCH_API LoopOptions {
         "blockIdx.w",
     };
 
-    if (gpu_block_index_ < 0 || gpu_block_index_ >= 4) {
+    if (gpu_block_index_ < IDX_X || gpu_block_index_ > IDX_MAX) {
       throw malformed_input("invalid GPU block index");
     }
 
@@ -467,6 +490,10 @@ class TORCH_API LoopOptions {
   }
 
   void set_gpu_block_index(int index) {
+    if (index == IDX_UNSET) {
+      gpu_block_index_ = IDX_UNSET;
+    }
+
     if (is_gpu_thread_index()) {
       throw std::runtime_error("Cannot set both gpu block and thread index");
     }
@@ -478,7 +505,7 @@ class TORCH_API LoopOptions {
 
   // GPU Thread Index
   bool is_gpu_thread_index() const {
-    return gpu_thread_index() != -1;
+    return gpu_thread_index() != IDX_UNSET;
   }
 
   int gpu_thread_index() const {
@@ -493,7 +520,7 @@ class TORCH_API LoopOptions {
     static const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
 
-    if (gpu_thread_index_ < 0 || gpu_thread_index_ >= 4) {
+    if (gpu_thread_index_ < IDX_X || gpu_thread_index_ > IDX_MAX) {
       throw malformed_input("invalid GPU thread index");
     }
 
@@ -501,6 +528,10 @@ class TORCH_API LoopOptions {
   }
 
   void set_gpu_thread_index(int index) {
+    if (index == IDX_UNSET) {
+      gpu_thread_index_ = IDX_UNSET;
+    }
+
     if (is_gpu_block_index()) {
       throw std::runtime_error("Cannot set both gpu thread and block index");
     }
@@ -521,12 +552,12 @@ class TORCH_API LoopOptions {
   }
 
   bool isDefault() const {
-    return gpu_block_index_ == -1 && gpu_thread_index_ == -1;
+    return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET;
   }
 
  private:
-  int gpu_block_index_ = -1;
-  int gpu_thread_index_ = -1;
+  int gpu_block_index_{IDX_UNSET};
+  int gpu_thread_index_{IDX_UNSET};
 };
 
 class TORCH_API For : public StmtNode<For> {

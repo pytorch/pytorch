@@ -2,17 +2,6 @@
 
 namespace torch {
 namespace jit {
-c10::AliasAnalysisKind aliasAnalysisFromSchema() {
-  return c10::AliasAnalysisKind::FROM_SCHEMA;
-}
-
-c10::AliasAnalysisKind aliasAnalysisConservative() {
-  return c10::AliasAnalysisKind::CONSERVATIVE;
-}
-
-c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
-  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
-}
 
 template <>
 c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType) {
@@ -120,7 +109,7 @@ int listRemove<at::Tensor>(Stack& stack) {
   return 0;
 }
 
-void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
+void checkImplicitTensorToNum(const at::Tensor& t, bool toInt) {
   if (t.requires_grad()) {
     throw std::runtime_error(
         "Cannot input a tensor that requires grad as a scalar argument");
@@ -169,7 +158,7 @@ IValue tensorToListRecursive(
     } else {
       TORCH_CHECK(
           false,
-          ty->python_str(),
+          ty->repr_str(),
           " is not one of the supported types for tolist: int, float, bool");
     }
   }
@@ -242,12 +231,12 @@ void loop(int n, int64_t& p, int64_t& r) {
 
 int nminussumofbits(int v) {
   long w = (long)v;
-  w -= (0xaaaaaaaa & w) >> 1;
-  w = (w & 0x33333333) + ((w >> 2) & 0x33333333);
-  w = (w + (w >> 4)) & 0x0f0f0f0f;
-  w += w >> 8;
-  w += w >> 16;
-  return v - (int)(w & 0xff);
+  w -= (0xaaaaaaaa & w) >> 1; // NOLINT
+  w = (w & 0x33333333) + ((w >> 2) & 0x33333333); // NOLINT
+  w = (w + (w >> 4)) & 0x0f0f0f0f; // NOLINT
+  w += w >> 8; // NOLINT
+  w += w >> 16; // NOLINT
+  return v - (int)(w & 0xff); // NOLINT
 }
 
 int64_t factorial(int n) {
@@ -420,7 +409,7 @@ int listMulIntLeftInPlace(Stack& stack) {
     list.clear();
   } else if (n > 1) {
     size_t list_size = list.size();
-    for (auto i = 1; i < n; i++) {
+    for (int64_t i = 1; i < n; i++) {
       for (size_t j = 0; j < list_size; j++) {
         list.push_back(list.get(j));
       }
@@ -439,7 +428,7 @@ int listMulIntLeft(Stack& stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (auto i = 0; i < n; i++) {
+  for (int64_t i = 0; i < n; i++) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
@@ -457,7 +446,7 @@ int listMulIntRight(Stack& stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (auto i = 0; i < n; i++) {
+  for (int64_t i = 0; i < n; i++) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
