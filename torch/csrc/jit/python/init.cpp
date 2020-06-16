@@ -972,7 +972,7 @@ void initJITBindings(PyObject* module) {
         auto typePtr =
             futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
         c10::List<c10::intrusive_ptr<c10::ivalue::Future>> asList(
-          c10::FutureType::create(typePtr));
+            c10::FutureType::create(typePtr));
         asList.reserve(futures.size());
         for (const auto& f : futures) {
           asList.push_back(f->fut);
