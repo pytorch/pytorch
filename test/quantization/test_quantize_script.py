@@ -2373,7 +2373,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                    .check("aten::dequantize(") \
                    .run(m2.graph)
 
-class TestQuantizeDynamicScript(QuantizationTestCase):
+class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
     def test_prepare_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2466,21 +2466,6 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                        .check_not(wt_quant_func) \
                        .check("return") \
                        .run(m.graph)
-
-    def test_finalize_for_linear_dynamic(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.fc = torch.nn.Linear(5, 5).float()
-
-            def forward(self, x):
-                return self.fc(x)
-
-        qconfig_dict = {'': default_dynamic_qconfig}
-        model = torch.jit.script(M()).eval()
-        model = quantize_dynamic_script(model, qconfig_dict)
-        FileCheck().check("quantized::linear_dynamic") \
-                   .run(model.graph)
 
     def test_dynamic_multi_op(self):
         class M(torch.nn.Module):
@@ -2640,3 +2625,29 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         for x, obs in model._modules._c.items():
             graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
         self.assertEqual(ref_qparams, graph_params)
+
+class TestQuantizeScriptPTDQOps(QuantizationTestCase):
+    """ Test graph mode post training dynamic quantization works
+    for individual ops end to end.
+    """
+    def test_quantized_linear_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                return self.fc(x)
+
+        qconfig_dict = {'': default_dynamic_qconfig}
+        for tracing_mode in [True, False]:
+            eager_model = M()
+            eager_model.eval()
+            if tracing_mode:
+                x = torch.randn(5, 5)
+                model = torch.jit.trace(eager_model, x)
+            else:
+                model = torch.jit.script(eager_model)
+            model = quantize_dynamic_script(model, qconfig_dict)
+            FileCheck().check("quantized::linear_dynamic") \
+                       .run(model.graph)
