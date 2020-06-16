@@ -33,7 +33,7 @@ struct OperatorRegistry {
   std::unordered_map<std::string, std::shared_ptr<Operator>> operators_by_sig;
   std::unordered_map<const char*, std::shared_ptr<Operator>>
       operators_by_sig_literal;
-
+  std::unordered_set<c10::OperatorName> registered_operator_names;
   // XXX - caller must be holding lock
   void registerPendingOperators() {
     for (const auto& op : to_register) {
@@ -47,6 +47,10 @@ struct OperatorRegistry {
  public:
   void registerOperator(Operator&& op) {
     std::lock_guard<std::mutex> guard(lock);
+    if(registered_operator_names.count(op.schema().operator_name()) > 0) {
+      std::cout << op.schema() << std::endl;
+    };
+    registered_operator_names.insert(op.schema().operator_name());
     to_register.push_back(std::make_shared<Operator>(std::move(op)));
   }
 
@@ -55,6 +59,8 @@ struct OperatorRegistry {
     auto sig = canonicalSchemaString(schema);
 
     std::lock_guard<std::mutex> guard(lock);
+
+    registered_operator_names.erase(schema.operator_name());
     // Try removing from pending operators list first
     auto pending_it = to_register.begin();
     while (pending_it != to_register.end() && (*pending_it)->schema() != schema)
