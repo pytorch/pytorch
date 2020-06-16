@@ -17607,17 +17607,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         if shape == ():
                             x = torch.tensor(())
                         else:
-                            x = torch.randn(*shape)
+                            x = torch.randn(*shape) * random.randint(30, 100)
                             x[torch.randn(*shape) > 0.5] = 0
 
                         if count_dim == ():
                             # Default `dims=None` case
-                            self.compare_with_numpy(torch.count_nonzero, np.count_nonzero, x, device, dtype)
+                            self.compare_with_numpy(torch.count_nonzero, np.count_nonzero, x.tolist(), device, dtype)
                         else:
                             # With `dims: tuple of ints` case
                             torch_func = partial(torch.count_nonzero, dim=count_dim)
                             np_func = partial(np.count_nonzero, axis=count_dim)
-                            self.compare_with_numpy(torch_func, np_func, x, device, dtype)
+                            self.compare_with_numpy(torch_func, np_func, x.tolist(), device, dtype)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
