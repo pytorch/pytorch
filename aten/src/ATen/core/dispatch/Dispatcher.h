@@ -298,29 +298,34 @@ inline Return Dispatcher::callWithDispatchKey(const OperatorHandle& op, Dispatch
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  // Check if we need to run callbacks registered with RecordFunction
-  // If true and callbacks need inputs, we box the arguments and pass
-  // them into the callbacks and also into the kernel call
 
-  // Note: for perf reasons we wouldn't want to pass arguments into
-  // the function call or prematurely box them
-  at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(guard.active)) {
-    if (guard.needs_inputs) {
-      std::vector<c10::IValue> stack;
-      auto boxed_all_args = impl::boxArgumentsIntoStack(stack, args...);
+  if (dispatchKey != DispatchKey::BackendSelect) {
+    // Check if we need to run callbacks registered with RecordFunction
+    // If true and callbacks need inputs, we box the arguments and pass
+    // them into the callbacks and also into the kernel call
 
-      guard.before(op.schema().name(), stack, at::sequence_number::peek());
+    // Note: for perf reasons we wouldn't want to pass arguments into
+    // the function call or prematurely box them
+    at::RecordFunction guard(at::RecordScope::FUNCTION);
+    if (C10_UNLIKELY(guard.active)) {
+      if (guard.needs_inputs) {
+        std::vector<c10::IValue> stack;
+        auto boxed_all_args = impl::boxArgumentsIntoStack(stack, args...);
 
-      // if we could convert all the arguments, also pass the stack into the kernel call
-      if (boxed_all_args) {
-        return kernel.template callBoxedOrUnboxed<Return, Args...>(op, stack, std::forward<Args>(args)...);
+        guard.before(op.schema().name(), stack, at::sequence_number::peek());
+
+        // if we could convert all the arguments, also pass the stack into the kernel call
+        if (boxed_all_args) {
+          return kernel.template callBoxedOrUnboxed<Return, Args...>(op, stack, std::forward<Args>(args)...);
+        }
+      } else {
+        guard.before(op.schema().name(), at::sequence_number::peek());
       }
-    } else {
-      guard.before(op.schema().name(), at::sequence_number::peek());
     }
+    return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
+  } else {
+    return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
   }
-  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
@@ -350,17 +355,20 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(backendsWithoutFallthrough_, stack);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
 
-  // using already existing stack to record function execution in observers
-  at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(guard.active)) {
-    if (guard.needs_inputs) {
-      guard.before(op.schema().name(), *stack, at::sequence_number::peek());
-    } else {
-      guard.before(op.schema().name(), at::sequence_number::peek());
+  if (dispatchKey != DispatchKey::BackendSelect) {
+    // using already existing stack to record function execution in observers
+    at::RecordFunction guard(at::RecordScope::FUNCTION);
+    if (C10_UNLIKELY(guard.active)) {
+      if (guard.needs_inputs) {
+        guard.before(op.schema().name(), *stack, at::sequence_number::peek());
+      } else {
+        guard.before(op.schema().name(), at::sequence_number::peek());
+      }
     }
+    kernel.callBoxed(op, stack);
+  } else {
+    kernel.callBoxed(op, stack);
   }
-
-  kernel.callBoxed(op, stack);
 }
 
 inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, DispatchKey dispatchKey) const {
