@@ -115,6 +115,18 @@ class AbstractTestCases:
         def test_dir(self):
             dir(torch)
 
+        def test_deterministic_flag(self):
+            deterministic_restore = torch.is_deterministic()
+
+            for deterministic in [True, False]:
+                torch.set_deterministic(deterministic)
+                self.assertEqual(deterministic, torch.is_deterministic())
+
+            with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
+                torch.set_deterministic(1)
+
+            torch.set_deterministic(deterministic_restore)
+
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
             self.assertEqual(x.byte().dtype, torch.uint8)
@@ -9535,7 +9547,7 @@ class TestTorchDeviceType(TestCase):
             M, N = input_.shape
             input_.zero_()
             for i in range(min(M, N)):
-                input_[i][i] = 1    
+                input_[i][i] = 1
             output1 = input_.argmax(dim=0)
             output2 = input_.sum(dim=0)
             for i in range(min(M, N)):
@@ -10941,18 +10953,20 @@ class TestTorchDeviceType(TestCase):
         t.bernoulli_(0.5)
         self.assertTrue(isBinary(t))
 
-        p = torch.rand(10, dtype=torch.float32, device=device).expand(10, 10)
-        t.fill_(2)
-        t.bernoulli_(p)
-        self.assertTrue(isBinary(t))
+        for p_dtype in torch.testing.get_all_fp_dtypes(include_half=device.startswith('cuda'),
+                                                       include_bfloat16=False):
+            p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
+            t.fill_(2)
+            t.bernoulli_(p)
+            self.assertTrue(isBinary(t))
 
-        t.fill_(2)
-        torch.bernoulli(torch.rand_like(t, dtype=torch.float32), out=t)
-        self.assertTrue(isBinary(t))
+            t.fill_(2)
+            torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
+            self.assertTrue(isBinary(t))
 
-        t.fill_(2)
-        t.bernoulli_(torch.rand_like(t, dtype=torch.float32))
-        self.assertTrue(isBinary(t))
+            t.fill_(2)
+            t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
+            self.assertTrue(isBinary(t))
 
     @slowTest
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
@@ -14153,6 +14167,24 @@ class TestTorchDeviceType(TestCase):
                     op(a, cpu_tensor)
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(cpu_tensor, a)
+
+    # This test ensures that a scalar Tensor can be safely used
+    # in a binary operation in conjuction with a Tensor on all
+    # available CUDA devices
+    @deviceCountAtLeast(2)
+    @onlyCUDA
+    def test_binary_op_scalar_device_unspecified(self, devices):
+        scalar_val = torch.tensor(1.)
+        for default_device in devices:
+            with torch.cuda.device(default_device):
+                for device in devices:
+                    device_obj = torch.device(device)
+                    x = torch.rand(3, device=device)
+                    y0 = x * scalar_val
+                    self.assertEqual(y0.device, device_obj)
+                    y1 = scalar_val * x
+                    self.assertEqual(y1.device, device_obj)
+                    self.assertEqual(y0, y1)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
     # binary operations with CUDA tensors.
