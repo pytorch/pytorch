@@ -395,7 +395,7 @@ if (FwGradMode::is_enabled() && (${if_stmt})) {
     ${fw_grad_defined}
 
     auto ${out_arg}_new_fw_grad = ${formula};
-    ${out_arg}.set_fw_grad(${out_arg}_new_fw_grad);
+    ${out_arg}.set_fw_grad(${out_arg}_new_fw_grad, /* inplace */ ${inplace});
 }
 """)
 
@@ -1195,12 +1195,11 @@ def emit_body(declaration):
             fw_grad_defined = ""
             for inp in differentiable_inputs:
                 if inp['name'] in derivative['required_inputs']:
-                    # new_val = "at::zeros_like({})".format(inp['name'])
-                    # if inp['is_nullable']:
-                    #     new_val = "({name}.defined()? {new_val} : Tensor())".format(name=inp['name'], new_val=new_val)
                     fw_grad_defined += FW_DERIVATIVE_DEFINED_TEMPLATE.substitute(inp=inp['name'])#, new_val=new_val)
+            # View ops create fw_grad that already is a view of the base's fw_grad so just use that
+            inplace = "false" if view_info is not None else "true"
             content.append(FW_DERIVATIVE_TEMPLATE.substitute(if_stmt=if_stmt, formula=derivative['formula'], out_arg=res,
-                                                             fw_grad_defined=fw_grad_defined))
+                                                             fw_grad_defined=fw_grad_defined, inplace=inplace))
         return content
 
     def emit_forbid_fw_derivatives(is_inplace=False):

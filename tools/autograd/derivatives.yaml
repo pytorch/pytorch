@@ -687,7 +687,7 @@
 
 - name: max(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
-  result: "self_fw_grad.defined()? select_first_equal_backward(self_fw_grad, self, result) : Tensor()"
+  result: max_forward(self_fw_grad, self, result)
 
 - name: max.other(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self <= other, 0)

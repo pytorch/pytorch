@@ -2906,7 +2906,11 @@ Tensor max_forward(const Tensor& self_fw_grad, const Tensor& self, const Tensor&
   Tensor out_fw_grad;
   if (self_fw_grad.defined()) {
     auto first_value_idx = (self == result).nonzero().select(0, 0);
-    out_fw_grad = self_fw_grad.index(first_value_idx);
+    auto n_dim = first_value_idx.sizes()[0];
+    out_fw_grad = self_fw_grad;
+    for (auto dim=0; dim < n_dim; ++dim) {
+      out_fw_grad = at::select(out_fw_grad, 0, first_value_idx[dim].item().to<int64_t>());
+    }
   }
   return out_fw_grad;
 }
