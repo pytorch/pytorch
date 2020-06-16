@@ -6,9 +6,8 @@
 namespace torch {
 namespace jit {
 
-enum class MobileOptimizerType {
+enum class MobileOptimizerType : int8_t {
   CONV_BN_FUSION,
-  FOLD_CONV_BATCH_NORM,
   INSERT_FOLD_PREPACK_OPS,
   REMOVE_DROPOUT
 };
@@ -19,6 +18,6 @@ TORCH_API void fusePrePackedLinearConvWithClamp(script::Module& module);
 TORCH_API void FoldPrePackingOps(script::Module& module);
 TORCH_API script::Module optimizeForMobile(
     const script::Module& module,
-    const std::unordered_set<MobileOptimizerType>& optimization_blacklist);
+    const std::set<MobileOptimizerType>& optimization_blacklist);
 } // namespace jit
 } // namespace torch

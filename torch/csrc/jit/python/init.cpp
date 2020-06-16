@@ -535,7 +535,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_optimize_for_mobile",
           [](script::Module& module,
-             std::unordered_set<MobileOptimizerType>& optimization_blacklist) {
+             std::set<MobileOptimizerType>& optimization_blacklist) {
             return optimizeForMobile(module, optimization_blacklist);
           })
       .def(
