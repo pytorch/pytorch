@@ -29,6 +29,12 @@ Expr* Statement::asExpr() {
   return static_cast<Expr*>(this);
 }
 
+void Statement::print() {
+  IRPrinter ir_printer(std::cout);
+  ir_printer.handle(this);
+  std::cout << std::endl;
+}
+
 // When we create a Val we immediately register them with the active fusion.
 Val::Val(ValType _vtype, DataType _dtype, bool register_val)
     : vtype_{_vtype}, dtype_{_dtype} {

@@ -520,7 +520,7 @@ void compileKernel(CudaKernel* entry) {
 void runKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
-    std::vector<at::Tensor> outputs) {
+    const std::vector<at::Tensor>& outputs) {
   validateKernelArgs(*entry, inputs, outputs);
 
   const auto prior_device = at::cuda::current_device();
@@ -590,7 +590,7 @@ void runKernel(
 void runTestKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
-    std::vector<at::Tensor> outputs) {
+    const std::vector<at::Tensor>& outputs) {
   validateKernelArgs(*entry, inputs, outputs);
 
   const auto prior_device = at::cuda::current_device();

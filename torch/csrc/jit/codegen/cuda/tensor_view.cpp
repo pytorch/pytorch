@@ -446,14 +446,6 @@ TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
   return this;
 }
 
-/*
- * Take reduction axes out of this domain, and create a new domain. New domain
- * will be used to create this domain. For example: TV1[I0, I1] = TV0[I0, R0,
- * R1, I1] TV0->rfactor({1}) TV0 is transformed to -> TV0[I0, R1, I1] The
- * TensorView returned is: TV2[I0, R0, I3, I1] The reduction will now beset
- * as: TV1[I0, R1, I1] = TV2[I0, R0, I3, I1] TV0[I0, I1] = TV1[I0, R1, I1]
- */
-
 TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   FusionGuard fg(this->fusion());
   Expr* origin_expr = this->fusion()->origin(this);

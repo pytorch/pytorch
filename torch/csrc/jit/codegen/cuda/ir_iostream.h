@@ -31,8 +31,6 @@ struct TensorView;
 struct IterDomain;
 struct TensorIndex;
 
-struct TensorContiguity;
-
 struct Split;
 struct Merge;
 

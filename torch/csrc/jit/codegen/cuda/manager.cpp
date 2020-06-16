@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
-#include <torch/csrc/jit/codegen/cuda/tensor_meta.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -24,15 +23,6 @@ std::unique_ptr<KernelArgsReq> makePWKernelSupport(
     req_ptr->dims_.push_back(input.isTensor() ? input.toTensor().dim() : -1);
   }
   return req_ptr;
-}
-
-// TODO: contiguity could be used for better kernel launch config.
-TensorContiguity infer_contiguity_from_tensor_type(
-    const std::shared_ptr<c10::TensorType>& tensor_type) {
-  TORCH_INTERNAL_ASSERT(tensor_type->isComplete());
-  return TensorContiguity(
-      *(tensor_type->sizes().concrete_sizes()),
-      *(tensor_type->strides().concrete_sizes()));
 }
 
 // CudaFusionManager holds compiled `CudaKernel` and handles all interfacing
@@ -88,7 +78,7 @@ class CudaFusionManager {
       int32_t kernel_id,
       std::shared_ptr<Graph>& graph,
       const at::ArrayRef<IValue> inputs,
-      std::vector<at::Tensor> outputs) {
+      const std::vector<at::Tensor>& outputs) {
     std::lock_guard<std::mutex> guard(mutex_);
     TORCH_CHECK(
         kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");

@@ -330,7 +330,6 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/parser.cpp",
     "torch/csrc/jit/codegen/cuda/partition.cpp",
     "torch/csrc/jit/codegen/cuda/predicate_compute.cpp",
-    "torch/csrc/jit/codegen/cuda/tensor_meta.cpp",
     "torch/csrc/jit/codegen/cuda/tensor_view.cpp",
     "torch/csrc/jit/codegen/cuda/transform_iter.cpp",
     "torch/csrc/jit/codegen/cuda/transform_replay.cpp",

@@ -89,13 +89,13 @@ TORCH_CUDA_API void compileKernel(CudaKernel* entry);
 TORCH_CUDA_API void runKernel(
     CudaKernel* entry,
     const at::ArrayRef<c10::IValue> inputs,
-    std::vector<at::Tensor> outputs);
+    const std::vector<at::Tensor>& outputs);
 
 // Facility API to run kernel in tests.
 TORCH_CUDA_API void runTestKernel(
     CudaKernel* entry,
     const at::ArrayRef<c10::IValue> inputs,
-    std::vector<at::Tensor> outputs);
+    const std::vector<at::Tensor>& outputs);
 
 } // namespace cuda
 } // namespace fuser

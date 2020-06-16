@@ -261,15 +261,24 @@ struct TORCH_CUDA_API TensorView : public Val {
   // Reorder axes according to old2new[old_pos] = new_pos
   TensorView* reorder(const std::unordered_map<int, int>& old2new);
 
-  /*
-   * WARNING: Does not return this TensorView, returns a new tensorview consumed
-   * to create this!! Take reduction axes out of this domain, and create a new
-   * domain. New domain will be used to create this domain. For example: TV1[I0,
-   * I1] = TV0[I0, R0, R1, I1] TV0->rfactor({1}) TV0 is transformed to ->
-   * TV0[I0, R1, I1] The TensorView returned is: TV2[I0, R0, I3, I1] The
-   * reduction will now beset as: TV1[I0, R1, I1] = TV2[I0, R0, I3, I1] TV0[I0,
-   * I1] = TV1[I0, R1, I1]
-   */
+  // WARNING: rFactor does not return this TensorView, ir returns a new
+  //  tensorview consumed by this!
+  //
+  // Take reduction axes out of this domain, and create a new
+  // domain. New domain will be used to create this domain.
+  //
+  // For example:
+  //  TV1[I0, R1, R2, I3] = TV0[I0, I1, I2, I3]
+  //
+  // After:
+  //  TV1->rfactor({1}), TV1 is transformed to -> TV1[I0, R2, I3]
+  //
+  // The TensorView returned is: TV2[I0, R1, I2, I3]
+  //
+  // The reduction will now beset as:
+  //  TV2[I0, R1, I2, I3] = TV0[I0, I1, I2, I3]
+  //  TV1[I0, R2, I3] = TV2[I0, R1, I2, I3]
+  //
   TensorView* rFactor(const std::vector<int>& axes);
 
   MemoryType getMemoryType() const noexcept {

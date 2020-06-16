@@ -378,7 +378,7 @@ void IRPrinter::handle(const ReductionOp* const rop) {
     return;
   }
 
-  TensorIndex* out = static_cast<TensorIndex*>(rop->out());
+  auto out = rop->out()->as<TensorIndex>();
   auto vec_domain = out->view()->domain()->domain();
 
   bool has_block_reduce = out->view()->hasBlockReduction();
@@ -554,7 +554,6 @@ void IRPrinter::handle(const Merge* const m) {
   handle(m->inner());
   os << " -> ";
   handle(m->out());
-  --indent_size;
   os << "\n";
 }
 

@@ -142,6 +142,8 @@ struct TORCH_CUDA_API Statement {
     return this == other;
   }
 
+  void print();
+
  protected:
   StmtNameType name_ = UNINITIALIZED_STMTNAMETYPE;
   Fusion* fusion_ = nullptr;
