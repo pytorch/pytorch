@@ -15,9 +15,9 @@ namespace {
 
 ${backend_select_method_definitions}
 
-TORCH_LIBRARY_IMPL(aten, BackendSelect, m) {
+static auto registry = torch::RegisterOperators()
   ${backend_select_function_registrations};
-}
+
 
 } // namespace
 } // at
