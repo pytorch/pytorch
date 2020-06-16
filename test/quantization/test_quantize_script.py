@@ -2237,6 +2237,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = x.unsqueeze(0)
                 x.unsqueeze_(0)
                 x = torch.unsqueeze(x, 0)
+                x = x.repeat(4, 2)
                 y = []
                 y.append(x)
                 x, _ = y

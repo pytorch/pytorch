@@ -84,6 +84,7 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "transpose",
     "contiguous",
     "permute",
+    "repeat",
     "repeat_interleave",
     "relu",
     "relu_",
