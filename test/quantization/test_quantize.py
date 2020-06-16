@@ -682,7 +682,6 @@ class TestPostTrainingDynamic(QuantizationTestCase):
     def test_quantized_rnn(self, qconfig, dtype):
         r"""Test dynamic quantization, scriptability and serialization for dynamic quantized lstm modules on int8 and fp16
         """
-        d_in, d_hid = 2, 2
         model = RNNDynamicModel('LSTM').eval()
         niter = 10
         x = torch.tensor([[100, -155],
@@ -691,7 +690,6 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         qconfig_dict = {
             torch.nn.LSTM : qconfig
         }
-
         if dtype == torch.float16:
             model_quantized = quantize_dynamic(model=model, dtype=dtype)
         else:
