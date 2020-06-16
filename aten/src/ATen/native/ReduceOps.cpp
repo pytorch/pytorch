@@ -320,15 +320,6 @@ Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<S
   return at::native::nansum_out(result, self, dim, keepdim, dtype);
 }
 
-Tensor nansum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  return at::nansum(self, dimnames_to_positions(self, dim), keepdim, dtype);
-}
-
-Tensor& nansum_out(Tensor& result, const Tensor& self, DimnameList dim,
-                bool keepdim, optional<ScalarType> opt_dtype) {
-  return at::nansum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
-}
-
 static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
                         bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
