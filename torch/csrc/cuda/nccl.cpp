@@ -71,8 +71,9 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
+inline
 ncclDataType_t get_data_type(const Tensor& t) {
-  if (t.type().backend() != Backend::CUDA) {
+  if (!t.is_cuda()) {
     throw std::runtime_error("Unconvertible NCCL type");
   }
   switch (t.scalar_type()) {
@@ -92,6 +93,54 @@ ncclDataType_t get_data_type(const Tensor& t) {
       return ncclChar;
     default:
       throw std::runtime_error("Unconvertible NCCL type");
+  }
+}
+
+static inline
+void check_tensor(
+    const at::Tensor& input,
+    const at::optional<at::Tensor>& output,
+    int input_multiplier,
+    int output_multiplier,
+    int64_t ref_numel,
+    ScalarType ref_dtype) {
+
+  auto check_one = [&](const at::Tensor &tensor) {
+    if (!tensor.is_cuda() || tensor.is_sparse()) {
+      throw std::runtime_error(
+          "input and output elements have to be cuda dense Tensors");
+    }
+
+    if (ref_dtype != tensor.scalar_type()) {
+      throw std::runtime_error(
+          "all inputs and outputs must be of the same Tensor dtype");
+    }
+
+    if (!tensor.is_contiguous()) {
+      throw std::runtime_error("all inputs and outputs have to be contiguous");
+    }
+  };
+
+  check_one(input);
+
+  // all inputs must be same size
+  if (input.numel() != ref_numel) {
+    throw std::runtime_error(
+        "all inputs must have the same number of elements");
+  }
+
+  if (output) {
+    check_one(*output);
+
+    // inputs and outputs must be on same device respectively
+    if (input.get_device() != output->get_device()) {
+      throw std::runtime_error("input and output must be on the same device");
+    }
+
+    if (output->numel() * output_multiplier != ref_numel * input_multiplier) {
+      throw std::runtime_error(
+          "output must be of size input_size * size_multiplier");
+    }
   }
 }
 
@@ -116,26 +165,13 @@ void check_inputs(
 
   device_set devices;
   int64_t numel = inputs[0].numel();
-  auto type = inputs[0].type();
+  auto dtype = inputs[0].scalar_type();
 
   for (size_t i = 0; i < len; i++) {
     auto input = inputs[i];
     auto output = outputs[i];
 
-    if (!(input.is_cuda() && !input.is_sparse() &&
-          output.is_cuda() && !output.is_sparse())) {
-      throw std::runtime_error(
-          "input and output elements have to be cuda dense Tensors");
-    }
-
-    if (!(type == input.type() && type == output.type())) {
-      throw std::runtime_error(
-          "all inputs and outputs must be of the same Tensor type");
-    }
-
-    if (!input.is_contiguous() || !output.is_contiguous()) {
-      throw std::runtime_error("all inputs and outputs have to be contiguous");
-    }
+    check_tensor(input, output, input_multiplier, output_multiplier, numel, dtype);
 
     auto input_device = input.get_device();
     // inputs must be on unique devices
@@ -143,22 +179,39 @@ void check_inputs(
       throw std::runtime_error("inputs must be on unique devices");
     }
     devices.set(input_device);
+  }
+}
 
-    // inputs and outputs must be on same device respectively
-    if (input_device != output.get_device()) {
-      throw std::runtime_error("input and output must be on the same device");
-    }
+void check_inputs(
+    TensorList inputs,
+    const at::Tensor& output,
+    int root,
+    int input_multiplier,
+    int output_multiplier) {
+  size_t len = inputs.size();
 
-    // all inputs must be same size
-    if (input.numel() != numel) {
-      throw std::runtime_error(
-          "all inputs must have the same number of elements");
-    }
+  if (len <= 0) {
+    throw std::runtime_error("input sequence can't be empty");
+  }
 
-    if (output.numel() * output_multiplier != numel * input_multiplier) {
-      throw std::runtime_error(
-          "output must be of size input_size * size_multiplier");
+  device_set devices;
+  int64_t numel = inputs[0].numel();
+  auto dtype = inputs[0].scalar_type();
+
+  for (size_t i = 0; i < len; i++) {
+    auto input = inputs[i];
+
+    check_tensor(
+      input,
+      i == root ? at::optional<at::Tensor>{output} : at::nullopt,
+      input_multiplier, output_multiplier, numel, dtype);
+
+    auto input_device = input.get_device();
+    // inputs must be on unique devices
+    if (devices.test(input_device)) {
+      throw std::runtime_error("inputs must be on unique devices");
     }
+    devices.set(input_device);
   }
 }
 
@@ -168,8 +221,7 @@ bool is_available(TensorList tensors) {
 #ifdef USE_NCCL
   device_set devices;
   for (auto& tensor : tensors) {
-    auto type = tensor.type();
-    if (!type.is_cuda() || type.is_sparse())
+    if (!tensor.is_cuda() || tensor.is_sparse())
       return false;
     if (!tensor.is_contiguous())
       return false;
@@ -295,7 +347,7 @@ void broadcast(
 
 void reduce(
     const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs,
+    at::Tensor& output,
     int32_t root,
     int32_t op,
     const stream_list& streams,
@@ -305,7 +357,7 @@ void reduce(
   TORCH_CHECK(
       root >= 0 && static_cast<size_t>(root) < inputs.size(), "invalid root");
 
-  check_inputs(inputs, outputs, 1, 1);
+  check_inputs(inputs, output, root, 1, 1);
   const auto len = inputs.size();
 
   ncclDataType_t data_type = get_data_type(inputs[0]);
@@ -326,7 +378,7 @@ void reduce(
 
     NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
-        outputs[i].data_ptr(),
+        root == i ? output.data_ptr() : nullptr,
         count,
         data_type,
         (ncclRedOp_t)op,
@@ -345,7 +397,7 @@ void reduce(
     int32_t op,
     const stream_list& streams,
     const comm_list& user_comms) {
-  reduce(inputs, /*outputs=*/inputs, root, op, streams, user_comms);
+  reduce(inputs, /*output=*/inputs[root], root, op, streams, user_comms);
 }
 
 void all_reduce(

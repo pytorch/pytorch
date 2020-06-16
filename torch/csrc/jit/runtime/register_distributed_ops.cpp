@@ -26,7 +26,7 @@ static auto workerInfo =
 
 RegisterOperators reg_rpc_ops(
     {Operator(
-         "aten::to_here(RRef(t) self) -> t",
+         "aten::to_here(RRef(t) self) -> t(*)",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();
            IValue res;
@@ -43,7 +43,7 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::to_here(RRef(t) self, double timeout) -> t",
+         "aten::to_here(RRef(t) self, double timeout) -> t(*)",
          [](Stack& stack) {
            auto timeout = pop(stack).toDouble();
            auto rref = pop(stack).toRRef();
@@ -61,7 +61,7 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::local_value(RRef(t) self) -> t",
+         "aten::local_value(RRef(t) self) -> t(*)",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();
            TORCH_CHECK(
