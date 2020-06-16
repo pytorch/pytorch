@@ -117,9 +117,9 @@ Tensor new_with_storage(c10::DispatchKey dispatch_key, at::ScalarType scalar_typ
 }
 
 Tensor new_with_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, const Tensor& other) {
-  TORCH_CHECK_TYPE(legacyExtractDispatchKey(other.key_set()) != dispatch_key, "expected ",
-                   toString(dispatch_key), " (got ", toString(other.key_set()), ")");
-  TORCH_CHECK_TYPE(other.scalar_type() != scalar_type, "expected ",
+  TORCH_CHECK_TYPE(legacyExtractDispatchKey(other.key_set()) == dispatch_key, "expected ",
+                   toString(dispatch_key), " (got ", toString(legacyExtractDispatchKey(other.key_set())), ")");
+  TORCH_CHECK_TYPE(other.scalar_type() == scalar_type, "expected ",
                    toString(scalar_type), " (got ", toString(other.scalar_type()), ")");
   return other.slice();
 }
