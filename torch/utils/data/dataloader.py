@@ -1063,7 +1063,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     if self._workers_status[worker_id]:
                         self._shutdown_worker(worker_id)
                 for w in self._workers:
-                    w.join()
+                    w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+                    if w.is_alive():
+                        # Existing mechanisms try to make the workers exit
+                        # peacefully, but in case that we unfortunately reach
+                        # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
+                        # we kill the worker.
+                        w.terminate()
                 for q in self._index_queues:
                     q.cancel_join_thread()
                     q.close()
