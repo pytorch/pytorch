@@ -2430,10 +2430,9 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
                 x = x + 5
                 return self.fc1(x)
 
-        eager_model = M().eval()
         x = torch.randn(5, 5)
         for tracing in [True, False]:
-            model = self.checkGraphModeOp(eager_model, x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+            model = self.checkGraphModeOp(M(), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
             # add op is not dynamically quantized.
             FileCheck().check("aten::add") \
                        .run(model.graph)
@@ -2449,10 +2448,9 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
                 size2 = x.size()
                 return self.fc(x), size1, size2
 
-        eager_model = M().eval()
         x = torch.randn(5, 5)
         for tracing in [True, False]:
-            model = self.checkGraphModeOp(eager_model, x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+            model = self.checkGraphModeOp(M(), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
             FileCheck().check_not("aten::_choose_qparams_per_tensor") \
                        .run(model.graph)
 
