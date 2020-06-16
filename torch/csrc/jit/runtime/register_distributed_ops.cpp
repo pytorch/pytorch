@@ -29,7 +29,7 @@ static auto workerInfo =
 RegisterOperators reg_rpc_ops(
     {Operator(
          fmt::format(
-             "aten::to_here(RRef(t) self, float timeout = {}) -> t",
+             "aten::to_here(RRef(t) self, float timeout = {}) -> t(*)",
              torch::distributed::rpc::kDefaultRpcTimeoutSeconds),
          [](Stack& stack) {
            auto timeout = pop(stack).toDouble();
