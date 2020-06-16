@@ -67,11 +67,11 @@ void testGPU_IrGraphGenerator() {
   fusion.addInput(tv0);
 
   TensorView* tv1 = mul(tv0, new Float(-1.0));
-  TensorView* tv2 = add(tv0, new Float(3.0));
-  TensorView* tv3 = mul(tv0, new Float(2.5));
-  TensorView* tv4 = add(tv2, tv1);
-  TensorView* tv5 = add(tv4, tv3);
-  TensorView* tv6 = add(tv0, tv3);
+  TensorView* tv2 = add(tv0, new Float(3.141));
+  TensorView* tv3 = broadcast(tv0, {false, true, false, true});
+  TensorView* tv4 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv3);
+  TensorView* tv5 = clamp(tv4, new Float(0.f), new Float(1.f));
+  TensorView* tv6 = add(tv2, tv2);
 
   // Another checkpoint before adding outputs
   TORCH_CHECK(!IrGraphGenerator::toGraphviz(
@@ -85,8 +85,7 @@ void testGPU_IrGraphGenerator() {
   tv6->split(0, 4);
   tv6->axis(0)->parallelize(ParallelType::BIDx);
   tv5->reorder({{-1, 0}});
-  tv0->computeAt(tv3, 1);
-  tv0->computeAt(tv6, 1);
+  tv2->computeAt(tv6, 1);
 
   // Another checkpoint with more node types
   TORCH_CHECK(!IrGraphGenerator::toGraphviz(
