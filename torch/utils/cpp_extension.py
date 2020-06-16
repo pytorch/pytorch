@@ -319,8 +319,8 @@ class BuildExtension(build_ext, object):
             def __init__(self, *args, **kwargs):
                 kwargs = kwargs.copy()
                 kwargs.update(options)
-                super(cls_with_options, self).__init__(*args, **kwargs)
-            pass
+                super().__init__(*args, **kwargs)
+
         return cls_with_options
 
     def __init__(self, *args, **kwargs):
