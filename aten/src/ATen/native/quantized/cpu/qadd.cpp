@@ -266,22 +266,22 @@ Tensor qadd_scalar_tensor_out(Tensor qa, Tensor b, Tensor out) {
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("add",                 qadd</*ReLUFused=*/false>);
-  m.impl("add_relu",            qadd</*ReLUFused=*/true>);
-  m.impl("add_out",             qadd_out</*ReLUFused=*/false>);
-  m.impl("add_relu_out",        qadd_out</*ReLUFused=*/true>);
-  m.impl("add_scalar",          qadd_scalar</*ReLUFused=*/false>);
-  m.impl("add_scalar_relu",     qadd_scalar</*ReLUFused=*/true>);
-  m.impl("add_scalar_out",      qadd_scalar_out</*ReLUFused=*/false>);
-  m.impl("add_scalar_relu_out", qadd_scalar_out</*ReLUFused=*/true>);
-  m.impl("add_scalar.Tensor",   qadd_scalar_tensor</*ReLUFused=*/false>);
-  m.impl("add_scalar_relu.Tensor", qadd_scalar_tensor</*ReLUFused=*/true>);
-  m.impl("add_scalar_out.Tensor", qadd_scalar_tensor_out</*ReLUFused=*/false>);
-  m.impl("add_scalar_relu_out.Tensor", qadd_scalar_tensor_out</*ReLUFused=*/true>);
+  m.impl("add",                 TORCH_FN(qadd</*ReLUFused=*/false>));
+  m.impl("add_relu",            TORCH_FN(qadd</*ReLUFused=*/true>));
+  m.impl("add_out",             TORCH_FN(qadd_out</*ReLUFused=*/false>));
+  m.impl("add_relu_out",        TORCH_FN(qadd_out</*ReLUFused=*/true>));
+  m.impl("add_scalar",          TORCH_FN(qadd_scalar</*ReLUFused=*/false>));
+  m.impl("add_scalar_relu",     TORCH_FN(qadd_scalar</*ReLUFused=*/true>));
+  m.impl("add_scalar_out",      TORCH_FN(qadd_scalar_out</*ReLUFused=*/false>));
+  m.impl("add_scalar_relu_out", TORCH_FN(qadd_scalar_out</*ReLUFused=*/true>));
+  m.impl("add_scalar.Tensor",   TORCH_FN(qadd_scalar_tensor</*ReLUFused=*/false>));
+  m.impl("add_scalar_relu.Tensor", TORCH_FN(qadd_scalar_tensor</*ReLUFused=*/true>));
+  m.impl("add_scalar_out.Tensor", TORCH_FN(qadd_scalar_tensor_out</*ReLUFused=*/false>));
+  m.impl("add_scalar_relu_out.Tensor", TORCH_FN(qadd_scalar_tensor_out</*ReLUFused=*/true>));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("add", qadd</*ReLUFused=*/false>);
+  m.impl("add", TORCH_FN(qadd</*ReLUFused=*/false>));
 }
 
 }  // namespace
