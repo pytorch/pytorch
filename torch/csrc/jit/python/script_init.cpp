@@ -846,10 +846,20 @@ void initJitScriptBindings(PyObject* module) {
     }
   }
 
+  struct DeepCopyMemoTable {
+    std::shared_ptr<IValue::HashAliasedIValueMap> map;
+  };
+  py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
+
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
-        // TODO: Figure out if memoization makes any sense in this context
-        return Object(IValue(self._ivalue()).deepcopy().toObject());
+        if (!memo.contains(py::str("__torch_script_memo_table"))) {
+          memo["__torch_script_memo_table"] = DeepCopyMemoTable{
+              std::make_shared<IValue::HashAliasedIValueMap>()};
+        }
+        auto& ivalue_memo =
+            *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;
+        return Object(IValue(self._ivalue()).deepcopy(ivalue_memo).toObject());
       });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
