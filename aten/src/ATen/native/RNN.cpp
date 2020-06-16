@@ -1319,7 +1319,6 @@ bool _use_cudnn_rnn_flatten_weight() {
         std::move(packed_output.data), std::move(std::get<1>(result)));     \
   }
 
-
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
 ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 
@@ -1368,15 +1367,15 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
       "using the newer definitions in torch.jit.quantized");
   auto params = gather_quantized_params(std::move(_params));
   return quantized_gru_data(
-                            data,
-                            batch_sizes,
-                            hx,
-                            std::move(params),
-                            has_biases,
-                            num_layers,
-                            dropout_p,
-                            train,
-                            bidirectional);
+    data,
+    batch_sizes,
+    hx,
+    std::move(params),
+    has_biases,
+    num_layers,
+    dropout_p,
+    train,
+    bidirectional);
 }
 
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;

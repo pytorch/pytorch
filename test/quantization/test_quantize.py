@@ -690,6 +690,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             torch.nn.LSTM : qconfig,
             torch.nn.GRU: qconfig
         }
+
         for module_type in ['LSTM', 'GRU']:
             model = RNNDynamicModel(module_type).eval()
 
