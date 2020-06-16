@@ -6,7 +6,6 @@
  */
 
 #include <c10/core/DispatchKey.h>
-#include <c10/core/CompileTimeFunctionPointer.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
@@ -235,9 +234,9 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
+        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
-        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<CompileTimeFunctionPointer<FuncType, kernel_func>>::type>()
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncType, kernel_func>::type>()
       );
     }
 
@@ -263,9 +262,9 @@ public:
 
       return std::move(*this).kernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
+        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
-        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<CompileTimeFunctionPointer<FuncType, kernel_func>>::type>()
+        detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<FuncType, kernel_func>::type>()
       );
     }
 

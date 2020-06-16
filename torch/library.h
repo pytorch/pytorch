@@ -65,15 +65,6 @@ public:
     , debug_()
     {}
 
-  // This overload accepts compile time function pointers, e.g., CppFunction(TORCH_FN(add_impl))
-  template <typename FuncPtr>
-  explicit CppFunction(FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
-    : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f.func_ptr()))
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<typename FuncPtr::FuncType>>>())
-    , debug_()
-    {}
-
   // This overload accepts lambdas, e.g., CppFunction([](const Tensor& self) { ... })
   template <typename Lambda>
   explicit CppFunction(Lambda&& f, std::enable_if_t<c10::guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
