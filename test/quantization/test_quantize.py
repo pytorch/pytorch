@@ -446,6 +446,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         def checkQuantized(model):
             self.checkNoPrepModules(model.hardswish)
             self.assertEqual(type(model.hardswish), nnq.Hardswish)
+            self.assertEqual(type(model.elu), nnq.ELU)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
 

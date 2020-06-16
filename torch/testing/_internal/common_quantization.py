@@ -418,10 +418,12 @@ class ActivationsTestModel(torch.nn.Module):
         self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         self.quant = torch.quantization.QuantStub()
         self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+        self.elu = torch.nn.ELU().to(dtype=torch.float)
 
     def forward(self, x):
         x = self.quant(x)
         x = self.hardswish(x)
+        x = self.elu(x)
         return x
 
 class ActivationsQATTestModel(torch.nn.Module):
