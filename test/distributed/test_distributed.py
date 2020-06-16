@@ -2203,7 +2203,6 @@ class _DistTestBase(object):
         process_group_sync = res50_model_sync.layer1[0].bn1.process_group
         self.assertEqual(process_group_sync, process_group)
 
-
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
 
