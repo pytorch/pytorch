@@ -305,7 +305,7 @@ inline Return Dispatcher::callWithDispatchKey(const OperatorHandle& op, Dispatch
   // Note: for perf reasons we wouldn't want to pass arguments into
   // the function call or prematurely box them
   at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (guard.active) {
+  if (C10_UNLIKELY(guard.active)) {
     if (guard.needs_inputs) {
       std::vector<c10::IValue> stack;
       auto boxed_all_args = impl::boxArgumentsIntoStack(stack, args...);
@@ -352,7 +352,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 
   // using already existing stack to record function execution in observers
   at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (guard.active) {
+  if (C10_UNLIKELY(guard.active)) {
     if (guard.needs_inputs) {
       guard.before(op.schema().name(), *stack, at::sequence_number::peek());
     } else {

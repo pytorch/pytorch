@@ -108,7 +108,7 @@ std::enable_if_t<supports_boxing<Result, Args...>::value && !std::is_same<void, 
 boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
   // TODO Reuse stack vector instead of allocating?
   torch::jit::Stack stack;
-  boxArgumentsIntoStack(stack, std::forward<Args>(args)...);
+  torch::jit::push(stack, std::forward<Args>(args)...);
 
   return callBoxedFunc<Result>(boxed_kernel_func, functor, opHandle, stack);
 }
@@ -119,7 +119,7 @@ std::enable_if_t<supports_boxing<Result, Args...>::value && std::is_same<void, R
 boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
   // TODO Reuse stack vector instead of allocating?
   torch::jit::Stack stack;
-  boxArgumentsIntoStack(stack, std::forward<Args>(args)...);
+  torch::jit::push(stack, std::forward<Args>(args)...);
 
   callBoxedFunc<Result>(boxed_kernel_func, functor, opHandle, stack);
 }
