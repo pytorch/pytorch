@@ -724,7 +724,7 @@ class TestDataParallel(TestCase):
                     tol = 1.e-3 if has_half else 1.e-5
                 except BaseException:
                     # Prints case-specific debugging info to narrow down failing case.
-                    print("Caught exception during model creation for " + model_msg)
+                    print("Caught exception during model creation for " + model_msg, flush=True)
                     raise
                 # 2 iters:  First iter creates grads, second iter tries zeroed grads.
                 for it in range(2):
@@ -743,7 +743,7 @@ class TestDataParallel(TestCase):
                                 self.assertEqual(p.grad, p_dp.grad, msg=named_msg, rtol=tol, atol=tol)
                     except BaseException:
                         # Makes sure we still get info if an error occurred somewhere other than the asserts.
-                        print("Caught exception during iterations at " + iter_msg)
+                        print("Caught exception during iterations at " + iter_msg, flush=True)
                         raise
 
 

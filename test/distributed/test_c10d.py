@@ -1890,8 +1890,11 @@ class QuadraGpuNet(nn.Module):
 class ConvNet(nn.Module):
     def __init__(self, gpus, layouts, dtypes):
         super(ConvNet, self).__init__()
-        self.gpus = gpus
         self.dtypes = dtypes
+        if isinstance(gpus, list):
+            self.layer_gpus = gpus
+        else:
+            gpus = [gpus] * 4
         self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(device=gpus[0], memory_format=layouts[0], dtype=dtypes[0])
         self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(device=gpus[1], memory_format=layouts[1], dtype=dtypes[1])
         self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(device=gpus[2], memory_format=layouts[2], dtype=dtypes[2])
@@ -1899,9 +1902,14 @@ class ConvNet(nn.Module):
 
     def forward(self, x):
         x = x.to(self.dtypes[0])
-        x = self.conv0(x).to(device=self.gpus[1], dtype=self.dtypes[1])
-        x = self.conv1(x).to(device=self.gpus[2], dtype=self.dtypes[2])
-        x = self.conv2(x).to(device=self.gpus[3], dtype=self.dtypes[3])
+        # Could say
+        # x = self.conv0(x).to(device=self.conv1.weight.device, dtype=self.dtypes[1])
+        # etc.  But I don't want to appeal to the weights' devices directly, because part of this test's purpose
+        # is to verify weights are where expected if the model gets replicated.
+        gpus = self.layer_gpus if hasattr(self, "layer_gpus") else [x.device] * 4
+        x = self.conv0(x).to(device=gpus[1], dtype=self.dtypes[1])
+        x = self.conv1(x).to(device=gpus[2], dtype=self.dtypes[2])
+        x = self.conv2(x).to(device=gpus[3], dtype=self.dtypes[3])
         return self.conv3(x)
 
 
@@ -2794,8 +2802,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                         [torch.float] * 2 + [torch.half] * 2,
                         [torch.half] * 4)
 
-        input = torch.randn(global_batch_size, 8, 8, 8).to(layer_devs[0])
-        target = torch.randn(global_batch_size, 8, 4, 4).to(layer_devs[-1])
+        input_dev = layer_devs[0] if isinstance(layer_devs, list) else layer_devs
+        target_dev = layer_devs[-1] if isinstance(layer_devs, list) else layer_devs
+        input = torch.randn(global_batch_size, 8, 8, 8).to(input_dev)
+        target = torch.randn(global_batch_size, 8, 4, 4).to(target_dev)
         local_batch_start = self.rank * local_batch_size
         local_batch_end = (self.rank + 1) * local_batch_size
 
@@ -2813,7 +2823,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     tol = 1.e-3 if has_half else 1.e-5
                 except BaseException:
                     # Prints case-specific debugging info to narrow down failing case.
-                    print("Caught exception during model creation for " + model_msg)
+                    print("Caught exception during model creation for " + model_msg, flush=True)
                     raise
                 # 3 iters:  First iter creates grads, second iter retests after rebucketing,
                 # third iter tries zeroed grads.
@@ -2840,7 +2850,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                     m_ddp.zero_grad()
                     except BaseException:
                         # Makes sure we still get info if an error occurred somewhere other than the asserts.
-                        print("Caught exception during iterations at " + iter_msg)
+                        print("Caught exception during iterations at " + iter_msg, flush=True)
                         raise
 
     @requires_nccl()
@@ -2851,7 +2861,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # Tells DDP to use just one device.
         replica_devices = [dev0]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
-        layer_devs = [dev0] * 4
+        layer_devs = dev0
         local_batch_size = 8
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
@@ -2865,7 +2875,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # Tells DDP to replicate the model to both of this process's devices.
         replica_devices = [dev0, dev1]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
-        layer_devs = [dev0] * 4
+        layer_devs = dev0
         local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
@@ -2886,12 +2896,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_not_multigpu
     @skip_if_rocm
-    def test_layout_mismatch_error(self):
+    def test_param_layout_mismatch_error(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
-        layer_devs = [dev0] * 4
+        layer_devs = dev0
         layer_formats = [torch.contiguous_format] * 4 if self.rank == 0 else [torch.channels_last] * 4
         layer_dtypes = [torch.float] * 4
 
