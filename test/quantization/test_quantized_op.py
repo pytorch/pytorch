@@ -6,7 +6,6 @@ import numpy as np
 import unittest
 
 import torch
-from torch import _VF
 import torch.jit
 import torch.nn.functional as F
 from torch.nn.modules.utils import _single, _pair
@@ -2012,10 +2011,8 @@ class TestQuantizedOps(TestCase):
         result = torch.ops.quantized.linear(qX, w_packed, 1.0, 0)
         self.assertEqual(result.shape, (0, 2))
 
-
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
-    @override_qengines
     @given(
         batch_size=st.integers(1, 4),
         input_channels=st.integers(16, 32),
@@ -2025,6 +2022,7 @@ class TestDynamicQuantizedLinear(TestCase):
         use_multi_dim_input=st.booleans(),
         use_channelwise=st.booleans(),
         reduce_range=st.booleans())
+    @override_qengines
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise, reduce_range):
         if torch.backends.quantized.engine == 'qnnpack':
@@ -2129,128 +2127,6 @@ class TestDynamicQuantizedLinear(TestCase):
             Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          msg="torch.ops.quantized.linear_dynamic results are off")
-
-class TestDynamicQuantizedRNNOp(TestCase):
-    """Tests the correctness of the dynamic quantized lstm/gru."""
-    @given(
-        num_batches=st.integers(1, 4),
-        input_size=st.integers(16, 32),
-        hidden_size=st.integers(4, 8),
-        num_directions=st.integers(1, 2),
-        per_channel_quant=st.booleans())
-    @override_qengines
-    def test_qlstm(self, num_batches, input_size, hidden_size,
-                   num_directions, per_channel_quant):
-
-        def _get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, num_directions):
-            # For Input (seq_len, batch, input_size)
-            X = torch.randn(seq_len, num_batches, input_size)
-            s, z = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=True)
-            Xq = torch.quantize_per_tensor(X, s, z, torch.quint8)
-
-            # For H and C: (num_layers(1) * num_directions, batch, hidden_size)
-
-            if num_directions == 1:
-                H = torch.randn(num_directions, num_batches, hidden_size)
-                C = torch.randn(num_directions, num_batches, hidden_size)
-            else:
-                H = torch.zeros(num_directions, num_batches, hidden_size)
-                C = torch.zeros(num_directions, num_batches, hidden_size)
-
-            s, z = _calculate_dynamic_qparams(H, torch.quint8, reduce_range=True)
-            Hq = torch.quantize_per_tensor(H, s, z, torch.quint8)
-            s, z = _calculate_dynamic_qparams(C, torch.quint8, reduce_range=True)
-            Cq = torch.quantize_per_tensor(C, s, z, torch.quint8)
-            return Xq, Hq, Cq
-
-        def _get_rnn_weights_and_bias(input_size, hidden_size, num_directions, per_channel_quant, rnn_type):
-            hidden_mult_map = {'LSTM': 4}
-            hidden_mult = hidden_mult_map[rnn_type]
-            weights1 = torch.randn(hidden_mult * hidden_size, input_size)
-            weights2 = torch.randn(hidden_mult * hidden_size, hidden_size)
-            scale1 = 0.1 * torch.ones([weights1.size()[0]])
-            scale2 = 0.3 * torch.ones([weights2.size()[0]])
-            zero_point1 = torch.zeros(scale1.size()).to(int)
-            zero_point2 = torch.zeros(scale2.size()).to(int)
-            b1 = torch.zeros(hidden_mult * hidden_size)
-            if per_channel_quant:
-                Wq1 = torch.quantize_per_channel(weights1, scale1, zero_point1, 0, torch.qint8)
-                Wq2 = torch.quantize_per_channel(weights2, scale2, zero_point2, 0, torch.qint8)
-
-            else:
-                Wq1 = torch.quantize_per_tensor(weights1, float(scale1[0]), int(zero_point1[0]), torch.qint8)
-                Wq2 = torch.quantize_per_tensor(weights2, float(scale2[0]), int(zero_point2[0]), torch.qint8)
-            return Wq1, Wq2, b1, b1
-
-        # We test only for seq length of 1 and num layers of 1 as dynamic quantization occurs multiple times
-        # within the LSTM op and we do not model the quantization between multiple calls of the linear op within the
-        # lstm op
-        seq_len = 1
-        for rnn_type in ['LSTM']:
-            for dtype in [torch.qint8, torch.float16]:
-                Xq, Hq, Cq = _get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, num_directions)
-                Wq1, Wq2, b1, b2 = _get_rnn_weights_and_bias(input_size, hidden_size, num_directions, per_channel_quant, rnn_type)
-                if dtype == torch.qint8:
-                    packed_ih = torch.ops.quantized.linear_prepack(Wq1, b1)
-                    packed_hh = torch.ops.quantized.linear_prepack(Wq2, b2)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh, b1, b2, True)
-                    W_ref1 = Wq1.dequantize()
-                    W_ref2 = Wq2.dequantize()
-
-                else:
-                    packed_ih = torch.ops.quantized.linear_prepack_fp16(Wq1.dequantize(), b1)
-                    packed_hh = torch.ops.quantized.linear_prepack_fp16(Wq2.dequantize(), b2)
-                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(packed_ih, packed_hh)
-                    W_ref1 = Wq1.dequantize().to(torch.float16).to(torch.float32)
-                    W_ref2 = Wq2.dequantize().to(torch.float16).to(torch.float32)
-
-                if rnn_type == 'LSTM':
-                    if num_directions > 1:
-                        result_ref = _VF.lstm(Xq.dequantize(),
-                                              (Hq.dequantize(), Cq.dequantize()),
-                                              [W_ref1, W_ref2, b1, b2, W_ref1, W_ref2, b1, b2],
-                                              True,
-                                              1,
-                                              0,
-                                              False,
-                                              num_directions > 1,
-                                              False)
-
-                        result_dynamic = torch.quantized_lstm(Xq.dequantize(),
-                                                              (Hq.dequantize(), Cq.dequantize()),
-                                                              ([cell_params, cell_params]),
-                                                              True,
-                                                              1,
-                                                              0,
-                                                              False,
-                                                              True,
-                                                              False,
-                                                              dtype=torch.qint8,
-                                                              use_dynamic=True)
-                    else:
-                        result_ref = _VF.lstm(Xq.dequantize(),
-                                              (Hq.dequantize(), Cq.dequantize()),
-                                              [W_ref1, W_ref2, b1, b2],
-                                              True,
-                                              1,
-                                              0,
-                                              False,
-                                              num_directions > 1,
-                                              False)
-
-                        result_dynamic = torch.quantized_lstm(Xq.dequantize(),
-                                                              (Hq.dequantize(), Cq.dequantize()),
-                                                              ([cell_params]),
-                                                              True,
-                                                              1,
-                                                              0,
-                                                              False,
-                                                              num_directions > 1,
-                                                              False,
-                                                              dtype=torch.qint8,
-                                                              use_dynamic=True)
-
-                self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_lstm results are off")
 
     @skipIfNoFBGEMM
     @given(
