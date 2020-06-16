@@ -307,19 +307,22 @@ script::Module optimizeForMobile(
   auto cloned_module = m.clone();
   cloned_module.eval();
 
-  if (!optimization_blacklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
+  if (optimization_blacklist.find(MobileOptimizerType::CONV_BN_FUSION) ==
+      optimization_blacklist.end()) {
     cloned_module = FoldConvBatchNorm2d(cloned_module);
   }
 
-  if (!optimization_blacklist.count(
-          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
+  if (optimization_blacklist.find(
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS) ==
+      optimization_blacklist.end()) {
     insertPrePackedOps(cloned_module);
     cloned_module = freeze_module(cloned_module);
     fusePrePackedLinearConvWithClamp(cloned_module);
     FoldPrePackingOps(cloned_module);
   }
 
-  if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
+  if (optimization_blacklist.find(MobileOptimizerType::REMOVE_DROPOUT) ==
+      optimization_blacklist.end()) {
     removeDropout(cloned_module);
   }
 
