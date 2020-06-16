@@ -295,9 +295,10 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
       inputs.push_back(output);
     }
     return inputs;
-  } else if (n->kind() == prim::ListUnpack) {
+  } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
     return {n->input(0)};
-  } else if (n->kind() == prim::ListConstruct) {
+  } else if (
+      n->kind() == prim::ListConstruct || n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -618,6 +619,16 @@ bool is_batchnorm2d_module(
       vmap,
       "batchnorm",
       "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
+}
+
+bool is_batchnorm3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
 }
 
 } // namespace jit
