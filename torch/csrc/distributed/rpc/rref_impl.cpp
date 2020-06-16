@@ -131,6 +131,10 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
       "RRef creation via rpc.remote() timed out, and it "
       "is possible that the RRef on the owner node does not exist.");
   // see Note [Best-Effort Check on Deleted UserRRefs]
+  TORCH_CHECK(
+      !deletedOnOwner_,
+      *this,
+      " has been deleted. Cannot call to_here() on it after deletion.");
   auto toHereKey = fmt::format(
       "to_here#({})->({})",
       RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
@@ -141,10 +145,6 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
     remoteProfilerManager.setCurrentKey(toHereKey);
   }
   RECORD_USER_SCOPE(toHereKey);
-  TORCH_CHECK(
-      !deletedOnOwner_,
-      *this,
-      " has been deleted. Cannot call to_here() on it after deletion.");
   TORCH_CHECK(
       !type_->is_module(),
       *this,
