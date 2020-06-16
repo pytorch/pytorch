@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.dist_utils import dist_init
 import torch.distributed as dist
-from torch.distributed.distributed_c10d import _get_default_group
 import torch.distributed.autograd as dist_autograd
 import torch.nn as nn
 import unittest
@@ -187,12 +186,14 @@ class Trainer:
         ddp_mode: DdpMode,
         rank: int,
     ):
+        self.rank = rank
+        self.trainer_group = dist.new_group(TRAINER_RANKS)
         self.remote_em_rref = remote_em_rref
         self.remote_net_rref = remote_net_rref
         self.hybrid_module = HybridModel(
             self.remote_em_rref,
             self.remote_net_rref,
-            _get_default_group()
+            trainer_group
             if ddp_mode in (DdpMode.INSIDE,)
             else None,
         )
@@ -207,6 +208,7 @@ class Trainer:
             self.hybrid_module = DistributedDataParallel(
                 self.hybrid_module,
                 check_reduction=True,
+                process_group=self.trainer_group,
             )
         gLogger.info(
             f"Succeeded in creating a HybridModel instance with "
@@ -214,8 +216,8 @@ class Trainer:
             f"other local params."
         )
 
-    def __del__(self):
-        dist.destroy_process_group()
+    def destroy_pg(self):
+        dist.destroy_process_group(self.trainer_group)
 
     def train_batch(self, mini_batch: FeatureSet):
         grads_dict = None
@@ -309,10 +311,16 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
 
     def _remote_worker_process(self):
         gLogger.info("The remote worker is running.")
+        dist.init_process_group(
+            backend="gloo",
+            init_method="file://{}".format(self.file_name),
+            world_size=self.world_size,
+            rank=self.rank)
         global shutdown_signal
         with shutdown_signal:
             shutdown_signal.wait()
         gLogger.info("Exiting remote worker.")
+        dist.destroy_process_group()
 
     def _trainer_process(self, rank: int):
         gLogger.info(f"Running the trainer #{rank}...")
@@ -322,7 +330,7 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
         dist.init_process_group(
             backend="gloo",
             init_method="file://{}".format(self.file_name),
-            world_size=NUM_TRAINERS,
+            world_size=self.world_size,
             rank=self.rank)
 
         gLogger.info(f"Waiting for shutdown signal on trainer #{rank}...")
@@ -331,9 +339,15 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
         with shutdown_signal:
             shutdown_signal.wait()
         gLogger.info(f"Exiting the trainer #{rank}...")
+        dist.destroy_process_group()
 
     def _master_process(self, ddp_mode: DdpMode):
         gLogger.info("Running the master process...")
+        dist.init_process_group(
+            backend="gloo",
+            init_method="file://{}".format(self.file_name),
+            world_size=self.world_size,
+            rank=self.rank)
         remote_em_rref = rpc.remote(
             self.remote_worker_name(), RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
         )
@@ -389,6 +403,13 @@ class TestDdpUnderDistAutograd(MultiProcessTestCase, RpcAgentTestFixture):
                         torch.zeros_like(grad),
                         msg="The grad for any non-ddp parameter shouldn't be zeros",
                     )
+
+        # Destroy process groups
+        for idx, trainer_rref in enumerate(trainer_rrefs):
+            _remote_method_async(
+                Trainer.destroy_pg,
+                trainer_rref,
+            ).wait()
 
         # Send shutdown signals.
         for rank in TRAINER_RANKS:
