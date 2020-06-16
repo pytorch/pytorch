@@ -87,6 +87,10 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "repeat_interleave",
     "relu",
     "relu_",
+    "squeeze",
+    "squeeze_",
+    "unsqueeze",
+    "unsqueeze_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
