@@ -849,7 +849,7 @@ def _convert_padding_node(padding):
             if all_constant:
                 padding = [int(v.node()['value']) for v in padding.node().inputs()]
             else:
-                return sym_help._onnx_opset_unsupported('Pad', 9, 11)
+                return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The sizes of the padding must be constant')
     return padding
 
 def constant_pad_nd(g, input, padding, value):
@@ -859,7 +859,7 @@ def constant_pad_nd(g, input, padding, value):
             tval = value.node()['value']
             value = float(tval)
         else:
-            return sym_help._onnx_opset_unsupported('Pad', 9, 11)
+            return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The value for the padding must be constant')
 
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(input.type().dim(), padding)
