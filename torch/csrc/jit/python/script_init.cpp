@@ -1063,7 +1063,11 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& src,
              ResolutionCallback rcb) {
             cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
-          });
+          })
+      .def(
+          "get_interface",
+          [](const std::shared_ptr<CompilationUnit>& self,
+             const std::string& name) { return self->get_interface(name); });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
