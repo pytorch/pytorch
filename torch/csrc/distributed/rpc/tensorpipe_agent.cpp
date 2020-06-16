@@ -61,11 +61,23 @@ std::string TensorPipeAgent::guessUvAddress(
 
 namespace {
 
+// These priorities instruct TensorPipe on which transport/channel to pick
+// during handshake. Higher priorities will take precedence over lower ones.
+// The transport with lowest priority will be the one used to bootstrap pipes.
+
+constexpr int64_t kShmTransportPriority = 100;
+// The UV transport just uses TCP and should work everywhere, thus keep it last.
+constexpr int64_t kUvTransportPriority = 0;
+
+constexpr int64_t kCmaChannelPriority = 100;
+// The basic channel reuses a transport as a channel, and is thus our fallback.
+constexpr int64_t kBasicChannelPriority = 0;
+
 std::unique_ptr<TransportRegistration> makeUvTransport() {
   auto context = std::make_shared<tensorpipe::transport::uv::Context>();
   std::string address = TensorPipeAgent::guessUvAddress(*context);
-  return std::make_unique<TransportRegistration>(
-      TransportRegistration{std::move(context), 1, std::move(address)});
+  return std::make_unique<TransportRegistration>(TransportRegistration{
+      std::move(context), kUvTransportPriority, std::move(address)});
 }
 
 // The UV transport is implemented using standard TCP connections. It leverages
@@ -77,8 +89,8 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 std::unique_ptr<TransportRegistration> makeShmTransport() {
   auto context = std::make_shared<tensorpipe::transport::shm::Context>();
   std::string address = TensorPipeAgent::createUniqueShmAddr();
-  return std::make_unique<TransportRegistration>(
-      TransportRegistration{std::move(context), 0, std::move(address)});
+  return std::make_unique<TransportRegistration>(TransportRegistration{
+      std::move(context), kShmTransportPriority, std::move(address)});
 }
 
 // The SHM implements connections using ringbuffers residing in anonymous shared
@@ -92,7 +104,7 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
 std::unique_ptr<ChannelRegistration> makeBasicChannel() {
   auto context = std::make_shared<tensorpipe::channel::basic::Context>();
   return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), 1});
+      ChannelRegistration{std::move(context), kBasicChannelPriority});
 }
 
 // The basic channel is just a straightforward adapter wrapper that allows any
@@ -104,7 +116,7 @@ C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel);
 std::unique_ptr<ChannelRegistration> makeCmaChannel() {
   auto context = std::make_shared<tensorpipe::channel::cma::Context>();
   return std::make_unique<ChannelRegistration>(
-      ChannelRegistration{std::move(context), 0});
+      ChannelRegistration{std::move(context), kCmaChannelPriority});
 }
 
 // The CMA channel uses the Linux cross-memory attach syscalls (process_vm_readv
@@ -757,7 +769,6 @@ void TensorPipeAgent::shutdownImpl() {
   threadPool_.waitWorkComplete();
   VLOG(1) << "RPC agent for " << workerInfo_.name_
           << " done waiting for thread pool to complete work";
-
 }
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
