@@ -114,15 +114,20 @@ struct TORCH_API VmapPhysicalView {
   VmapDimVector getPhysicalDims(IntArrayRef logical_dims);
   int64_t getPhysicalDim(int64_t logical_dim);
 
+  // Maps a logical shape to a physical shape by pre-pending the batch
+  // sizes to the logical shape.
+  VmapDimVector getPhysicalShape(IntArrayRef logical_shape);
+
   // Maps a physical tensor to a new logical tensor (BatchedTensor),
   // using the mapping info stored in this VmapPhysicalView.
   // Assumes that all of the "batch dimensions" are at the front
   // of the physical tensor.
   Tensor newLogicalFromPhysical(const Tensor& physical);
 
+  int64_t numBatchDims();
+
  private:
   int64_t numLogicalDims();
-  int64_t numBatchDims();
 
   std::bitset<kVmapNumLevels> levels_;
   Tensor tensor_;

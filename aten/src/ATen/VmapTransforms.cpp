@@ -84,6 +84,15 @@ int64_t VmapPhysicalView::getPhysicalDim(int64_t logical_dim) {
   return maybe_wrap_dim(logical_dim, logical_ndim) + numBatchDims();
 }
 
+VmapDimVector VmapPhysicalView::getPhysicalShape(IntArrayRef logical_shape) {
+  VmapDimVector result;
+  result.reserve(logical_shape.size() + numBatchDims());
+  auto tensor_sizes = tensor_.sizes();
+  result.insert(result.end(), tensor_sizes.begin(), tensor_sizes.begin() + numBatchDims());
+  result.insert(result.end(), logical_shape.begin(), logical_shape.end());
+  return result;
+}
+
 static BatchDims computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {
   BatchDims bdims;
   int64_t dim = 0;
