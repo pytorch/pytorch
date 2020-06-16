@@ -10952,21 +10952,21 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
+    @onlyCUDA   # TODO: fix CPU adaptive_maxpool_2d
     def test_max_pool_nan_inf(self, device, dtype):
         for adaptive in ['', 'adaptive_']:
             for num_dim in [1, 2, 3]:
                 fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
                 fn = getattr(F, fn_name)
-                x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype)
+                x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype, requires_grad=True)
                 res = fn(x, 1 if adaptive else 3)
+                res.backward(torch.randn_like(res))
                 self.assertTrue(math.isnan(res.item()))
 
-                x2 = torch.full([1, 1] + num_dim * [3], -inf, device=device, dtype=dtype)
+                x2 = torch.full([1, 1] + num_dim * [3], -inf, device=device, dtype=dtype, requires_grad=True)
                 res2 = fn(x2, 1 if adaptive else 3)
-
-                # TODO: fix CPU adaptive_maxpool_2d inf
-                if device != 'cpu' and adaptive != 'adaptive_':
-                    self.assertTrue(math.isinf(res2.item()))
+                res2.backward(torch.randn_like(res2))
+                self.assertTrue(math.isinf(res2.item()))
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
@@ -10975,12 +10975,14 @@ class TestNNDeviceType(NNTestCase):
         for num_dim in [2, 3]:
             fn_name = 'FractionalMaxPool{}d'.format(num_dim)
             fn = getattr(nn, fn_name)(kernel_size=2, output_size=1)
-            x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype)
+            x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype, requires_grad=True)
             res = fn(x)
+            res.backward(torch.randn_like(res))
             self.assertTrue(math.isnan(res.item()))
 
-            x2 = torch.full([1, 1] + num_dim * [3], -inf, device=device, dtype=dtype)
+            x2 = torch.full([1, 1] + num_dim * [3], -inf, device=device, dtype=dtype, requires_grad=True)
             res2 = fn(x2)
+            res2.backward(torch.randn_like(res2))
             self.assertTrue(math.isinf(res2.item()))
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
