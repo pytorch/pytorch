@@ -268,6 +268,10 @@ struct TORCH_API Event final {
     node_id_ = node_id;
   }
 
+  void setName(at::StringView newName_) {
+    name_ = std::move(newName_);
+  }
+
   bool isRemote() const {
     return is_remote_;
   }

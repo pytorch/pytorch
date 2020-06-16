@@ -1,8 +1,9 @@
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <ATen/record_function.h>
-
+#include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -132,7 +133,16 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
       "RRef creation via rpc.remote() timed out, and it "
       "is possible that the RRef on the owner node does not exist.");
   // see Note [Best-Effort Check on Deleted UserRRefs]
-  RECORD_USER_SCOPE("to_here");
+  auto toHereKey = fmt::format(
+      "to_here#({})->({})",
+      RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+      RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_);
+  if (torch::autograd::profiler::profilerEnabled()) {
+    auto& remoteProfilerManager =
+        torch::distributed::rpc::RemoteProfilerManager::getInstance();
+    remoteProfilerManager.setCurrentKey(toHereKey);
+  }
+  RECORD_USER_SCOPE(toHereKey);
   TORCH_CHECK(
       !deletedOnOwner_,
       "User RRef with RRefId=",
