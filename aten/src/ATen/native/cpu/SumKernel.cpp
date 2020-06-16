@@ -125,7 +125,7 @@ std::array<scalar_t, nrows> multi_row_sum(
       }
 
       const auto mask = (level_mask << (j * level_power));
-      if ((i & mask) != mask) {
+      if ((i & mask) != 0) {
         break;
       }
     }
