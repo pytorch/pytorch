@@ -293,6 +293,7 @@ class TestCudaFuser(JitTestCase):
     def test_ternary_ops(self):
         x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
         y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        z = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
         cond = torch.randint(0, 2, (4, 8, 32, 32)).to(dtype=torch.bool, device="cuda")
 
         def add(x: torch.Tensor, other: torch.Tensor, alpha: float):
@@ -329,6 +330,49 @@ class TestCudaFuser(JitTestCase):
             return o
         where_jit = torch.jit.script(where)
         self._run_helper(where_jit, where, x, y, cond)
+
+        def lerp(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+            o = torch.rand_like(x)
+            o = o * torch.lerp(x, y, z)
+            return o
+        lerp_jit = torch.jit.script(lerp)
+        self._run_helper(lerp_jit, lerp, x, y, z)
+
+        def lerp_scale(x : torch.Tensor, y : torch.Tensor, z: float):
+            o = torch.rand_like(x)
+            o = o * torch.lerp(x, y, z)
+            return o
+        lerp_scale_jit = torch.jit.script(lerp_scale)
+        self._run_helper(lerp_scale_jit, lerp_scale, x, y, 0.5)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires profiling node to run cuda fuser")
+    @skipIfRocm
+    def test_addcmul_ops(self):
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        z = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+
+        def addcmul(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor, value : float):
+            o = torch.add(x, 0.5)
+            o = torch.addcmul(o, y, z, value=value)
+            return o
+        addcmul_jit = torch.jit.script(addcmul)
+        self._run_helper(addcmul_jit, addcmul, x, y, z, 2.0)
+
+        def addcmul_no_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+            o = torch.add(x, 0.5)
+            o = torch.addcmul(o, y, z)
+            return o
+        addcmul_no_alpha_jit = torch.jit.script(addcmul_no_alpha)
+        self._run_helper(addcmul_no_alpha_jit, addcmul_no_alpha, x, y, z)
+
+        def addcmul_const_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+            o = torch.add(x, 0.5)
+            o = torch.addcmul(o, y, z, value=0.75)
+            return o
+        addcmul_const_alpha_jit = torch.jit.script(addcmul_const_alpha)
+        self._run_helper(addcmul_const_alpha_jit, addcmul_const_alpha, x, y, z)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
