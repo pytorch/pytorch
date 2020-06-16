@@ -137,7 +137,7 @@ class TestConversion(TestCase):
         self.assertEqual(len(caffe2_init_net.op), 2)
         self.assertEqual(set(sum([list(init_op.output)
                                   for init_op in caffe2_init_net.op], [])),
-                         {'W', 'X'})
+                         {'W', 'Y'})
 
     def test_onnx_to_caffe2_zipfile(self):
         buf = tempfile.NamedTemporaryFile()
