@@ -138,7 +138,7 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) && !defined(C10_IOS)
   // Currently only 3x3 depthwise convolutions on tensors of float are supported.
   return (input.ndimension() == 4) &&
          (input.size(1) == groups) &&
@@ -601,7 +601,7 @@ at::Tensor convolution(
   auto& ctx = at::globalContext();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
-                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
+                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN() || ctx.deterministic(), ctx.userEnabledCuDNN());
 }
 
 at::Tensor convolution_overrideable(
@@ -962,8 +962,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         ggO = ggW_term;
       }
     }
-  } else {
-    ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (ggb.defined()) {
@@ -1052,8 +1050,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         }
       }
     }
-  } else {
-    gW = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   // Compute gI = convT(ggW, gO.t()) if !transposed
@@ -1141,13 +1137,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         gI = gIt.transpose(0, 1);
       }
     }
-  } else {
-    gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-
-  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
 }

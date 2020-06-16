@@ -15,6 +15,11 @@ GENERATED_CPP = [
     "autograd/generated/ProfiledType_2.cpp",
     "autograd/generated/ProfiledType_3.cpp",
     "autograd/generated/ProfiledType_4.cpp",
+    "autograd/generated/TraceType_0.cpp",
+    "autograd/generated/TraceType_1.cpp",
+    "autograd/generated/TraceType_2.cpp",
+    "autograd/generated/TraceType_3.cpp",
+    "autograd/generated/TraceType_4.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_torch_functions.cpp",
@@ -36,6 +41,11 @@ libtorch_generated_sources = [
     ":generate-code=autograd/generated/ProfiledType_2.cpp",
     ":generate-code=autograd/generated/ProfiledType_3.cpp",
     ":generate-code=autograd/generated/ProfiledType_4.cpp",
+    ":generate-code=autograd/generated/TraceType_0.cpp",
+    ":generate-code=autograd/generated/TraceType_1.cpp",
+    ":generate-code=autograd/generated/TraceType_2.cpp",
+    ":generate-code=autograd/generated/TraceType_3.cpp",
+    ":generate-code=autograd/generated/TraceType_4.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
 ]
 
@@ -223,6 +233,7 @@ libtorch_core_sources = [
 ]
 
 libtorch_distributed_sources = [
+    "torch/csrc/distributed/autograd/autograd.cpp",
     "torch/csrc/distributed/autograd/utils.cpp",
     "torch/csrc/distributed/autograd/context/container.cpp",
     "torch/csrc/distributed/autograd/context/context.cpp",
@@ -295,10 +306,12 @@ libtorch_cuda_sources = [
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/codegen/cuda/arith.cpp",
     "torch/csrc/jit/codegen/cuda/dispatch.cpp",
+    "torch/csrc/jit/codegen/cuda/expr_evaluator.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
     "torch/csrc/jit/codegen/cuda/ir_base_nodes.cpp",
+    "torch/csrc/jit/codegen/cuda/ir_graphviz.cpp",
     "torch/csrc/jit/codegen/cuda/ir_nodes.cpp",
     "torch/csrc/jit/codegen/cuda/ir_iostream.cpp",
     "torch/csrc/jit/codegen/cuda/iter_visitor.cpp",

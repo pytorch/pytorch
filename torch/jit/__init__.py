@@ -29,7 +29,6 @@ import textwrap
 import warnings
 import weakref
 
-
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
@@ -86,6 +85,15 @@ def optimized_execution(should_optimize):
 
 @contextlib.contextmanager
 def fuser(name):
+    """
+    A context manager that facilitates switching between
+    backend fusers.
+
+    Valid names:
+    * ``fuser0`` - enables only legacy fuser
+    * ``fuser1`` - enables only NNC
+    * ``fuser2`` - enables only nvFuser
+    """
     old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
     old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
     old_texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
@@ -256,14 +264,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             raise ValueError("The provided filename {} does not exist".format(f))
         if os.path.isdir(f):
             raise ValueError("The provided filename {} is a directory".format(f))
-    if isinstance(map_location, string_classes):
-        map_location = torch.device(map_location)
-    elif not (map_location is None or
-              isinstance(map_location, torch.device)):
-        raise ValueError("map_location should be either None, string or torch.device, "
-                         "but got type: " + str(type(map_location)))
-    if (str(map_location).startswith('cuda')):
-        validate_cuda_device(map_location)
+
+    map_location = validate_map_location(map_location)
 
     cu = torch._C.CompilationUnit()
     if isinstance(f, str) or isinstance(f, pathlib.Path):
@@ -273,6 +275,19 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
 
     # TODO: Pretty sure this approach loses ConstSequential status and such
     return torch.jit._recursive.wrap_cpp_module(cpp_module)
+
+def validate_map_location(map_location=None):
+    if isinstance(map_location, str):
+        map_location = torch.device(map_location)
+    elif not (map_location is None or
+              isinstance(map_location, torch.device)):
+        raise ValueError("map_location should be either None, string or torch.device, "
+                         "but got type: " + str(type(map_location)))
+
+    if (str(map_location).startswith('cuda')):
+        validate_cuda_device(map_location)
+
+    return map_location
 
 def export_opnames(m):
     r"""
@@ -1378,6 +1393,10 @@ def interface(obj):
     if not _is_new_style_class(obj):
         raise RuntimeError("TorchScript interfaces must inherit from 'object'")
 
+    # Expected MRO is:
+    #   User module
+    #   torch.nn.modules.module.Module
+    #   object
     is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
 
     if not is_module_interface and len(obj.mro()) > 2:
@@ -1539,7 +1558,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     parameters are initialized _before_ the script compiler resolve references to
 #     `self.param` or `self.module`.
 class ScriptMeta(type):
-    def __init__(cls, name, bases, attrs):
+    def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods = {}
         cls._constants_set = set(getattr(cls, '__constants__', ()))
@@ -1625,8 +1644,12 @@ if _enabled:
                 # This ensures that if we use the attr again in `__init__`, it
                 # will look like the actual value, not an instance of Attribute.
                 if isinstance(value, Attribute):
-                    if not hasattr(self, "__annotations__"):
-                        self.__annotations__ = {}
+                    # NB: Ensure that we set __annotations__ on the specific
+                    # class in question, and not on a superclass (which would
+                    # be wrong wrong wrong!).
+                    # See also https://github.com/pytorch/pytorch/issues/39463
+                    if "__annotations__" not in self.__class__.__dict__:
+                        self.__class__.__annotations__ = {}
                     self.__annotations__[attr] = value.type
                     value = value.value
                 return super(ScriptModule, self).__setattr__(attr, value)
@@ -1782,6 +1805,9 @@ if _enabled:
 
             """
             return self._c._save_for_mobile(*args, **kwargs)
+
+        def _save_to_buffer_for_lite_interpreter(self, *args, **kwargs):
+            return self._c._save_to_buffer_for_mobile(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):
             return self._c.save_to_buffer(*args, **kwargs)

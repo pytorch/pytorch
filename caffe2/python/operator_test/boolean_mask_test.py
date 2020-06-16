@@ -14,7 +14,7 @@ import numpy as np
 class TestBooleanMaskOp(serial.SerializedTestCase):
     @given(x=hu.tensor1d(min_len=1,
                          max_len=100,
-                         elements=st.floats(min_value=0.5, max_value=1.0)),
+                         elements=hu.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs_cpu_only)
     def test_boolean_mask_gradient(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",
@@ -28,7 +28,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor1d(min_len=1,
                          max_len=5,
-                         elements=st.floats(min_value=0.5, max_value=1.0)),
+                         elements=hu.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs)
     def test_boolean_mask(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",
@@ -43,7 +43,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor1d(min_len=1,
                          max_len=5,
-                         elements=st.floats(min_value=0.5, max_value=1.0)),
+                         elements=hu.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs)
     def test_boolean_mask_indices(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",
@@ -68,7 +68,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
     def test_sequence_mask_with_lengths(self, x, dtype, gc, dc):
@@ -101,7 +101,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
     def test_sequence_mask_with_window(self, x, dtype, gc, dc):
@@ -142,7 +142,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
@@ -194,7 +194,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
     def test_sequence_mask_batching_lengths(self, x, dtype, gc, dc):
@@ -246,7 +246,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=4,
                        max_dim=4,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
     def test_sequence_mask_batching_window(self, x, dtype, gc, dc):
@@ -300,7 +300,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=3,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
@@ -364,7 +364,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @given(x=hu.tensor(min_dim=3,
                        max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+                       elements=hu.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
     def test_sequence_mask_repeated(self, x, dtype, gc, dc):
