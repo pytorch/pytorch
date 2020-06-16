@@ -751,7 +751,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
 
 void TensorIterator::populate_operands(const TensorIteratorConfig& config) {
   for (int i = 0; i < config.tensors_.size(); i++) {
-    operands_.emplace_back(*config.tensors_[i]);
+    operands_.emplace_back(std::move(config.tensors_[i]));
   }
   num_outputs_ = config.num_outputs_;
 }

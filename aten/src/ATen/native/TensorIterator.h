@@ -66,9 +66,9 @@ struct CAFFE2_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
   explicit OperandInfo(Tensor t) : tensor(std::move(t)) {
-    if (t.defined()) {
-      device = t.device();
-      target_dtype = t.scalar_type();
+    if (tensor.defined()) {
+      device = tensor.device();
+      target_dtype = tensor.scalar_type();
       current_dtype = target_dtype;
     }
     validate();
@@ -408,16 +408,20 @@ class CAFFE2_API TensorIteratorConfig final {
 public:
   friend struct TensorIterator;
 
+  TensorIteratorConfig() {}
+
+  C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
+
   /// Construction
   TensorIteratorConfig& add_output(const Tensor& output) {
     TORCH_INTERNAL_ASSERT(num_inputs_ == 0);
-    tensors_.emplace_back(&output);
+    tensors_.emplace_back(output);
     num_outputs_++;
     return *this;
   }
 
   TensorIteratorConfig& add_input(const Tensor& input) {
-    tensors_.emplace_back(&input);
+    tensors_.emplace_back(input);
     num_inputs_++;
     return *this;
   }
@@ -524,7 +528,7 @@ public:
   }
 
 private:
-  SmallVector<const Tensor*, 4> tensors_;
+  SmallVector<Tensor, 4> tensors_;
   int num_outputs_ = 0;
   int num_inputs_ = 0;
 
