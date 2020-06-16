@@ -5818,6 +5818,8 @@ Return the sum of array elements over a given axis treating Not a Numbers (NaNs)
 
 Args:
     {input}
+
+Keyword args:
     {dtype}
 
 Example::
@@ -5840,6 +5842,8 @@ Args:
     {input}
     {dim}
     {keepdim}
+
+Keyword args:
     {dtype}
 
 Example::
