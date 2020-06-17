@@ -19,7 +19,6 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
-    "-DUSE_INTERNAL_PTHREADPOOL_IMPL",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -1351,7 +1350,6 @@ filegroup(
         "caffe2/utils/smart_tensor_printer.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
-        "caffe2/utils/threadpool/ThreadPoolMobile.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
         "caffe2/utils/threadpool/pthreadpool_impl.cc",
     ],
