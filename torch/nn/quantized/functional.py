@@ -484,7 +484,6 @@ def elu(input, scale, zero_point, alpha=1.):
         input: quantized input
         scale, zero_point: Scale and zero point of the output tensor.
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
-        inplace: Inplace modification of the input tensor
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.elu' must be quantized!")

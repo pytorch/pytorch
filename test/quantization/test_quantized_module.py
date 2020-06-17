@@ -805,17 +805,17 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 # fp16 dynamic quant is not supported for qnnpack
                 continue
                 # Test default instantiation
-            seq_len = 128
-            batch = 16
+            seq_len = 4
+            batch = 2
             input_size = 3
             hidden_size = 7
             num_layers = 2
             bias = True
             bidirectional = False
 
-            x = torch.rand(seq_len, batch, input_size)
-            h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
-            c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+            x = torch.randn(seq_len, batch, input_size)
+            h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
+            c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
 
 
             cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
