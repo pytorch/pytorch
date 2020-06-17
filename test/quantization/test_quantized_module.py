@@ -46,9 +46,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy6 = relu6_module(qx)
 
         self.assertEqual(y_ref, qy.dequantize(),
-                         message="ReLU module API failed")
+                         msg="ReLU module API failed")
         self.assertEqual(y6_ref, qy6.dequantize(),
-                         message="ReLU6 module API failed")
+                         msg="ReLU6 module API failed")
 
 
     @given(
@@ -92,7 +92,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         qlinear.set_weight_bias(W_q, B)
         # Simple round-trip test to ensure weight()/set_weight() API
-        self.assertEqual(qlinear.weight(), W_q, atol=1e-5)
+        self.assertEqual(qlinear.weight(), W_q, atol=1e-5, rtol=0)
         W_pack = qlinear._packed_params._packed_params
 
         qlinear.scale = float(scale)
@@ -148,25 +148,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
-        # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on save.
-        # <start code>
-        # b = io.BytesIO()
-        # torch.save(qlinear, b)
-        # b.seek(0)
-        # loaded = torch.load(b)
-        # self.assertEqual(qlinear.weight(), loaded.weight())
-        # self.assertEqual(qlinear.scale, loaded.scale)
-        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
-        # <end code>
-        #
-        # Currently disabled after TorchBind PR
-        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-        #     b = io.BytesIO()
-        #     torch.save(qlinear, b)
+        b = io.BytesIO()
+        torch.save(qlinear, b)
+        b.seek(0)
+        loaded = torch.load(b)
+        self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.scale, loaded.scale)
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
@@ -295,28 +283,15 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
 
-        # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on
-        # save.
-        # <start code>
-        # b = io.BytesIO()
-        # torch.save(conv_under_test, b)
-        # b.seek(0)
-        # loaded_conv = torch.load(b)
-        #
-        # self.assertEqual(loaded_qconv_module.bias(), qconv_module.bias())
-        # self.assertEqual(loaded_qconv_module.scale, qconv_module.scale)
-        # self.assertEqual(loaded_qconv_module.zero_point,
-        #                  qconv_module.zero_point)
-        # <end code>
-        with self.assertRaisesRegex(
-            RuntimeError, r'torch.save\(\) is not currently supported'
-        ):
-            bytes_io = io.BytesIO()
-            torch.save(qconv_module, bytes_io)
+        b = io.BytesIO()
+        torch.save(qconv_module, b)
+        b.seek(0)
+        loaded_conv = torch.load(b)
+
+        self.assertEqual(loaded_conv.bias(), qconv_module.bias())
+        self.assertEqual(loaded_conv.scale, qconv_module.scale)
+        self.assertEqual(loaded_conv.zero_point,
+                         qconv_module.zero_point)
 
         # JIT testing
         self.checkScriptable(
@@ -576,7 +551,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm2d module API failed")
+                         msg="BatchNorm2d module API failed")
 
     def test_batch_norm3d(self):
         """Tests the correctness of the batchnorm3d module.
@@ -594,7 +569,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qy = quant_mod(qx)
 
         self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
-                         message="BatchNorm3d module API failed")
+                         msg="BatchNorm3d module API failed")
 
     def test_layer_norm(self):
         """Tests the correctness of the layernorm module.
@@ -624,12 +599,82 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qY = quant_mod(qX)
 
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         message="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         msg="LayerNorm module API failed, qY_ref\n{} vs qY\n{}"
                          .format(qY_ref, qY))
 
+    def test_group_norm(self):
+        """Tests the correctness of the groupnorm module.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+
+        dims = (1, 4, 8)
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = torch.nn.GroupNorm(2, 4).float()
+        float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
+        float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
+
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = nnq.GroupNorm(
+            2, 2, float_mod.weight, float_mod.bias, y_scale, y_zero_point)
+        qY = quant_mod(qX)
+
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         msg="GroupNorm module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
+
+    def test_instance_norm(self):
+        """Tests the correctness of the instancenorm{n}d modules.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+
+        dims_to_modules = [
+            ((1, 4, 8), torch.nn.InstanceNorm1d, nnq.InstanceNorm1d),
+            ((1, 4, 8, 1), torch.nn.InstanceNorm2d, nnq.InstanceNorm2d),
+            ((1, 4, 8, 1, 1), torch.nn.InstanceNorm3d, nnq.InstanceNorm3d),
+        ]
+
+        for dim_to_modules in dims_to_modules:
+            dims, float_cls, q_cls = dim_to_modules
+
+            X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+            qX = torch.quantize_per_tensor(
+                X, x_scale, x_zero_point, dtype=torch.quint8)
+            dqX = qX.dequantize()
+
+            float_mod = float_cls(dims[1], affine=True).float()
+            float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
+            float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
+
+            dqY_ref = float_mod(dqX)
+            qY_ref = torch.quantize_per_tensor(
+                dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+            quant_mod = q_cls(
+                dims[1], float_mod.weight, float_mod.bias, y_scale,
+                y_zero_point)
+            qY = quant_mod(qX)
+
+            self.assertEqual(
+                qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                msg="InstanceNorm module API failed, qY_ref\n{} vs qY\n{}"
+                .format(qY_ref, qY))
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
-    @skipIfNoFBGEMM
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -658,7 +703,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Check if the module implementation matches calling the
         # ops directly
-        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack)
+        Z_ref = torch.ops.quantized.linear_dynamic(X, W_pack, reduce_range=True)
         self.assertEqual(Z_ref, Z_dq)
 
         # Test serialization of dynamic quantized Linear Module using state_dict
@@ -695,22 +740,12 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
-        # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on save.
-        # <start code>
-        # b = io.BytesIO()
-        # torch.save(qlinear, b)
-        # b.seek(0)
-        # loaded = torch.load(b)
-        # self.assertEqual(qlinear.weight(), loaded.weight())
-        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
-        # <end code>
-        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-        #     b = io.BytesIO()
-        #     torch.save(qlinear, b)
+        b = io.BytesIO()
+        torch.save(qlinear, b)
+        b.seek(0)
+        loaded = torch.load(b)
+        self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
         self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
@@ -728,3 +763,47 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Smoke test extra_repr
         self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
+
+    @override_qengines
+    def test_lstm_api(self):
+        r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
+        """
+        # Check that module matches the numerics of the op and ensure that module can be
+        # instantiated for all engines and dtypes
+
+        for dtype in [torch.qint8, torch.float16]:
+            if dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack":
+                # fp16 dynamic quant is not supported for qnnpack
+                continue
+                # Test default instantiation
+            seq_len = 4
+            batch = 2
+            input_size = 3
+            hidden_size = 7
+            num_layers = 2
+            bias = True
+            bidirectional = False
+
+            x = torch.randn(seq_len, batch, input_size)
+            h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
+            c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
+
+
+            cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                      hidden_size=hidden_size,
+                                                      num_layers=num_layers,
+                                                      bias=bias,
+                                                      batch_first=False,
+                                                      dropout=0.0,
+                                                      bidirectional=bidirectional,
+                                                      dtype=dtype)
+            _all_params = ([m.param for m in cell_dq._all_weight_values])
+            result = torch.quantized_lstm(x, (h, c), _all_params, cell_dq.bias, cell_dq.num_layers,
+                                          float(cell_dq.dropout), False, bidirectional,
+                                          False, dtype=dtype, use_dynamic=True)
+
+
+            y, (h, c) = cell_dq(x, (h, c))
+            self.assertEqual(result[0], y)
+            self.assertEqual(result[1], h)
+            self.assertEqual(result[2], c)

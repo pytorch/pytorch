@@ -157,7 +157,11 @@ if(INTERN_BUILD_ATEN_OPS)
 
   set(CUSTOM_BUILD_FLAGS)
   if(INTERN_BUILD_MOBILE)
-    list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
+    if(USE_VULKAN)
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU Vulkan)
+    else()
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
+    endif()
   endif()
 
   if(SELECTED_OP_LIST)
@@ -177,6 +181,9 @@ if(INTERN_BUILD_ATEN_OPS)
       --force_schema_registration
       --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
   endif()
+  if(USE_VULKAN)
+    set(GEN_VULKAN_FLAGS --vulkan)
+  endif()
 
   set(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
@@ -185,6 +192,7 @@ if(INTERN_BUILD_ATEN_OPS)
       ${GEN_ROCM_FLAG}
       ${cwrap_files}
       ${CUSTOM_BUILD_FLAGS}
+      ${GEN_VULKAN_FLAGS}
   )
 
   execute_process(

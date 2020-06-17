@@ -1,7 +1,6 @@
 from __future__ import print_function
 import os
 import collections
-import glob
 import yaml
 import re
 import argparse
@@ -43,7 +42,8 @@ read gen_pyi for the gory details.
 
 needed_modules = set()
 
-FACTORY_PARAMS = "dtype: Optional[_dtype]=None, device: Union[_device, str, None]=None, requires_grad: _bool=False"
+DEVICE_PARAM = "device: Union[_device, str, None]=None"
+FACTORY_PARAMS = f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: _bool=False"
 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
@@ -121,7 +121,7 @@ def type_to_python(typename, size=None):
         typename += '[]'
 
     typename = {
-        'Device': 'Union[_device, str, None]',
+        'Device': 'Device',
         'Generator': 'Generator',
         'IntegerTensor': 'Tensor',
         'Scalar': 'Number',
@@ -341,26 +341,6 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
 
     return type_hints
 
-def gen_nn_modules(out):
-    def replace_forward(m):
-        # We instruct mypy to not emit errors for the `forward` and `__call__` declarations since mypy
-        # would otherwise correctly point out that Module's descendants' `forward` declarations
-        # conflict with `Module`s. Specifically, `Module` defines `forward(self, *args)` while the
-        # descandantes define more specific forms, such as `forward(self, input: Tensor)`, which
-        # violates Liskov substitutability. The 'mypy' team recommended this solution for now.
-        forward_def = m.group(0) + "  # type: ignore"
-        call_def = re.sub(r'def forward', 'def __call__', forward_def)
-        new_def = "{}\n{}".format(forward_def, call_def)
-        return new_def
-    pattern = re.compile(r'^\s*def forward\(self.*$', re.MULTILINE)
-    for fname in glob.glob("torch/nn/modules/*.pyi.in"):
-        with open(fname, 'r') as f:
-            src = f.read()
-        res = pattern.sub(replace_forward, src)
-        fname_out = fname[:-3]
-        with open(os.path.join(out, fname_out), 'w') as f:
-            f.write(res)
-
 def gen_nn_functional(out):
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
@@ -420,7 +400,6 @@ def gen_nn_functional(out):
 
 def gen_nn_pyi(out):
     gen_nn_functional(out)
-    gen_nn_modules(out)
 
 def gen_pyi(declarations_path, out):
     """gen_pyi()
@@ -534,6 +513,18 @@ def gen_pyi(declarations_path, out):
         'new_ones': ['def new_ones(self, size: {}, {}) -> Tensor: ...'.
                      format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
         'new_tensor': ["def new_tensor(self, data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
+        # new and __init__ have the same signatures differ only in return type
+        # Adapted from legacy_tensor_ctor and legacy_tensor_new
+        'new': ['def new(self, *args: Any, {}) ->Tensor: ...'.format(DEVICE_PARAM),
+                'def new(self, storage: Storage) -> Tensor: ...',
+                'def new(self, other: Tensor) -> Tensor: ...',
+                'def new(self, size: {}, *, {}) -> Tensor: ...'.format(type_to_python('IntArrayRef'), DEVICE_PARAM),
+                ],
+        '__init__': ['def __init__(self, *args: Any, {}) -> None: ...'.format(DEVICE_PARAM),
+                     'def __init__(self, storage: Storage) -> None: ...',
+                     'def __init__(self, other: Tensor) -> None: ...',
+                     'def __init__(self, size: {}, *, {}) -> None: ...'.format(type_to_python('IntArrayRef'), DEVICE_PARAM),
+                     ],
         # clamp has no default values in the Declarations
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
@@ -633,7 +624,7 @@ def gen_pyi(declarations_path, out):
 
     legacy_class_hints = []
     for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-              'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor'):
+              'ShortTensor', 'HalfTensor', 'CharTensor', 'ByteTensor', 'BoolTensor'):
         legacy_class_hints.append('class {}(Tensor): ...'.format(c))
 
     # Generate type signatures for dtype classes

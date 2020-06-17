@@ -173,35 +173,29 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w,
     scalar_t* bottom_diff) {
-    CUDA_KERNEL_LOOP(index, height*width) {
-    int h = index/width;
-    int w = index - h * width;
+  CUDA_KERNEL_LOOP(index, height*width) {
+    int h = index / width;
+    int w = index % width;
     int phstart = p_start(h, pad_h, kernel_h, dilation_h, stride_h);
     int phend = p_end(h, pad_h, pooled_height, stride_h);
     int pwstart = p_start(w, pad_w, kernel_w, dilation_w, stride_w);
     int pwend = p_end(w, pad_w, pooled_width, stride_w);
-    for (int n = blockIdx.y; n < num; n += gridDim.y)
-       for (int c = blockIdx.z; c < channels; c+= gridDim.z) {
-
+    for (int n = blockIdx.y; n < num; n += gridDim.y) {
+      for (int c = blockIdx.z; c < channels; c+= gridDim.z) {
         accscalar_t gradient = accscalar_t(0);
         int offset = (n * channels + c) * pooled_height * pooled_width;
-        top_diff += offset;
-        top_mask += offset;
-        if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
+        const scalar_t* ptr_top_diff = top_diff + offset;
+        const int64_t* ptr_top_mask = top_mask + offset;
         for (int ph = phstart; ph < phend; ++ph) {
           for (int pw = pwstart; pw < pwend; ++pw) {
-            if (top_mask[ph * pooled_width + pw] == h * width + w) {
-              gradient += ScalarConvert<scalar_t, accscalar_t>::to(top_diff[ph * pooled_width + pw]);
+            if (ptr_top_mask[ph * pooled_width + pw] == h * width + w) {
+              gradient += ScalarConvert<scalar_t, accscalar_t>::to(ptr_top_diff[ph * pooled_width + pw]);
             }
           }
         }
-        } else {
-            if (top_mask[phstart * pooled_width + pwstart] == h * width + w) {
-              gradient += ScalarConvert<scalar_t, accscalar_t>::to(top_diff[phstart * pooled_width + pwstart]);
-            }
-        }
         bottom_diff[(n*channels+c)*height*width+index] = ScalarConvert<accscalar_t, scalar_t>::to(gradient);
       }
+    }
   }
 }
 
@@ -445,6 +439,7 @@ void max_pool2d_with_indices_out_cuda_template(
 
   if(input.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
+    indices.resize_({nInputPlane, outputHeight, outputWidth});
   }
 }
 

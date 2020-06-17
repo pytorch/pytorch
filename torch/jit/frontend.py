@@ -16,7 +16,7 @@ from torch._C._jit_tree_views import (
 )
 from torch._utils_internal import get_source_lines_and_file
 
-from torch._jit_internal import SourceContext
+from torch._jit_internal import SourceContext, should_drop
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -165,7 +165,19 @@ def get_jit_def(fn, def_name, self_name=None):
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
-    return build_def(ctx, py_ast.body[0], type_line, def_name, self_name=self_name)
+    fn_def = py_ast.body[0]
+
+    # Swap out the function signature and body if it is unused
+    if should_drop(fn):
+        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
+        fn_def.body = unused_fn_def.body
+        # kwarg/vararg not supported by `build_def`
+        fn_def.args.kwarg = fn_def.args.vararg = None
+        for arg in fn_def.args.args + fn_def.args.kwonlyargs:
+            # Replace potentially unsupported type annotations by "Any"
+            arg.annotation = unused_fn_def.args.args[0].annotation
+
+    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
 
 
 class Builder(object):
@@ -258,6 +270,7 @@ class StmtBuilder(Builder):
         ast.Sub: '-',
         ast.Mult: '*',
         ast.Div: '/',
+        ast.Mod: '%',
     }
 
     @staticmethod

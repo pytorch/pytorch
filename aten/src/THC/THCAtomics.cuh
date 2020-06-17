@@ -1,6 +1,7 @@
 #ifndef THC_ATOMICS_INC
 #define THC_ATOMICS_INC
 
+#include <c10/util/complex_type.h>
 #include <THC/THC.h>
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>
@@ -199,6 +200,12 @@ static inline __device__ void gpuAtomicAdd(double *address, double val) {
 
 static inline __device__ void gpuAtomicAdd(float *address, float val) {
   atomicAdd(address, val);
+}
+
+template<typename T>
+static inline __device__ void gpuAtomicAdd(c10::complex<T> *address, c10::complex<T> val) {
+  gpuAtomicAdd(&address->real_, val.real_);
+  gpuAtomicAdd(&address->imag_, val.imag_);
 }
 
 /* Note [gpuAtomicAdd vs atomicAdd]
