@@ -31,7 +31,7 @@ class Module(object):
             raise RuntimeError("Module {} has no member called {}".format(self.name, name))
 
 
-class EvalEnv:
+class EvalEnv(object):
     ENV = {
         'torch': Module('torch', {'Tensor': torch.Tensor}),
         'Tensor': torch.Tensor,
