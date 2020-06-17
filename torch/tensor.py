@@ -6,7 +6,6 @@ from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
 import weakref
-from torch._six import imap
 from torch._C import _add_docstr
 from numbers import Number
 import functools
@@ -394,14 +393,11 @@ class Tensor(torch._C._TensorBase):
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)
 
-    def __rdiv__(self, other):
+    def __rtruediv__(self, other):
         if self.dtype.is_floating_point or self.dtype.is_complex:
             return self.reciprocal() * other
         else:
             return (self.double().reciprocal() * other).type_as(self)
-
-    __rtruediv__ = __rdiv__
-    __itruediv__ = _C._TensorBase.__idiv__
 
     __pow__ = _C._TensorBase.pow
 
@@ -445,12 +441,6 @@ class Tensor(torch._C._TensorBase):
         return self.shape[0]
 
     def __iter__(self):
-        # NB: we use 'imap' and not 'map' here, so that in Python 2 we get a
-        # generator and don't eagerly perform all the indexes.  This could
-        # save us work, and also helps keep trace ordering deterministic
-        # (e.g., if you zip(*hiddens), the eager map will force all the
-        # indexes of hiddens[0] before hiddens[1], while the generator
-        # map will interleave them.)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
         if torch._C._get_tracing_state():
@@ -458,7 +448,7 @@ class Tensor(torch._C._TensorBase):
                           'Passing a tensor of different shape won\'t change the number of '
                           'iterations executed (and might lead to errors or silently give '
                           'incorrect results).', category=RuntimeWarning)
-        return iter(imap(lambda i: self[i], range(self.size(0))))
+        return iter(map(lambda i: self[i], range(self.size(0))))
 
     def __hash__(self):
         return id(self)
