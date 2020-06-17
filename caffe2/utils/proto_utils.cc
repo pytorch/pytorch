@@ -137,7 +137,7 @@ C10_EXPORT bool ParseProtoFromLargeString(
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  coded_stream.SetTotalBytesLimit(2147483647);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -150,7 +150,7 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   // Total bytes hard limit / warning limit are set to 2GB and 512MB
   // respectively.
   ::google::protobuf::io::CodedInputStream coded_stream(&stream);
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  coded_stream.SetTotalBytesLimit(2147483647);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 

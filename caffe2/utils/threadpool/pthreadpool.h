@@ -117,6 +117,11 @@ size_t pthreadpool_get_threads_count(pthreadpool_t threadpool);
  * @param[in]  items       The number of items to process. The @a function
  *    will be called once for each item.
  */
+
+// See https://github.com/pytorch/pytorch/issues/33760
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 void pthreadpool_compute_1d(
     pthreadpool_t threadpool,
     pthreadpool_function_1d_t function,
@@ -169,6 +174,8 @@ void pthreadpool_compute_4d_tiled(
     size_t tile_j,
     size_t tile_k,
     size_t tile_l);
+
+#pragma GCC diagnostic pop
 
 /**
  * Terminates threads in the thread pool and releases associated resources.
