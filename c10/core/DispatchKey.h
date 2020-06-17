@@ -46,6 +46,16 @@ enum class DispatchKey : uint8_t {
   // backend; e.g., CPU and SparseCPU (sparse must have
   // higher priority).
 
+  // The "default" backend is a generic backend which could be used
+  // by any backend by lowering an operation into other operations (think of it
+  // like "default methods" in Haskell type classes or Rust traits).
+  // If you provide an actual implementation for your backend specifically,
+  // it will be preferred over this implementation, but these implementations
+  // may be of use for backend implementors who don't have time to
+  // implement everything.  Order matters: the DefaultBackend must
+  // be tested after we have checked for everything else.
+  DefaultBackend,
+
   // Here are backends which you think of as traditionally specifying
   // how to implement operations on some device.
   CPU, // registered at build/aten/src/ATen/CPUType.cpp
