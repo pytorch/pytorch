@@ -44,7 +44,7 @@ if IS_WINDOWS:
                 self.manager_dead = self.kernel32.WaitForSingleObject(self.manager_handle, 0) == 0
             return not self.manager_dead
 else:
-    class ManagerWatchdog(object):
+    class ManagerWatchdog(object):  # type: ignore[no-redef]
         def __init__(self):
             self.manager_pid = os.getppid()
             self.manager_dead = False
@@ -63,12 +63,19 @@ class WorkerInfo(object):
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+        self.__keys = tuple(kwargs.keys())
         self.__initialized = True
 
     def __setattr__(self, key, val):
         if self.__initialized:
             raise RuntimeError("Cannot assign attributes to {} objects".format(self.__class__.__name__))
         return super(WorkerInfo, self).__setattr__(key, val)
+
+    def __repr__(self):
+        items = []
+        for k in self.__keys:
+            items.append('{}={}'.format(k, getattr(self, k)))
+        return '{}({})'.format(self.__class__.__name__, ', '.join(items))
 
 
 def get_worker_info():

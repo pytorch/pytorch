@@ -34,11 +34,9 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-#include <ATen/native/cuda/CUDA9Workarounds.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
@@ -66,26 +64,44 @@ static constexpr int launch_bound2 = 4;
 
 namespace at { namespace native {
 
-template<int N>
-static OffsetCalculator<N> make_input_offset_calculator(const TensorIterator& iter) {
-  // array size can not be 0, this happens when N == 0
-  constexpr int array_size = std::max<int>(N, 1);
-  TORCH_INTERNAL_ASSERT(N == iter.ntensors() - 1);
-  std::array<const int64_t*, array_size> strides;
-  int64_t element_sizes[array_size];
-  for (int i = 0; i < N; i++) {
-    strides[i] = iter.strides(i + 1).data();
-    element_sizes[i] = iter.element_size(i + 1);
-  }
-  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
-}
+// See [NOTE: Complex Operator Unification]
+// std::complex and thrust::complex don't work with some !needs_dynamic_casting optimizations.
+// They always currently map to !needs_dynamic_casting even though we sometimes rely on the ability
+// to reinterpret_cast between these representations.
+// In order to separate these concerns, we have a check for non-c10 complex separately.
+template<typename func_t, int nargs=function_traits<func_t>::arity>
+struct uses_non_c10_complex {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::template arg<nargs - 1>::type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
 
-static OffsetCalculator<1> make_output_offset_calculator(const TensorIterator& iter) {
-  std::array<const int64_t*, 1> strides;
-  strides[0] = iter.strides(0).data();
-  int64_t element_size = iter.element_size(0);
-  return OffsetCalculator<1>(iter.ndim(), iter.shape().data(), strides.data(), &element_size);
-}
+    return c10::guts::if_constexpr<non_c10_complex>([]() {
+      return true;
+    }, /* else */ []() {
+      return uses_non_c10_complex<func_t, nargs - 1>::check();
+    });
+  }
+};
+
+template<typename func_t>
+struct uses_non_c10_complex<func_t, 0> {
+  constexpr static bool check() {
+    using traits = function_traits<func_t>;
+    using type = typename traits::result_type;
+    constexpr bool non_c10_complex =
+        std::is_same<std::complex<float>, type>::value
+        || std::is_same<std::complex<double>, type>::value
+        || std::is_same<thrust::complex<float>, type>::value
+        || std::is_same<thrust::complex<double>, type>::value;
+
+    return non_c10_complex;
+  }
+};
 
 // NOTE: @zasdfgbnm is currently working on rewriting the gpu loops.
 // Some of the old codes has been moved to namespace legacy, and
@@ -165,8 +181,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   int idx = blockIdx.x;
 
   return_t results[thread_work_size];
-  cuda9::workaround::enable_default_constructor<args_t> args_[thread_work_size];
-  args_t *args = reinterpret_cast<args_t *>(&args_);
+  args_t args[thread_work_size];
 
   // load
   policy.load(args, idx);
@@ -252,7 +267,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   constexpr int ntensors = traits::arity + 1;
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
+  TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
 
   at::detail::Array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
@@ -263,18 +279,21 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
 
   bool contiguous = iter.is_contiguous();
   bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
+  bool non_c10_complex = uses_non_c10_complex<func_t>::check();
 
-  if (contiguous && !dynamic_casting) {
-    modern::launch_vectorized_kernel(numel, f, data);
-    return;
-  }
+  if (!non_c10_complex) {
+    if (contiguous && !dynamic_casting) {
+      modern::launch_vectorized_kernel(numel, f, data);
+      return;
+    }
 
-  if (!dynamic_casting) {
-    // !contiguous
-    auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
-    auto output_offset_calculator = make_output_offset_calculator(iter);
-    modern::launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator);
-    return;
+    if (!dynamic_casting) {
+      // !contiguous
+      auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
+      auto output_offset_calculator = make_output_offset_calculator(iter);
+      modern::launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator);
+      return;
+    }
   }
 
   at::detail::Array<ScalarType, ntensors> dtypes;
@@ -289,7 +308,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       strides[i] = inner_strides[i];
     }
 
-    if (needs_dynamic_casting<func_t>::check(iter)) {
+    // TODO: can non_c10_complex go through the other path?  Need to verify.
+    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         void* out = data[0] + strides[0] * idx;
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
@@ -303,7 +323,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     }
   } else {
     auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
-    if (needs_dynamic_casting<func_t>::check(iter)) {
+    // TODO: can non_c10_complex go through the other path?  Need to verify.
+    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];

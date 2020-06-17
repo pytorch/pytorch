@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -24,14 +25,26 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// include IO data structure for host code
-#define STRINGIFY(...) __VA_ARGS__
-#include <torch/csrc/jit/codegen/cuda/data_struct_str.h>
-#undef STRINGIFY
+// TODO: given that KernelArgsReq is becoming complicated and not really
+//       hashable, I should throw this inside CudaKernel.
+// Interfacing object allows kernel to return whether a given input
+// configuration could/should be handled.
+struct KernelArgsReq {
+  virtual bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) = 0;
+  virtual ~KernelArgsReq() = default;
+};
 
-class CudaKernel {
+// naive P-wise kernel only requires same dimensionality for input tensors.
+struct NaivePWKernelArgsReq : KernelArgsReq {
+  bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) override;
+  std::vector<int> dims_;
+};
+
+struct CudaKernel {
  public:
-  CudaKernel() = default;
+  CudaKernel() {
+    fusion_ = std::make_unique<Fusion>();
+  }
 
   CUmodule& getModule() {
     return module_;
@@ -45,6 +58,7 @@ class CudaKernel {
   CUmodule module_;
   CUfunction function_;
   int max_blocks_;
+  int unroll_factor_ = 1;
 
   // WARNING:
   // Block and Grid dimension setting is here for testing purposes only
@@ -59,33 +73,29 @@ class CudaKernel {
 
   dim3 block_;
   dim3 grid_;
-};
+  bool has_random_;
 
-// include IO data structure for stringification
-#define STRINGIFY(...) #__VA_ARGS__
-static auto typeinfo =
-#include "data_struct_str.h"
-    ;
-#undef STRINGIFY
+  std::unique_ptr<Fusion> fusion_;
+};
 
 // compile Fusion to CUDA functions:
 // 1. JIT compilation via nvrtc to generate CUDA c++ kernel code;
 // 2. CUDA Drive API to load CUDA c++ kernel code as function_;
-TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel& entry);
+TORCH_CUDA_API void compileKernel(CudaKernel* entry);
 
 // run loaded kernel through Function.
 // inputs/outputs is given in the sense of a PyTorch JIT ir node. This function
 // wraps IO data structure for tensors on host.
 TORCH_CUDA_API void runKernel(
-    CudaKernel& entry,
-    const at::ArrayRef<IValue>& inputs,
-    std::vector<at::Tensor>& outputs);
+    CudaKernel* entry,
+    const at::ArrayRef<c10::IValue> inputs,
+    std::vector<at::Tensor> outputs);
 
 // Facility API to run kernel in tests.
 TORCH_CUDA_API void runTestKernel(
-    CudaKernel& entry,
-    const std::vector<at::Tensor>& inputs,
-    std::vector<at::Tensor>& outputs);
+    CudaKernel* entry,
+    const at::ArrayRef<c10::IValue> inputs,
+    std::vector<at::Tensor> outputs);
 
 } // namespace cuda
 } // namespace fuser

@@ -4,6 +4,9 @@
 #include <TH/THGenerateAllTypes.h>
 
 #include <TH/generic/THTensor.cpp>
+#include <TH/THGenerateComplexTypes.h>
+
+#include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateHalfType.h>
 
 #include <TH/generic/THTensor.cpp>
@@ -57,8 +60,6 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 might have tensors whose storages are null, but we
   // don't allow it in PyTorch.
   AT_ASSERT(storage);
-  // Caffe2 also has uninitialized dtype states, which we disallow here
-  AT_ASSERT(tensor->storage().dtype() == storage->dtype());
 
   // We used to allow this, but this breaks device caching.
   // Let's put an actual error message for this one.
@@ -66,5 +67,6 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
             "Attempted to set the storage of a tensor on device \"", tensor->storage().device(),
              "\" to a storage on different device \"", storage->device(),
             "\".  This is no longer allowed; the devices must match.");
-  tensor->set_storage(at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
+  tensor->set_storage_keep_dtype(
+      at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
 }

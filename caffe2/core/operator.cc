@@ -580,7 +580,7 @@ TensorShapes InferBlobShapesAndTypes(
         }
 
       } catch (::caffe2::EnforceNotMet& enf) {
-        LOG(ERROR) << "Shape inference error: " << enf.msg();
+        LOG(ERROR) << "Shape inference error: " << enf.what();
         LOG(ERROR) << "Operator: " << ProtoDebugString(op) << std::endl;
         LOG(ERROR) << "Returning empty results.";
 

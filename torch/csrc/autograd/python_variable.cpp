@@ -6,6 +6,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Size.h>
 #include <torch/csrc/Types.h>
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
@@ -143,7 +144,22 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
   END_HANDLE_TH_ERRORS
 }
 
-// Instantiates a subclass of torch.Tensor. Used by nn.Parameter()
+// Instantiates a subclass of self with the same data.
+static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "as_subclass(PyObject* cls)",
+  });
+  ParsedArgs<1> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+  PyObject* cls = r.pyobject(0);
+  if (!PyType_Check(cls)) {
+    throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+  }
+  return THPVariable_NewWithVar((PyTypeObject*)cls, self->cdata.alias());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -155,7 +171,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data = as_variable_ref(r.tensor(1)).detach();
+  auto data = r.tensor(1).detach();
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
   // allow the following use case for backward compatibility:
   //
@@ -377,8 +393,8 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj, void *unused
     THPUtils_setError(autograd::utils::requires_grad_leaf_error(obj == Py_True).c_str());
     return -1;
   }
-  if (requires_grad && !var.is_floating_point()) {
-    THPUtils_setError("only Tensors of floating point dtype can require gradients");
+  if (requires_grad && !isDifferentiableType(at::typeMetaToScalarType((var.dtype())))) {
+    THPUtils_setError("only Tensors of floating point and complex dtype can require gradients");
     return -1;
   }
   var.set_requires_grad(requires_grad);
@@ -483,20 +499,38 @@ static PyObject *THPVariable_dtype(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getDtype(self_.scalar_type()));
+  return torch::autograd::utils::wrap(torch::getTHPDtype(self_.scalar_type()));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_layout(THPVariable* self, void *unused) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getLayout(self_.options().backend()));
+  return torch::autograd::utils::wrap(torch::getTHPLayout(self_.layout()));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_device(THPVariable* self, void *unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata.device());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_get_real(THPVariable* self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto real = at::real(self_);
+  return THPVariable_Wrap(real);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto imag = at::imag(self_);
+  return THPVariable_Wrap(imag);
   END_HANDLE_TH_ERRORS
 }
 
@@ -529,6 +563,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
+  {"real", (getter)THPVariable_get_real, nullptr, nullptr, nullptr},
+  {"imag", (getter)THPVariable_get_imag, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
@@ -539,7 +575,8 @@ static PyMappingMethods THPVariable_as_mapping = {
 };
 
 static PyMethodDef extra_methods[] = {
-  {"_make_subclass", (PyCFunction)(void(*)(void))THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"as_subclass", (PyCFunction)THPVariable_as_subclass, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_make_subclass", (PyCFunction)THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr}
 };
 

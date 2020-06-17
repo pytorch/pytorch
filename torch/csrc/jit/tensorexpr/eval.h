@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+#include <torch/csrc/jit/tensorexpr/var_substitutor.h>
 
 namespace torch {
 namespace jit {
@@ -123,13 +124,24 @@ inline bool div_value(bool lhs, bool rhs) {
 
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
  public:
-  using CodeGen::CodeGen;
+  template <typename... Ts>
+  SimpleIREvaluator(Stmt* stmt, Ts... ts) : CodeGen(stmt, ts...) {
+    expand_intrinsics();
+  }
+
+  SimpleIREvaluator(
+      Stmt* stmt,
+      const std::vector<BufferArg>& buffer_args,
+      at::Device device = at::kCPU)
+      : CodeGen(stmt, buffer_args, device) {
+    expand_intrinsics();
+  }
 
   ~SimpleIREvaluator() override {}
 
   TORCH_API void call(const std::vector<CallArg>& args) override {
     if (args.size() != buffer_args().size()) {
-      throw malformed_input();
+      throw malformed_input("bad args in IREvaluator call");
     }
     for (size_t i = 0; i < args.size(); i++) {
       bind(buffer_args()[i], args[i]);
@@ -157,6 +169,12 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       default:
         throw unsupported_dtype();
     }
+  }
+
+  void bindVar(const Var* v, const Expr* e) {
+    e->accept(this);
+    Value value = value_;
+    eval_context_[v] = value_;
   }
 
   template <typename... Ts>
@@ -346,7 +364,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->rhs()->accept(this);
     Value rhs_v = value_;
     if (lhs_v.dtype() != rhs_v.dtype()) {
-      throw malformed_input(v);
+      throw malformed_input("bad dtype in binary op", v);
     }
     IRNodeType expr_type = v->expr_type();
     if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kOr ||
@@ -385,7 +403,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     if (lhs_v.dtype() != rhs_v.dtype() ||
         ret_val1_v.dtype() != ret_val2_v.dtype()) {
-      throw malformed_input(v);
+      throw malformed_input("bad dtype in CompareSelect", v);
     }
 
     switch (lhs_v.dtype().scalar_type()) {
@@ -408,59 +426,24 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT
 
-  TORCH_API void visit(const Let* v) override {
-    const Var* var = dynamic_cast<const Var*>(v->var());
-    if (!var) {
-      throw malformed_input(v);
-    }
-    v->value()->accept(this);
-    Value value = value_;
-    auto iter = eval_context_.find(var);
-    if (iter != eval_context_.end()) {
-      // Save the old value
-      auto stash = iter->second;
-      iter->second = value;
-
-      v->body()->accept(this);
-
-      // Restore the old value
-      eval_context_[var] = stash;
-    } else {
-      eval_context_[var] = value_;
-      v->body()->accept(this);
-      eval_context_.erase(var);
-    }
-  }
-
-  TORCH_API void visit(const LetStmt* v) override {
-    const Var* var = v->var();
-    if (!var) {
-      throw malformed_input(v);
+  TORCH_API void visit(const Block* v) override {
+    for (const auto& pair : v->varBindings()) {
+      bindVar(pair.first, pair.second);
     }
 
-    v->value()->accept(this);
-    Value value = value_;
-    auto iter = eval_context_.find(var);
-    if (iter != eval_context_.end()) {
-      // Save the old value
-      auto stash = iter->second;
-      iter->second = value;
+    for (Stmt* s : v->stmts()) {
+      s->accept(this);
+    }
 
-      v->body()->accept(this);
-
-      // Restore the old value
-      eval_context_[var] = stash;
-    } else {
-      eval_context_[var] = value_;
-      v->body()->accept(this);
-      eval_context_.erase(var);
+    for (const auto& pair : v->varBindings()) {
+      eval_context_.erase(pair.first);
     }
   }
 
   TORCH_API void visit(const Var* v) override {
     auto iter = eval_context_.find(v);
     if (iter == eval_context_.end()) {
-      throw malformed_input(v);
+      throw malformed_input("could not find Var in context", v);
     }
 
     value_ = iter->second;
@@ -499,7 +482,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
     if (src_dtype.lanes() != dst_dtype.lanes()) {
-      throw malformed_input(v);
+      throw malformed_input("lane mismatch in Cast", v);
     }
 
     if (src_dtype != dst_dtype) {
@@ -523,7 +506,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->stop()->accept(this);
     int stop = value_.as<int>();
     if (eval_context_.count(var_node)) {
-      throw malformed_input(v);
+      throw malformed_input("could not find var_node in For context", v);
     }
 
     for (int i = start; i < stop; i++) {
@@ -580,7 +563,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
     if (iter == buffer_mapping_.end()) {
-      throw malformed_input(v);
+      throw malformed_input("could not find base node in Load", v);
     }
     void* ptr = iter->second;
 
@@ -613,7 +596,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
     if (iter == buffer_mapping_.end()) {
-      throw malformed_input(v);
+      throw malformed_input("could not find base node in Store", v);
     }
 
     void* ptr = iter->second;
@@ -624,25 +607,25 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
     if (index.size() != mask.size()) {
-      throw malformed_input(v);
+      throw malformed_input("mask size mismatch in Store", v);
     }
 
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
-#define TYPE_CASE(Type, Name)                               \
-  case ScalarType::Name: {                                  \
-    v->value()->accept(this);                               \
-    std::vector<Type> value = this->value().as_vec<Type>(); \
-    if (index.size() != value.size()) {                     \
-      throw malformed_input(v);                             \
-    }                                                       \
-    Type* ptr##Name = static_cast<Type*>(ptr);              \
-    for (size_t i = 0; i < index.size(); i++) {             \
-      if (mask[i]) {                                        \
-        ptr##Name[index[i]] = value[i];                     \
-      }                                                     \
-    }                                                       \
+#define TYPE_CASE(Type, Name)                                   \
+  case ScalarType::Name: {                                      \
+    v->value()->accept(this);                                   \
+    std::vector<Type> value = this->value().as_vec<Type>();     \
+    if (index.size() != value.size()) {                         \
+      throw malformed_input("value size mismatch in Store", v); \
+    }                                                           \
+    Type* ptr##Name = static_cast<Type*>(ptr);                  \
+    for (size_t i = 0; i < index.size(); i++) {                 \
+      if (mask[i]) {                                            \
+        ptr##Name[index[i]] = value[i];                         \
+      }                                                         \
+    }                                                           \
   } break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -669,7 +652,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     if (values.size() >= 2ULL) {
       v2 = values[1].as_vec<float>();
       if (v1.size() != v2.size()) {
-        throw malformed_input(v);
+        throw malformed_input("value size mismatch in Intrinsics", v);
       }
     }
 
@@ -718,6 +701,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           "Free a buffer that is not currently bound: " +
           buffer_var->name_hint());
     }
+    buffer_mapping_.erase(buffer_var);
   }
 
   void visit(const Cond* v) override {
@@ -738,6 +722,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
  private:
+  void expand_intrinsics() {
+    GenericIntrinsicsExpander intrinsics_expander;
+    apply_mutator(&intrinsics_expander);
+  }
+
   static float compute_intrinsics(IntrinsicsOp op_type, float v) {
     switch (op_type) {
       case kSin:
@@ -820,33 +809,6 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       internal_buffers_;
 };
 
-using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
-
-class VarSubMutator : public IRMutator {
- public:
-  VarSubMutator(const VarMapping& var_mapping) {
-    for (const auto& entry : var_mapping) {
-      const Var* key_var = entry.first;
-      const Expr* value = entry.second;
-      if (!key_var) {
-        throw malformed_input();
-      }
-      var_mapping_[key_var] = value;
-    }
-  }
-
-  const Expr* mutate(const Var* var) override {
-    auto iter = var_mapping_.find(var);
-    if (iter == var_mapping_.end()) {
-      return var;
-    }
-    return iter->second;
-  }
-
- private:
-  std::unordered_map<const Var*, const Expr*> var_mapping_;
-};
-
 template <class CodeGenType>
 class ExprEval {
  public:
@@ -879,6 +841,14 @@ class ExprEval {
 
   void operator()(const std::vector<CallArg>& call_args) {
     call(call_args);
+  }
+
+  void bindVar(const Var* v, const Expr* e) {
+    codegen_->bindVar(v, e);
+  }
+
+  void bindVar(const VarHandle& v, const ExprHandle& e) {
+    codegen_->bindVar(v.node(), e.node());
   }
 
   template <typename... Ts>
@@ -939,28 +909,6 @@ inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
 inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
-}
-
-// Uses the evaluator to fold an Expression with constant terms.
-// E.g. evaluateOp(Add(3, 4)) => 7.
-// Expr v must not have any unbound Vars.
-static Expr* evaluateOp(const Expr* v) {
-  ExprHandle handle(v);
-  ExprEval<SimpleIREvaluator> eval(handle);
-
-  switch (v->dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name)                                 \
-  case ScalarType::Name: {                                    \
-    Type val = eval.value<Type>();                            \
-    return getImmediateByType(v->dtype().scalar_type(), val); \
-  }
-    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
-#undef TYPE_CASE
-    default:
-      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
-      return nullptr;
-  }
-  return nullptr;
 }
 
 } // namespace tensorexpr

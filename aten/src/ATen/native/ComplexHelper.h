@@ -21,13 +21,9 @@ inline Tensor view_complex_as_float(const Tensor& self) {
   // last dimension will always have two elements containing the real and imag vals
   new_sizes.emplace_back(2);
   auto new_strides = computeStrideForComplex(self.strides());
-  if(self.scalar_type() == at::kComplexFloat) {
-    float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
-    return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kFloat));
-  } else {
-    double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
-    return at::from_blob(data, new_sizes, new_strides, self.options().dtype(at::kDouble));
-  }
+  auto new_storage_offset = 2 * self.storage_offset();
+  const auto float_type = c10::toValueType(self.scalar_type());
+  return at::empty({0}, self.options().dtype(float_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
 }
 
 }} // namespace at::native

@@ -4,7 +4,7 @@ set -ex
 
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
-  BASE_URL="https://repo.continuum.io/miniconda"
+  BASE_URL="https://repo.anaconda.com/miniconda"
 
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
 
@@ -25,7 +25,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   chown jenkins:jenkins /opt/conda
 
   as_jenkins() {
-    # NB: unsetting the environment variables works around a conda bug
+    # NB 2020-05-06: this work-around may no longer be needed
+    # NB 2018-02-24: unsetting the environment variables works around a conda bug
     # https://github.com/conda/conda/issues/6576
     # NB: Pass on PATH and LD_LIBRARY_PATH to sudo invocation
     # NB: This must be run from a directory that jenkins has access to,
@@ -39,9 +40,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   as_jenkins ./"${CONDA_FILE}" -b -f -p "/opt/conda"
   popd
 
-  # NB: Don't do this, rely on the rpath to get it right
-  #echo "/opt/conda/lib" > /etc/ld.so.conf.d/conda-python.conf
-  #ldconfig
+  # NB gh-37737: prefer this to setting rpath
+  echo "/opt/conda/lib" > /etc/ld.so.conf.d/conda-python.conf
+  ldconfig
   sed -e 's|PATH="\(.*\)"|PATH="/opt/conda/bin:\1"|g' -i /etc/environment
   export PATH="/opt/conda/bin:$PATH"
 
@@ -64,17 +65,21 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   # DO NOT install cmake here as it would install a version newer than 3.5, but
   # we want to pin to version 3.5.
-  conda_install numpy pyyaml mkl mkl-include setuptools cffi typing future six
-  if [[ "$CUDA_VERSION" == 9.0* ]]; then
-    conda_install magma-cuda90 -c pytorch
-  elif [[ "$CUDA_VERSION" == 9.1* ]]; then
-    conda_install magma-cuda91 -c pytorch
-  elif [[ "$CUDA_VERSION" == 9.2* ]]; then
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
+    # DO NOT install typing if installing python-3.8, since its part of python-3.8 core packages
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
+  else
+    conda_install numpy pyyaml mkl mkl-include setuptools cffi typing future six
+  fi
+  if [[ "$CUDA_VERSION" == 9.2* ]]; then
     conda_install magma-cuda92 -c pytorch
   elif [[ "$CUDA_VERSION" == 10.0* ]]; then
     conda_install magma-cuda100 -c pytorch
   elif [[ "$CUDA_VERSION" == 10.1* ]]; then
     conda_install magma-cuda101 -c pytorch
+  elif [[ "$CUDA_VERSION" == 10.2* ]]; then
+    conda_install magma-cuda102 -c pytorch
   fi
 
   # TODO: This isn't working atm

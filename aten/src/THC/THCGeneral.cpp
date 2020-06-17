@@ -47,6 +47,8 @@ void THCudaInit(THCState* state)
   THCudaCheck(cudaGetDeviceCount(&numDevices));
   state->numDevices = numDevices;
 
+  c10::cuda::CUDACachingAllocator::init(numDevices);
+
   int device = 0;
   THCudaCheck(cudaGetDevice(&device));
 
@@ -308,31 +310,6 @@ void THCudaHostRecord(THCState *state, void *ptr) {
   if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
     THCCachingHostAllocator_recordEvent(ptr, at::cuda::getCurrentCUDAStream());
   }
-}
-
-cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes, size_t* largestBlock)
-{
-  size_t cachedBytes = 0;
-
-  *largestBlock = 0;
-  /* get info from CUDA first */
-  cudaError_t ret = cudaMemGetInfo(freeBytes, totalBytes);
-  if (ret!= cudaSuccess)
-    return ret;
-
-  int device;
-  ret = cudaGetDevice(&device);
-  if (ret!= cudaSuccess)
-    return ret;
-
-  /* not always true - our optimistic guess here */
-  *largestBlock = *freeBytes;
-
-  c10::cuda::CUDACachingAllocator::cacheInfo(device, &cachedBytes, largestBlock);
-
-  /* Adjust resulting free bytes number. largesBlock unused for now */
-  *freeBytes += cachedBytes;
-  return cudaSuccess;
 }
 
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM

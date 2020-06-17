@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -79,17 +80,6 @@ void IRVisitor::visit(const Cast* v) {
   v->src_value()->accept(this);
 }
 void IRVisitor::visit(const Var* v) {}
-void IRVisitor::visit(const Let* v) {
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-}
-
-void IRVisitor::visit(const LetStmt* v) {
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-}
 
 void IRVisitor::visit(const Ramp* v) {
   v->base()->accept(this);
@@ -117,8 +107,20 @@ void IRVisitor::visit(const Store* v) {
   v->mask()->accept(this);
 }
 
+void IRVisitor::visit(const AtomicAdd* v) {
+  v->buf()->accept(this);
+  for (const Expr* ind : v->indices()) {
+    ind->accept(this);
+  }
+  v->value()->accept(this);
+}
+
 void IRVisitor::visit(const Block* v) {
-  for (Stmt* s : v->stmts()) {
+  for (const auto& pair : v->varBindings()) {
+    pair.first->accept(this);
+    pair.second->accept(this);
+  }
+  for (Stmt* s : *v) {
     s->accept(this);
   }
 }
@@ -200,6 +202,18 @@ void IRVisitor::visit(const Polynomial* v) {
 void IRVisitor::visit(const RoundOff* v) {
   v->lhs()->accept(this);
   v->rhs()->accept(this);
+}
+
+void IRVisitor::visit(const ReduceOp* v) {
+  v->accumulator()->accept(this);
+  v->body().node()->accept(this);
+
+  for (auto* e : v->output_args()) {
+    e->accept(this);
+  }
+  for (auto* r : v->reduce_args()) {
+    r->accept(this);
+  }
 }
 
 } // namespace tensorexpr

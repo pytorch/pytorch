@@ -27,15 +27,13 @@ struct Argument {
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt,
-      bool is_inferred_type = false)
+      c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
         type_(type ? type : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)),
-        is_inferred_type_(is_inferred_type) {
+        alias_info_(std::move(alias_info)) {
   }
   const std::string& name() const {
     return name_;
@@ -56,7 +54,14 @@ struct Argument {
     return alias_info_;
   }
   bool is_inferred_type() const {
-    return is_inferred_type_;
+    bool is_inferred_type = false;
+    TORCH_INTERNAL_ASSERT(type_);
+    if (auto pt = type_->cast<TensorType>()) {
+      if (pt->isInferredType()) {
+        is_inferred_type = true;
+      }
+    }
+    return is_inferred_type;
   }
 
   std::string formatTypeMismatchMsg(const std::string& actual_type) const {
@@ -70,7 +75,7 @@ struct Argument {
     }
     return c10::str(
         "Expected a value of type '",
-        type()->python_str(),
+        type()->repr_str(),
         "' for argument '",
         name(),
         "' but instead found type '",
@@ -105,7 +110,6 @@ private:
   // is this only specifyable as a keyword argument?
   bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
-  bool is_inferred_type_;
 };
 
 inline bool operator==(const Argument& lhs, const Argument& rhs) {
@@ -320,8 +324,14 @@ public:
     alias_kind_ = v;
   }
 
-  void setNamespaceIfNotSet(const char* ns) {
-    name_.setNamespaceIfNotSet(ns);
+  c10::optional<c10::string_view> getNamespace() const {
+    return name_.getNamespace();
+  }
+
+  // Returns true if we successfully set the namespace (as there
+  // was none set, and false otherwise)
+  bool setNamespaceIfNotSet(const char* ns) {
+    return name_.setNamespaceIfNotSet(ns);
   }
 
   // can a function with this schema be substituted for a function of rhs's

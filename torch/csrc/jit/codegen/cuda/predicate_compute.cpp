@@ -8,35 +8,42 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-bool PredicateCompute::hasPredicates(
-    const TensorView* tv,
-    const std::vector<Int*>& _indices) {
-  std::vector<Int*> preds;
-  for (auto ind : _indices)
+bool PredicateCompute::hasPredicates(const TensorIndex* ti) {
+  std::vector<Bool*> preds;
+  for (auto ind : ti->indices())
     if (FusionGuard::getCurFusion()->origin(ind) != nullptr)
       return true;
   return false;
 }
 
-std::vector<Int*> PredicateCompute::computePredicates(
-    const TensorView* tv,
-    const std::vector<Int*>& _indices) {
-  std::vector<Int*> preds;
-  if (!hasPredicates(tv, _indices))
+std::vector<Bool*> PredicateCompute::computePredicates(const TensorIndex* ti) {
+  const TensorView* tv = ti->view();
+  const std::vector<IterDomain*>& root = tv->getRootDomain();
+
+  std::vector<Bool*> preds;
+
+  bool no_pred_needed = true;
+  for (auto id : tv->domain()->domain())
+    if (id->getOrigin() != nullptr)
+      no_pred_needed = false;
+
+  if (no_pred_needed)
     return preds;
 
-  TensorDomain* root = tv->getRootDomain();
-  TORCH_CHECK(root->size() == _indices.size());
-  for (decltype(_indices.size()) i{0}; i < _indices.size(); i++)
+  TORCH_INTERNAL_ASSERT(root.size() == ti->nDims());
+  for (decltype(ti->nDims()) i{0}; i < ti->nDims(); i++)
 
-    if (FusionGuard::getCurFusion()->origin(_indices[i]) != nullptr) {
-      Val* pred = lt(_indices[i], root->axis(i)->size());
-      TORCH_CHECK(
+    // I believe the second part of this check is redundant, but it doesn't
+    // hurt.
+    if (FusionGuard::getCurFusion()->origin(ti->index(i)) != nullptr &&
+        !root[i]->isBroadcast()) {
+      Val* pred = lt(ti->index(i), root[i]->extent());
+      TORCH_INTERNAL_ASSERT(
           pred->getValType().value() == ValType::Scalar &&
-          pred->getDataType().value() == DataType::Int);
-      preds.push_back(static_cast<Int*>(pred));
+          pred->getDataType().value() == DataType::Bool);
+      preds.push_back(static_cast<Bool*>(pred));
     } else {
-      preds.push_back(new Int(1));
+      preds.push_back(new Bool(true));
     }
 
   return preds;

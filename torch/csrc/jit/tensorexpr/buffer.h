@@ -6,16 +6,16 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+// TODO: Merge this class with 'BufHandle'
 class Buffer {
  public:
-  Buffer(const BufHandle& data, const Dtype& dtype)
-      : data_(data.node()), dtype_(dtype) {
-    if (data.dtype() != kHandle) {
-      throw malformed_input();
+  Buffer(const BufHandle& data) : data_(data.node()) {
+    if (data_->base_handle()->dtype() != kHandle) {
+      throw malformed_input("Buffer dtype must be Handle");
     }
 
     std::vector<ExprHandle> stride_handles(ndim());
-    for (int i = ndim() - 1; i >= 0; i--) {
+    for (int i = (int)ndim() - 1; i >= 0; i--) {
       if (i == ndim() - 1) {
         stride_handles[i] = 1;
       } else {
@@ -28,13 +28,13 @@ class Buffer {
       const std::string& name,
       const Dtype& dtype,
       const std::vector<ExprHandle>& dims)
-      : Buffer(BufHandle(name, dims), dtype) {}
+      : Buffer(BufHandle(name, dims, dtype)) {}
 
   const Buf* data() const {
     return data_;
   }
-  const Dtype& dtype() const {
-    return dtype_;
+  Dtype dtype() const {
+    return data_->dtype();
   }
   int ndim() const {
     return data_->ndim();
@@ -51,6 +51,7 @@ class Buffer {
   ExprHandle operator()(Args... args) const {
     return LoadValue(std::forward<Args>(args)...);
   }
+
   ExprHandle LoadValue(
       const ExprHandle& x,
       const ExprHandle& y,
@@ -74,9 +75,7 @@ class Buffer {
   ExprHandle LoadValue(const std::vector<ExprHandle>& indices) const;
 
   const Buf* data_;
-  Dtype dtype_;
   std::vector<const Expr*> strides_;
-  // TODO: add strides
 };
 
 inline ExprHandle Buffer::LoadValue(

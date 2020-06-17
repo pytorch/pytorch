@@ -85,6 +85,8 @@ std::unordered_set<Symbol> skip_list = {
     prim::Constant,
     prim::AutogradZero,
     prim::Uninitialized,
+    prim::Guard,
+    prim::profile,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
@@ -285,7 +287,7 @@ struct ConstantPropagator {
 
   bool noMutableValues(at::ArrayRef<Value*> values) {
     return std::none_of(values.begin(), values.end(), [](Value* v) {
-      return AliasDb::mutableType(v);
+      return AliasDb::isMutableType(v);
     });
   }
 

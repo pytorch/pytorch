@@ -2,6 +2,8 @@ import time
 from collections import defaultdict
 from functools import partial
 
+import torch
+
 
 # Unfortunately it doesn't seem as if there was any way to get TensorBoard to do
 # anything without having TF installed, and so this file has a hard dependency on it

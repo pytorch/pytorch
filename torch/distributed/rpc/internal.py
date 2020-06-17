@@ -1,13 +1,15 @@
 import collections
 import copyreg
-from enum import Enum
 import io
 import pickle
 import threading
 import traceback
+from enum import Enum
 
 import torch
 import torch.distributed as dist
+
+from . import _get_current_rpc_agent
 
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
@@ -19,6 +21,7 @@ class RPCExecMode(Enum):
     SYNC = "sync"
     ASYNC = "async"
     REMOTE = "remote"
+
 
 class _InternalRPCPickler:
     r"""
@@ -32,12 +35,8 @@ class _InternalRPCPickler:
     """
 
     def __init__(self):
-        # python2 does not have dispatch_table, add "if torch._six.PY3" condition,
-        # as _InternalRPCPickler still got build in python2 even
-        # we skipped python 2 tests for rpc_test
-        if torch._six.PY3:
-            self._dispatch_table = copyreg.dispatch_table.copy()
-            self._dispatch_table[torch.Tensor] = self._tensor_reducer
+        self._dispatch_table = copyreg.dispatch_table.copy()
+        self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
     @classmethod
     def _tensor_receiver(cls, tensor_index):
@@ -56,7 +55,7 @@ class _InternalRPCPickler:
 
     def _rref_reducer(self, rref):
         rref_fork_data = rref._serialize()
-        return (_InternalRPCPickler._rref_receiver, (rref_fork_data, ))
+        return (_InternalRPCPickler._rref_receiver, (rref_fork_data,))
 
     def serialize(self, obj):
         r"""
@@ -112,9 +111,12 @@ class _InternalRPCPickler:
         except AttributeError as e:
             # Occurs when function is not found on module/class during
             # unpickling.
-            except_str = str(e) + """ Default RPC pickler does not serialize
+            except_str = (
+                str(e)
+                + """ Default RPC pickler does not serialize
             function code. Ensure that UDFs are defined on both caller and
             callee modules."""
+            )
             ret = AttributeError(except_str)
 
         # restore _thread_local_tensor_tables.recv_tables if return
@@ -153,7 +155,10 @@ def _run_function(python_udf):
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
     except Exception as e:
         # except str = exception info + traceback string
-        except_str = "{}\n{}".format(repr(e), traceback.format_exc())
+        except_str = (
+            f"On {_get_current_rpc_agent().get_worker_info()}:\n"
+            f"{repr(e)}\n{traceback.format_exc()}"
+        )
         result = RemoteException(except_str, type(e))
     return result
 
@@ -161,6 +166,31 @@ def _run_function(python_udf):
 def _handle_exception(result):
     if isinstance(result, RemoteException):
         raise result.exception_type(result.msg)
+
+
+def _build_rpc_profiling_key(
+    exec_type, func_name, current_worker_name, dst_worker_name
+):
+    """
+    Builds the key that RPC calls are profiled with using the autograd profiler.
+    This will be the name of the corresponding Event recorded in the profiler.
+
+    Arguments:
+        exec_type (RPCExecMode): Type of RPC/RRef call
+        func_name (str): Name of function being profiled.
+        current_worker_name (str): Name of current worker.
+        dst_worker_name (str): Name of the destination worker.
+
+    Returns:
+        String representing profiling key
+    """
+    profile_key = "rpc_{rpc_type}#{func_name}({current_worker} -> {dst_worker})".format(
+        rpc_type=exec_type.value,
+        func_name=func_name,
+        current_worker=current_worker_name,
+        dst_worker=dst_worker_name,
+    )
+    return profile_key
 
 
 def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):

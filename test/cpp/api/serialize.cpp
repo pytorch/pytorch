@@ -16,7 +16,6 @@
 using namespace torch::test;
 using namespace torch::nn;
 using namespace torch::optim;
-using namespace torch::serialize;
 
 namespace {
 Sequential xor_model() {
@@ -193,17 +192,12 @@ void write_step_buffers(
 }
 
 #define OLD_SERIALIZATION_LOGIC_WARNING_CHECK(funcname, optimizer, filename) \
-{ \
-  std::stringstream buffer;\
-  CerrRedirect cerr_redirect(buffer.rdbuf());\
-  funcname(optimizer, filename);\
-  ASSERT_EQ(\
-    count_substr_occurrences(\
-      buffer.str(),\
-      "old serialization"\
-    ),\
-  1);\
-}
+  {                                                                          \
+    WarningCapture warnings;                                                 \
+    funcname(optimizer, filename);                                           \
+    ASSERT_EQ(                                                               \
+        count_substr_occurrences(warnings.str(), "old serialization"), 1);   \
+  }
 
 TEST(SerializeTest, KeysFunc) {
   auto tempfile = c10::make_tempfile();

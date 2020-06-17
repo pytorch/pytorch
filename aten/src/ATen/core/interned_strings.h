@@ -54,6 +54,7 @@ namespace c10 {
   _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
+  _(prim, LocalVariableScope)        \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
@@ -78,6 +79,7 @@ namespace c10 {
   _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
+  _(prim, layout)                    \
   _(prim, id)                        \
   _(prim, requires_grad)             \
   _(prim, MakeTestTensor) /* test */ \
@@ -132,6 +134,10 @@ namespace c10 {
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
+  _(prim, is_cuda)                   \
+  _(aten, abs_)                      \
+  _(aten, absolute)                  \
+  _(aten, absolute_)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -207,7 +213,9 @@ namespace c10 {
   _(onnx, Expand)                    \
   _(onnx, Equal)                     \
   _(onnx, Greater)                   \
+  _(onnx, GreaterOrEqual)            \
   _(onnx, Less)                      \
+  _(onnx, LessOrEqual)               \
   _(onnx, Not)                       \
   _(onnx, ATen)                      \
   _(onnx, Split)                     \
@@ -222,6 +230,9 @@ namespace c10 {
   _(onnx, SequenceInsert)            \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
+  _(onnx, SoftmaxCrossEntropyLoss)   \
+  _(onnx, NegativeLogLikelihoodLoss) \
+  _(onnx, LogSoftmax)                \
   _(onnx, ReduceL1)                  \
   _(onnx, ReduceL2)                  \
   FORALL_ATTR_BASE_SYMBOLS(_)        \

@@ -37,7 +37,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("NVTX", ProfilerState::NVTX);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<ProfilerState, bool>());
+      .def(py::init<ProfilerState, bool, bool>());
 
   py::class_<Event>(m, "ProfilerEvent")
       .def("kind", &Event::kind)
@@ -47,15 +47,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("cpu_elapsed_us", &Event::cpu_elapsed_us)
       .def("cuda_elapsed_us", &Event::cuda_elapsed_us)
       .def("has_cuda", &Event::has_cuda)
-      .def("shapes", &Event::shapes);
+      .def("shapes", &Event::shapes)
+      .def("cpu_memory_usage", &Event::cpu_memory_usage)
+      .def("cuda_memory_usage", &Event::cuda_memory_usage)
+      .def("handle", &Event::handle);
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
-  m.def("_run_before_callbacks", _runBeforeCallbacks);
-
-  py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(m, "_RecordFunction")
-    .def(py::init<>());
 
   Py_RETURN_TRUE;
 }
@@ -142,7 +141,7 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
 }
 
 // autograd methods on torch._C
-static PyMethodDef methods[] = {
+static PyMethodDef methods[] = { // NOLINT
   {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", (PyCFunction)set_autocast_enabled, METH_O, nullptr},

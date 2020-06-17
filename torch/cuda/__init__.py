@@ -77,16 +77,17 @@ def _check_capability():
     The minimum cuda capability that we support is 3.5.
     """
 
-    CUDA_VERSION = torch._C._cuda_getCompiledVersion()
-    for d in range(device_count()):
-        capability = get_device_capability(d)
-        major = capability[0]
-        minor = capability[1]
-        name = get_device_name(d)
-        if capability == (3, 0) or major < 3:
-            warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
-        elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
-            warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
+    if torch.version.cuda is not None:  # on ROCm we don't want this check
+        CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+        for d in range(device_count()):
+            capability = get_device_capability(d)
+            major = capability[0]
+            minor = capability[1]
+            name = get_device_name(d)
+            if capability == (3, 0) or major < 3:
+                warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
+            elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
+                warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
 
 def is_initialized():
@@ -414,7 +415,8 @@ def _dummy_type(name):
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16']:
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16',
+              'ComplexDouble', 'ComplexFloat']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
@@ -483,6 +485,13 @@ class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
 class BFloat16Storage(_CudaBase, torch._C.CudaBFloat16StorageBase, _StorageBase):
     pass
 
+class ComplexDoubleStorage(_CudaBase, torch._C.CudaComplexDoubleStorageBase, _StorageBase):
+    pass
+
+
+class ComplexFloatStorage(_CudaBase, torch._C.CudaComplexFloatStorageBase, _StorageBase):
+    pass
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -493,6 +502,8 @@ torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
 torch._storage_classes.add(BoolStorage)
 torch._storage_classes.add(BFloat16Storage)
+torch._storage_classes.add(ComplexDoubleStorage)
+torch._storage_classes.add(ComplexFloatStorage)
 
 from . import sparse
 from . import profiler

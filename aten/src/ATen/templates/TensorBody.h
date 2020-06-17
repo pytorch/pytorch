@@ -17,6 +17,7 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace caffe2 {
 class Tensor;
@@ -60,7 +61,7 @@ inline bool variable_excluded_from_dispatch() {
   // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
   return true;
 #else
-  return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::VariableTensorId);
+  return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd);
 #endif
 }
 }
@@ -295,7 +296,7 @@ class CAFFE2_API Tensor {
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
 
-  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
+  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.cpp
   caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
@@ -315,6 +316,9 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` is mkldnn tensor.
   bool is_mkldnn() const;
+
+  /// Returns if a `Tensor` is vulkan tensor.
+  bool is_vulkan() const;
 
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
@@ -401,6 +405,7 @@ class CAFFE2_API Tensor {
   C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
+  Tensor operator~() const;
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
   Tensor& operator+=(Scalar other);
@@ -410,6 +415,9 @@ class CAFFE2_API Tensor {
   Tensor& operator*=(Scalar other);
   Tensor& operator/=(const Tensor & other);
   Tensor& operator/=(Scalar other);
+  Tensor& operator&=(const Tensor & other);
+  Tensor& operator|=(const Tensor & other);
+  Tensor& operator^=(const Tensor & other);
   Tensor operator[](Scalar index) const;
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
@@ -425,6 +433,7 @@ class CAFFE2_API Tensor {
   Tensor cpu() const;
   Tensor cuda() const;
   Tensor hip() const;
+  Tensor vulkan() const;
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -465,7 +474,7 @@ class CAFFE2_API Tensor {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, bool keep_graph=false, bool create_graph=false) const;
+  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -484,7 +493,7 @@ class CAFFE2_API Tensor {
   ///     None values can be specified for scalar Tensors or ones that
   ///     don't require grad. If a None value would be acceptable then
   ///     this argument is optional.
-  /// \param keep_graph If ``false``, the graph used to compute
+  /// \param retain_graph If ``false``, the graph used to compute
   ///     the grads will be freed. Note that in nearly all cases setting
   ///     this option to True is not needed and often can be worked around
   ///     in a much more efficient way. Defaults to the value of
@@ -549,7 +558,7 @@ class CAFFE2_API Tensor {
   }
 
   template <typename F, typename... Args>
-  auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
+  decltype(auto) m(F func, Args&&... params) const {
     return func(*this, std::forward<Args>(params)...);
   }
 
@@ -660,6 +669,24 @@ protected:
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
+
+int64_t get_device(Tensor self);
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
+  // Return the grad argument in case of a hook with void return type to have an
+  // std::function with Tensor return type
+  std::function<void(Tensor)> fn(hook);
+  return _register_hook([fn](const Tensor& grad) {
+    fn(grad);
+    return Tensor();
+  });
+}
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
+  return _register_hook(hook);
+}
 
 namespace detail {
 // Helper creator for Tensor class which doesn't requires the users to pass

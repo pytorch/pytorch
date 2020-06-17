@@ -5,6 +5,16 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import numpy as np
 import torch
 from contextlib import contextmanager
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN, TEST_WITH_UBSAN, IS_PPC, IS_MACOS, IS_WINDOWS
+
+supported_qengines = torch.backends.quantized.supported_engines
+supported_qengines.remove('none')
+# Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
+# QNNPACK is not supported on PPC
+# QNNPACK throws ASAN heap-buffer-overflow error.
+if 'qnnpack' in supported_qengines:
+    if IS_PPC or TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN or IS_MACOS or IS_WINDOWS:
+        supported_qengines.remove('qnnpack')
 
 """Computes the output shape given convolution parameters."""
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
@@ -53,7 +63,6 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
             qmin, qmax = 0, 127
         else:
             qmin, qmax = 0, 255
-    n_levels = 255.0
     min_val = X.min()
     max_val = X.max()
     if min_val == max_val:
@@ -62,7 +71,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     else:
         max_val = max(max_val, 0.0)
         min_val = min(min_val, 0.0)
-        scale = (max_val - min_val) / n_levels
+        scale = (max_val - min_val) / (qmax - qmin)
         scale = max(scale, np.finfo(np.float32).eps)
         zero_point = qmin - round(min_val / scale)
         zero_point = max(qmin, zero_point)
@@ -103,3 +112,17 @@ def override_quantized_engine(qengine):
         yield
     finally:
         torch.backends.quantized.engine = previous
+
+# TODO: Update all quantization tests to use this decorator.
+# Currently for some of the tests it seems to have inconsistent params
+# for fbgemm vs qnnpack.
+def override_qengines(qfunction):
+    def test_fn(*args, **kwargs):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                # qfunction should not return anything.
+                qfunction(*args, **kwargs)
+    return test_fn
+
+def qengine_is_fbgemm():
+    return torch.backends.quantized.engine == 'fbgemm'

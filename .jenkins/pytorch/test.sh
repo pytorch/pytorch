@@ -36,13 +36,15 @@ if [ -n "${IN_CIRCLECI}" ]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # Print GPU info
+  rocminfo | egrep 'Name:.*\sgfx|Marketing'
   # TODO: Move this to Docker
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
@@ -51,24 +53,14 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # TODO: Please move this to Docker
   # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
   pip_install --user "hypothesis==4.53.2"
+  # Pin MyPy version because new errors are likely to appear with each release
+  pip_install --user "mypy==0.770"
+  # Update scikit-learn to a python-3.8 compatible version
+  if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
+    pip_install -U scikit-learn
+  fi
 
-  # TODO: move this to Docker
-  PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
-  echo $PYTHON_VERSION
-  # if [[ $PYTHON_VERSION == "2" ]]; then
-  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl
-  # else
-  #   pip_install --user https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
-  # fi
   pip_install --user tb-nightly
-  # mypy will fail to install on Python <3.4.  In that case,
-  # we just won't run these tests.
-  pip_install --user mypy || true
-fi
-
-# faulthandler become built-in since 3.3
-if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
-  pip_install --user faulthandler
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -140,8 +132,8 @@ test_python_nn() {
   assert_git_not_dirty
 }
 
-test_python_ge_config_simple() {
-  time python test/run_test.py --include test_jit_simple --verbose --determine-from="$DETERMINE_FROM"
+test_python_ge_config_profiling() {
+  time python test/run_test.py --include test_jit_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -151,7 +143,7 @@ test_python_ge_config_legacy() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -181,12 +173,19 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@43e94b39bcdda519c093ca11d99dfa2568aa7258
+  # Check out torch/vision at Jun 11 2020 commit
+  # This hash must match one in .jenkins/caffe2/test.sh
+  pip_install --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
 }
 
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
+
+    # Start background download
+    python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
+
+    # Run JIT cpp tests
     mkdir -p test/test-reports/cpp-unittest
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -195,8 +194,10 @@ test_libtorch() {
       build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:test/test-reports/cpp-unittest/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
-    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+    # Wait for background download to finish
+    wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
+    build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
     assert_git_not_dirty
   fi
 }
@@ -217,6 +218,18 @@ test_custom_script_ops() {
   fi
 }
 
+test_torch_function_benchmark() {
+  echo "Testing __torch_function__ benchmarks"
+  pushd benchmarks/overrides_benchmark
+  python bench.py -n 1 -m 2
+  python pyspybench.py Tensor -n 1
+  python pyspybench.py SubTensor -n 1
+  python pyspybench.py WithTorchFunction -n 1
+  python pyspybench.py SubWithTorchFunction -n 1
+  popd
+  assert_git_not_dirty
+}
+
 test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
   # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
@@ -231,7 +244,7 @@ test_xla() {
 
   echo "Running C++ Tests"
   pushd test/cpp
-  CC=clang-7 CXX=clang++-7 ./run_tests.sh
+  CC=clang-9 CXX=clang++-9 ./run_tests.sh
   popd
   assert_git_not_dirty
 }
@@ -251,7 +264,21 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+test_bazel() {
+  set -e
+
+  get_bazel
+
+  tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+}
+
+test_cpp_extension() {
+  # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
+  time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+}
+
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
@@ -264,8 +291,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
   test_python_ge_config_legacy
-elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_simple* || "${JOB_BASE_NAME}" == *ge_config_simple* ]]; then
-  test_python_ge_config_simple
+elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_profiling* || "${JOB_BASE_NAME}" == *ge_config_profiling* ]]; then
+  test_python_ge_config_profiling
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
@@ -277,6 +304,13 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_torch_function_benchmark
+elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+  test_bazel
+elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
+  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure 
+  # cpp extension can be built correctly under this old env 
+  test_cpp_extension
 else
   test_torchvision
   test_python_nn
@@ -284,4 +318,5 @@ else
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_torch_function_benchmark
 fi

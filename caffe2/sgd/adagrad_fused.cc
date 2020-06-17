@@ -2,8 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
-
 struct adagrad_update_prefetch_inlined {
   void operator()(
       int N,
@@ -17,9 +15,10 @@ struct adagrad_update_prefetch_inlined {
       float* nh,
       float* nh_n, // prefetch ptr
       float epsilon,
-      float lr) {
+      float lr,
+      float weight_decay) {
     return internal::adagrad_update_prefetch_inlined(
-        N, w, w_n, g, h, h_n, nw, nw_n, nh, nh_n, epsilon, lr);
+        N, w, w_n, g, h, h_n, nw, nw_n, nh, nh_n, epsilon, lr, weight_decay);
   }
 };
 
@@ -156,5 +155,4 @@ REGISTER_CPU_OPERATOR(
         int,
         adagrad_update_prefetch_inlined>);
 
-} // namespace
 } // namespace caffe2

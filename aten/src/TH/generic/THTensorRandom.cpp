@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <type_traits>
 #include <ATen/Utils.h>
+#include <ATen/core/DistributionsHelper.h>
 #include <TH/THGenerator.hpp>
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -113,7 +114,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THLongTensor_free(smaller);
   THLongTensor_free(larger);
 }
-void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, at::Generator _generator)
+void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, c10::optional<at::Generator> _generator)
 {
   THArgCheck(q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
@@ -127,7 +128,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTens
   scalar_t _q;
   THLongTensor_resize1d(self, n_sample);
   int64_t rand_ind, sample_idx, J_sample;
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  auto gen = at::get_generator_or_default<at::CPUGeneratorImpl>(_generator, at::detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
@@ -153,7 +154,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTens
 void THTensor_(getRNGState)(at::Generator _generator, THTensor *self)
 {
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(_generator->mutex_);
+  std::lock_guard<std::mutex> lock(_generator.mutex());
   static const size_t size = sizeof(THGeneratorStateNew);
   THTensor_(resize1d)(self, size);
   THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
@@ -165,7 +166,7 @@ void THTensor_(getRNGState)(at::Generator _generator, THTensor *self)
 
   // accumulate generator data to be copied into byte tensor
   auto accum_state = std::make_unique<THGeneratorStateNew>();
-  auto cast_generator = at::check_generator<at::CPUGenerator>(_generator);
+  auto cast_generator = at::check_generator<at::CPUGeneratorImpl>(_generator);
   auto rng_data = cast_generator->engine().data();
   accum_state->legacy_pod.the_initial_seed = rng_data.seed_;
   accum_state->legacy_pod.left = rng_data.left_;
@@ -193,8 +194,8 @@ void THTensor_(getRNGState)(at::Generator _generator, THTensor *self)
 void THTensor_(setRNGState)(at::Generator _generator, THTensor *self)
 {
   // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(_generator->mutex_);
-  auto cast_generator = at::check_generator<at::CPUGenerator>(_generator);
+  std::lock_guard<std::mutex> lock(_generator.mutex());
+  auto cast_generator = at::check_generator<at::CPUGeneratorImpl>(_generator);
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
   static_assert(std::is_pod<THGeneratorState>::value, "THGeneratorState is not a PODType");
   static_assert(std::is_pod<THGeneratorStateNew>::value, "THGeneratorStateNew is not a PODType");
@@ -207,7 +208,7 @@ void THTensor_(setRNGState)(at::Generator _generator, THTensor *self)
   auto float_normal_sample = c10::optional<float>();
   auto double_normal_sample = c10::optional<double>();
 
-  // Construct the state of at::CPUGenerator based on input byte tensor size.
+  // Construct the state of at::CPUGeneratorImpl based on input byte tensor size.
   THGeneratorState* legacy_pod;
   if (THTensor_(nElement)(self) == size_legacy) {
     legacy_pod = (THGeneratorState*)self->data<scalar_t>();
