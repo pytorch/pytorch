@@ -1,10 +1,12 @@
+import copy
 import sys
 import io
 import inspect
 import math
+import os
 import random
 import re
-import copy
+import subprocess
 import torch
 import torch.cuda
 import torch.backends.cuda
@@ -19228,6 +19230,29 @@ class TestTorchMathOps(TestCase):
 
 class TestTorch(AbstractTestCases._TestTorchMixin):
     exact_dtype = True
+
+class TestRPATH(TestCase):
+    @unittest.skipIf(not sys.platform.startswith('linux'), "linux-only test")
+    def test_rpath(self):
+        """
+        Make sure RPATH (or RUNPATH) in nvrtc does not contain a cuda path
+        issue gh-35418
+        """
+        libdir = os.path.join(os.path.dirname(torch._C.__file__), 'lib')
+        caffe2_nvrtc = os.path.join(libdir, 'libcaffe2_nvrtc.so')
+        if os.path.exists(caffe2_nvrtc):
+            output = subprocess.check_output(['objdump', '-x', caffe2_nvrtc])
+            nRPATHfound = 0
+            for line in output.split(b'\n'):
+                if b'RPATH' in line or b'RUNPATH' in line:
+                    # If CMake adds a path, it will be after $ORIGIN
+                    # The before-$origin paths are ones added via -L linkpaths
+                    # in $CFLAGS
+                    segments = line.split(b'$ORIGIN')
+                    if len(segments) > 1:
+                        self.assertFalse(b'cuda' in segments[-1])
+                    nRPATHfound += 1
+            self.assertNotEqual(nRPATHfound, 0)
 
 
 # Generates tests
