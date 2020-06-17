@@ -73,3 +73,11 @@ def write(dirname, name, template, env):
 
 def is_tensor_method(declaration):
     return 'Tensor' in declaration['method_of']
+
+def is_out_variant(decl):
+    return decl['name'].endswith('_out')
+
+def signature_without_args(decl):
+    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
+    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
+    return 'aten::{}{}'.format(name, overload_name)

@@ -171,13 +171,16 @@ Module Module::deepcopy() const {
   return Module(_ivalue()->deepcopy());
 }
 
-Module Module::clone() const {
+Module Module::clone(bool inplace) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  return clone_impl(type_remap);
+  IValue::HashAliasedIValueMap memo;
+  return clone_impl(type_remap, inplace, memo);
 }
 
 Module Module::clone_impl(
-    std::unordered_map<TypePtr, TypePtr>& type_remap) const {
+    std::unordered_map<TypePtr, TypePtr>& type_remap,
+    bool inplace,
+    IValue::HashAliasedIValueMap memo) const {
   // Create a new _ivalue in the same compilation unit.
   // Since now we have shared ClassType, we need to preserve the shared
   // ClassType during cloning, so we first need to check if the type
@@ -202,7 +205,7 @@ Module Module::clone_impl(
     IValue s = _ivalue()->getSlot(i);
     if (type()->getAttribute(i)->is_module()) {
       const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_impl(type_remap);
+      Module cloned = orig.clone_impl(type_remap, inplace, memo);
       type_remap[orig.type()] = cloned.type();
       r.register_module(type()->getAttributeName(i), cloned);
     } else {
@@ -212,7 +215,8 @@ Module Module::clone_impl(
       r.register_attribute(
           type()->getAttributeName(i),
           type()->getAttribute(i),
-          s,
+          // we'll deepcopy the IValue in non inplace option
+          inplace ? s : s.deepcopy(memo),
           type()->is_parameter(i),
           type()->is_buffer(i));
     }

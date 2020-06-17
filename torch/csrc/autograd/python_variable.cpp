@@ -516,6 +516,24 @@ static PyObject * THPVariable_device(THPVariable* self, void *unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_get_real(THPVariable* self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto real = at::real(self_);
+  return THPVariable_Wrap(real);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  auto imag = at::imag(self_);
+  return THPVariable_Wrap(imag);
+  END_HANDLE_TH_ERRORS
+}
+
 // properties are registered here because we are currently only able to bind them
 // manually. TODO: make declarable in native_functions
 static struct PyGetSetDef THPVariable_properties[] = {
@@ -545,6 +563,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
   {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
   {"names", (getter)THPVariable_get_names, (setter)THPVariable_set_names, nullptr, nullptr},
+  {"real", (getter)THPVariable_get_real, nullptr, nullptr, nullptr},
+  {"imag", (getter)THPVariable_get_imag, nullptr, nullptr, nullptr},
   {nullptr}
 };
 

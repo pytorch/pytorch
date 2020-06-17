@@ -160,6 +160,12 @@ class TestOptim(TestCase):
             self.assertEqual(bias, bias_c)
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
+        # Make sure state dict is deterministic with equal but not identical parameters
+        self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict())
+        # Make sure repeated parameters have identical representation in state dict
+        optimizer_c.param_groups.extend(optimizer_c.param_groups)
+        self.assertEqual(optimizer.state_dict()['param_groups'][-1],
+                         optimizer_c.state_dict()['param_groups'][-1])
 
         # Check that state dict can be loaded even when we cast parameters
         # to a different type and move to a different device.

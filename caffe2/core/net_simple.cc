@@ -68,6 +68,12 @@ bool SimpleNet::Run() {
 #ifdef CAFFE2_ENABLE_SDT
     CAFFE_SDT(operator_done, net_name, op_name, op_type, op_ptr);
 #endif
+    // workaround for async cpu ops, we need to explicitly wait for them
+    if (res && op->HasAsyncPart() &&
+        op->device_option().device_type() == PROTO_CPU) {
+      op->Finish();
+      res = op->event().Query() == EventStatus::EVENT_SUCCESS;
+    }
     if (!res) {
       LOG(ERROR) << "Operator failed: " << ProtoDebugString(op->debug_def());
       return false;
@@ -86,7 +92,7 @@ template <typename A, typename B>
 bool PairLargerThan(const std::pair<A, B>& x, const std::pair<A, B>& y) {
   return x.second > y.second;
 }
-}
+} // namespace
 
 vector<float> SimpleNet::TEST_Benchmark(
     const int warmup_runs,

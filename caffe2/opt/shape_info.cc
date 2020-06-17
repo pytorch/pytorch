@@ -55,7 +55,7 @@ ShapeInfo constructShapeInfoWithDefaultDimType(
 void parseShapeInfoMapFromString(
     const std::string& input,
     ShapeInfoMap& shape_hints) {
-  auto hints = caffe2::split('|', input);
+  auto hints = caffe2::split('#', input);
   for (const auto& hint : hints) {
     auto kv = caffe2::split(',', hint);
     CAFFE_ENFORCE_GE(kv.size(), 2, "Cannot parse shape hint: ", hint);
