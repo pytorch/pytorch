@@ -225,19 +225,19 @@ class QConvGroups final {
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // conv_unpack is deprecated, please use conv2d_unpack for 2D conv.
-  m.impl("conv_unpack", QConvUnpackWeightsInt8<2>::run);
+  m.impl("conv_unpack", TORCH_FN(QConvUnpackWeightsInt8<2>::run));
   // We use  conv2d_unpack to be consistent with conv3d_unpack
-  m.impl("conv1d_unpack", QConv1dUnpackWeightsInt8::run);
-  m.impl("conv2d_unpack", QConvUnpackWeightsInt8<2>::run);
-  m.impl("conv3d_unpack", QConvUnpackWeightsInt8<3>::run);
-  m.impl("conv2d_stride", QConvStride<2>::run);
-  m.impl("conv2d_padding", QConvPadding<2>::run);
-  m.impl("conv2d_dilation", QConvDilation<2>::run);
-  m.impl("conv2d_groups", QConvGroups<2>::run);
-  m.impl("conv3d_stride", QConvStride<3>::run);
-  m.impl("conv3d_padding", QConvPadding<3>::run);
-  m.impl("conv3d_dilation", QConvDilation<3>::run);
-  m.impl("conv3d_groups", QConvGroups<3>::run);
+  m.impl("conv1d_unpack", TORCH_FN(QConv1dUnpackWeightsInt8::run));
+  m.impl("conv2d_unpack", TORCH_FN(QConvUnpackWeightsInt8<2>::run));
+  m.impl("conv3d_unpack", TORCH_FN(QConvUnpackWeightsInt8<3>::run));
+  m.impl("conv2d_stride", TORCH_FN(QConvStride<2>::run));
+  m.impl("conv2d_padding", TORCH_FN(QConvPadding<2>::run));
+  m.impl("conv2d_dilation", TORCH_FN(QConvDilation<2>::run));
+  m.impl("conv2d_groups", TORCH_FN(QConvGroups<2>::run));
+  m.impl("conv3d_stride", TORCH_FN(QConvStride<3>::run));
+  m.impl("conv3d_padding", TORCH_FN(QConvPadding<3>::run));
+  m.impl("conv3d_dilation", TORCH_FN(QConvDilation<3>::run));
+  m.impl("conv3d_groups", TORCH_FN(QConvGroups<3>::run));
 }
 
 } // namespace

@@ -15,7 +15,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
+    default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
 import unittest
@@ -218,6 +218,15 @@ class QuantizationTestCase(TestCase):
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
+    def checkDynamicQuantizedModule(self, mod, reference_module_type, dtype):
+        r"""Checks that mod has been swapped for an nnqd.Linear
+            module, the bias is float.
+        """
+        wt_dtype_map = {torch.qint8: 'quantized_dynamic', torch.float16: 'quantized_fp16'}
+        self.assertEqual(type(mod), reference_module_type)
+        for packed_params in mod._all_weight_values:
+            self.assertEqual(packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype])
+
     # calib_data follows the same schema as calib_data for
     # test_only_eval_fn, i.e. (input iterable, output iterable)
     def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
@@ -238,7 +247,6 @@ class QuantizationTestCase(TestCase):
 
         buffer.seek(0)
         loaded_mod = torch.jit.load(buffer)
-
         # Pending __get_state_ and __set_state__ support
         # See tracking task https://github.com/pytorch/pytorch/issues/23984
         if check_save_load:
@@ -284,7 +292,7 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
 class LSTMDynamicModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = default_dynamic_qconfig
         self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
 
     def forward(self, x):
