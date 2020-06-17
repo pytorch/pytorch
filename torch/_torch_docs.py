@@ -1185,7 +1185,7 @@ the input tensor is expected to represent the real and imaginary components of c
 .. warning::
     :func:`view_as_complex` is only supported for tensors with :class:`torch.dtype` ``torch.float64`` and ``torch.float32`.
     The input is expected to have the last dimension of :attr:`size` 2. In addition, the tensor must have a `stride` of 1
-    for it's last dimension. The strides of all other dimensions must be even numbers.
+    for its last dimension. The strides of all other dimensions must be even numbers.
 
 Example::
     >>> x=torch.randn(4, 2)

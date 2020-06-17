@@ -1181,9 +1181,9 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
-  RemoveRedundantDequantize(graph);
   ReplicateClampScalarArgs(graph);
   propagateQuantizationOps(graph->block());
+  RemoveRedundantDequantize(graph);
 }
 
 } // namespace
