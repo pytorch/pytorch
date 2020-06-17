@@ -135,9 +135,9 @@ class TestConversion(TestCase):
         caffe2_init_net = caffe2_pb2.NetDef()
         caffe2_init_net.ParseFromString(init_net_output.read())
         self.assertEqual(len(caffe2_init_net.op), 2)
-        #self.assertEqual(set(sum([list(init_op.output)
-                                  #for init_op in caffe2_init_net.op], [])),
-                         #{'W', 'Y'})
+        self.assertEqual(set(sum([list(init_op.output)
+                                  for init_op in caffe2_init_net.op], [])),
+                         {'W', 'Y'})
 
     def test_onnx_to_caffe2_zipfile(self):
         buf = tempfile.NamedTemporaryFile()
@@ -240,33 +240,6 @@ class TestConversion(TestCase):
             helper.make_node("Loop", loop_inputs, loop_outputs, body=body_graph)
         ]
         return retval_nodes
-
-    def test_onnx_to_caffe2_loop(self):
-        body_nodes = [helper.make_node(
-            "MatMul", ["_X", "W"], ["_Y"])]
-        nodes = self._make_fake_loop_op(body_nodes,
-                                        [(TensorProto.FLOAT, (2, 2), "X")],
-                                        [(TensorProto.FLOAT, (2, 2), "Y")])
-        X = np.random.rand(2, 2).astype(np.float32)
-        W = np.random.rand(2, 2).flatten().astype(np.float32)
-        graph_def = helper.make_graph(
-            nodes,
-            "test",
-            [helper.make_tensor_value_info("X", TensorProto.FLOAT, (2, 2)),
-             helper.make_tensor_value_info("W", TensorProto.FLOAT, (2, 2))],
-            [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 2))],
-            initializer=[helper.make_tensor("W",
-                                            TensorProto.FLOAT,
-                                            [2, 2],
-                                            W.tolist())]
-        )
-        model_def = helper.make_model(graph_def, producer_name='onnx-to-caffe2-test')
-        Y = X
-        for _ in range(10):
-            Y = np.matmul(Y, W.reshape(2, 2))
-        p = c2.prepare(model_def)
-        out = p.run(X)
-        np.testing.assert_allclose(out.Y, Y)
 
     # TODO investigate why this is failing after changing Reshape
     # operator from taking the new shape as attribute to as input
