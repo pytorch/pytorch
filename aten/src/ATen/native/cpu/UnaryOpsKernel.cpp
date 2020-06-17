@@ -291,10 +291,14 @@ void bernoulli_tensor_kernel(Tensor& self, const Tensor& p_, c10::optional<Gener
   templates::cpu::bernoulli_kernel(self, p_, generator);
 }
 
-#if !AT_MKL_ENABLED()
-void bernoulli_scalar_kernel(Tensor& self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel_default(Tensor& self, double p, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
+}
+
+#if !AT_MKL_ENABLED()
+void bernoulli_scalar_kernel(Tensor& self, double p, c10::optional<Generator> gen) {
+  bernoulli_scalar_kernel_default(self, p, gen);
 }
 #else
 void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> gen) {
@@ -348,9 +352,8 @@ void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> ge
       }
     });
   } else {
-    // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
-    // users to report this as a bug.
-    AT_ASSERTM(false, "ATen not compiled with MKL");
+    // The situation of AMD, move to using the default version
+    bernoulli_scalar_kernel_default(self, p, gen);
   }
 }
 #endif
