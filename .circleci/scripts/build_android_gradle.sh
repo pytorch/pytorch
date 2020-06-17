@@ -27,6 +27,9 @@ echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
 
 # Run custom build script
 if [[ "${BUILD_ENVIRONMENT}" == *-gradle_custom_build* ]]; then
+  # Install torch & torchvision - used to download & dump used ops from test model.
+  retry pip install torch torchvision --progress-bar off
+
   exec "$(dirname "${BASH_SOURCE[0]}")/../../android/build_test_app_custom.sh" "$@"
 fi
 
