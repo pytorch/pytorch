@@ -585,10 +585,11 @@ class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
             self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
             self.assertEqual(
                 layer1.weight.grad,
-                rpc.rpc_sync("worker0",
-                             TestDdpComparison.get_remote_grads,
-                             args=(remote_layer1.module_rref, context_id)
-                            )
+                rpc.rpc_sync(
+                    "worker0",
+                    TestDdpComparison.get_remote_grads,
+                    args=(remote_layer1.module_rref, context_id)
+                )
             )
 
 if __name__ == "__main__":
