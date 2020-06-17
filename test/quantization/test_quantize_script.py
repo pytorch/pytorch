@@ -36,8 +36,6 @@ from torch.quantization.quantize_script import (
 # Testing utils
 from torch.testing._internal.common_quantized import (
     override_qengines,
-    supported_qengines,
-    override_quantized_engine,
     qengine_is_fbgemm,
     qengine_is_qnnpack,
 )
@@ -2654,6 +2652,7 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         for x, obs in model._modules._c.items():
             graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
         self.assertEqual(ref_qparams, graph_params)
+
 class TestQuantizeScript(QuantizationTestCase):
     @override_qengines
     def test_single_linear(self):
@@ -2667,8 +2666,7 @@ class TestQuantizeScript(QuantizationTestCase):
         # compare the result of the two quantized models later
         linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
         linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-        model_eager = quantize(annotated_linear_model, test_only_eval_fn,
-                                self.calib_data)
+        model_eager = quantize(annotated_linear_model, test_only_eval_fn, self.calib_data)
 
         qconfig_dict = {'': torch.quantization.get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
@@ -2748,7 +2746,6 @@ class TestQuantizeScript(QuantizationTestCase):
                 inplace=False)
             self.assertEqual(model_quantized(self.img_data[0][0]), result_eager)
 
-    # @unittest.skip("This doesn't work right now, re-enable after fold_convbn is fixed")
     def test_conv_bn(self):
         r"""Compare the result of quantizing conv + bn layer in
         eager mode and graph mode
