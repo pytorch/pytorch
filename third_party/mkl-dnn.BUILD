@@ -7,9 +7,9 @@ template_rule(
     out = "include/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "1",
-        "@DNNL_VERSION_MINOR@": "2",
+        "@DNNL_VERSION_MINOR@": "5",
         "@DNNL_VERSION_PATCH@": "0",
-        "@DNNL_VERSION_HASH@": "70f8b879ea7a0c38caedb3320b7c85e8497ff50d",
+        "@DNNL_VERSION_HASH@": "e2ac1fac44c5078ca927cb9b90e1b3066a0b2ed0",
     },
 )
 
@@ -29,18 +29,7 @@ cc_library(
     name = "mkl-dnn",
     srcs = glob([
         "src/common/*.cpp",
-        "src/cpu/*.cpp",
-        "src/cpu/binary/*.cpp",
-        "src/cpu/gemm/*.cpp",
-        "src/cpu/gemm/bf16/*.cpp",
-        "src/cpu/gemm/f32/*.cpp",
-        "src/cpu/gemm/s8x8s32/*.cpp",
-        "src/cpu/jit_utils/*.cpp",
-        "src/cpu/jit_utils/jitprofiling/*.c",
-        "src/cpu/jit_utils/linux_perf/*.cpp",
-        "src/cpu/matmul/*.cpp",
-        "src/cpu/resampling/*.cpp",
-        "src/cpu/rnn/*.cpp",
+        "src/cpu/**/*.cpp",
     ]),
     hdrs = glob([
         "include/*.h",
@@ -74,7 +63,7 @@ cc_library(
         "src/",
         "src/common/",
         "src/cpu/",
-        "src/cpu/xbyak/",
+        "src/cpu/x64/xbyak/",
     ],
     visibility = ["//visibility:public"],
     linkopts = [

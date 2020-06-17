@@ -1246,12 +1246,10 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 return self.conv(x)
 
         options = itertools.product([1, 2, 3], [True, False])
-        input_data = {1 : self.img_data_1d,
-                      2 : self.img_data,
-                      3 : self.img_data_3d}
         for dim, tracing in options:
             model = self._test_op_impl(
-                Conv(dim), input_data[dim], "quantized::conv{}d".format(dim), tracing)
+                Conv(dim), self.img_data_dict[dim],
+                "quantized::conv{}d".format(dim), tracing)
             # make sure there is only one quantize_per_tensor for input
             # and conv2d_prepack is folded
             FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
@@ -1290,7 +1288,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             def forward(self, x):
                 return F.relu(self.conv(x), True)
 
-        input_data = {1 : self.img_data_1d, 2 : self.img_data, 3 : self.img_data_3d}
         options = itertools.product([1, 2, 3], [True, False])
         for dim, tracing in options:
             for orig_m in [ConvNdRelu(dim, True),
@@ -1298,9 +1295,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                            ConvNdFunctionalRelu(dim),
                            ConvNdInplaceFunctionalRelu(dim)]:
                 conv_name = "conv{}d".format(dim)
-                data = input_data[dim]
                 m = self._test_op_impl(
-                    orig_m, data, "quantized::conv{}d_relu(".format(dim), tracing=tracing)
+                    orig_m, self.img_data_dict[dim], "quantized::conv{}d_relu(".format(dim), tracing=tracing)
 
                 FileCheck().check_not("aten::conv{}d(".format(dim)) \
                            .check_not("aten::relu") \
@@ -1773,52 +1769,58 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_qbatch_norm(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(M, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
                 return self.bn(x)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        for tracing in [True, False]:
-            model = self._test_op_impl(M(), data, "quantized::batch_norm2d", tracing)
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            model = self._test_op_impl(M(dim), self.img_data_dict[dim], "quantized::batch_norm", tracing)
 
             FileCheck().check_not("aten::batch_norm") \
                        .run(model.graph)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+
         class BNRelu(torch.nn.Module):
-            def __init__(self, inplace):
+            def __init__(self, dim, inplace):
                 super(BNRelu, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
                 self.relu = torch.nn.ReLU(inplace=inplace)
 
             def forward(self, x):
                 return self.relu(self.bn(x))
 
         class BNFuncRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(BNFuncRelu, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
                 return F.relu(self.bn(x), False)
 
         class BNFuncInplaceRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(BNFuncInplaceRelu, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
                 return F.relu(self.bn(x), True)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        for instance in [BNRelu(True), BNRelu(False), BNFuncRelu(), BNFuncInplaceRelu()]:
-            for tracing in [True, False]:
-                model = self._test_op_impl(instance, data, "quantized::batch_norm2d_relu", tracing)
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            for instance in [BNRelu(dim, True), BNRelu(dim, False),
+                             BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
+                model = self._test_op_impl(instance, self.img_data_dict[dim],
+                                           "quantized::batch_norm_relu", tracing)
                 FileCheck().check_not("aten::batch_norm") \
                            .check_not("aten::relu") \
                            .check_not("aten::relu_") \
@@ -2160,16 +2162,20 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 super(M, self).__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu6 = torch.nn.ReLU6()
+                self.relu6_ = torch.nn.ReLU6(True)
                 self.hardtanh = torch.nn.Hardtanh()
+                self.hardtanh_ = torch.nn.Hardtanh(inplace=True)
 
             def forward(self, x):
                 x = self.conv(x)
                 x = self.relu6(x)
+                self.relu6_(x)
                 x = F.relu6(x)
                 x = torch.clamp(x, -3, 3)
                 x = x.clamp(-2.5, 2.5)
                 # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = self.hardtanh(x)
+                self.hardtanh_(x)
                 x = F.hardtanh(x)
                 F.hardtanh_(x)
                 return x
@@ -2229,6 +2235,13 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.relu(x)
                 x = F.relu(x)
                 x.relu_()
+                x = x.squeeze(0)
+                x.squeeze_(0)
+                x = torch.squeeze(x, 0)
+                x = x.unsqueeze(0)
+                x.unsqueeze_(0)
+                x = torch.unsqueeze(x, 0)
+                x = x.repeat(4, 2)
                 y = []
                 y.append(x)
                 x, _ = y
@@ -2293,7 +2306,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = F.adaptive_avg_pool2d(x, (1, 1))
                 x = F.adaptive_avg_pool3d(x, (1, 1, 1))
                 x = torch.mean(x)
+                x = torch.mean(x, [2, 3], False)
                 x = x.mean()
+                x = x.mean([2, 3], True)
                 # interpolate node will introduce 3 quantize_per_tensor ops
                 x = F.interpolate(x, 4, mode='nearest')  # interpolate node
                 x = F.upsample(x, (32, 32))  # interpolate node
@@ -2345,7 +2360,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         # mapping from number of quant for the op to the number of these ops
         # for example, for `3` in the key means for this type of op
         # we'll have 3 quantize_per_tensor
-        num_op_by_num_quant = {1: 33, 2: 2, 3: 3}
+        num_op_by_num_quant = {1: 35, 2: 2, 3: 3}
         num_quantize_per_tensor = 1  # for output
         for num_quant, num_op in num_op_by_num_quant.items():
             num_quantize_per_tensor += num_op * num_quant
