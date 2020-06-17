@@ -2720,6 +2720,7 @@ class TestQuantizeScript(QuantizationTestCase):
                     [self.calib_data],
                     inplace=False)
                 self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+
     @override_qengines
     def test_conv(self):
         r"""Compare the result of quantizing conv layer in
@@ -2731,8 +2732,7 @@ class TestQuantizeScript(QuantizationTestCase):
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
-        model_eager = quantize(annotated_conv_model, default_eval_fn,
-                                self.img_data)
+        model_eager = quantize(annotated_conv_model, default_eval_fn, self.img_data)
         qconfig_dict = {'': torch.quantization.get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(conv_model, self.img_data[0][0])
         model_script = torch.jit.script(conv_model)
@@ -2805,6 +2805,7 @@ class TestQuantizeScript(QuantizationTestCase):
                 [self.calib_data],
                 inplace=False)
             self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+
     @override_qengines
     def test_skip_quant(self):
         """ Test None qconfig
