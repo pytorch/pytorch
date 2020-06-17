@@ -79,8 +79,9 @@ private:
     using parameters_after_tensoroptions =
         guts::typelist::drop_t<gathered_parameter_types, tensoroptions_arg_index + 1>;
 
+    using wrapper = with_scattered_tensor_options_<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>;
 public:
-    using FuncPtr = TORCH_FN_TYPE((with_scattered_tensor_options_<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>::wrapper));
+    using FuncPtr = TORCH_FN_TYPE(&wrapper::wrapper);
 };
 
 template<class FuncPtr, class... ParametersBeforeTensorOptions, class... ParametersAfterTensorOptions>
