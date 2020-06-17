@@ -1216,8 +1216,7 @@ def dispatch_strategy(declaration):
           get dispatched back to VariableType (which will ensure that they
           are differentiable.)
     """
-    if (declaration['abstract'] or declaration['requires_tensor'] or
-            declaration['derivative'] is not None):
+    if declaration['abstract'] or declaration['derivative'] is not None:
         # If the function is abstract (not implemented on at::Type), we must
         # call the implementation on the derived type with unpacked tensors.
 
@@ -1232,6 +1231,7 @@ def dispatch_strategy(declaration):
         # more performant and to ensure factory functions return tensors with _version
         # of 0 (probably not strictly necessary, but nice to have to keeps versions simple
         # to understand.
+
         return 'use_derived'
     else:
         # If the function is concrete (we don't have to override it) and we
