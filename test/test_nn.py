@@ -10950,7 +10950,7 @@ class TestNNDeviceType(NNTestCase):
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @onlyCUDA   # TODO: fix CPU adaptive_maxpool_2d
     def test_max_pool_nan_inf(self, device, dtype):
@@ -10968,7 +10968,7 @@ class TestNNDeviceType(NNTestCase):
                 res2.backward(torch.randn_like(res2))
                 self.assertTrue(math.isinf(res2.item()))
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @onlyCUDA   # TODO: fix CPU fractional_maxpool_2d
     def test_fractional_max_pool_nan_inf(self, device, dtype):
