@@ -53,6 +53,7 @@ from quantization.test_quantize import TestModelNumerics  # noqa: F401
 # 2. Graph mode quantization
 from quantization.test_quantize_script import TestQuantizeScriptJitPasses  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeScriptPTSQOps  # noqa: F401
+from quantization.test_quantize_script import TestQuantizeScript  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeDynamicScript  # noqa: F401
 
 # Tooling: numric_suite
