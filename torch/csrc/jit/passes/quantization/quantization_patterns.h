@@ -758,7 +758,9 @@ graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %
   auto adaptive_avg_pool3d = getInputTensorQParamOpFusionInfo(
       "aten::adaptive_avg_pool3d", {"%output_size"});
 
-  auto mean = getInputTensorQParamOpFusionInfo("aten::mean", {"%dim"});
+  auto mean1 = getInputTensorQParamOpFusionInfo("aten::mean", {"%dim"});
+
+  auto mean2 = getInputTensorQParamOpFusionInfo("aten::mean", {"%dim", "%keepdim", "%out"});
 
   auto upsample_nearest1d = getInputTensorQParamOpFusionInfo(
       "aten::upsample_nearest1d", {"%output_size", "%scales"});
@@ -915,7 +917,8 @@ graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %
       adaptive_avg_pool1d,
       adaptive_avg_pool2d,
       adaptive_avg_pool3d,
-      mean,
+      mean1,
+      mean2,
       upsample_nearest1d,
       upsample_nearest2d,
       upsample_nearest3d,

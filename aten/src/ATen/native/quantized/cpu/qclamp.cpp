@@ -140,7 +140,7 @@ Tensor& quantized_hardtanh_(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("clamp", quantized_clamp);
+  m.impl("clamp", TORCH_FN(quantized_clamp));
 }
 
 } // namespace native

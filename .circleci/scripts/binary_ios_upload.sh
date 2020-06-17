@@ -22,8 +22,6 @@ do
         lipo -create "${libs[@]}" -o ${ZIP_DIR}/install/lib/${lib}
     fi
 done
-# for nnpack, we only support arm64 build
-cp ${ARTIFACTS_DIR}/arm64/lib/libnnpack.a ./
 lipo -i ${ZIP_DIR}/install/lib/*.a
 # copy the umbrella header and license
 cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/

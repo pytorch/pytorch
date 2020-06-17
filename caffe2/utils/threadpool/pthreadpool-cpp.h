@@ -22,8 +22,8 @@ public:
   PThreadPool(const PThreadPool&) = delete;
   PThreadPool& operator=(const PThreadPool&) = delete;
 
-  PThreadPool(PThreadPool&&) = default;
-  PThreadPool& operator=(PThreadPool&&) = default;
+  PThreadPool(PThreadPool&&) = delete;
+  PThreadPool& operator=(PThreadPool&&) = delete;
 
   size_t get_thread_count() const;
   void set_thread_count(size_t thread_count);

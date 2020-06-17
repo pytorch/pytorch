@@ -8,6 +8,7 @@
 
 #include "pytorch_jni_common.h"
 #if defined(__ANDROID__)
+#define USE_PTHREADPOOL
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #endif
 
