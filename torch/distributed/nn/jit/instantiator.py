@@ -3,9 +3,9 @@ import atexit
 import importlib
 import logging
 import os
+import sys
 import tempfile
 import traceback
-import sys
 
 import torch
 from torch.distributed.nn.jit.templates.remote_module_template import (
@@ -76,7 +76,9 @@ def cleanup_generated_modules():
     try:
         _TEMP_DIR.cleanup()
     except Exception as exc:
-        logger.warning(f"Failed to cleanup {INSTANTIATED_TEMPLATE_DIR_PATH}:\n{traceback.format_exc()}")
+        logger.warning(
+            f"Failed to cleanup {INSTANTIATED_TEMPLATE_DIR_PATH}:\n{traceback.format_exc()}"
+        )
 
 
 def _write(out_path, text):
@@ -95,7 +97,9 @@ def _write(out_path, text):
 
 def _do_instantiate_remote_module_template(generated_module_name, str_dict):
     generated_code_text = REMOTE_MODULE_TEMPLATE.format(**str_dict)
-    out_path = os.path.join(INSTANTIATED_TEMPLATE_DIR_PATH, f"{generated_module_name}.py")
+    out_path = os.path.join(
+        INSTANTIATED_TEMPLATE_DIR_PATH, f"{generated_module_name}.py"
+    )
     _write(out_path, generated_code_text)
 
     # From importlib doc,
@@ -104,9 +108,7 @@ def _do_instantiate_remote_module_template(generated_module_name, str_dict):
     # you may need to call invalidate_caches() in order for the new module
     # to be noticed by the import system.
     importlib.invalidate_caches()
-    generated_module = importlib.import_module(
-        f"{generated_module_name}"
-    )
+    generated_module = importlib.import_module(f"{generated_module_name}")
     return generated_module
 
 
