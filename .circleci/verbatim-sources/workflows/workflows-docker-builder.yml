@@ -1,11 +1,4 @@
   docker_build:
-    triggers:
-      - schedule:
-          cron: "0 15 * * 0"
-          filters:
-            branches:
-              only:
-                - master
     jobs:
       - docker_build_job:
           name: "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9"
