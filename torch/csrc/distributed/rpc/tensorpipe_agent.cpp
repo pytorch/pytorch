@@ -364,6 +364,19 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
   responseMessage.setId(messageId);
   if (!error) {
+    for (const auto& tensor : responseMessage.tensors()) {
+      if (!tensor.device().is_cpu()) {
+        responseMessage = createExceptionResponse(
+            c10::str(
+                "TensorPipe RPC backend only supports CPU tensors, please ",
+                "move your tensors to CPU before sending them over RPC. Found ",
+                "tensor on device: ",
+                tensor.device()),
+            responseMessage.id());
+        break;
+      }
+    }
+
     pipeWrite(
         pipe,
         std::move(responseMessage),
@@ -492,6 +505,14 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
         requestMessage.type(),
         " but RPC is no longer running on this node.");
     throw std::runtime_error(err);
+  }
+
+  for (const auto& tensor : requestMessage.tensors()) {
+    TORCH_CHECK(
+        tensor.device().is_cpu(),
+        "TensorPipe RPC backend only supports CPU tensors, please move your ",
+        "tensors to CPU before sending them over RPC. Found tensor on device: ",
+        tensor.device());
   }
 
   const auto& url = findWorkerURL(toWorkerInfo);
