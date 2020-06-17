@@ -105,7 +105,7 @@ class TestVmap(TestCase):
         # dispatcher's fallback mechanism doesn't work for ops that don't support
         # boxing. Fix the error message at some point.
         with self.assertRaisesRegex(
-                RuntimeError, 'Tried to call KernelFunction::call\(\) for a kernel'):
+                RuntimeError, 'Tried to call KernelFunction::call'):
             vmap(foo)(x)
 
 
