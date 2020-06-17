@@ -91,11 +91,11 @@ __device__ __forceinline__ c10::complex<T> WARP_SHFL_DOWN(c10::complex<T> value,
 {
 #ifndef __HIP_PLATFORM_HCC__
     return c10::complex<T>(
-        __shfl_down_sync(mask, value.storage[0], delta, width),
-        __shfl_down_sync(mask, value.storage[1], delta, width));
+        __shfl_down_sync(mask, value.real_, delta, width),
+        __shfl_down_sync(mask, value.imag_, delta, width));
 #else
     return c10::complex<T>(
-        __shfl_down(value.storage[0], delta, width),
-        __shfl_down(value.storage[1], delta, width));
+        __shfl_down(value.real_, delta, width),
+        __shfl_down(value.imag_, delta, width));
 #endif
 }

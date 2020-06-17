@@ -222,22 +222,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
-         [](Stack& stack) {
-           bool non_blocking;
-           bool copy;
-           pop(stack, non_blocking, copy);
-           c10::optional<at::ScalarType> scalarType =
-               pop(stack).toOptional<at::ScalarType>();
-           c10::optional<c10::Device> device = c10::nullopt;
-           at::Tensor self = pop(stack).toTensor();
-           push(
-               stack,
-               to_dispatch(self, device, scalarType, non_blocking, copy));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack& stack) {
            at::Tensor self;
@@ -276,15 +260,6 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.grad());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "prim::data(Tensor(a) a) -> Tensor(a)",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, autograd::Variable(a).variable_data());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -1047,42 +1022,6 @@ RegisterOperators reg2({
           return 0;
         },
         aliasAnalysisFromSchema()),
-
-    DEFINE_INT_OP(aten::__and__, a& b),
-    DEFINE_INT_OP(aten::__or__, a | b),
-    DEFINE_INT_OP(aten::__xor__, a ^ b),
-    DEFINE_INT_OP(aten::__lshift__, a << b),
-    DEFINE_INT_OP(aten::__rshift__, a >> b),
-
-    DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
-    DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
-    DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
-    DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
-    DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
-    DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
-    DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
-    DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
-    DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
-    DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
-    DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
-    DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
-    DEFINE_BINARY_FLOAT_OP(aten::atan2, std::atan2(a, b)),
-    DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
-    DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
-    DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
-    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
-    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
-    DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
-    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
-    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
-    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
-    DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
-    DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
-    DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
-    DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
-    DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
-    DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
-    DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
     Operator(
         "aten::modf(float a) -> (float, float)",
         [](Stack& stack) {
@@ -1145,18 +1084,6 @@ RegisterOperators reg2({
         std::copysign(a, b),
         float),
 
-    DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
-    DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
-    DEFINE_UNARY_OP(aten::erfc, std::erfc(a), float, float),
-    DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
-    DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
-    DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
-    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
-    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
-    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
-    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
-    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
-
     Operator(
         "aten::isnan(float a) -> bool",
         [](Stack& stack) {
@@ -1167,7 +1094,6 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
 
-    DEFINE_UNARY_OP(aten::neg, -a, int, float),
     Operator(
         "aten::_tensor_to_list(Tensor self) -> int[]",
         [](Stack& stack) {
@@ -1344,16 +1270,16 @@ Function* checkSortSchema(const c10::TypePtr& list_element_type) {
         return method;
       }
     }
-    error_str << "To sort a list of " << class_type->python_str()
+    error_str << "To sort a list of " << class_type->repr_str()
               << " it must define a "
               << "__lt__ method with two inputs of type "
-              << class_type->python_str() << " that "
+              << class_type->repr_str() << " that "
               << "returns a bool";
   } else {
-    error_str << "To sort a list of " << list_element_type->python_str()
+    error_str << "To sort a list of " << list_element_type->repr_str()
               << " must be of Tensors, ints, floats, bools or "
               << "a User Defined Class that defines the __lt__ compare method"
-              << ", got list of " << list_element_type->python_str() << "\n";
+              << ", got list of " << list_element_type->repr_str() << "\n";
   }
   throw std::runtime_error(error_str.str());
 }

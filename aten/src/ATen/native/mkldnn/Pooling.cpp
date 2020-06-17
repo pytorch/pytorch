@@ -111,6 +111,7 @@ static Tensor _mkldnn_pooling(
     ideep::algorithm algo) {
   const int64_t dims = input.dim() - 2;
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", dims);
+  if (stride.empty()) stride = kernel_size;
   auto stride_vec = expand_param_if_needed(stride, "stride", dims);
   auto padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto padding_vec_l = padding_vec;
