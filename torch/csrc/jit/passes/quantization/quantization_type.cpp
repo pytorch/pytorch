@@ -1,4 +1,4 @@
-#include "quantization_type.h"
+#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 
 namespace torch {
 namespace jit {
