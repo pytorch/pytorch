@@ -655,7 +655,7 @@ class Caffe2Backend(Backend):
 
     @staticmethod
     def optimize_onnx(input, init=False, predict=False):
-        if init:
+        passes =  []
             passes.append('split_init')
         if predict:
             passes.append('split_predict')
