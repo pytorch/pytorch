@@ -6,7 +6,7 @@ repositories {
         url "https://oss.sonatype.org/content/repositories/snapshots"
     }
     flatDir {
-        dir 'aars'
+        dirs 'aars'
     }
 }
 
@@ -86,6 +86,9 @@ android {
         nightly {
             dimension "build"
         }
+        aar {
+            dimension "build"
+        }
         nativeBuild {
             dimension "build"
             buildConfigField("boolean", "NATIVE_BUILD", "true")
@@ -107,7 +110,6 @@ android {
     }
     packagingOptions {
         doNotStrip '**.so'
-        pickFirst '**/libfbjni.so'
     }
 
     // Filtering for CI
@@ -116,6 +118,7 @@ android {
             def names = variant.flavors*.name
             if (names.contains("nightly")
                 || names.contains("camera")
+                || names.contains("aar")
                 || names.contains("nativeBuild")) {
                 setIgnore(true)
             }
@@ -136,6 +139,11 @@ dependencies {
 
     nightlyImplementation 'org.pytorch:pytorch_android:1.6.0-SNAPSHOT'
     nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.6.0-SNAPSHOT'
+
+    aarImplementation(name:'pytorch_android', ext:'aar')
+    aarImplementation(name:'pytorch_android_torchvision', ext:'aar')
+    aarImplementation 'com.facebook.soloader:nativeloader:0.8.0'
+    aarImplementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
 
     def camerax_version = "1.0.0-alpha05"
     cameraImplementation "androidx.camera:camera-core:$camerax_version"

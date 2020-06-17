@@ -11,7 +11,6 @@
 
 #include "jni.h"
 
-#include <ATen/NativeFunctions.h>
 #include <torch/script.h>
 
 namespace pytorch_testapp_jni {
@@ -35,6 +34,11 @@ static void loadAndForwardModel(JNIEnv* env, jclass, jstring jModelPath) {
   const char* modelPath = env->GetStringUTFChars(jModelPath, 0);
   assert(modelPath);
 
+  // To load torchscript model for mobile we need set these guards,
+  // because mobile build doesn't support features like autograd for smaller
+  // build size which is placed in `struct JITCallGuard` in this example. It may
+  // change in future, you can track the latest changes keeping an eye in
+  // android/pytorch_android/src/main/cpp/pytorch_jni_jit.cpp
   JITCallGuard guard;
   torch::jit::Module module = torch::jit::load(modelPath);
   module.eval();

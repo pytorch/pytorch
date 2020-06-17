@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.FloatBuffer;
+import java.util.Arrays;
 import org.pytorch.IValue;
 import org.pytorch.Module;
 import org.pytorch.PyTorchAndroid;
@@ -135,7 +136,6 @@ public static String assetFilePath(Context context, String assetName) {
     final long moduleForwardDuration = SystemClock.elapsedRealtime() - moduleForwardStartTime;
     final float[] scores = outputTensor.getDataAsFloatArray();
     final long analysisDuration = SystemClock.elapsedRealtime() - startTime;
-
     return new Result(scores, moduleForwardDuration, analysisDuration);
   }
 
@@ -155,7 +155,6 @@ public static String assetFilePath(Context context, String assetName) {
   @UiThread
   protected void handleResult(Result result) {
     String message = String.format("forwardDuration:%d", result.moduleForwardDuration);
-    Log.i(TAG, message);
     mTextViewStringBuilder.insert(0, '\n').insert(0, message);
     if (mTextViewStringBuilder.length() > TEXT_TRIM_SIZE) {
       mTextViewStringBuilder.delete(TEXT_TRIM_SIZE, mTextViewStringBuilder.length());
