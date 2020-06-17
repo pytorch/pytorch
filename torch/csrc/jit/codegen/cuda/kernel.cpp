@@ -395,6 +395,16 @@ void compileKernel(CudaKernel* entry) {
   std::tie(func_name, code) = codeGeneration(entry->fusion_.get());
 
   static int32_t compiled_kernel_id = 0;
+  // We increment the id here instead of at the end of the function to avoid
+  // error during jit-compilation that would make debug message confusing.
+  compiled_kernel_id++;
+  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_DEBUG");
+  if (debug_env && atoi(debug_env)) {
+    std::cout << "\n==== codegen output for kernel: " << compiled_kernel_id
+              << " ====" << std::endl
+              << code << std::endl
+              << "====================================" << std::endl;
+  }
 
   // vvv NVRTC COMPILATION vvv
 
