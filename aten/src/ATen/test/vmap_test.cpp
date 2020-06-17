@@ -642,5 +642,79 @@ TEST(VmapTest, TestBatchedTensorSize) {
   }
 }
 
+TEST(VmapTest, TestVmapPhysicalViewGetPhysicalShape) {
+  {
+    VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 1 | 4);
+    ASSERT_EQ(physical_view.getPhysicalShape({}), VmapDimVector({2, 3}));
+    ASSERT_EQ(physical_view.getPhysicalShape({7}), VmapDimVector({2, 3, 7}));
+    ASSERT_EQ(physical_view.getPhysicalShape({7, 11, 13}), VmapDimVector({2, 3, 7, 11, 13}));
+    ASSERT_EQ(physical_view.getPhysicalShape({7, 11, 13, 17}), VmapDimVector({2, 3, 7, 11, 13, 17}));
+  }
+  {
+    VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2);
+    ASSERT_EQ(physical_view.getPhysicalShape({}), VmapDimVector({2}));
+    ASSERT_EQ(physical_view.getPhysicalShape({7}), VmapDimVector({2, 7}));
+  }
+}
+
+// Basic test for BatchedTensor::expand
+TEST(VmapTest, TestBatchedTensorExpand) {
+  {
+    // Expand size is too small
+    auto tensor = at::randn({2, 3, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    ASSERT_THROW(batched.expand({5}), c10::Error);
+  }
+  {
+    // Expand size has same dimensionality as the logical dim
+    auto tensor = at::randn({2, 1, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto batched_out = batched.expand({3, 5});
+    const auto& out = maybeGetBatched(batched_out)->value();
+
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.expand({2, 3, 5})));
+  }
+  {
+    // Expand size has same dimensionality as the logical dim, incorrect expand size
+    auto tensor = at::randn({2, 1, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    ASSERT_THROW(batched.expand({1, 25}), c10::Error);
+  }
+  {
+    // Expand size has greater dimensionality as the logical dim
+    auto tensor = at::randn({2, 3, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto batched_out = batched.expand({7, 3, 5});
+    const auto& out = maybeGetBatched(batched_out)->value();
+
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.view({2, 1, 3, 5}).expand({2, 7, 3, 5})));
+  }
+  {
+    // Expand size has greater dimensionality as the logical dim, incorrect expand size
+    auto tensor = at::randn({2, 3, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    ASSERT_THROW(batched.expand({7, 9, 5}), c10::Error);
+  }
+  {
+    // logical dim is 0, expand size has same dimensionality as logical dim
+    auto tensor = at::randn({2, 3});
+    auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
+    auto batched_out = batched.expand({});
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor));
+  }
+  {
+    // logical dim is 0, expand size has greater dimensionality than logical dim
+    auto tensor = at::randn({2, 3});
+    auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
+    auto batched_out = batched.expand({5, 7});
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.view({2, 3, 1, 1}).expand({2, 3, 5, 7})));
+  }
+}
 
 }
