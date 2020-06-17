@@ -73,6 +73,9 @@ DEFAULT_QAT_MODULE_MAPPING = {
 DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
+    nn.LSTMCell: nnqd.LSTMCell,
+    nn.RNNCell: nnqd.RNNCell,
+    nn.GRUCell: nnqd.GRUCell
 }
 
 # Whitelist for propagating the qconfig

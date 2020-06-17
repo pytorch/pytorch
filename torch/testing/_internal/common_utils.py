@@ -860,11 +860,13 @@ class TestCase(expecttest.TestCase):
     #   arguments then wrap the function in a lambda or pass a partial function.
     # TODO: support bfloat16 comparisons
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
-    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device, dtype):
+    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device=None, dtype=None):
         assert TEST_NUMPY
         assert dtype is not torch.bfloat16
 
         if isinstance(tensor_like, torch.Tensor):
+            assert device is None
+            assert dtype is None
             a = tensor_like.detach().cpu().numpy()
             t = tensor_like
         else:
