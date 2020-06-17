@@ -72,6 +72,7 @@ class _InternalRPCPickler:
         # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
         # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
         # so puting rref's dispatch table here
+        p.dispatch_table[dist.rpc.PyRRef] = self._rref_reducer
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
