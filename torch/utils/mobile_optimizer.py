@@ -17,9 +17,9 @@ def optimize_for_mobile(script_module, optimization_blacklist: Set[MobileOptimiz
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule
-        whitelist_optimizer_dict: A dictionary with key type of MobileOptimizerType and value type of bool.
-        When dict is not passed, optimization method will run all the optimizer pass; otherwise, optimizer
-        method will run the whitelist optimization pass that has value of True.
+        optimization_blacklist: A set with type of MobileOptimizerType.
+        When set is not passed, optimization method will run all the optimizer pass; otherwise, optimizer
+        method will run the optimization pass that is not included inside optimization_blacklist.
     Returns:
         script_module: A new optimized torch script module
     """
