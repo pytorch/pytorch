@@ -204,14 +204,7 @@ bool input_b_is_scalar(
     const std::unordered_map<std::string, Value*>& vmap) {
   const auto& match_vmap = match.values_map;
   auto b_scalar = match_vmap.at(vmap.at("b_scalar"));
-  auto b_scalar_value = toIValue(b_scalar);
-  bool b_is_scalar =
-    b_scalar->type()->isSubtypeOf(NumberType::get()) ||
-    (b_scalar->type()->isSubtypeOf(TensorType::get()) &&
-     b_scalar_value &&
-     b_scalar_value->isTensor() &&
-     b_scalar_value->toTensor().dim() == 0);
-  return b_is_scalar;
+  return isScalar(b_scalar);
 }
 
 } // namespace
@@ -509,25 +502,25 @@ graph(%a_quant, %b_scalar, %alpha):
          return (%r) )";
 
   // quantized::batch_norm
-  std::string batch_norm2d = R"(
+  std::string batch_norm = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
          %a_dequant = aten::dequantize(%a_quant)
          %r_bn = aten::batch_norm(%a_dequant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7)
          %r = aten::quantize_per_tensor(%r_bn, %scale, %zero_point, %scalar_type)
          return (%r) )";
-  std::string quantized_batch_norm2d = R"(
+  std::string quantized_batch_norm = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
-         %r = quantized::batch_norm2d(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
+         %r = quantized::batch_norm(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
          return (%r) )";
 
-  std::string batch_norm2d_relu = R"(
+  std::string batch_norm_relu = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
          %a_dequant = aten::dequantize(%a_quant)
          %bn_out = aten::batch_norm(%a_dequant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7)
          %relu = aten::relu(%bn_out)
          %r = aten::quantize_per_tensor(%relu, %scale, %zero_point, %scalar_type)
          return (%r) )";
-  std::string batch_norm2d_inplace_relu = R"(
+  std::string batch_norm_inplace_relu = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
          %a_dequant = aten::dequantize(%a_quant)
          %bn_out = aten::batch_norm(%a_dequant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7)
@@ -535,9 +528,9 @@ graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, 
          %r = aten::quantize_per_tensor(%relu, %scale, %zero_point, %scalar_type)
          return (%r) )";
 
-  std::string quantized_batch_norm2d_relu = R"(
+  std::string quantized_batch_norm_relu = R"(
 graph(%a_quant, %weight, %bias, %mean, %var, %training, %eaf, %eps, %7, %scale, %zero_point, %scalar_type):
-         %r = quantized::batch_norm2d_relu(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
+         %r = quantized::batch_norm_relu(%a_quant, %weight, %bias, %mean, %var, %eps, %scale, %zero_point)
          return (%r) )";
 
   // aten::mul
@@ -765,7 +758,9 @@ graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %
   auto adaptive_avg_pool3d = getInputTensorQParamOpFusionInfo(
       "aten::adaptive_avg_pool3d", {"%output_size"});
 
-  auto mean = getInputTensorQParamOpFusionInfo("aten::mean", {"%dim"});
+  auto mean1 = getInputTensorQParamOpFusionInfo("aten::mean", {"%dim"});
+
+  auto mean2 = getInputTensorQParamOpFusionInfo("aten::mean", {"%dim", "%keepdim", "%out"});
 
   auto upsample_nearest1d = getInputTensorQParamOpFusionInfo(
       "aten::upsample_nearest1d", {"%output_size", "%scales"});
@@ -875,13 +870,13 @@ graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %
       {"quantized::add", add, quantized_add, {aten_add_alpha_is_one}},
       {"quantized::add", inplace_add, quantized_add, {aten_add_alpha_is_one}},
       {"quantized::cat", cat, quantized_cat},
-      {"quantized::batch_norm2d", batch_norm2d, quantized_batch_norm2d},
-      {"quantized::batch_norm2d_relu",
-       batch_norm2d_relu,
-       quantized_batch_norm2d_relu},
-      {"quantized::batch_norm2d_relu",
-       batch_norm2d_inplace_relu,
-       quantized_batch_norm2d_relu},
+      {"quantized::batch_norm", batch_norm, quantized_batch_norm},
+      {"quantized::batch_norm_relu",
+       batch_norm_relu,
+       quantized_batch_norm_relu},
+      {"quantized::batch_norm_relu",
+       batch_norm_inplace_relu,
+       quantized_batch_norm_relu},
       {"quantized::mul_scalar_relu",
        mul_scalar_relu,
        quantized_mul_scalar_relu,
@@ -922,7 +917,8 @@ graph(%a_quant, %weight, %bias, %running_mean, %running_var, %use_input_stats, %
       adaptive_avg_pool1d,
       adaptive_avg_pool2d,
       adaptive_avg_pool3d,
-      mean,
+      mean1,
+      mean2,
       upsample_nearest1d,
       upsample_nearest2d,
       upsample_nearest3d,
