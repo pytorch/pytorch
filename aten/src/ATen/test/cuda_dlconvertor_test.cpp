@@ -47,7 +47,6 @@ TEST(TestDlconvertor, TestDlconvertorCUDAHIP) {
   ASSERT_TRUE(dlMTensor->dl_tensor.ctx.device_type == DLDeviceType::kDLROCM);
 #else
   ASSERT_TRUE(dlMTensor->dl_tensor.ctx.device_type == DLDeviceType::kDLGPU);
-  ctx.device_type = DLDeviceType::kDLGPU;
 #endif
 
   Tensor b = fromDLPack(dlMTensor);
