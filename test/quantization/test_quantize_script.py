@@ -2170,16 +2170,20 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 super(M, self).__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu6 = torch.nn.ReLU6()
+                self.relu6_ = torch.nn.ReLU6(True)
                 self.hardtanh = torch.nn.Hardtanh()
+                self.hardtanh_ = torch.nn.Hardtanh(inplace=True)
 
             def forward(self, x):
                 x = self.conv(x)
                 x = self.relu6(x)
+                self.relu6_(x)
                 x = F.relu6(x)
                 x = torch.clamp(x, -3, 3)
                 x = x.clamp(-2.5, 2.5)
                 # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = self.hardtanh(x)
+                self.hardtanh_(x)
                 x = F.hardtanh(x)
                 F.hardtanh_(x)
                 return x
@@ -2239,6 +2243,13 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.relu(x)
                 x = F.relu(x)
                 x.relu_()
+                x = x.squeeze(0)
+                x.squeeze_(0)
+                x = torch.squeeze(x, 0)
+                x = x.unsqueeze(0)
+                x.unsqueeze_(0)
+                x = torch.unsqueeze(x, 0)
+                x = x.repeat(4, 2)
                 y = []
                 y.append(x)
                 x, _ = y
@@ -2302,7 +2313,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = F.adaptive_avg_pool2d(x, (1, 1))
                 x = F.adaptive_avg_pool3d(x, (1, 1, 1))
                 x = torch.mean(x)
+                x = torch.mean(x, [2, 3], False)
                 x = x.mean()
+                x = x.mean([2, 3], True)
                 # interpolate node will introduce 3 quantize_per_tensor ops
                 x = F.interpolate(x, 4, mode='nearest')  # interpolate node
                 x = F.upsample(x, (32, 32))  # interpolate node
@@ -2351,7 +2364,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         # mapping from number of quant for the op to the number of these ops
         # for example, for `3` in the key means for this type of op
         # we'll have 3 quantize_per_tensor
-        num_op_by_num_quant = {1: 33, 2: 2, 3: 3}
+        num_op_by_num_quant = {1: 35, 2: 2, 3: 3}
         num_quantize_per_tensor = 1  # for output
         for num_quant, num_op in num_op_by_num_quant.items():
             num_quantize_per_tensor += num_op * num_quant

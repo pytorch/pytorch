@@ -74,14 +74,13 @@ class RNNBase(torch.nn.Module):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
 
+                w_ih = torch.randn(gate_size, layer_input_size).to(torch.float)
+                w_hh = torch.randn(gate_size, hidden_size).to(torch.float)
+                b_ih = torch.randn(gate_size).to(torch.float)
+                b_hh = torch.randn(gate_size).to(torch.float)
                 if dtype == torch.qint8:
-                    w_ih = torch._empty_affine_quantized([gate_size, layer_input_size], scale=1, zero_point=0, dtype=torch.qint8)
-                    w_hh = torch._empty_affine_quantized([gate_size, hidden_size], scale=1, zero_point=0, dtype=torch.qint8)
-                    b_ih = torch.zeros([gate_size], dtype=torch.float)
-                    # Second bias vector included for CuDNN compatibility. Only one
-                    # bias vector is needed in standard definition.
-                    b_hh = torch.zeros([gate_size], dtype=torch.float)
-
+                    w_ih = torch.quantize_per_tensor(w_ih, scale=0.1, zero_point=0, dtype=torch.qint8)
+                    w_hh = torch.quantize_per_tensor(w_hh, scale=0.1, zero_point=0, dtype=torch.qint8)
                     packed_ih = \
                         torch.ops.quantized.linear_prepack(w_ih, b_ih)
                     packed_hh = \
@@ -94,12 +93,6 @@ class RNNBase(torch.nn.Module):
                             packed_ih, packed_hh, b_ih, b_hh, True)
 
                 else:
-                    w_ih = torch.Tensor(gate_size, layer_input_size).float()
-                    w_hh = torch.Tensor(gate_size, hidden_size).float()
-                    b_ih = torch.Tensor(gate_size).float()
-                    # Second bias vector included for CuDNN compatibility. Only one
-                    # bias vector is needed in standard definition.
-                    b_hh = torch.Tensor(gate_size).float()
 
                     packed_ih = torch.ops.quantized.linear_prepack_fp16(w_ih, b_ih)
                     packed_hh = torch.ops.quantized.linear_prepack_fp16(w_hh, b_hh)
@@ -399,21 +392,17 @@ class RNNCellBase(torch.nn.Module):
         self.hidden_size = hidden_size
         self.bias = bias
         if bias:
-            self.bias_ih = torch.zeros([num_chunks * hidden_size], dtype=torch.float)
-            self.bias_hh = torch.zeros([num_chunks * hidden_size], dtype=torch.float)
+            self.bias_ih = torch.randn(num_chunks * hidden_size).to(dtype=torch.float)
+            self.bias_hh = torch.randn(num_chunks * hidden_size).to(dtype=torch.float)
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
 
+        weight_ih = torch.randn(num_chunks * hidden_size, input_size).to(torch.float)
+        weight_hh = torch.randn(num_chunks * hidden_size, hidden_size).to(torch.float)
         if dtype == torch.qint8:
-            weight_ih = torch._empty_affine_quantized(
-                [num_chunks * hidden_size, input_size], scale=1, zero_point=0, dtype=torch.qint8)
-            weight_hh = torch._empty_affine_quantized(
-                [num_chunks * hidden_size, hidden_size], scale=1, zero_point=0, dtype=torch.qint8)
-
-        else:
-            weight_ih = torch.Tensor(num_chunks * hidden_size, input_size).float()
-            weight_hh = torch.Tensor(num_chunks * hidden_size, hidden_size).float()
+            weight_ih = torch.quantize_per_tensor(weight_ih, scale=1, zero_point=0, dtype=torch.qint8)
+            weight_hh = torch.quantize_per_tensor(weight_hh, scale=1, zero_point=0, dtype=torch.qint8)
 
         if dtype == torch.qint8:
             # for each layer, for each direction we need to quantize and pack
