@@ -1,10 +1,12 @@
+import copy
 import sys
 import io
 import inspect
 import math
+import os
 import random
 import re
-import copy
+import subprocess
 import torch
 import torch.cuda
 import torch.backends.cuda
@@ -9565,19 +9567,13 @@ class TestTorchDeviceType(TestCase):
     @slowTest
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
-        # Requires > 8 GB of memory. So, if allocation fails just skip it.
-        try:
-            x = torch.zeros((2, 2**32), device=device, dtype=torch.int8)
-            x[:, -1] = 1
-            self.assertEqual(x.argmax(1), [x.shape[1] - 1] * 2)
-            self.assertEqual(x.max(1).indices, [x.shape[1] - 1] * 2)
-            x[:, -1] = -1
-            self.assertEqual(x.argmin(1), [x.shape[1] - 1] * 2)
-            self.assertEqual(x.min(1).indices, [x.shape[1] - 1] * 2)
-        except RuntimeError as e:
-            if 'memory' in str(e):
-                raise unittest.SkipTest('Insufficient memory')
-            raise
+        x = torch.zeros(2**31, device=device, dtype=torch.int8)
+        x[-1] = 1
+        self.assertEqual(x.argmax(0), x.shape[0] - 1)
+        self.assertEqual(x.max(0).indices, x.shape[0] - 1)
+        x[-1] = -1
+        self.assertEqual(x.argmin(0), x.shape[0] - 1)
+        self.assertEqual(x.min(0).indices, x.shape[0] - 1)
 
     def test_argminmax_axis_with_dim_one(self, device):
         # See: https://github.com/pytorch/pytorch/issues/38922
@@ -19234,6 +19230,29 @@ class TestTorchMathOps(TestCase):
 
 class TestTorch(AbstractTestCases._TestTorchMixin):
     exact_dtype = True
+
+class TestRPATH(TestCase):
+    @unittest.skipIf(not sys.platform.startswith('linux'), "linux-only test")
+    def test_rpath(self):
+        """
+        Make sure RPATH (or RUNPATH) in nvrtc does not contain a cuda path
+        issue gh-35418
+        """
+        libdir = os.path.join(os.path.dirname(torch._C.__file__), 'lib')
+        caffe2_nvrtc = os.path.join(libdir, 'libcaffe2_nvrtc.so')
+        if os.path.exists(caffe2_nvrtc):
+            output = subprocess.check_output(['objdump', '-x', caffe2_nvrtc])
+            nRPATHfound = 0
+            for line in output.split(b'\n'):
+                if b'RPATH' in line or b'RUNPATH' in line:
+                    # If CMake adds a path, it will be after $ORIGIN
+                    # The before-$origin paths are ones added via -L linkpaths
+                    # in $CFLAGS
+                    segments = line.split(b'$ORIGIN')
+                    if len(segments) > 1:
+                        self.assertFalse(b'cuda' in segments[-1])
+                    nRPATHfound += 1
+            self.assertNotEqual(nRPATHfound, 0)
 
 
 # Generates tests
