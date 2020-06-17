@@ -264,7 +264,7 @@ auto ConvParams::use_xnnpack(
 // TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
 #if defined(C10_MOBILE) && !defined(__APPLE__)
   if (!transposed) {
-    return (input.size(1) == groups) &&
+    return (input.size(1) != groups) &&
             xnnpack::use_convolution2d(
                 input,
                 weight,
