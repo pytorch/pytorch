@@ -464,6 +464,7 @@ BLAS and LAPACK Operations
     matmul
     matrix_power
     matrix_rank
+    matrix_exp
     mm
     mv
     orgqr

@@ -3739,6 +3739,34 @@ Example::
              [  2.0774,  -0.8187]]])
 """.format(**common_args))
 
+add_docstr(torch.matrix_exp,
+           r"""
+matrix_power(input) -> Tensor
+
+Returns the matrix exponential. Supports batched input.
+
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.randn(2, 2, 2)
+    >>> a[0, :, :] = torch.eye(2, 2)
+    >>> a[1, :, :] = 2 * torch.eye(2, 2)
+    >>> a
+    tensor([[[1., 0.],
+             [0., 1.]],
+
+            [[2., 0.],
+             [0., 2.]]])
+    >>> torch.matrix_exp(a)
+    tensor([[[2.7183, 0.0000],
+             [0.0000, 2.7183]],
+
+             [[7.3891, 0.0000],
+              [0.0000, 7.3891]]])
+""".format(**common_args))
+
 add_docstr(torch.max,
            r"""
 max(input) -> Tensor
