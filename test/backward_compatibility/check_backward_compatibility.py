@@ -95,6 +95,7 @@ white_list = [
     ('prim::min', datetime.date(2020, 6, 30)),
     ('prim::max', datetime.date(2020, 6, 30)),
     ('aten::to_here', datetime.date(2020, 6, 30)),
+    ('aten::to_here(RRef(t) self, double timeout*)', datetime.date(2020, 6, 30)),
     ('aten::local_value', datetime.date(2020, 6, 30)),
     ('aten::log', datetime.date(2020, 6, 30)),
     ('aten::__and__', datetime.date(2020, 6, 30)),

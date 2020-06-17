@@ -22,6 +22,7 @@ from torch import Tensor
 
 # Standard library
 from collections import namedtuple
+from itertools import chain
 import tempfile
 from typing import Dict
 import warnings
