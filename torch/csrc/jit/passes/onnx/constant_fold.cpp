@@ -4,6 +4,7 @@
 
 #include <c10/util/Optional.h>
 #include <algorithm>
+#include <onnx/onnx_pb.h>
 
 namespace torch {
 namespace jit {
@@ -18,16 +19,16 @@ std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
     // ScalarType type.
-    {1, at::kFloat},
-    {2, at::kByte},
-    {3, at::kChar},
-    {4, at::kInt},
-    {5, at::kShort},
-    {6, at::kInt},
-    {7, at::kLong},
-    {10, at::kFloat},
-    {11, at::kDouble},
-    {12, at::kLong},
+    {::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, at::kFloat},
+    {::ONNX_NAMESPACE::TensorProto_DataType_UINT8, at::kByte},
+    {::ONNX_NAMESPACE::TensorProto_DataType_INT8, at::kChar},
+    {::ONNX_NAMESPACE::TensorProto_DataType_UINT16, at::kUInt16},
+    {::ONNX_NAMESPACE::TensorProto_DataType_INT16, at::kShort},
+    {::ONNX_NAMESPACE::TensorProto_DataType_INT32, at::kInt},
+    {::ONNX_NAMESPACE::TensorProto_DataType_INT64, at::kLong},
+    {::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16, at::kHalf},
+    {::ONNX_NAMESPACE::TensorProto_DataType_DOUBLE, at::kDouble},
+    {::ONNX_NAMESPACE::TensorProto_DataType_UINT32, at::kUInt32},
 };
 
 void handleNegativeStartEndIndex(
