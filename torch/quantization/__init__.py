@@ -22,7 +22,6 @@ _all__ = [
     'prepare', 'convert', 'prepare_qat',
     # Top level API for graph mode quantization
     'quantize_script', 'quantize_dynamic_script',
-    'prepare_script', 'convert_script',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',
