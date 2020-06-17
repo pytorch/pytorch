@@ -225,7 +225,6 @@ void Fusion::printKernel() {
   lower.printKernel(std::cout);
 }
 
-
 void Fusion::printMath() {
   FusionGuard fg(this);
   for (auto expr : exprs(true))

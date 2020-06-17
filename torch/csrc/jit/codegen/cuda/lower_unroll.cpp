@@ -35,10 +35,11 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
   std::vector<Val*> inds;
   if (reductions) {
     for (size_t ind_i = 0, tv_i = 0; tv_i < tv->nDims();) {
-      if (tv->axis(tv_i++)->isReduction()){
+      if (tv->axis(tv_i++)->isReduction()) {
         inds.push_back(new Int(0));
-      }else{
-        TORCH_INTERNAL_ASSERT(ind_i < inds_.size(), "Ran out of indices to generate predicate.");
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            ind_i < inds_.size(), "Ran out of indices to generate predicate.");
         inds.push_back(inds_[ind_i++]);
       }
     }
