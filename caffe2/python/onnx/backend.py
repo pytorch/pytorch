@@ -35,6 +35,7 @@ import onnx
 from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
 import onnx.numpy_helper
 import onnx.defs
+import onnx.optimizer
 import onnx.shape_inference
 import onnx.utils
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
@@ -652,6 +653,15 @@ class Caffe2Backend(Backend):
                 np.ones(shape, dtype=onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[value_info.type.tensor_type.elem_type]),
                 device_option)
 
+    @staticmethod
+    def optimize_onnx(input, init=False, predict=False):
+        if init:
+            passes.append('split_init')
+        if predict:
+            passes.append('split_predict')
+        out = onnx.optimizer.optimize(input, passes)
+        return out
+
     @classmethod
     def prepare_zip_archive(cls, file, device='CPU', **kwargs):
         with zipfile.ZipFile(file, mode='r') as z:
@@ -860,8 +870,8 @@ class Caffe2Backend(Backend):
         device_option = get_device_option(Device(device))
 
         onnx_model = onnx.utils.polish_model(onnx_model)
-        
-        init_model = pred_model = onnx_model
+        init_model = cls.optimize_onnx(onnx_model, init=True)
+        pred_model = cls.optimize_onnx(onnx_model, predict=True)
 
         init_net = caffe2_pb2.NetDef()
         pred_net = caffe2_pb2.NetDef()
