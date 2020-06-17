@@ -1,4 +1,5 @@
 import ast
+import enum
 import inspect
 import re
 import torch
@@ -7,7 +8,8 @@ from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     is_optional, _qualified_name, Any, Future, is_future
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, FutureType
+    DeviceObjType, FutureType, EnumType
+
 
 from textwrap import dedent
 from torch._six import builtins
@@ -240,6 +242,21 @@ def try_real_annotations(fn, loc):
     return arg_types, return_type
 
 
+# Finds common type for enum values belonging to an Enum class. If not all
+# values have the same type, AnyType is returned.
+def get_enum_value_type(e: enum.Enum, loc):
+    enum_values = list(e)
+    if not enum_values:
+        raise ValueError("No enum values defined for: '{}'".format(e.__class__))
+
+    types = set([type(v.value) for v in enum_values])
+
+    # Likely path of all enum values having same type.
+    if len(types) == 1:
+        return try_ann_to_type(types.pop(), loc)
+    return AnyType.get()
+
+
 def try_ann_to_type(ann, loc):
     if ann is None:
         return TensorType.get()
@@ -282,6 +299,8 @@ def try_ann_to_type(ann, loc):
         return DeviceObjType.get()
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
+    if inspect.isclass(ann) and issubclass(ann, enum.Enum):
+        return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc))
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))

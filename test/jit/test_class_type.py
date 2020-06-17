@@ -178,6 +178,9 @@ class TestClassType(JitTestCase):
         def fn2(x):
             foo = FooTest(x)
             return fn(foo)
+        
+        print(fn.code)
+        print(fn.graph)
 
         input = torch.ones(1)
         self.assertEqual(fn2(input), input)

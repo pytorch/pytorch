@@ -722,7 +722,11 @@ def _qualified_name(obj):
     if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name
 
-    name = obj.__name__
+    if getattr(obj, "__name__", None):
+        name = obj.__name__
+    elif getattr(obj, "name"):
+        name = obj.name
+
     if name == '<lambda>':
         name = '_lambda'  # make name a valid identifier
 
