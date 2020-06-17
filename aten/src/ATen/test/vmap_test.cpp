@@ -277,7 +277,7 @@ TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDims) {
 
   ASSERT_EQ(
       physical_view.getPhysicalDims({0, 1, -1, -2}),
-      std::vector<int64_t>({3, 4, 4, 3}));
+      VmapDimVector({3, 4, 4, 3}));
 
   ASSERT_THROW(physical_view.getPhysicalDims({2, 0}), c10::Error);
   ASSERT_THROW(physical_view.getPhysicalDims({0, -3}), c10::Error);
