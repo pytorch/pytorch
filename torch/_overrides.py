@@ -149,7 +149,8 @@ def get_ignored_functions():
         torch.nn.functional.hardswish,
         torch.is_vulkan_available,
         torch.is_deterministic,
-        torch.set_deterministic
+        torch.set_deterministic,
+        torch.unify_type_list
     )
 
 def get_testing_overrides():

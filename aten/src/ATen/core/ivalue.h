@@ -37,6 +37,7 @@ struct ConstantString;
 struct GenericDict;
 struct Object;
 struct PyObjectHolder;
+struct EnumHolder;
 }
 
 // This is an owning wrapper for a c10::optional<std::vector<T>>
@@ -77,24 +78,25 @@ struct OptionalArray {
 // retain/release calls.
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) \
-  _(Tensor) \
-  _(Double) \
-  _(Int) \
-  _(Bool) \
-  _(Tuple) \
-  _(String) \
-  _(Blob) \
-  _(GenericList) \
-  _(GenericDict) \
-  _(Future) \
-  _(Device) \
-  _(Object) \
-  _(PyObject) \
-  _(Uninitialized) \
-  _(Capsule) \
-  _(RRef) \
-  _(Generator) \
+  _(None)                    \
+  _(Tensor)                  \
+  _(Double)                  \
+  _(Int)                     \
+  _(Bool)                    \
+  _(Tuple)                   \
+  _(String)                  \
+  _(Blob)                    \
+  _(GenericList)             \
+  _(GenericDict)             \
+  _(Future)                  \
+  _(Device)                  \
+  _(Object)                  \
+  _(PyObject)                \
+  _(Uninitialized)           \
+  _(Capsule)                 \
+  _(RRef)                    \
+  _(Generator)               \
+  _(Enum)                    \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -407,13 +409,13 @@ struct CAFFE2_API IValue final {
   c10::List<bool> toBoolList() &&;
   c10::List<bool> toBoolList() const &;
 
-  //TensorList
+  // TensorList
   bool isTensorList() const;
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const &;
   std::vector<at::Tensor> toTensorVector() const;
 
-  //GenericList
+  // GenericList
   IValue(c10::List<IValue> v);
   bool isList() const { return Tag::GenericList == tag; }
   c10::List<IValue> toList() &&;
@@ -478,6 +480,12 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() &&;
   c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() const &;
   PyObject* toPyObject() const;
+
+  // Enum
+  explicit IValue(c10::intrusive_ptr<ivalue::EnumHolder> v);
+  bool isEnum() const { return tag == Tag::Enum; }
+  c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() &&;
+  c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() const &;
 
   // None
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}

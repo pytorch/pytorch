@@ -29,6 +29,7 @@ from jit.test_op_normalization import TestOpNormalization  # noqa: F401
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
+from jit.test_enum import TestEnum, TestEnumFeatureGuard  # noqa: F401
 
 # Torch
 from torch import Tensor
