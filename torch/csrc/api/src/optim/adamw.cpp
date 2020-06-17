@@ -78,6 +78,11 @@ Tensor AdamW::step(LossClosure closure)  {
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
       auto& options = static_cast<AdamWOptions&>(group.options());
 
+      // Perform stepweight decay
+      if(options.weight_decay() != 0) {
+        p.mul_(1 - options.lr() * options.weight_decay());
+      }
+
       // State initialization
       if(param_state == state_.end()) {
         auto state = std::make_unique<AdamWParamState>();
@@ -104,10 +109,6 @@ Tensor AdamW::step(LossClosure closure)  {
 
       auto bias_correction1 = 1 - std::pow(beta1, state.step());
       auto bias_correction2 = 1 - std::pow(beta2, state.step());
-
-      if(options.weight_decay() != 0) {
-        p.mul_(1 - options.lr() * options.weight_decay());
-      }
 
       // Decay the first and second moment running average coefficient
       exp_avg.mul_(beta1).add_(grad, 1 - beta1);
