@@ -64,6 +64,7 @@ void is_optimizer_state_equal(
 
 template <typename OptimizerClass, typename DerivedOptimizerOptions, typename DerivedOptimizerParamState>
 void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_global_state = false) {
+  torch::manual_seed(0);
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
   auto model3 = Linear(5, 2);
