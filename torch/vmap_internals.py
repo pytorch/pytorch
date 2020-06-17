@@ -40,8 +40,8 @@ def _validate_inputs_and_get_batch_size(args, fn_name):
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(batched_outputs, vmap_level, batch_size):
     if isinstance(batched_outputs, Tensor):
-        return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, 0)
-    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, 0)
+        return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, 0)  # type: ignore
+    return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, 0)  # type: ignore
                  for out in batched_outputs)
 
 # Checks that `outputs` is either a Tensor or a sequence of Tensors.
@@ -80,7 +80,7 @@ def vmap(func, in_dims=0, out_dims=0):
         global VMAP_LEVEL
         VMAP_LEVEL += 1
         try:
-            batched_inputs = [torch._add_batch_dim(arg, 0, VMAP_LEVEL) for arg in args]
+            batched_inputs = [torch._add_batch_dim(arg, 0, VMAP_LEVEL) for arg in args]  # type: ignore
             batched_outputs = func(*batched_inputs)
             _validate_outputs(batched_outputs, func.__name__)
             return _unwrap_batched(batched_outputs, VMAP_LEVEL, batch_size)
