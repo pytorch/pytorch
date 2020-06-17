@@ -628,54 +628,15 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
 }
 
 bool isNamedTupleClass(const py::object& obj) {
-  auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
-  return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
-      py::hasattr(obj, "_fields");
+  return py::cast<bool>(
+      py::module::import("torch._jit_internal").attr("is_named_tuple")(obj));
 }
 
 TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
-  auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
-      py::module::import("torch.jit").attr("_qualified_name")(obj)));
-  // Currently don't support default values
-  if (py::hasattr(obj, "_field_defaults")) {
-    auto default_dict = py::cast<std::map<std::string, py::object>>(
-        py::getattr(obj, "_field_defaults"));
-    if (default_dict.size()) {
-      std::string error_msg =
-          "Default values are currently not supported"
-          " on NamedTuple fields in TorchScript. Fields "
-          "with default values: [";
-      bool first = true;
-      for (const auto& kv : default_dict) {
-        if (!first) {
-          error_msg += ", ";
-        }
-        error_msg += kv.first;
-      }
-      error_msg += "]";
-      throw ErrorReport(loc) << error_msg;
-    }
-  }
-
-  py::object props =
-      py::module::import("torch.jit").attr("_get_named_tuple_properties")(obj);
-  std::string unqualName;
-  std::vector<std::string> fields;
-  std::vector<TypePtr> annotations;
-  std::tie(unqualName, fields, annotations) = py::cast<
-      std::tuple<std::string, decltype(fields), decltype(annotations)>>(props);
-
-  auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
-  if (auto type = get_python_cu()->get_type(qualifiedName)) {
-    TORCH_CHECK(
-        type->isSubtypeOf(tt),
-        "Can't to redefine NamedTuple: ",
-        tt->repr_str());
-    return type;
-  }
-  get_python_cu()->register_type(tt);
-  return tt;
+  return py::cast<TypePtr>(
+      py::module::import("torch._jit_internal")
+          .attr("try_make_named_tuple_type")(obj, nullptr, loc));
 }
 
 std::shared_ptr<SugaredValue> toSugaredValue(

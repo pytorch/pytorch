@@ -9565,19 +9565,13 @@ class TestTorchDeviceType(TestCase):
     @slowTest
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
-        # Requires > 8 GB of memory. So, if allocation fails just skip it.
-        try:
-            x = torch.zeros((2, 2**32), device=device, dtype=torch.int8)
-            x[:, -1] = 1
-            self.assertEqual(x.argmax(1), [x.shape[1] - 1] * 2)
-            self.assertEqual(x.max(1).indices, [x.shape[1] - 1] * 2)
-            x[:, -1] = -1
-            self.assertEqual(x.argmin(1), [x.shape[1] - 1] * 2)
-            self.assertEqual(x.min(1).indices, [x.shape[1] - 1] * 2)
-        except RuntimeError as e:
-            if 'memory' in str(e):
-                raise unittest.SkipTest('Insufficient memory')
-            raise
+        x = torch.zeros(2**31, device=device, dtype=torch.int8)
+        x[-1] = 1
+        self.assertEqual(x.argmax(0), x.shape[0] - 1)
+        self.assertEqual(x.max(0).indices, x.shape[0] - 1)
+        x[-1] = -1
+        self.assertEqual(x.argmin(0), x.shape[0] - 1)
+        self.assertEqual(x.min(0).indices, x.shape[0] - 1)
 
     def test_argminmax_axis_with_dim_one(self, device):
         # See: https://github.com/pytorch/pytorch/issues/38922
