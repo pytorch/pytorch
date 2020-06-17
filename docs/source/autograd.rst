@@ -54,58 +54,6 @@ Locally disabling gradient computation
 
 .. autoclass:: set_grad_enabled
 
-.. _default-grad-layouts:
-
-Default gradient layouts
-^^^^^^^^^^^^^^^^^^^^^^^^
-
-When a non-sparse ``param`` receives a non-sparse gradient during
-:func:`torch.autograd.backward` or :func:`torch.Tensor.backward`
-``param.grad`` is accumulated as follows.
-
-If ``param.grad`` is initially ``None``:
-
-1. If ``param``'s memory is non-overlapping and dense, ``.grad`` is
-   created with strides matching ``param`` (thus matching ``param``'s
-   layout).
-2. Otherwise, ``.grad`` is created with rowmajor-contiguous strides.
-
-If ``param`` already has a non-sparse ``.grad`` attribute:
-
-3. If ``create_graph=False``, ``backward()`` accumulates into ``.grad``
-   in-place, which preserves its strides.
-4. If ``create_graph=True``, ``backward()`` replaces ``.grad`` with a
-   new tensor ``.grad + new grad``, which attempts (but does not guarantee)
-   matching the preexisting ``.grad``'s strides.
-
-The default behavior (letting ``.grad``\ s be ``None`` before the first
-``backward()``, such that their layout is created according to 1. or 2.,
-and retained over time according to 3. or 4) is recommended for best performance.
-Calls to ``model.zero_grad()`` or ``optimizer.zero_grad()`` will not affect ``.grad``
-layouts.
-
-In fact, resetting all ``.grad``\ s to ``None`` before each
-accumulation phase, e.g.::
-
-    for iterations...
-        ...
-        for param in model.parameters():
-            param.grad = None
-        loss.backward()
-
-such that they're recreated according to 1. or 2. every time,
-is a valid alternative to ``model.zero_grad()`` or ``optimizer.zero_grad()``
-that may improve performance for some networks.
-
-Manual gradient layouts
------------------------
-
-If you need manual control over ``.grad``'s strides,
-assign ``param.grad =`` a zeroed tensor with desired strides
-before the first ``backward()``, and never reset it to ``None``.
-3. guarantees your layout is preserved as long as ``create_graph=False``.
-4. indicates your layout is *likely* preserved even if ``create_graph=True``.
-
 In-place operations on Tensors
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
