@@ -299,7 +299,7 @@ protected:
   void build(TensorIteratorConfig&);
 
   // Mutable reference as it moves tensors out of TensorIteratorConfig
-  void populate_operands(TensorIteratorConfig&);
+  void populate_operands(const TensorIteratorConfig&);
   void analyze_memory_format();
   void mark_outputs();
   void compute_mem_overlaps(const TensorIteratorConfig&);
@@ -416,16 +416,21 @@ public:
   /// Construction
   TensorIteratorConfig& add_output(const Tensor& output) {
     TORCH_INTERNAL_ASSERT(num_inputs_ == 0);
-    tensors_.emplace_back(output);
+    tensors_.emplace_back(&output);
     num_outputs_++;
     return *this;
   }
 
   TensorIteratorConfig& add_input(const Tensor& input) {
-    tensors_.emplace_back(input);
+    tensors_.emplace_back(&input);
     num_inputs_++;
     return *this;
   }
+
+  // DON'T GIVE US TEMPORARIES.  The tensors must stay live for the entirety
+  // of the TensorIterator
+  void add_output(const Tensor&&) = delete;
+  void add_input(const Tensor&&) = delete;
 
   TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap) {
     check_mem_overlap_ = check_mem_overlap;
@@ -536,7 +541,7 @@ public:
   }
 
 private:
-  SmallVector<Tensor, 4> tensors_;
+  SmallVector<const Tensor*, 4> tensors_;
   int num_outputs_ = 0;
   int num_inputs_ = 0;
 

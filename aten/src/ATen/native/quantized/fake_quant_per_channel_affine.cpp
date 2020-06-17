@@ -63,12 +63,14 @@ Tensor fake_quantize_per_channel_affine(
   std::vector<int64_t> expected_shape(self.dim(), 1);
   expected_shape[axis] = self.size(axis);
 
+  Tensor scale_view = native::_unsafe_view(scale, expected_shape);
+  Tensor zero_point_view = native::_unsafe_view(zero_point, expected_shape);
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(Y)
     .add_input(self)
-    .add_input(native::_unsafe_view(scale, expected_shape))
-    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_input(scale_view)
+    .add_input(zero_point_view)
     .build();
 
   fake_quant_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);
@@ -139,13 +141,15 @@ Tensor fake_quantize_per_channel_affine_backward(
   std::vector<int64_t> expected_shape(X.dim(), 1);
   expected_shape[axis] = X.size(axis);
 
+  Tensor scale_view = native::_unsafe_view(scale, expected_shape);
+  Tensor zero_point_view = native::_unsafe_view(zero_point, expected_shape);
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(dX)
     .add_input(X)
     .add_input(dY)
-    .add_input(native::_unsafe_view(scale, expected_shape))
-    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_input(scale_view)
+    .add_input(zero_point_view)
     .build();
 
   fake_quant_grad_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);

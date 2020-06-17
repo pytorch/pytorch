@@ -77,11 +77,13 @@ Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, cons
 
 Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
   Tensor loss_squeezed = at::squeeze(loss);
+  Tensor input_squeezed = at::squeeze(input);
+  Tensor target_squeezed = at::squeeze(target);
 
   TensorIterator iter = TensorIteratorConfig()
       .add_output(loss_squeezed)
-      .add_input(at::squeeze(input))
-      .add_input(at::squeeze(target))
+      .add_input(input_squeezed)
+      .add_input(target_squeezed)
       .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "binary_cross_entropy_out_cuda", [&]() {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "binary_cross_entropy_out_cuda", [&] {

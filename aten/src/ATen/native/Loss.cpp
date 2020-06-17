@@ -126,11 +126,13 @@ Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const
 
 Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     Tensor loss_squeezed = at::squeeze(loss);
+    Tensor input_squeezed = at::squeeze(input);
+    Tensor target_squeezed = at::squeeze(target);
 
     auto iter = TensorIteratorConfig()
       .add_output(loss_squeezed)
-      .add_input(at::squeeze(input))
-      .add_input(at::squeeze(target))
+      .add_input(input_squeezed)
+      .add_input(target_squeezed)
       .build();
 
     AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {
@@ -167,12 +169,15 @@ Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input
 
 Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     Tensor grad_input_squeezed = at::squeeze(grad_input);
+    Tensor grad_squeezed = at::squeeze(grad);
+    Tensor input_squeezed = at::squeeze(input);
+    Tensor target_squeezed = at::squeeze(target);
 
     auto iter = TensorIteratorConfig()
       .add_output(grad_input_squeezed)
-      .add_input(at::squeeze(grad))
-      .add_input(at::squeeze(input))
-      .add_input(at::squeeze(target))
+      .add_input(grad_squeezed)
+      .add_input(input_squeezed)
+      .add_input(target_squeezed)
       .build();
 
     AT_DISPATCH_FLOATING_TYPES(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
