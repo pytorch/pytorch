@@ -393,7 +393,6 @@ class IrParser {
 
             if (alpha->isOneInt()) {
               printf("input 0 value dimension, %zu, %zu\n", node->input(0)->unique(), lhs->as<TensorView>()->nDims());
-              printf("input 1 value dimension, %zu, %zu\n", node->input(1)->unique(), rhs->as<TensorView>()->nDims());
               auto out = binaryOp(op_mapping[node->kind()].first, lhs, rhs);
               printf("output value dimension, %zu, %zu\n", node->output()->unique(), out->as<TensorView>()->nDims());
               value_map.emplace(node->output()->unique(), out);
