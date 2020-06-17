@@ -2820,7 +2820,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                                     process_group=process_group,
                                                     bucket_cap_mb=bucketsize)
                     has_half = any(p.dtype is torch.half for p in m.parameters())
-                    tol = 1.e-3 if has_half else 1.e-5
+                    tol = 1.e-3 if has_half else 1.e-2
                 except BaseException:
                     # Prints case-specific debugging info to narrow down failing case.
                     print("Caught exception during model creation for " + model_msg, flush=True)
@@ -2829,6 +2829,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 # third iter tries zeroed grads.
                 for it in range(3):
                     iter_msg = "iter = {} ".format(it) + model_msg
+                    named_msg = iter_msg
                     try:
                         F.mse_loss(m(input).float(), target).backward()
                         F.mse_loss(m_ddp(input[local_batch_start: local_batch_end]).float(),
@@ -2841,7 +2842,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             for j, ((param_name, p), p_ddp) in enumerate(zip(m_child.named_parameters(),
                                                                              m_ddp_child.parameters())):
                                 named_msg = layer_name + "." + param_name + " " + iter_msg
-                                self.assertEqual(p.grad, p_ddp.grad, msg=named_msg, rtol=tol, atol=tol)
+                                self.assertEqual(p.grad, p_ddp.grad, rtol=tol, atol=tol)
                                 if it == 0:
                                     p.grad = None
                                     p_ddp.grad = None
@@ -2850,7 +2851,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                     m_ddp.zero_grad()
                     except BaseException:
                         # Makes sure we still get info if an error occurred somewhere other than the asserts.
-                        print("Caught exception during iterations at " + iter_msg, flush=True)
+                        print("Caught exception during iterations at " + named_msg, flush=True)
                         raise
 
     @requires_nccl()

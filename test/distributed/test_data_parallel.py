@@ -729,6 +729,7 @@ class TestDataParallel(TestCase):
                 # 2 iters:  First iter creates grads, second iter tries zeroed grads.
                 for it in range(2):
                     iter_msg = "iter = {} ".format(it) + model_msg
+                    named_msg = iter_msg
                     try:
                         F.mse_loss(m(input).float(), target).backward()
                         F.mse_loss(m_dp(input).float(), target).backward()
@@ -740,10 +741,10 @@ class TestDataParallel(TestCase):
                             for j, ((param_name, p), p_dp) in enumerate(zip(m_child.named_parameters(),
                                                                             m_dp_child.parameters())):
                                 named_msg = layer_name + "." + param_name + " " + iter_msg
-                                self.assertEqual(p.grad, p_dp.grad, msg=named_msg, rtol=tol, atol=tol)
+                                self.assertEqual(p.grad, p_dp.grad, rtol=tol, atol=tol)
                     except BaseException:
                         # Makes sure we still get info if an error occurred somewhere other than the asserts.
-                        print("Caught exception during iterations at " + iter_msg, flush=True)
+                        print("Caught exception during iterations at " + named_msg, flush=True)
                         raise
 
 
