@@ -355,9 +355,19 @@ T = TypeVar("T")
 GenericWithOneTypeVar = Generic[T]
 
 
-class RRef(PyRRef, GenericWithOneTypeVar):
-    # Combine the implementation class and the type class.
-    pass
+try:
+    class RRef(PyRRef, GenericWithOneTypeVar):
+        # Combine the implementation class and the type class.
+        pass
+except TypeError as exc:
+    # TypeError: metaclass conflict: the metaclass of a derived class
+    # must be a (non-strict) subclass of the metaclasses of all its bases
+    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):
+        pass
+
+    class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta):
+        # Combine the implementation class and the type class.
+        pass
 
 
 @_require_initialized
