@@ -2,7 +2,6 @@ import ast
 import inspect
 import re
 import torch
-import torch.distributed.rpc
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future

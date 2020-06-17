@@ -8,6 +8,8 @@ import inspect
 import weakref
 import warnings
 import torch
+# This is needed.
+# Otherwise, AttributeError: module 'torch' has no attribute 'distributed'
 import torch.distributed.rpc
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
