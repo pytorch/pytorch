@@ -106,7 +106,9 @@ _wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkers
 
 
 def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
+    self_worker_name = _get_current_rpc_agent().get_worker_info().name
     with _wait_all_workers_dict_lock:
+        logger.error(f"Worker {worker_name} signalled to worker {self_worker_name} its intent to shutdown (sequence id: {sequence_id})")
         assert (
             worker_name in _ALL_WORKER_NAMES
         ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
@@ -120,6 +122,7 @@ def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
         )
         intent_worker_names.add(worker_name)
         if _ALL_WORKER_NAMES == intent_worker_names:
+            logger.error(f"All workers have signaled their intent to shutdown (sequence id: {sequence_id})")
             _set_proceed_shutdown_signal(sequence_id)
 
 
@@ -131,6 +134,8 @@ def _set_proceed_shutdown_signal(sequence_id):
     assert (
         not proceed_signal.is_set()
     ), "Termination signal sequence id {} got set twice.".format(sequence_id)
+    self_worker_name = _get_current_rpc_agent().get_worker_info().name
+    logger.error(f"Worker {self_worker_name} setting its event (sequence id: {sequence_id})")
     proceed_signal.set()
 
 
@@ -159,6 +164,8 @@ def _wait_all_workers():
     # Set a long enough timeout for all shutdown messages to be processed.
     timeout = 5  # seconds
 
+    logger.error(f"Worker {self_worker_name} is signalling to {leader_worker_name} its intent to shutdown (sequence id: {sequence_id})")
+
     # Phase 1: Followers send intents.
     # All followers report intents to the leader.
     if is_leader_worker:
@@ -175,7 +182,9 @@ def _wait_all_workers():
         proceed_signal = _wait_all_workers_sequence_id_to_states[
             sequence_id
         ].proceed_signal
+    logger.error(f"Worker {self_worker_name} is waiting for {leader_worker_name} to notify that all workers intend to shutdown (sequence id: {sequence_id})")
     proceed_signal.wait()
+    logger.error(f"Worker {self_worker_name} has been notified by {leader_worker_name} that all workers intend to shutdown (sequence id: {sequence_id})")
 
     # Phase 2: Leader asks followers to proceed.
     # Leader's signal is the first to be unblocked,
@@ -184,12 +193,14 @@ def _wait_all_workers():
         # The leader sends out proceeed signals to all followers.
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
+            logger.error(f"Worker {self_worker_name} is notifying {follower_worker_name} that all workers intend to shutdown (sequence id: {sequence_id})")
             fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal,
                             args=(sequence_id,), timeout=timeout)
             worker_name_to_response_future_dict[follower_worker_name] = fut
         for follower_worker_name, fut in worker_name_to_response_future_dict.items():
             try:
                 fut.wait()
+                logger.error(f"Worker {self_worker_name} is done notifying {follower_worker_name} that all workers intend to shutdown (sequence id: {sequence_id})")
             except RuntimeError as ex:
                 logger.error(
                     "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
@@ -245,14 +256,21 @@ def shutdown(graceful=True):
         >>> # wait for worker 0 to finish work, and then shutdown.
         >>> rpc.shutdown()
     """
+    self_worker_name = _get_current_rpc_agent().get_worker_info().name
+    logger.error(f"Worker {self_worker_name} is shutting down")
     if graceful:
+        logger.error(f"Worker {self_worker_name} is entering a barrier")
         _wait_all_workers()
+        logger.error(f"Worker {self_worker_name} is cleaning up rref context")
         _delete_all_user_and_unforked_owner_rrefs()
+        logger.error(f"Worker {self_worker_name} is joining")
         _get_current_rpc_agent().join()
     try:
+        logger.error(f"Worker {self_worker_name} is destroying rref context")
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
     finally:
+        logger.error(f"Worker {self_worker_name} is shutting down agent")
         _get_current_rpc_agent().shutdown()
         # clean up python rpc handler in shutdown(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
@@ -265,7 +283,9 @@ def shutdown(graceful=True):
         # pythonRpcHandler is cleaned up in shutdown(), after
         # shutdown(), python objects returned from rpc python call can not be
         # resolved.
+        logger.error(f"Worker {self_worker_name} is cleaning up RPC handler")
         _cleanup_python_rpc_handler()
+        logger.error(f"Worker {self_worker_name} is resetting current RPC agent")
         _reset_current_rpc_agent()
 
 
