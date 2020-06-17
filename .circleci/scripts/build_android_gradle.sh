@@ -25,6 +25,10 @@ echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
 echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
 echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
 
+retry () {
+  $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+}
+
 # Run custom build script
 if [[ "${BUILD_ENVIRONMENT}" == *-gradle-custom-build* ]]; then
   # Install torch & torchvision - used to download & dump used ops from test model.
