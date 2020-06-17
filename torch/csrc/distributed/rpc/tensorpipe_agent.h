@@ -71,8 +71,8 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
   }
 
   int numWorkerThreads;
-  optional<std::vector<std::string>> transports;
-  optional<std::vector<std::string>> channels;
+  const optional<std::vector<std::string>> transports;
+  const optional<std::vector<std::string>> channels;
 };
 
 // Struct to track the network source metrics
