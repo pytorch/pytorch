@@ -246,6 +246,7 @@ class TestCppExtensionJIT(common.TestCase):
             cpp_sources=cpp_source,
             functions="tanh_add",
             verbose=True,
+            extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
         )
 
         self.assertEqual(module.tanh_add.__doc__.split("\n")[2], "tanh_add")
@@ -268,6 +269,7 @@ class TestCppExtensionJIT(common.TestCase):
             cpp_sources=cpp_source,
             functions={"tanh_add": "Tanh and then sum :D"},
             verbose=True,
+            extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
         )
 
         self.assertEqual(module.tanh_add.__doc__.split("\n")[2], "Tanh and then sum :D")
@@ -291,6 +293,7 @@ class TestCppExtensionJIT(common.TestCase):
             name="inline_jit_extension",
             cpp_sources=[cpp_source1, cpp_source2],
             verbose=True,
+            extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
         )
 
         x = torch.randn(4, 4)
@@ -331,6 +334,7 @@ class TestCppExtensionJIT(common.TestCase):
             cuda_sources=cuda_source,
             functions=["cos_add"],
             verbose=True,
+            extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
         )
 
         self.assertEqual(module.cos_add.__doc__.split("\n")[2], "cos_add")
@@ -344,7 +348,8 @@ class TestCppExtensionJIT(common.TestCase):
     def test_inline_jit_compile_extension_throws_when_functions_is_bad(self):
         with self.assertRaises(ValueError):
             torch.utils.cpp_extension.load_inline(
-                name="invalid_jit_extension", cpp_sources="", functions=5
+                name="invalid_jit_extension", cpp_sources="", functions=5,
+                extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
             )
 
     def test_lenient_flag_handling_in_jit_extensions(self):
@@ -361,6 +366,7 @@ class TestCppExtensionJIT(common.TestCase):
             extra_cflags=["-g\n\n", "-O0 -Wall"],
             extra_include_paths=["       cpp_extensions\n"],
             verbose=True,
+            extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
         )
 
         x = torch.zeros(100, dtype=torch.float32)
@@ -404,6 +410,7 @@ class TestCppExtensionJIT(common.TestCase):
             cuda_sources=cuda_source,
             functions=["half_test"],
             verbose=True,
+            extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
         )
 
         x = torch.randn(3, device="cuda", dtype=torch.half)
@@ -417,6 +424,7 @@ class TestCppExtensionJIT(common.TestCase):
                 cpp_sources=code,
                 functions="f",
                 verbose=True,
+                extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
             )
 
         module = compile("int f() { return 123; }")
@@ -636,6 +644,7 @@ class TestCppExtensionJIT(common.TestCase):
             functions="func",
             verbose=True,
             is_python_module=False,
+            extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
         )
         self.assertEqual(torch.ops.test.func(torch.eye(5)), torch.eye(5))
 
@@ -645,6 +654,7 @@ class TestCppExtensionJIT(common.TestCase):
             cpp_sources="torch::Tensor get() { return torch::empty({}); }",
             functions="get",
             verbose=True,
+            extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
         )
 
         initial_default = torch.get_default_dtype()
@@ -667,7 +677,8 @@ class TestCppExtensionJIT(common.TestCase):
         with self.assertRaises(RuntimeError) as e:
             torch.utils.cpp_extension.load_inline(
                 name="test_compilation_error_formatting",
-                cpp_sources="int main() { return 0 }")
+                cpp_sources="int main() { return 0 }",
+                extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split())
         pattern = r'.*(\\n|\\r).*'
         self.assertNotRegex(str(e), pattern)
 
@@ -714,7 +725,8 @@ class TestCppExtensionJIT(common.TestCase):
         warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
                                                          cpp_sources=[source],
                                                          functions=['foo'],
-                                                         with_pytorch_error_handling=False)
+                                                         with_pytorch_error_handling=False,
+                                                         extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split())
 
         with warnings.catch_warnings(record=True) as w:
             warn_mod.foo(t, 0)
@@ -736,7 +748,8 @@ class TestCppExtensionJIT(common.TestCase):
         warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
                                                          cpp_sources=[source],
                                                          functions=['foo'],
-                                                         with_pytorch_error_handling=True)
+                                                         with_pytorch_error_handling=True,
+                                                         extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split())
 
 
         with warnings.catch_warnings(record=True) as w:
@@ -797,7 +810,8 @@ class TestCppExtensionJIT(common.TestCase):
 
         test_backward_deadlock = torch.utils.cpp_extension.load_inline(name='test_backward_deadlock',
                                                                        cpp_sources=[source],
-                                                                       functions=['run_back', 'run_back_no_gil'],)
+                                                                       functions=['run_back', 'run_back_no_gil'],
+                                                                       extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),)
 
         # This used to deadlock
         inp = torch.rand(20, requires_grad=True)
@@ -828,6 +842,7 @@ class TestCppExtensionJIT(common.TestCase):
             cpp_sources=source,
             verbose=True,
             is_python_module=False,
+            extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split(),
         )
 
         a = torch.randn(5, 5, requires_grad=True)

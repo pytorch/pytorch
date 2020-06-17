@@ -146,6 +146,7 @@ def compile_cpp_code_inline(name, cpp_sources, functions):
         extra_cflags=['-g'],  # Enable debug symbols by default for debugging test failures.
         functions=functions,
         verbose=False,
+        extra_include_paths=os.getenv('EXTRA_INCLUDE_PATH', '').split()
     )
     return cpp_module
 
