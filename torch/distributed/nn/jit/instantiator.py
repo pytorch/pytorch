@@ -1,11 +1,9 @@
 #!/usr/bin/python3
-import atexit
 import importlib
 import logging
 import os
 import sys
 import tempfile
-import traceback
 
 import torch
 from torch.distributed.nn.jit.templates.remote_module_template import (
@@ -17,15 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 _FILE_PREFIX = "_remote_module_"
-
-
 _TEMP_DIR = tempfile.TemporaryDirectory()
 INSTANTIATED_TEMPLATE_DIR_PATH = _TEMP_DIR.name
-
-
 logger.info(f"Created a temporary directory at {INSTANTIATED_TEMPLATE_DIR_PATH}")
-
-
 sys.path.append(INSTANTIATED_TEMPLATE_DIR_PATH)
 
 
@@ -68,17 +60,6 @@ def get_arg_return_types_from_interface(module_interface):
     return_type_str = str(argument.type)
 
     return args_str, arg_types_str, return_type_str
-
-
-@atexit.register
-def cleanup_generated_modules():
-    logger.info(f"Removing the temporary directory at {INSTANTIATED_TEMPLATE_DIR_PATH}")
-    try:
-        _TEMP_DIR.cleanup()
-    except Exception as exc:
-        logger.warning(
-            f"Failed to cleanup {INSTANTIATED_TEMPLATE_DIR_PATH}:\n{traceback.format_exc()}"
-        )
 
 
 def _write(out_path, text):
