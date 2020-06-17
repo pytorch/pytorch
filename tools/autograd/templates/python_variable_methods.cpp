@@ -250,13 +250,13 @@ static double dispatch_to_CDouble(const Tensor & self) {
   return self.item<double>();
 }
 
-static std::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
+static c10::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
-  return self.item<std::complex<double>>();
+  return self.item<c10::complex<double>>();
 }
 
 static int64_t dispatch_to_CLong(const Tensor & self) {
@@ -929,10 +929,9 @@ PyMethodDef variable_methods[] = {
   {"__imul__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_mul_>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__sub__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_sub>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__isub__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_sub_>, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__div__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__truediv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div>, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__itruediv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div_>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__floordiv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_floor_divide>, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__idiv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_div_>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__ifloordiv__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_floor_divide_>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_remainder>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},

@@ -15,8 +15,8 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.pytorch:pytorch_android:1.3.0'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.3.0'
+    implementation 'org.pytorch:pytorch_android:1.5.0'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.5.0'
 }
 ```
 
@@ -79,7 +79,6 @@ After successful build you should see the result as aar file:
 $ find pytorch_android/build/ -type f -name *aar
 pytorch_android/build/outputs/aar/pytorch_android.aar
 pytorch_android_torchvision/build/outputs/aar/pytorch_android.aar
-libs/fbjni_local/build/outputs/aar/pytorch_android_fbjni.aar
 ```
 
 It can be used directly in android projects, as a gradle dependency:
@@ -92,34 +91,20 @@ allprojects {
     }
 }
 
-android {
-    ...
-    packagingOptions {
-        pickFirst "**/libfbjni.so"
-    }
-    ...
-}
-
 dependencies {
     implementation(name:'pytorch_android', ext:'aar')
     implementation(name:'pytorch_android_torchvision', ext:'aar')
-    implementation(name:'pytorch_android_fbjni', ext:'aar')
     ...
     implementation 'com.android.support:appcompat-v7:28.0.0'
     implementation 'com.facebook.soloader:nativeloader:0.8.0'
+    implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
 }
 ```
 We also have to add all transitive dependencies of our aars.
-As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L62-L63) on `'com.android.support:appcompat-v7:28.0.0'` and `'com.facebook.soloader:nativeloader:0.8.0'`, we need to add them.
+As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L62-L63) on `'com.android.support:appcompat-v7:28.0.0'`, `'com.facebook.soloader:nativeloader:0.8.0'` and 'com.facebook.fbjni:fbjni-java-only:0.0.3', we need to add them.
 (In case of using maven dependencies they are added automatically from `pom.xml`).
 
-
-At the moment for the case of using aar files directly we need additional configuration due to packaging specific (`libfbjni.so` is packaged in both `pytorch_android_fbjni.aar` and `pytorch_android.aar`).
-```
-packagingOptions {
-    pickFirst "**/libfbjni.so"
-}
-```
+You can check out [test app example](https://github.com/pytorch/pytorch/blob/master/android/test_app/app/build.gradle) that uses aars directly.
 
 ## More Details
 
