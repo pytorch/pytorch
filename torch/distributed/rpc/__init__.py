@@ -35,9 +35,7 @@ if is_available():
         and distributed autograd.
 
         Initializes the local RPC agent which immediately makes the current
-        process ready to send and receive RPCs. This method also properly
-        initializes a default process group backend that uses Gloo for
-        communication.
+        process ready to send and receive RPCs.
 
         Arguments:
             backend (Enum): type of RPC backend implementation. Currently,

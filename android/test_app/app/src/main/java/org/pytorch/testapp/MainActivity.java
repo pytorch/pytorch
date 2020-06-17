@@ -11,6 +11,7 @@ import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
 import androidx.appcompat.app.AppCompatActivity;
 import java.nio.FloatBuffer;
+import java.util.Arrays;
 import org.pytorch.IValue;
 import org.pytorch.Module;
 import org.pytorch.PyTorchAndroid;
@@ -101,7 +102,6 @@ public class MainActivity extends AppCompatActivity {
     final long moduleForwardDuration = SystemClock.elapsedRealtime() - moduleForwardStartTime;
     final float[] scores = outputTensor.getDataAsFloatArray();
     final long analysisDuration = SystemClock.elapsedRealtime() - startTime;
-
     return new Result(scores, moduleForwardDuration, analysisDuration);
   }
 
@@ -121,7 +121,6 @@ public class MainActivity extends AppCompatActivity {
   @UiThread
   protected void handleResult(Result result) {
     String message = String.format("forwardDuration:%d", result.moduleForwardDuration);
-    Log.i(TAG, message);
     mTextViewStringBuilder.insert(0, '\n').insert(0, message);
     if (mTextViewStringBuilder.length() > TEXT_TRIM_SIZE) {
       mTextViewStringBuilder.delete(TEXT_TRIM_SIZE, mTextViewStringBuilder.length());
