@@ -353,6 +353,16 @@ Tensor norm_sparse(const SparseTensor& self, Scalar value) {
 }
 
 // --------------------------------------------------------------------
+// norm_matrix(SparseTensor, Scalar)
+// --------------------------------------------------------------------
+
+// Only supports floating point, FYI
+Tensor _norm_matrix_sparse(const SparseTensor& self, Scalar value) {
+  AT_ASSERT(self.is_sparse());
+  TORCH_CHECK(false, "_norm_matrix does not support sparse tensors yet");
+}
+
+// --------------------------------------------------------------------
 // mv(SparseTensor, Tensor)
 // --------------------------------------------------------------------
 

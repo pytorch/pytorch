@@ -983,41 +983,49 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
 
 # TODO: type dim as BroadcastingList when https://github.com/pytorch/pytorch/issues/33782 is fixed
 @overload  # noqa: 749
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+def norm(input, p=None, dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
     pass
 
 @overload  # noqa: 749
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+def norm(input, p=None, dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
     pass
 
 @overload  # noqa: 749
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+def norm(input, p=None, dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
     pass
 
 @overload  # noqa: 749
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+def norm(input, p=None, dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
     pass
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
+def norm(input, p=None, dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     Args:
-        input (Tensor): the input tensor
+        input (Tensor): The input tensor. If dim is None, x must be 1-D or 2-D, unless p
+            is None. If both dim and p are None, the 2-norm of the input flattened to 1-D
+            will be returned.
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
 
             =====  ============================  ==========================
-            ord    matrix norm                   vector norm
+            ord    norm for matrices             norm for vectors 
             =====  ============================  ==========================
             None   Frobenius norm                2-norm
             'fro'  Frobenius norm                --
             'nuc'  nuclear norm                  --
-            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
-            =====  ============================  ==========================
+            inf    max(sum(abs(x), axis=1))      max(abs(x)) 
+            -inf   min(sum(abs(x), axis=1))      min(abs(x)) 
+            0      --                            sum(x != 0) 
+            1      max(sum(abs(x), axis=0))      as below 
+            -1     min(sum(abs(x), axis=0))      as below
+            2      2-norm (largest sing. value)  as below 
+            -2     smallest singular value       as below
+            other  --                            sum(abs(x)**ord)**(1./ord)
 
         dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
             vector norm will be calculated, if it is 2-tuple of ints, matrix norm
@@ -1069,14 +1077,32 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
 
     ndim = input.dim()
 
-
     # catch default case
-    if dim is None and out is None and dtype is None and p is not None:
-        if isinstance(p, str):
-            if p == "fro":
-                return _VF.frobenius_norm(input)
-        if not isinstance(p, str):
-            return _VF.norm(input, p)
+    if dim is None and out is None and dtype is None:
+        if p is None:
+            return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)
+
+        elif isinstance(p, str):
+            if p == 'fro':
+                if ndim != 2:
+                    raise RuntimeError('p="%s" can only be set if len(dim) == 2' % (p))
+                return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)
+            elif p == 'nuc':
+                if ndim != 2:
+                    raise RuntimeError('p="%s" can only be set if len(dim) == 2' % (p))
+                return _VF.nuclear_norm(input, keepdim=keepdim)
+            else:
+                raise RuntimeError('Invalid norm order for vectors: %s' % p)
+
+        else:
+            if ndim == 1:
+                return _VF.norm(input, p, dim=0, keepdim=keepdim)
+            elif ndim == 2:
+                return _VF._norm_matrix(input, p, dim=(0, 1), keepdim=keepdim)
+            else:
+                raise RuntimeError((
+                    "'dim' must specify 1 or 2 dimensions when p is numerical and input is "
+                    "not 1-D or 2-D"))
 
     # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed
     # remove the overloads where dim is an int and replace with BraodcastingList1
@@ -1086,6 +1112,9 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             _dim = [dim]
         else:
             _dim = dim
+        # for d in _dim:
+        #     if _dim.count(d) > 1:
+        #         raise IndexError("'dim' has duplicate entries: %s" % d)
     else:
         _dim = None
 
@@ -1118,16 +1147,32 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         if _dim is None:
             _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
 
-        if out is None:
-            if dtype is None:
-                return _VF.norm(input, p, _dim, keepdim=keepdim)
+        if len(_dim) == 1:
+            if out is None:
+                if dtype is None:
+                    return _VF.norm(input, p, _dim, keepdim=keepdim)
+                else:
+                    return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype)
             else:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype)
+                if dtype is None:
+                    return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)
+                else:
+                    return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)
+        elif len(_dim) == 2:
+            if out is None:
+                if dtype is None:
+                    return _VF._norm_matrix(input, p, _dim, keepdim=keepdim)
+                else:
+                    return _VF._norm_matrix(input, p, _dim, keepdim=keepdim, dtype=dtype)
+            else:
+                if dtype is None:
+                    return _VF._norm_matrix(input, p, _dim, keepdim=keepdim, out=out)
+                else:
+                    return _VF._norm_matrix(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)
         else:
-            if dtype is None:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)
-            else:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)
+            raise RuntimeError((
+                "'dim' must specify 1 or 2 dimensions when p is numerical and input is "
+                "not 1-D or 2-D"))
 
 def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed

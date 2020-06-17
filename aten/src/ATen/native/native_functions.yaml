@@ -3012,6 +3012,12 @@
   dispatch:
     SparseCPU, SparseCUDA: norm_sparse
 
+- func: _native_norm_matrix(Tensor self, Scalar p=2) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    SparseCPU: _norm_matrix_sparse
+    SparseCUDA: _norm_matrix_sparse
+
 # TODO: reduce signatures down to one when optional args is available
 - func: _sparse_sum(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3094,6 +3100,34 @@
 - func: norm.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
 
 - func: norm.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: _norm_matrix.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: _norm_matrix.Scalar(Tensor self, Scalar p=2) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: _norm_matrix.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: _norm_matrix.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: _norm_matrix.dtype_out(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+
+- func: _norm_matrix.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: _norm_matrix.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: _norm_matrix.names_ScalarOpt_dim(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: _norm_matrix.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+
+- func: _norm_matrix.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: frobenius_norm(Tensor self) -> Tensor
   use_c10_dispatcher: full

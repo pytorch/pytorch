@@ -10,6 +10,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorDimApply.h>
 #include <ATen/native/SharedReduceOps.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 
 #include <algorithm>
 #include <functional>
@@ -501,6 +502,124 @@ Tensor norm(const Tensor& self, Scalar p) {
   return at::native::_norm(self, p);
 }
 
+static Tensor& _norm_matrix_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
+                               IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  auto p = opt_p.value_or(2.0).toDouble();
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "_norm_matrix only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "_norm_matrix only supports strided layout, got: ", self.layout());
+  if ((dim.size() == 0) && (self.dim() == 2)) {
+    dim = {0, 1};
+  }
+  TORCH_CHECK(dim.size() == 2, "_norm_matrix: 'dim' must either specify 2 dimensions, or if ",
+    "'self' is 2-D 'dim' can specify 0 dimensions for a full reduction. Got 'dim' specifying ",
+    dim.size(), " dims and 'self' is ", self.dim(), "-D");
+  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
+  TORCH_CHECK(
+      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
+      "Can only calculate the mean of floating types. Got ",
+      toString(scalarType),
+      " instead.");
+
+  auto dim_ = dim.vec();
+  maybe_wrap_dims(dim_, self.dim());
+  TORCH_CHECK(dim_[0] != dim_[1],
+    "Expected dims to be different, got (", dim[0], ", ", dim[1], ") instead");
+
+  Tensor result_;
+  Tensor self_;
+    
+  if (opt_dtype.has_value()) {
+    self_ = self.to(scalarType);
+  } else {
+    self_ = self;
+  }
+
+  if (std::abs(p) == 2) {
+    // Need to shift the reduction dims to the back, because at::svd will only operate on
+    // the last 2 dimensions
+    auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
+    auto permutation_reverse = create_reverse_permutation(permutation);
+
+    result_ = std::get<1>(self_.permute(permutation).svd()).abs();
+
+    if (p > 0) {
+      result_ = std::get<0>(result_.max(-1, keepdim));
+    } else {
+      result_ = std::get<0>(result_.min(-1, keepdim));
+    }
+
+    if (keepdim) {
+      result_.unsqueeze_(-1);
+      result_ = result_.permute(permutation_reverse);
+    }
+  } else {
+    // abs(p) == infinity and abs(p) == 1 will perform identical reductions, except
+    // that the order of the two dims is swapped. So we can swap the dims if
+    // abs(p) == infinity to simplify the rest of the operation's logic.
+    if (std::abs(p) == INFINITY) {
+      std::swap(dim_[0], dim_[1]);
+    }
+    // If the dim of the second reduction is greater than that of the first reduction
+    // and we are not keeping the dims, then the fact that the output of the first
+    // reduction will have one fewer dimension means that the second reduction dim
+    // will be off by one, so we need to correct that.
+    if ((dim_[1] > dim_[0]) && !keepdim) {
+      dim_[1]--;
+    }
+    if (p == 1 || p == INFINITY) {
+      result_ = std::get<0>(self_.abs().sum(dim_[0], keepdim).max(dim_[1], keepdim));
+    } else if (p == -1 || p == -INFINITY) {
+      result_ = std::get<0>(self_.abs().sum(dim_[0], keepdim).min(dim_[1], keepdim));
+    } else {
+      TORCH_CHECK(false, "Order ", p, " not supported for matrix norm");
+    }
+  }
+  result.resize_as_(result_);
+  result.copy_(result_);
+  return result;
+}
+
+Tensor _norm_matrix(const Tensor &self, Scalar p) {
+  if (self.is_sparse()) {
+    return at::_native_norm_matrix(self, p);
+  } else {
+    Tensor result = at::empty_like(self);
+    return at::native::_norm_matrix_out(result, self, p, IntArrayRef{}, false, c10::nullopt);
+  }
+}
+
+Tensor &_norm_matrix_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
+  return at::native::_norm_matrix_out(result, self, p, dim, keepdim, optional<ScalarType>(dtype));
+}
+
+Tensor &_norm_matrix_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
+  return at::native::_norm_matrix_out(result, self, p, dim, keepdim, c10::nullopt);
+}
+
+static Tensor _norm_matrix(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim,
+            optional<ScalarType> opt_dtype) {
+  Tensor result = at::empty_like(self);
+  return at::native::_norm_matrix_out(result, self, p, dim, keepdim, opt_dtype);
+}
+
+Tensor _norm_matrix(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
+  return at::native::_norm_matrix(self, p, dim, keepdim, optional<ScalarType>(dtype));
+}
+
+Tensor _norm_matrix(const Tensor& self, optional<Scalar> p, ScalarType dtype) {
+  return at::native::_norm_matrix(self, p, IntArrayRef{}, false, optional<ScalarType>(dtype));
+}
+
+Tensor _norm_matrix(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
+  return at::native::_norm_matrix(self, p, dim, keepdim, c10::nullopt);
+}
+
+Tensor _norm_matrix(Tensor self, optional<Scalar> p, ScalarType dtype) {
+  return at::native::_norm_matrix(self, p, IntArrayRef{}, false, optional<ScalarType>(dtype));
+}
+
 inline Tensor & _all(Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(1);
@@ -905,6 +1024,22 @@ Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdi
 
 Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim);
+}
+
+Tensor& _norm_matrix_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
+  return at::_norm_matrix_out(result, self, p, dimnames_to_positions(self, dim), keepdim, dtype);
+}
+
+Tensor& _norm_matrix_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
+  return at::_norm_matrix_out(result, self, p, dimnames_to_positions(self, dim), keepdim);
+}
+
+Tensor _norm_matrix(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
+  return at::_norm_matrix(self, p, dimnames_to_positions(self, dim), keepdim, dtype);
+}
+
+Tensor _norm_matrix(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
+  return at::_norm_matrix(self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
 Tensor any(const Tensor& self, Dimname dim, bool keepdim) {

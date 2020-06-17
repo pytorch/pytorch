@@ -1290,7 +1290,17 @@ def _compute_norm(t, n, dim):
     # convert negative indexing
     if dim < 0:
         dim = dims[dim]
-    dims.remove(dim)
 
-    norm = torch.norm(t, p=n, dim=dims)
+    if len(dims) > 2:
+        if dims[0] != dim:
+            dims.remove(dim)
+            dims.insert(0, dim)
+            t = t.permute(dims)
+        t = t.flatten(1, -1)
+        norm = torch.norm(t, p=n, dim=1)
+    else:
+        dims.remove(dim)
+        norm = torch.norm(t, p=n, dim=dims)
+
+
     return norm

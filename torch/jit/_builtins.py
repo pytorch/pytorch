@@ -82,6 +82,7 @@ _builtin_ops = [
     (torch._VF.istft, "aten::istft"),
     (torch._VF.cdist, "aten::cdist"),
     (torch._VF.norm, "aten::norm"),
+    (torch._VF._norm_matrix, "aten::_norm_matrix"),
     (torch._VF.unique_dim, "aten::unique_dim"),
     (torch._VF.unique_consecutive, "aten::unique_consecutive"),
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),

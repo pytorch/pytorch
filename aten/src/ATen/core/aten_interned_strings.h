@@ -528,6 +528,7 @@ _(aten, nll_loss_backward) \
 _(aten, nll_loss_forward) \
 _(aten, nonzero) \
 _(aten, norm) \
+_(aten, _norm_matrix) \
 _(aten, norm_except_dim) \
 _(aten, normal) \
 _(aten, nuclear_norm) \

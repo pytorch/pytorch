@@ -563,7 +563,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
       "Expected at most 2 dimensions, but got ",
       dim.size(),
       " dimensions instead.");
-  if (dim.size() == 1) {
+  if (dim.size() == 1 || dim.size() == 0) {
     return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
@@ -583,7 +583,7 @@ Tensor &frobenius_norm_out(
       "Expected at most 2 dimensions, but got ",
       dim.size(),
       " dimensions instead.");
-  if (dim.size() == 1) {
+  if (dim.size() == 1 || dim.size() == 0) {
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
   if (self.is_complex()){
@@ -601,8 +601,12 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
   // Since we error out on svd_backward when we don't compute U and V, the backward pass for nuclear_norm
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
-  return at::sum(std::get<1>(at::svd(self, /*some=*/true,
+  Tensor result = at::sum(std::get<1>(at::svd(self, /*some=*/true,
                  /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), 0, keepdim);
+  if (keepdim) {
+    result.unsqueeze_(0);
+  }
+  return result;
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
@@ -610,27 +614,43 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
       self.dim() == 2,
       "Expected a tensor with 2 dimensions, but got a tensor with ",
       self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  return at::sum_out(result, std::get<1>(at::svd(self, /*some=*/true, /*compute_uv=*/false)), 0, keepdim);
-
+  at::sum_out(result, std::get<1>(at::svd(self, /*some=*/true, /*compute_uv=*/false)), 0, keepdim);
+  if (keepdim) {
+    result.unsqueeze_(0);
+  }
+  return result;
 }
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
-  Tensor p = _move_to_end(self, dim);
+  auto permutation = create_dim_backshift_permutation(dim[0], dim[1], self.dim());
+  auto permutation_reverse = create_reverse_permutation(permutation);
+  Tensor p = self.permute(permutation);
   // Since we error out on svd_backward when we don't compute U and V, the backward pass for nuclear_norm
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
-  return at::sum(std::get<1>(at::svd(p, /*some=*/true,
+  Tensor result = at::sum(std::get<1>(at::svd(p, /*some=*/true,
                  /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), -1, keepdim);
+  if (keepdim) {
+    result.unsqueeze_(-1);
+    result = result.permute(permutation_reverse);
+  }
+  return result;
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
-  Tensor p = _move_to_end(self, dim);
-  return at::sum_out(result, std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
-
+  auto permutation = create_dim_backshift_permutation(dim[0], dim[1], self.dim());
+  auto permutation_reverse = create_reverse_permutation(permutation);
+  Tensor p = self.permute(permutation);
+  at::sum_out(result, std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
+  if (keepdim) {
+    result.unsqueeze_(-1);
+    result = result.permute(permutation_reverse);
+  }
+  return result;
 }
 
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {

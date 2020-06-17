@@ -8440,7 +8440,7 @@ a")
 
         def norm():
             c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
-            return torch.norm(c, p="fro"), torch.norm(c, p="nuc"), torch.norm(c), torch.norm(c, p=.5)
+            return torch.norm(c, p="fro"), torch.norm(c, p="nuc"), torch.norm(c), torch.norm(c.flatten(0, 1), p=.5)
 
         self.checkScript(norm, ())
 

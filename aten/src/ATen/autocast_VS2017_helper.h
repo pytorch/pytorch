@@ -122,6 +122,9 @@ UPTOd( Tensor, sum        , (const Tensor &A, DimnameList               B, bool 
 UPTOc( Tensor, norm, (const Tensor &A, c10::optional<Scalar> B, ScalarType  C) )
 UPTOe( Tensor, norm, (const Tensor &A, c10::optional<Scalar> B, IntArrayRef C, bool D, ScalarType E) )
 UPTOe( Tensor, norm, (const Tensor &A, c10::optional<Scalar> B, DimnameList C, bool D, ScalarType E) )
+UPTOc( Tensor, _norm_matrix, (const Tensor &A, c10::optional<Scalar> B, ScalarType  C) )
+UPTOe( Tensor, _norm_matrix, (const Tensor &A, c10::optional<Scalar> B, IntArrayRef C, bool D, ScalarType E) )
+UPTOe( Tensor, _norm_matrix, (const Tensor &A, c10::optional<Scalar> B, DimnameList C, bool D, ScalarType E) )
 
 // promote
 UPTOd( Tensor, addcdiv  , (const Tensor &A, const Tensor &B, const Tensor &         C, Scalar        D) )

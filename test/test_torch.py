@@ -10060,32 +10060,114 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_norm(self, device):
-        # full reduction
-        x = torch.randn(25, device=device)
-        xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf, -inf]:
-            res = x.norm(p).item()
-            expected = np.linalg.norm(xn, p)
-            self.assertEqual(res, expected, atol=1e-5, rtol=0, msg="full reduction failed for {}-norm".format(p))
+        def gen_error_message(input_size, p, keepdim, dim=None):
+            return "norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
+                input_size, p, keepdim, dim)
 
-        # one dimension
-        x = torch.randn(25, 25, device=device)
-        xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf, -inf]:
-            res = x.norm(p, 1).cpu()
-            expected = np.linalg.norm(xn, p, 1)
-            self.assertEqual(res.shape, expected.shape)
-            self.assertEqual(res, expected, msg="dim reduction failed for {}-norm".format(p))
+        for keepdim in [True]:
+            # full reduction
+            x = torch.randn(25, device=device)
+            xn = x.cpu().numpy()
+            for p in [None, 0, 1, 2, 3, 4, inf, -inf, -1, -2, -3, 1.5]:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                self.assertEqual(res, expected, atol=1e-5, rtol=0, msg=gen_error_message(x.size(), p, keepdim))
 
-        # matrix norm
-        for p in ['fro', 'nuc']:
-            res = x.norm(p).cpu()
-            expected = np.linalg.norm(xn, p)
-            self.assertEqual(res.shape, expected.shape)
-            self.assertEqual(res, expected, msg="dim reduction failed for {}-norm".format(p))
+            # one dimension
+            x = torch.randn(25, 25, device=device)
+            xn = x.cpu().numpy()
+            for p in [None, 0, 1, 2, 3, 4, inf, -inf, -1, -2, -3]:
+                dim = 1
+                res = x.norm(p, 1, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, dim, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim, dim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
 
-        # larger tensor sanity check
-        self.assertEqual(2 * torch.norm(torch.ones(10000)), torch.norm(torch.ones(40000)))
+            # matrix norm
+            for p in ['fro', 'nuc', 1, 2, inf, -inf, -1, -2]:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
+
+            # larger tensor sanity check
+            self.assertEqual(2 * torch.norm(torch.ones(10000), keepdim=keepdim), torch.norm(torch.ones(40000), keepdim=keepdim))
+
+            x = torch.randn(5, 6, 7, 8, device=device)
+            xn = x.cpu().numpy()
+            p = None
+            dim = None
+            res = x.norm(p=p, dim=dim, keepdim=keepdim).cpu()
+            expected = np.linalg.norm(xn, ord=p, axis=dim, keepdims=keepdim)
+            msg = gen_error_message(x.size(), p, keepdim, dim)
+            self.assertEqual(res.shape, expected.shape, msg=msg)
+            self.assertEqual(res, expected, msg=msg)
+
+            # matrix norm with non-square >2-D tensors, all combinations of reduction dims
+            for p in ['fro', 'nuc', 1, 2, inf, -inf, -1, -2]:
+                for dim in product(*[list(range(4))] * 2):
+                    if dim[0] == dim[1]:
+                        continue
+                    res = x.norm(p=p, dim=dim, keepdim=keepdim).cpu()
+                    expected = np.linalg.norm(xn, ord=p, axis=dim, keepdims=keepdim)
+                    msg = gen_error_message(x.size(), p, keepdim, dim)
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg)
+
+        # Make sure n-D tensor norm with no arguments is the same as
+        # flattened 1-D norm with p=None, dim=None
+        x_flat = x.flatten(0, -1)
+        p = None
+        dim = None
+        res = x.norm()
+        expected = x_flat.norm(p=p, dim=dim)
+        self.assertEqual(res.shape, expected.shape)
+        self.assertEqual(res, expected, msg="dim reduction failed for {}-norm, {}-dim".format(p, dim))
+        res = torch.norm(x)
+        self.assertEqual(res.shape, expected.shape)
+        self.assertEqual(res, expected, msg="dim reduction failed for {}-norm, {}-dim".format(None, None))
+        res = torch.functional.norm(x)
+        self.assertEqual(res.shape, expected.shape)
+        self.assertEqual(res, expected, msg="dim reduction failed for {}-norm, {}-dim".format(None, None))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @onlyOnCPUAndCUDA
+    def test_norm_invalid_args(self, device):
+        x1 = torch.randn(4, device=device)
+        x2 = torch.randn(4, 4, device=device)
+        x3 = torch.randn(4, 4, 4, device=device)
+
+        # Check unavailable order settings for vector norm
+        for p in ['nuc', 'fro']:
+            with self.assertRaises(RuntimeError):
+                x1.norm(p=p)
+
+        # Invalid if input has few dims than 'dim'
+        for p in [inf, -inf, 2, -2, 1, -1, 0]:
+            with self.assertRaises(IndexError):
+                x1.norm(p=p, dim=(0, 1))
+
+        # Check unavailable order settings for matrix norm
+        for p in [0, 4, -2.3]:
+            with self.assertRaises(RuntimeError):
+                x2.norm(p=p)
+
+        for p in ['fro', 'nuc', inf, -inf, 2, -2, 1, -1, 0]:
+            # Invalid if dim not specified
+            with self.assertRaises(RuntimeError):
+                x3.norm(p=p)
+
+            # Invalid if dim is size 3
+            with self.assertRaises(RuntimeError):
+                x3.norm(p=p, dim=(0, 1, 2))
+
+            # Invalid if dim out of bounds
+            for dim in [(0, 5)]:
+                with self.assertRaises(BaseException):
+                    x3.norm(p=p, dim=dim)
 
     @skipCUDAIfNoMagma
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
