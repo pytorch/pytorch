@@ -1,7 +1,6 @@
 import collections
 import unittest
 
-import numpy as np
 import torch
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN)
@@ -49,7 +48,7 @@ class TestOpenMP_ParallelFor(TestCase):
         for idx in range(len(last_rss)):
             if idx == 0:
                 continue
-            is_increasing = is_increasing and (last_rss[idx] > last_rss[idx-1])
+            is_increasing = is_increasing and (last_rss[idx] > last_rss[idx - 1])
         self.assertTrue(not is_increasing,
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
 
