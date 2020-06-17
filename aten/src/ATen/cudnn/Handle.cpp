@@ -22,24 +22,22 @@ void destroyCuDNNHandle(cudnnHandle_t handle) {
 #endif
 }
 
-auto pool = std::make_shared<at::cuda::DeviceThreadHandlePool<cudnnHandle_t, createCuDNNHandle, destroyCuDNNHandle>>();
-
-// Thread local PoolWindows are wrapped by unique_ptrs and lazily-initialized
-// to avoid initialization issues that caused hangs on Windows.
-// See: https://github.com/pytorch/pytorch/pull/22405
-// This thread local unique_ptrs will be destroyed when the thread terminates,
-// releasing its reserved handles back to the pool.
-thread_local std::unique_ptr<decltype(pool)::element_type::PoolWindow> myPoolWindow;
+using CudnnPoolType = at::cuda::DeviceThreadHandlePool<cudnnHandle_t, createCuDNNHandle, destroyCuDNNHandle>;
 
 } // namespace
 
-cudnnHandle_t getCudnnHandle()
-{
+cudnnHandle_t getCudnnHandle() {
   int device;
   AT_CUDA_CHECK(cudaGetDevice(&device));
 
-  if (!myPoolWindow)
-    myPoolWindow.reset(pool->newPoolWindow());
+  // Thread local PoolWindows are lazily-initialized
+  // to avoid initialization issues that caused hangs on Windows.
+  // See: https://github.com/pytorch/pytorch/pull/22405
+  // This thread local unique_ptrs will be destroyed when the thread terminates,
+  // releasing its reserved handles back to the pool.
+  static auto pool = std::make_shared<CudnnPoolType>();
+  thread_local std::unique_ptr<CudnnPoolType::PoolWindow> myPoolWindow(
+      pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);
   AT_CUDNN_CHECK(cudnnSetStream(handle, c10::cuda::getCurrentCUDAStream()));

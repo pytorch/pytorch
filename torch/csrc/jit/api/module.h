@@ -119,8 +119,7 @@ struct TORCH_API Module : public Object {
   void register_buffer(const std::string& name, at::Tensor v) {
     bool is_param = false;
     bool is_buffer = true;
-    type()->addOrCheckAttribute(
-        name, TensorType::get(), is_param, false, is_buffer);
+    type()->addOrCheckAttribute(name, TensorType::get(), is_param, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
 
@@ -128,8 +127,7 @@ struct TORCH_API Module : public Object {
       const std::string& name,
       at::Tensor v,
       bool is_buffer) {
-    type()->addOrCheckAttribute(
-        name, TensorType::get(), !is_buffer, false, is_buffer);
+    type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
 
@@ -138,9 +136,8 @@ struct TORCH_API Module : public Object {
       const TypePtr t,
       IValue v,
       bool is_param = false,
-      bool allow_any = false,
       bool is_buffer = false) {
-    type()->addOrCheckAttribute(name, t, is_param, allow_any, is_buffer);
+    type()->addOrCheckAttribute(name, t, is_param, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
 
@@ -238,7 +235,7 @@ struct TORCH_API Module : public Object {
   // function creates a new `ClassType` and returns a new instance that has the
   // same data as the current instance but with the new type, shared ClassType
   // will be preserved as well
-  Module clone() const;
+  Module clone(bool inplace = false) const;
 
   // Clones the module instance but shares the underlying type with the
   // the current instance, it doesn't create new `ClassType`
@@ -258,7 +255,10 @@ struct TORCH_API Module : public Object {
   }
 
  private:
-  Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
+  Module clone_impl(
+      std::unordered_map<TypePtr, TypePtr>& type_remap,
+      bool inplace,
+      IValue::HashAliasedIValueMap memo) const;
 
   void clone_method(
       const Module& orig,

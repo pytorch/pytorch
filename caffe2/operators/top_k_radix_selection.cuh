@@ -100,16 +100,16 @@ struct TopKTypeConfig<int> {
 };
 
 template <>
-struct TopKTypeConfig<long> {
+struct TopKTypeConfig<int64_t> {
   typedef unsigned long long int RadixType;
 
-  static inline __device__ RadixType convert(long v) {
+  static inline __device__ RadixType convert(int64_t v) {
     //static_assert fails on windows, so leave it as CUDA_KERNEL_ASSERT
-    CUDA_KERNEL_ASSERT(sizeof(long) == 8);
+    static_assert(sizeof(int64_t) == 8, "");
     return 9223372036854775808ull + v;
   }
 
-  static inline __device__ long deconvert(RadixType v) {
+  static inline __device__ int64_t deconvert(RadixType v) {
     return v - 9223372036854775808ull;
   }
 };

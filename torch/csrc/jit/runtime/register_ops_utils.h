@@ -34,11 +34,17 @@
 
 namespace torch {
 namespace jit {
-c10::AliasAnalysisKind aliasAnalysisFromSchema();
+inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
+}
 
-c10::AliasAnalysisKind aliasAnalysisConservative();
+inline c10::AliasAnalysisKind aliasAnalysisConservative() {
+  return c10::AliasAnalysisKind::CONSERVATIVE;
+}
 
-c10::AliasAnalysisKind aliasAnalysisSpecialCase();
+inline c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
+  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
+}
 
 template <class T>
 c10::List<T> make_result_list(const TypePtr& elemType) {
@@ -55,7 +61,7 @@ inline int noop(Stack& n) {
 // using the rules from python_arg_parser FunctionParameter::check
 // tensor cannot have grad set, tensor must be 0 dim,
 // and if the dest is an int the source must be integral type
-void checkImplicitTensorToNum(at::Tensor t, bool toInt);
+void checkImplicitTensorToNum(const at::Tensor& t, bool toInt);
 
 // Convert the tensor pointed to by \p data to a nested list. \p dim is the
 // number of dimensions in the tensor and \p cur_dim is the dimension being
@@ -427,6 +433,26 @@ int listCopyAndSort<at::Tensor>(Stack& stack);
 
 int listSetItem(Stack& stack);
 
+#define DEFINE_GENERIC_BINARY_OP(aten_op, op, result)            \
+  Operator(                                                      \
+      #aten_op ".int_int(int a, int b) -> " #result,             \
+      [](Stack& stack) {                                         \
+        int64_t a, b;                                            \
+        pop(stack, a, b);                                        \
+        push(stack, op);                                         \
+        return 0;                                                \
+      },                                                         \
+      aliasAnalysisFromSchema()),                                \
+      Operator(                                                  \
+          #aten_op ".float_float(float a, float b) -> " #result, \
+          [](Stack& stack) {                                     \
+            double a, b;                                         \
+            pop(stack, a, b);                                    \
+            push(stack, op);                                     \
+            return 0;                                            \
+          },                                                     \
+          aliasAnalysisFromSchema())
+
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
   Operator(                                                                    \
@@ -481,15 +507,15 @@ int listSetItem(Stack& stack);
       },                                                    \
       aliasAnalysisFromSchema())
 
-#define DEFINE_STR_CMP_OP(aten_op, op)     \
-  Operator(                                \
-      #aten_op "(str a, str b) -> bool",   \
-      [](Stack& stack) {                   \
-        auto b = pop(stack).toStringRef(); \
-        auto a = pop(stack).toStringRef(); \
-        push(stack, op);                   \
-        return 0;                          \
-      },                                   \
+#define DEFINE_STR_CMP_OP(aten_op, op)       \
+  Operator(                                  \
+      #aten_op ".str(str a, str b) -> bool", \
+      [](Stack& stack) {                     \
+        auto b = pop(stack).toStringRef();   \
+        auto a = pop(stack).toStringRef();   \
+        push(stack, op);                     \
+        return 0;                            \
+      },                                     \
       aliasAnalysisFromSchema())
 
 // define a primitive op over Scalar operands.
@@ -583,15 +609,15 @@ int listSetItem(Stack& stack);
             return 0;                                          \
           },                                                   \
           aliasAnalysisFromSchema())
-#define DEFINE_BOOL_OP(aten_op, op)        \
-  Operator(                                \
-      #aten_op "(bool a, bool b) -> bool", \
-      [](Stack& stack) {                   \
-        bool a, b;                         \
-        pop(stack, a, b);                  \
-        push(stack, op);                   \
-        return 0;                          \
-      },                                   \
+#define DEFINE_BOOL_OP(aten_op, op)             \
+  Operator(                                     \
+      #aten_op ".bool(bool a, bool b) -> bool", \
+      [](Stack& stack) {                        \
+        bool a, b;                              \
+        pop(stack, a, b);                       \
+        push(stack, op);                        \
+        return 0;                               \
+      },                                        \
       aliasAnalysisFromSchema())
 
 } // namespace jit

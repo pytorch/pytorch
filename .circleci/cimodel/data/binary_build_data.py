@@ -59,9 +59,6 @@ CONFIG_TREE_DATA = OrderedDict(
     )),
 )
 
-CONFIG_TREE_DATA_NO_WINDOWS = CONFIG_TREE_DATA.copy()
-CONFIG_TREE_DATA_NO_WINDOWS.pop("windows")
-
 # GCC config variants:
 #
 # All the nightlies (except libtorch with new gcc ABI) are built with devtoolset7,

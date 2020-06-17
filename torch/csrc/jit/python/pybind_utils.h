@@ -71,7 +71,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
       : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
 
-  PythonFutureWrapper(const PythonFutureWrapper&) = delete;
+  explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
   PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
 
   py::object wait() {
@@ -134,6 +134,14 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
           }
         },
         PyObjectType::get()));
+  }
+
+  void markCompleted(const py::object& pyValue) {
+    DCHECK(PyGILState_Check());
+    IValue value = toIValue(pyValue, PyObjectType::get());
+
+    py::gil_scoped_release release;
+    fut->markCompleted(std::move(value));
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
@@ -343,9 +351,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
       if (!unified_key) {
         return InferredType(c10::str(
             "Dictionary inputs to traced functions must have consistent type. Found ",
-            key_type->python_str(),
+            key_type->repr_str(),
             " and ",
-            (entry_key_type_match.type())->python_str()));
+            (entry_key_type_match.type())->repr_str()));
       }
 
       // Try to infer the value type and unify it with the existing one
@@ -358,9 +366,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
       if (!unified_value) {
         return InferredType(c10::str(
             "Dictionary inputs to traced functions must have consistent type. Found ",
-            value_type->python_str(),
+            value_type->repr_str(),
             " and ",
-            (entry_value_type_match.type())->python_str()));
+            (entry_value_type_match.type())->repr_str()));
       }
 
       key_type = *unified_key;
@@ -387,9 +395,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
       if (!unified_type) {
         return InferredType(c10::str(
             "List inputs to traced functions must have consistent element type. Found ",
-            element_type->python_str(),
+            element_type->repr_str(),
             " and ",
-            (element_type_match.type())->python_str()));
+            (element_type_match.type())->repr_str()));
       }
       element_type = *unified_type;
     }
@@ -445,7 +453,7 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
   TORCH_CHECK(
       isTraceableType(info.type()),
       "Type '",
-      info.type()->python_str(),
+      info.type()->repr_str(),
       "' cannot be traced. Only Tensors and (possibly nested) Lists, Dicts, and"
       " Tuples of Tensors can be traced");
   return info.toTuple()->elements();
@@ -534,7 +542,7 @@ inline IValue toIValue(
             "Object ",
             py::str(obj),
             " had a different number of elements than type ",
-            type->python_str()));
+            type->repr_str()));
       }
       std::vector<IValue> values;
       values.reserve(tuple_size);
@@ -559,8 +567,8 @@ inline IValue toIValue(
           if (!N || !py::isinstance<py::int_>(obj)) {
             return IValue(py::cast<std::vector<int64_t>>(obj));
           } else {
-            double value = py::cast<int64_t>(obj);
-            c10::List<double> repeated;
+            int64_t value = py::cast<int64_t>(obj);
+            c10::List<int64_t> repeated;
             repeated.reserve(*N);
             for (int i = 0; i < *N; ++i) {
               repeated.push_back(value);
@@ -661,7 +669,7 @@ inline IValue toIValue(
             "Object ",
             py::str(obj),
             " is not compatible with interface ",
-            interfaceType->python_str(),
+            interfaceType->repr_str(),
             "\n",
             why_not.str()));
       }
@@ -686,7 +694,7 @@ inline IValue toIValue(
         return py::cast<double>(obj);
       } else {
         throw py::cast_error(
-            c10::str("Cannot cast ", py::str(obj), " to ", type->python_str()));
+            c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
       }
     }
     case TypeKind::RRefType: {
@@ -718,7 +726,7 @@ inline IValue toIValue(
       break;
   }
   throw py::cast_error(c10::str(
-      "toIValue() cannot handle converting to type: ", type->python_str()));
+      "toIValue() cannot handle converting to type: ", type->repr_str()));
 }
 
 // Small wrapper around getting the type name string from Python to make

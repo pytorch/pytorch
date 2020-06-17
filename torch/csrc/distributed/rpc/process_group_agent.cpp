@@ -2,6 +2,7 @@
 
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -10,6 +11,8 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+const std::string kRPCTimeoutErrorStr =
+    "RPC ran for more than {} milliseconds and timed out.";
 
 namespace {
 constexpr auto kSecToMsConversion = 1000;
@@ -371,36 +374,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   // Sending to ourselves: bypass the send logic and enqueue directly
   // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
-    threadPool_.run(std::bind(
-        [this, future](const Message& message) {
-          // Unlike the other cases, need to add a tensor deleter, since the
-          // data outlives the scope of this function. It's shared_ptr<> due
-          // to c++11 lambda capture limitations with unique_ptr<>.
-          std::unique_ptr<std::string> payload;
-          try {
-            payload = std::make_unique<std::string>(
-                wireSerialize(message.payload(), message.tensors()));
-            // only increment sendCounts when the message is indeed added into
-            // local recv.
-            sendCounts_.increment(pg_->getRank());
-          } catch (std::exception& e) {
-            markFutureWithError(message.id(), e.what());
-            return;
-          }
-          const char* data = payload->data();
-          size_t len = payload->length();
-          std::string* delete_when_done = payload.release();
-          enqueueRecv(RecvWork(
-              getWorkerInfo(pg_->getRank()),
-              message.type(),
-              message.id(),
-              torch::from_blob(
-                  (void*)data,
-                  len,
-                  [delete_when_done](void*) { delete delete_when_done; },
-                  {torch::kChar})));
-        },
-        std::move(message)));
+    sendToSelf(std::move(message));
     return future;
   }
 
@@ -477,6 +451,39 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
       set.erase(p);
     }
   }
+}
+
+void ProcessGroupAgent::sendToSelf(Message&& message) {
+  threadPool_.run(std::bind(
+      [this](const Message& message) {
+        // Unlike the other cases, need to add a tensor deleter, since the
+        // data outlives the scope of this function. It's shared_ptr<> due
+        // to c++11 lambda capture limitations with unique_ptr<>.
+        std::unique_ptr<std::string> payload;
+        try {
+          payload = std::make_unique<std::string>(
+              wireSerialize(message.payload(), message.tensors()));
+          // only increment sendCounts when the message is indeed added into
+          // local recv.
+          sendCounts_.increment(pg_->getRank());
+        } catch (std::exception& e) {
+          markFutureWithError(message.id(), e.what());
+          return;
+        }
+        const char* data = payload->data();
+        size_t len = payload->length();
+        std::string* delete_when_done = payload.release();
+        enqueueRecv(RecvWork(
+            getWorkerInfo(pg_->getRank()),
+            message.type(),
+            message.id(),
+            torch::from_blob(
+                (void*)data,
+                len,
+                [delete_when_done](void*) { delete delete_when_done; },
+                {torch::kChar})));
+      },
+      std::move(message)));
 }
 
 void ProcessGroupAgent::enqueueSend(SendWork work) {
@@ -796,13 +803,13 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     futureCV_.notify_all();
 
     for (const auto& timedOutFuture : timedOutFutures) {
-      auto err = c10::str(
-          "RPC ran for more than ",
-          timedOutFuture.timeout_.count(),
-          " milliseconds and timed out.");
+      auto errStr =
+          fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count());
+      auto err = makeRPCError(errStr, RPCErrorType::TIMEOUT);
+
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
-        timedOutFuture.future_->setError(err);
+        timedOutFuture.future_->setError(std::move(err));
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.
