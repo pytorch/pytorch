@@ -602,7 +602,7 @@ TEST(SerializeTest, Optim_Adam) {
 }
 
 TEST(SerializeTest, Optim_AdamW) {
-  test_serialize_optimizer<AdamW, AdamWOptions, AdamWParamState>(AdamWOptions().lr(0.99999).amsgrad(true).betas({0.999, 0.1}));
+  test_serialize_optimizer<AdamW, AdamWOptions, AdamWParamState>(AdamWOptions().lr(0.99999).amsgrad(true).betas(std::make_tuple(0.999, 0.1)));
 
   // bc compatibility check
   auto model1 = Linear(5, 2);
