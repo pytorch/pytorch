@@ -113,18 +113,11 @@ class Conf(object):
 
 def get_root(smoke, name):
 
-    if smoke:
-        return binary_build_data.TopLevelNode(
-            name,
-            binary_build_data.CONFIG_TREE_DATA_NO_WINDOWS,
-            smoke,
-        )
-    else:
-        return binary_build_data.TopLevelNode(
-            name,
-            binary_build_data.CONFIG_TREE_DATA,
-            smoke,
-        )
+    return binary_build_data.TopLevelNode(
+        name,
+        binary_build_data.CONFIG_TREE_DATA,
+        smoke,
+    )
 
 
 def gen_build_env_list(smoke):

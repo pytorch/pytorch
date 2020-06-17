@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 
+#include <limits>
+
 #include <fmt/format.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -27,7 +29,14 @@ const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 const std::string kRpcTimeoutErrorStr =
     "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
 
-std::string guessAddress(tensorpipe::transport::uv::Context& uvContext) {
+} // namespace
+
+C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+
+C10_DEFINE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+
+std::string TensorPipeAgent::guessUvAddress(
+    tensorpipe::transport::uv::Context& uvContext) {
   tensorpipe::Error error;
   std::string uvAddress;
   char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
@@ -49,6 +58,75 @@ std::string guessAddress(tensorpipe::transport::uv::Context& uvContext) {
   }
   return uvAddress;
 }
+
+namespace {
+
+// These priorities instruct TensorPipe on which transport/channel to pick
+// during handshake. Higher priorities will take precedence over lower ones.
+// The transport with lowest priority will be the one used to bootstrap pipes.
+
+constexpr int64_t kShmTransportPriority = 100;
+// The UV transport just uses TCP and should work everywhere, thus keep it last.
+constexpr int64_t kUvTransportPriority = 0;
+
+constexpr int64_t kCmaChannelPriority = 100;
+// The basic channel reuses a transport as a channel, and is thus our fallback.
+constexpr int64_t kBasicChannelPriority = 0;
+
+std::unique_ptr<TransportRegistration> makeUvTransport() {
+  auto context = std::make_shared<tensorpipe::transport::uv::Context>();
+  std::string address = TensorPipeAgent::guessUvAddress(*context);
+  return std::make_unique<TransportRegistration>(TransportRegistration{
+      std::move(context), kUvTransportPriority, std::move(address)});
+}
+
+// The UV transport is implemented using standard TCP connections. It leverages
+// libuv (https://github.com/libuv/libuv) in order to be cross-platform.
+C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
+
+#ifdef TP_ENABLE_SHM
+
+std::unique_ptr<TransportRegistration> makeShmTransport() {
+  auto context = std::make_shared<tensorpipe::transport::shm::Context>();
+  std::string address = TensorPipeAgent::createUniqueShmAddr();
+  return std::make_unique<TransportRegistration>(TransportRegistration{
+      std::move(context), kShmTransportPriority, std::move(address)});
+}
+
+// The SHM implements connections using ringbuffers residing in anonymous shared
+// memory (plus UNIX domain sockets to bootstrap the connection and exchange
+// file descriptors). It is Linux-only due to some advanced features (O_TMPFILE,
+// eventfd, ...).
+C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
+
+#endif
+
+std::unique_ptr<ChannelRegistration> makeBasicChannel() {
+  auto context = std::make_shared<tensorpipe::channel::basic::Context>();
+  return std::make_unique<ChannelRegistration>(
+      ChannelRegistration{std::move(context), kBasicChannelPriority});
+}
+
+// The basic channel is just a straightforward adapter wrapper that allows any
+// transport to be used as a channel.
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel);
+
+#ifdef TP_ENABLE_CMA
+
+std::unique_ptr<ChannelRegistration> makeCmaChannel() {
+  auto context = std::make_shared<tensorpipe::channel::cma::Context>();
+  return std::make_unique<ChannelRegistration>(
+      ChannelRegistration{std::move(context), kCmaChannelPriority});
+}
+
+// The CMA channel uses the Linux cross-memory attach syscalls (process_vm_readv
+// and _writev), which allow one process to access the private memory of another
+// process (as long as they belong to the same user and other security
+// constraints are satisfied). It does, more or less, what GDB does when it's
+// attached to a running process.
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cma, makeCmaChannel);
+
+#endif
 
 } // namespace
 
@@ -133,35 +211,39 @@ TensorPipeAgent::~TensorPipeAgent() {
 
 void TensorPipeAgent::startImpl() {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is starting";
-  auto uvContext = std::make_shared<tensorpipe::transport::uv::Context>();
 
-  std::string uvAddress = guessAddress(*uvContext);
-  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is using address "
-          << uvAddress;
+  std::vector<std::string> addresses;
+  int lowestPriority = std::numeric_limits<int>::max();
+  std::string lowestPriorityTransport;
 
-  context_->registerTransport(1, "tcp", std::move(uvContext));
-#ifdef TP_ENABLE_SHM
-  context_->registerTransport(
-      0, "shm", std::make_shared<tensorpipe::transport::shm::Context>());
-#endif
-  context_->registerChannel(
-      1, "basic", std::make_shared<tensorpipe::channel::basic::Context>());
-#ifdef TP_ENABLE_CMA
-  context_->registerChannel(
-      0, "cma", std::make_shared<tensorpipe::channel::cma::Context>());
-#endif
+  for (auto& key : TensorPipeTransportRegistry()->Keys()) {
+    std::unique_ptr<TransportRegistration> reg =
+        TensorPipeTransportRegistry()->Create(key);
+    if (reg->priority < lowestPriority) {
+      lowestPriority = reg->priority;
+      lowestPriorityTransport = key;
+    }
+    addresses.push_back(c10::str(key, "://", reg->address));
+    context_->registerTransport(
+        reg->priority, std::move(key), std::move(reg->transport));
+  }
 
-  std::vector<std::string> addresses = {"tcp://" + uvAddress};
-#ifdef TP_ENABLE_SHM
-  addresses.push_back(createUniqueShmAddr());
-#endif
+  for (auto& key : TensorPipeChannelRegistry()->Keys()) {
+    std::unique_ptr<ChannelRegistration> reg =
+        TensorPipeChannelRegistry()->Create(key);
+    context_->registerChannel(
+        reg->priority, std::move(key), std::move(reg->channel));
+  }
 
   listener_ = context_->listen(addresses);
 
   // Store our own url.
-  const auto address = listener_->url("tcp");
+  const auto address = listener_->url(lowestPriorityTransport);
   const std::vector<uint8_t> selfAddrData(address.begin(), address.end());
   nameToAddressStore_.set(workerInfo_.name_, selfAddrData);
+
+  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is using address "
+          << address;
 
   for (const auto& p : workerNameToInfo_) {
     const auto& name = p.first;
@@ -282,6 +364,19 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
   responseMessage.setId(messageId);
   if (!error) {
+    for (const auto& tensor : responseMessage.tensors()) {
+      if (!tensor.device().is_cpu()) {
+        responseMessage = createExceptionResponse(
+            c10::str(
+                "TensorPipe RPC backend only supports CPU tensors, please ",
+                "move your tensors to CPU before sending them over RPC. Found ",
+                "tensor on device: ",
+                tensor.device()),
+            responseMessage.id());
+        break;
+      }
+    }
+
     pipeWrite(
         pipe,
         std::move(responseMessage),
@@ -325,14 +420,21 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       pipe,
       [this, pipe](
           const tensorpipe::Error& error, Message&& requestMessage) mutable {
-        // FIXME Find a way for the client to tell the server they are done with
-        // the pipe and are intentionally shutting it down. Perhaps sending an
-        // empty message?
         if (error) {
-          LOG(WARNING)
-              << "RPC agent for " << workerInfo_.name_
-              << " encountered error when reading incoming request from "
-              << pipe->getRemoteName() << ": " << error.what();
+          // FIXME This is not a correct way to check whether this error was
+          // "intentionally" caused by the remote end shutting down. We should
+          // find a better way, Perhaps sending an empty message?
+          if ((error.isOfType<tensorpipe::PipeClosedError>() &&
+               !rpcAgentRunning_.load()) ||
+              error.isOfType<tensorpipe::transport::EOFError>()) {
+            // This is expected.
+          } else {
+            LOG(WARNING)
+                << "RPC agent for " << workerInfo_.name_
+                << " encountered error when reading incoming request from "
+                << pipe->getRemoteName() << ": " << error.what()
+                << " (this is expected to happen during shutdown)";
+          }
           return;
         }
 
@@ -403,6 +505,14 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
         requestMessage.type(),
         " but RPC is no longer running on this node.");
     throw std::runtime_error(err);
+  }
+
+  for (const auto& tensor : requestMessage.tensors()) {
+    TORCH_CHECK(
+        tensor.device().is_cpu(),
+        "TensorPipe RPC backend only supports CPU tensors, please move your ",
+        "tensors to CPU before sending them over RPC. Found tensor on device: ",
+        tensor.device());
   }
 
   const auto& url = findWorkerURL(toWorkerInfo);
@@ -664,10 +774,6 @@ void TensorPipeAgent::shutdownImpl() {
   // FIXME Isn't it too verbose for a library to print logs in normal operation?
   LOG(INFO) << "RPC agent for " << workerInfo_.name_ << " is shutting down";
 
-  threadPool_.waitWorkComplete();
-  VLOG(1) << "RPC agent for " << workerInfo_.name_
-          << " done waiting for thread pool to complete work";
-
   // Join the Timeout Thread
   timeoutThreadCV_.notify_one();
   if (timeoutThread_.joinable()) {
@@ -681,6 +787,16 @@ void TensorPipeAgent::shutdownImpl() {
   context_->join();
   VLOG(1) << "RPC agent for " << workerInfo_.name_
           << " done waiting for TensorPipe context to join";
+
+  // NOTE: We need to call waitWorkComplete in the end after we have shutdown
+  // all listeners for Tensorpipe. This is to drain any already accepted work
+  // in the ThreadPool. If this is done before we shutdown the listeners,
+  // additional work could be added after this call and before we shutdown
+  // listeners. This work would continue executing in the threadpool and might
+  // cause issues during shutdown of the system.
+  threadPool_.waitWorkComplete();
+  VLOG(1) << "RPC agent for " << workerInfo_.name_
+          << " done waiting for thread pool to complete work";
 }
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
