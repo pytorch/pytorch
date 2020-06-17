@@ -362,23 +362,6 @@ try:
 except TypeError as exc:
     # TypeError: metaclass conflict: the metaclass of a derived class
     # must be a (non-strict) subclass of the metaclasses of all its bases
-    #
-    # This used to show in Python3.5 tests.
-    # Now it is stil seen in XLA tests.
-    import sys
-
-    raise AssertionError(
-        "Python",
-        "version",
-        sys.version,
-        "version_info",
-        sys.version_info,
-        "implementation",
-        sys.implementation,
-        "platform",
-        sys.platform
-    ) from exc
-
     class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):
         pass
 

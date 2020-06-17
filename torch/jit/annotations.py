@@ -32,7 +32,7 @@ class Module(object):
 
 
 class EvalEnv(object):
-    ENV = {
+    env = {
         'torch': Module('torch', {'Tensor': torch.Tensor}),
         'Tensor': torch.Tensor,
         'typing': Module('typing', {'Tuple': Tuple}),
@@ -45,7 +45,6 @@ class EvalEnv(object):
 
     def __init__(self, rcb):
         self.rcb = rcb
-        self.env = self.ENV
         if torch.distributed.rpc.is_available():
             self.env['RRef'] = RRef
 

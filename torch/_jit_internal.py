@@ -8,7 +8,7 @@ import inspect
 import weakref
 import warnings
 import torch
-# This is needed. Python "import" statement executes torch/distributed/__init__.py,
+# This is needed. Python "import" statement executes "torch/distributed/__init__.py",
 # which installs C++ bindings by calling `torch._C._c10d_init()`.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
