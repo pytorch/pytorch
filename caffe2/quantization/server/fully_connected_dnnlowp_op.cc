@@ -871,7 +871,26 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 #endif
 
   if (!dequantize_output_ && !requantization_param_selected_) {
-    GetOutputQuantizationParams_();
+    CAFFE_ENFORCE(InputSize() == 3 || InputSize() == 5);
+    if (InputSize() == 5) {
+      CAFFE_ENFORCE(Input(3).template IsType<float>());
+      CAFFE_ENFORCE(Input(4).template IsType<int>());
+
+      const auto& in_3 = Input(3);
+      CAFFE_ENFORCE_EQ(in_3.numel(), 1);
+      float in_scale = *(in_3.template data<float>());
+      const auto& in_4 = Input(4);
+      CAFFE_ENFORCE_EQ(in_4.numel(), 1);
+      int in_zero_point = *(in_4.template data<int>());
+
+      dnnlowp::TensorQuantizationParams out_qparams_overwrite;
+      out_qparams_overwrite.scale = in_scale;
+      out_qparams_overwrite.zero_point = in_zero_point;
+      out_qparams_overwrite.precision = qfactory_->GetActivationPrecision();
+      GetOutputQuantizationParams_(&out_qparams_overwrite);
+    } else {
+      GetOutputQuantizationParams_();
+    }
 
     for (int i = 0; i < filter_qparams_.size(); ++i) {
       float real_multiplier =
@@ -945,7 +964,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FCRelu)
-    .NumInputs(3)
+    .NumInputs(3, 5)
     .NumOutputs(1)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false));

@@ -36,7 +36,6 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_format_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/complex_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/vmap_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp)
 
