@@ -167,7 +167,8 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   void printMath();
   // Print transformations used in fusion (can be very verbose)
   void printTransforms();
-
+  // Lower the fusion and print a kernel
+  void printKernel();
   // Register the Val with this fusion
   StmtNameType registerVal(Val* val);
 

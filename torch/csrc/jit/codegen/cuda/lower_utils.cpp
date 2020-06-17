@@ -295,6 +295,10 @@ struct FirstInnerMostScope : private OptInDispatch {
 
     FirstInnerMostScope fims;
     Expr* inner = fims.getInner(scope);
+
+    if (inner == nullptr)
+      return scope;
+
     while (fims.getInner(inner) != nullptr)
       inner = fims.getInner(inner);
     return inner;

@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 namespace torch {
 namespace jit {
@@ -218,10 +219,16 @@ void Fusion::print() {
   std::cout << "}\n";
 }
 
+void Fusion::printKernel() {
+  FusionGuard fg(this);
+  GPULower lower(this);
+  lower.printKernel(std::cout);
+}
+
 void Fusion::printMath() {
   FusionGuard fg(this);
   for (auto expr : exprs(true))
-    std::cout << expr << std::endl;
+    std::cout << expr;
 }
 
 void Fusion::printTransforms() {

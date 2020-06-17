@@ -29,18 +29,24 @@ Bool* getPredicate(TensorView* tv, std::vector<Val*> inds_, Bool* thread_pred) {
       inds_.size() == tv->nDims() ||
       inds_.size() == tv->domain()->noReductions().size());
 
+  // Do we need to adjust for reduction axes?
+  bool reductions = inds_.size() != tv->nDims();
+
   std::vector<Val*> inds;
-  if (inds_.size() < tv->nDims()) {
-    size_t i_ = 0;
-    for (size_t i = 0; i < tv->nDims() && i_ < inds_.size(); i++) {
-      if (tv->axis(i)->isReduction())
+  if (reductions) {
+    for (size_t ind_i = 0, tv_i = 0; tv_i < tv->nDims();) {
+      if (tv->axis(tv_i++)->isReduction()) {
         inds.push_back(new Int(0));
-      else
-        inds.push_back(inds_[i_++]);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            ind_i < inds_.size(), "Ran out of indices to generate predicate.");
+        inds.push_back(inds_[ind_i++]);
+      }
     }
   } else {
     inds = inds_;
   }
+
   if (tv->nDims() > inds.size()) {
     for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
       if (tv->axis(i)->isReduction())
