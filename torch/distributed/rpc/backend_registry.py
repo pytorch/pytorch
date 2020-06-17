@@ -5,7 +5,6 @@ from datetime import timedelta
 import enum
 
 import torch.distributed as dist
-import torch.distributed.distributed_c10d as dc10d
 
 from . import constants as rpc_constants
 
@@ -99,52 +98,42 @@ def _process_group_construct_rpc_backend_options_handler(
         num_send_recv_threads=num_send_recv_threads
     )
 
+def _init_process_group(store, rank, world_size):
+    # Initialize ProcessGroup.
+    process_group_timeout = rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
+
+    # We're using a bunch of private APIs here since `new_group` requires the
+    # default group to be initialized.
+    group = dist.ProcessGroupGloo(store, rank, world_size, process_group_timeout)
+
+    assert group is not None, "Failed to initialize default ProcessGroup."
+
+    if (rank != -1) and (rank != group.rank()):
+        raise RuntimeError(
+            "rank argument {} doesn't match pg rank {}".format(rank, group.rank())
+        )
+    if (world_size != -1) and (world_size != group.size()):
+        raise RuntimeError(
+            "world_size argument {} doesn't match pg size {}".format(
+                world_size, group.size()
+            )
+        )
+    return group
 
 def _process_group_init_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
     from . import ProcessGroupAgent
 
-    # Initialize ProcessGroup.
-    if dist.is_initialized():
-        raise RuntimeError(
-            "Default process group must not be initialized before init_rpc."
-        )
+    group = _init_process_group(store, rank, world_size)
 
-    process_group_timeout = rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
-
-    dist.init_process_group(
-        backend=dist.Backend.GLOO,
-        store=store,
-        rank=rank,
-        world_size=world_size,
-        timeout=process_group_timeout,
+    # TODO: add try-except and destroy _agent in all processes if any fails.
+    return ProcessGroupAgent(
+        name,
+        group,
+        rpc_backend_options.num_send_recv_threads,
+        timedelta(seconds=rpc_backend_options.rpc_timeout),
     )
-
-    try:
-        group = dc10d._get_default_group()
-        assert group is not None, "Failed to initialize default ProcessGroup."
-
-        if (rank != -1) and (rank != group.rank()):
-            raise RuntimeError(
-                "rank argument {} doesn't match pg rank {}".format(rank, group.rank())
-            )
-        if (world_size != -1) and (world_size != group.size()):
-            raise RuntimeError(
-                "world_size argument {} doesn't match pg size {}".format(
-                    world_size, group.size()
-                )
-            )
-        # TODO: add try-except and destroy _agent in all processes if any fails.
-        return ProcessGroupAgent(
-            name,
-            group,
-            rpc_backend_options.num_send_recv_threads,
-            timedelta(seconds=rpc_backend_options.rpc_timeout),
-        )
-    except Exception as ex:
-        dist.destroy_process_group()
-        raise ex
 
 
 register_backend(
@@ -186,43 +175,12 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     # collective operations, for which it relies on a process group, instead of
     # re-implementing this on top of RPCs.
 
-    # Initialize ProcessGroup.
-    if dist.is_initialized():
-        raise RuntimeError(
-            "Default process group must not be initialized before init_rpc."
-        )
+    group = _init_process_group(store, rank, world_size)
 
-    process_group_timeout = rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
-
-    dist.init_process_group(
-        backend=dist.Backend.GLOO,
-        store=store,
-        rank=rank,
-        world_size=world_size,
-        timeout=process_group_timeout,
+    # TODO: add try-except and destroy _agent in all processes if any fails.
+    return TensorPipeAgent(
+        store, name, rank, world_size, group, rpc_backend_options
     )
-
-    try:
-        group = dc10d._get_default_group()
-        assert group is not None, "Failed to initialize default ProcessGroup."
-
-        if (rank != -1) and (rank != group.rank()):
-            raise RuntimeError(
-                "rank argument {} doesn't match pg rank {}".format(rank, group.rank())
-            )
-        if (world_size != -1) and (world_size != group.size()):
-            raise RuntimeError(
-                "world_size argument {} doesn't match pg size {}".format(
-                    world_size, group.size()
-                )
-            )
-        # TODO: add try-except and destroy _agent in all processes if any fails.
-        return TensorPipeAgent(
-            store, name, rank, world_size, group, rpc_backend_options
-        )
-    except Exception as ex:
-        dist.destroy_process_group()
-        raise ex
 
 
 register_backend(

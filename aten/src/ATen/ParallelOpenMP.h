@@ -26,8 +26,12 @@ inline void parallel_for(
 #ifdef _OPENMP
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
+  // Work around memory leak when using 1 thread in nested "omp parallel"
+  // caused by some buggy OpenMP versions and the fact that omp_in_parallel()
+  // returns false when omp_get_max_threads() == 1 inside nested "omp parallel"
+  // See issue gh-32284
 
-#pragma omp parallel if (!omp_in_parallel() && ((end - begin) > grain_size))
+#pragma omp parallel if (omp_get_max_threads() > 1 && !omp_in_parallel() && ((end - begin) > grain_size))
   {
     // choose number of tasks based on grain size and number of threads
     // can't use num_threads clause due to bugs in GOMP's thread pool (See #32008)
