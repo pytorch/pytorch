@@ -69,6 +69,12 @@ TORCH_LIBRARY_IMPL(_, Batched, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Batched, m) {
+  // NB: Ideally we would like some operators, like size.int, to "fallthrough"
+  // to the underlying implementation. However, because a BatchedTensor is a
+  // Tensor wrapper, it only has one dispatch key (Batched) on it. The resolution
+  // here is to just directly call the underlying implementation.
+  m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
+
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl_UNBOXED("mul.Tensor", mul_batching_rule);
 }

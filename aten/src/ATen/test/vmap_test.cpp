@@ -612,5 +612,35 @@ TEST(VmapTest, TestBatchedTensorMul) {
   }
 }
 
+// test for BatchedTensor::size(int).
+TEST(VmapTest, TestBatchedTensorSize) {
+  {
+    // Single batch dim at front
+    Tensor x = at::randn({3, 5, 7});
+    Tensor Bx = makeBatched(x, {{0, 0}});
+
+    ASSERT_EQ(Bx.size(0), 5);
+    ASSERT_EQ(Bx.size(1), 7);
+    ASSERT_EQ(Bx.size(-1), 7);
+    ASSERT_EQ(Bx.size(-2), 5);
+    ASSERT_THROW(Bx.size(2), c10::Error);
+    ASSERT_THROW(Bx.size(-3), c10::Error);
+  }
+  {
+    // multiple batch dims not at front
+    Tensor x = at::randn({2, 3, 5, 7, 11});
+    Tensor Bx = makeBatched(x, {{0, 3}, {1, 1}});
+
+    ASSERT_EQ(Bx.size(0), 2);
+    ASSERT_EQ(Bx.size(1), 5);
+    ASSERT_EQ(Bx.size(2), 11);
+    ASSERT_EQ(Bx.size(-1), 11);
+    ASSERT_EQ(Bx.size(-2), 5);
+    ASSERT_EQ(Bx.size(-3), 2);
+    ASSERT_THROW(Bx.size(3), c10::Error);
+    ASSERT_THROW(Bx.size(-4), c10::Error);
+  }
+}
+
 
 }
