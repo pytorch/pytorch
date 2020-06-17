@@ -55,7 +55,7 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
       for (const std::string& transportName : transports.value()) {
         TORCH_CHECK(
             TensorPipeTransportRegistry()->Has(transportName),
-            "Unknwon transport: ",
+            "Unknown transport: ",
             transportName);
       }
     }
@@ -64,7 +64,7 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
       for (const std::string& channelName : channels.value()) {
         TORCH_CHECK(
             TensorPipeChannelRegistry()->Has(channelName),
-            "Unknwon channel: ",
+            "Unknown channel: ",
             channelName);
       }
     }
