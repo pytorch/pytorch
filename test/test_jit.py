@@ -95,15 +95,6 @@ import re
 import string
 
 
-RUN_CUDA_HALF = RUN_CUDA
-if torch.cuda.is_available():
-    CUDA_VERSION = torch._C._cuda_getCompiledVersion()
-    for d in range(torch.cuda.device_count()):
-        major = torch.cuda.get_device_capability(d)[0]
-        if (major < 6):
-            RUN_CUDA_HALF = False
-
-
 def canonical(graph):
     return torch._C._jit_pass_canonicalize(graph).str(False)
 
@@ -138,8 +129,8 @@ def doAutodiffCheck(testname):
         'test_nn_batch_norm',
         'test_nn_max_pool2d_with_indices',
         # AutogradJitGenerated
-        'test___rdiv___constant',
-        'test___rdiv___scalar_constant',
+        'test___rtruediv___constant',
+        'test___rtruediv___scalar_constant',
         'test_split',
         'test_split_dim',
         'test_split_dim_neg0',
@@ -15468,8 +15459,8 @@ class TestJitGeneratedFunctional(JitTestCase):
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
 UBSAN_BLACKLISTED_TESTS = [
-    "test___rdiv___constant",
-    "test___rdiv___scalar_constant",
+    "test___rtruediv___constant",
+    "test___rtruediv___scalar_constant",
     "test_addcdiv",
     "test_addcdiv_broadcast_all",
     "test_addcdiv_broadcast_rhs",
