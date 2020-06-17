@@ -129,6 +129,33 @@ RegisterOperators reg_str_ops({
 
 });
 
+// consecutive whitespace are regarded as a single separator,
+// the result will contain no empty strings at the start or end
+// if the string has leading or trailing whitespace.
+c10::List<std::string> splitNoneSeparator(const std::string& string) {
+  c10::List<std::string> splits;
+  // whitespaces includes tab, space and
+  // the delimiters defined in the implementation of splitlines
+  std::string whitespaces =
+      " \t\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
+  std::string::size_type prev_pos = 0;
+  std::string::size_type pos = 0;
+
+  while ((pos = string.find_first_of(whitespaces, pos)) != std::string::npos) {
+    auto substr = string.substr(prev_pos, pos - prev_pos);
+    // skip the whitespaces as the Python split() method
+    if (!substr.empty()) {
+      splits.emplace_back(substr);
+    }
+    pos++;
+    prev_pos = pos;
+  }
+  if (prev_pos != string.size()) {
+    splits.emplace_back(string.substr(prev_pos));
+  }
+  return splits;
+}
+
 // String Ops
 // Implementations located in torch/csrc/jit/runtime/register_string_ops.cpp
 TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
@@ -546,19 +573,34 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
   });
 
   m.impl(
-      "split.str", [](std::string string, std::string separator, int64_t max) {
+      "split.str",
+      [](const std::string& string,
+         c10::optional<std::string> separator,
+         int64_t max) {
+        if (!separator.has_value()) {
+          // if separator is not specified,
+          // a different splitting algorithm is applied as Python
+          return splitNoneSeparator(string);
+          ;
+        }
+        if (separator.value().empty()) {
+          throw std::runtime_error("ValueError: empty separator");
+        }
+
         std::string::size_type prev_pos = 0;
         std::string::size_type pos = 0;
         c10::List<std::string> splits;
         auto count = 0;
-        while ((pos = string.find(separator, pos)) != std::string::npos) {
+
+        while ((pos = string.find(separator.value(), pos)) !=
+               std::string::npos) {
           count++;
           if (max >= 0 && count > max) {
             break;
           } else {
             splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
           }
-          pos += separator.size();
+          pos += separator.value().size();
           prev_pos = pos;
         }
         splits.emplace_back(string.substr(prev_pos, string.size() - prev_pos));
