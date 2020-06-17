@@ -31,7 +31,7 @@ class _StorageBase(object):
 
     def __reduce__(self):
         b = io.BytesIO()
-        torch.save(self, b)
+        torch.save(self, b, _use_new_zipfile_serialization=False)
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
