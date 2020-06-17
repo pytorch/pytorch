@@ -494,6 +494,10 @@ FunctionOption = TypedDict('FunctionOption', {
     # visible and is mangled with the overload name
     'type_wrapper_name': str,
     'arguments': List[THFormal],
+    # 'schema_order_arguments' is like 'arguments' but keeps them in the
+    # order they are defined in the JIT function schema while
+    # 'arguments' does some modifications (e.g. reorders out arguments
+    # and packs TensorOptions)
     'schema_order_arguments': List[THFormal],
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
@@ -562,6 +566,10 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('arguments', List[AtFormal]),
+    # 'schema_order_arguments' is like 'arguments' but keeps them in the
+    # order they are defined in the JIT function schema while
+    # 'arguments' does some modifications (e.g. reorders out arguments
+    # and packs TensorOptions)
     ('schema_order_arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
