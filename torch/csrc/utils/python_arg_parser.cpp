@@ -481,6 +481,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
       throw std::runtime_error("missing closing parenthesis: " + fmt);
     }
     if (offset == last_offset) {
+      last_offset = next_offset;
       break;
     }
 
