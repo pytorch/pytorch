@@ -139,7 +139,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
           profiled_types[pno] = TensorType::get()->withUndefined();
         } else {
           // we would like to preserve the accumulated properties
-          // for cases where a tensor was defined
+          // of the cases when a tensor was defined
           auto actual = profiled_types[pno]->withUndefined();
           profiled_types[pno] = profiled_types[pno]->merge(actual);
         }
