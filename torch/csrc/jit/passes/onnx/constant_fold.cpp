@@ -26,7 +26,7 @@ std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     {::ONNX_NAMESPACE::TensorProto_DataType_INT16, at::kShort},
     {::ONNX_NAMESPACE::TensorProto_DataType_INT32, at::kInt},
     {::ONNX_NAMESPACE::TensorProto_DataType_INT64, at::kLong},
-    {::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16, at::kHalf},
+    {::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16, at::kFloat},
     {::ONNX_NAMESPACE::TensorProto_DataType_DOUBLE, at::kDouble},
     {::ONNX_NAMESPACE::TensorProto_DataType_UINT32, at::kLong},
 };
