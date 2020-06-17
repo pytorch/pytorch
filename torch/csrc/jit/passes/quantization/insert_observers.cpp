@@ -1413,7 +1413,7 @@ Module InsertObservers(
   // Since the types are changed after clone, we need to fill
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
-  GRAPH_DEBUG("quant type:", quant_type);
+  GRAPH_DEBUG("Quant type:", quant_type);
   InsertObserversHelper helper(module_qconfig_map, quant_type);
   helper.preprocess(module, method_name);
   helper.fillBoundaryValueMap(module, method_name);
