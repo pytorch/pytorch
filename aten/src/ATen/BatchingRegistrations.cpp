@@ -112,6 +112,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // Tensor wrapper, it only has one dispatch key (Batched) on it. The resolution
   // here is to just directly call the underlying implementation.
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
+  m.impl("_add_batch_dim", native::_add_batch_dim);
+  m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl_UNBOXED("mul.Tensor", mul_batching_rule);

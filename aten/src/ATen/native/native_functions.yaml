@@ -6642,6 +6642,12 @@
   variants: function, method
   device_guard: False
 
+- func: _add_batch_dim(Tensor self, int batch_dim, int level) -> Tensor
+  use_c10_dispatcher: full
+
+- func: _remove_batch_dim(Tensor self, int level, int batch_size, int out_dim) -> Tensor
+  use_c10_dispatcher: full
+
 # Note: this function is only for testing.
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
