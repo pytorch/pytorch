@@ -3,13 +3,11 @@ import atexit
 import importlib
 import logging
 import os
-import pathlib
+import tempfile
 import traceback
+import sys
 
 import torch
-from torch.distributed.nn.jit.templates.instantiated import (
-    INSTANTIATED_TEMPLATE_DIR_PATH,
-)
 from torch.distributed.nn.jit.templates.remote_module_template import (
     REMOTE_MODULE_TEMPLATE,
 )
@@ -19,6 +17,16 @@ logger = logging.getLogger(__name__)
 
 
 _FILE_PREFIX = "_remote_module_"
+
+
+_TEMP_DIR = tempfile.TemporaryDirectory()
+INSTANTIATED_TEMPLATE_DIR_PATH = _TEMP_DIR.name
+
+
+logger.info(f"Created a temporary directory at {INSTANTIATED_TEMPLATE_DIR_PATH}")
+
+
+sys.path.append(INSTANTIATED_TEMPLATE_DIR_PATH)
 
 
 def get_arg_return_types_from_interface(module_interface):
@@ -64,16 +72,11 @@ def get_arg_return_types_from_interface(module_interface):
 
 @atexit.register
 def cleanup_generated_modules():
-    generated_module_paths = pathlib.Path(INSTANTIATED_TEMPLATE_DIR_PATH).glob(
-        f"{_FILE_PREFIX}*.py"
-    )
-    for file_path in generated_module_paths:
-        try:
-            print(f"Removing {file_path}")
-            assert file_path.is_file(), f"Expect {file_path} to be a file"
-            file_path.unlink()
-        except Exception as exc:
-            logger.warning(f"Failed to remove {file_path}:\n{traceback.format_exc()}")
+    logger.info(f"Removing the temporary directory at {INSTANTIATED_TEMPLATE_DIR_PATH}")
+    try:
+        _TEMP_DIR.cleanup()
+    except Exception as exc:
+        logger.warning(f"Failed to cleanup {INSTANTIATED_TEMPLATE_DIR_PATH}:\n{traceback.format_exc()}")
 
 
 def _write(out_path, text):
@@ -92,9 +95,7 @@ def _write(out_path, text):
 
 def _do_instantiate_remote_module_template(generated_module_name, str_dict):
     generated_code_text = REMOTE_MODULE_TEMPLATE.format(**str_dict)
-    out_path = os.path.join(
-        INSTANTIATED_TEMPLATE_DIR_PATH, f"{generated_module_name}.py"
-    )
+    out_path = os.path.join(INSTANTIATED_TEMPLATE_DIR_PATH, f"{generated_module_name}.py")
     _write(out_path, generated_code_text)
 
     # From importlib doc,
@@ -104,7 +105,7 @@ def _do_instantiate_remote_module_template(generated_module_name, str_dict):
     # to be noticed by the import system.
     importlib.invalidate_caches()
     generated_module = importlib.import_module(
-        f"torch.distributed.nn.jit.templates.instantiated.{generated_module_name}"
+        f"{generated_module_name}"
     )
     return generated_module
 
