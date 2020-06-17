@@ -102,7 +102,6 @@ public class MainActivity extends AppCompatActivity {
     final long moduleForwardDuration = SystemClock.elapsedRealtime() - moduleForwardStartTime;
     final float[] scores = outputTensor.getDataAsFloatArray();
     final long analysisDuration = SystemClock.elapsedRealtime() - startTime;
-    Log.i(TAG, "XXX scores:" + Arrays.toString(scores));
     return new Result(scores, moduleForwardDuration, analysisDuration);
   }
 
