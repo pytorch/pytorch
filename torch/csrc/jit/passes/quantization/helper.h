@@ -38,6 +38,9 @@ c10::optional<Use> getClampScalarInputUse(Value* v);
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
 
+// Check if a value in the graph is a Scalar value
+TORCH_API bool isScalar(Value* v);
+
 // Check if value is the input of the graph
 TORCH_API bool hitGraphInput(Value* value);
 
@@ -133,6 +136,10 @@ bool is_conv3d_module(
     const std::unordered_map<std::string, Value*>& vmap);
 
 bool is_batchnorm2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 

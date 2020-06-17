@@ -22,6 +22,7 @@ class Conf:
     #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
     # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
     is_xla: bool = False
+    vulkan: bool = False
     restrict_phases: Optional[List[str]] = None
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
@@ -187,6 +188,10 @@ def instantiate_configs():
         is_xla = fc.find_prop("is_xla") or False
         parms_list_ignored_for_docker_image = []
 
+        vulkan = fc.find_prop("vulkan") or False
+        if vulkan:
+            parms_list_ignored_for_docker_image.append("vulkan")
+
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
             python_version = fc.find_prop("pyver")
@@ -240,6 +245,7 @@ def instantiate_configs():
             python_version,
             cuda_version,
             is_xla,
+            vulkan,
             restrict_phases,
             gpu_resource,
             is_libtorch=is_libtorch,
