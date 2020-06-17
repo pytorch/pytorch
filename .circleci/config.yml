@@ -1171,9 +1171,9 @@ jobs:
           elif [[ "${CIRCLE_BRANCH}" == "v1.2.0" ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export GITHUB_PYTORCHBOT_TOKEN=${GITHUB_PYTORCHBOT_TOKEN}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/python_doc_push_script.sh docs/stable 1.2.0 site dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
-          # For open PRs: Do a dry_run of the docs build, don't push build
           else
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export GITHUB_PYTORCHBOT_TOKEN=${GITHUB_PYTORCHBOT_TOKEN}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/python_doc_push_script.sh docs/master master site dry_run") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            # On open PRs: build the docs and push to pytorch/pytorch.gitub.io:site-v1.5.1 branch
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export GITHUB_PYTORCHBOT_TOKEN=${GITHUB_PYTORCHBOT_TOKEN}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/python_doc_push_script.sh docs/stable 1.5.1 site-v1.5.1") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -4991,7 +4991,7 @@ workflows:
           context: org-member
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
-          requires: 
+          requires:
             - setup
           filters:
             branches:
@@ -5002,7 +5002,7 @@ workflows:
           context: org-member
           ios_arch: "arm64"
           ios_platform: "OS"
-          requires: 
+          requires:
             - setup
           filters:
             branches:
@@ -7715,5 +7715,3 @@ workflows:
             project: tensorcomp
             tags_to_keep: "34"
       - docker_hub_index_job
-
-
