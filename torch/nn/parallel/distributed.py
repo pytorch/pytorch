@@ -109,12 +109,7 @@ class DistributedDataParallel(Module):
         same model and thus the exact same parameter registration order.
 
     .. warning::
-        This module allows parameters with non-rowmajor-contiguous strides.
-        For example, your model may contain some parameters whose
-        :class:`torch.memory_format` is ``torch.contiguous_format``
-        and others whose format is ``torch.channels_last``.  However,
-        corresponding parameters in different processes must have the
-        same strides.
+        This module assumes all buffers and gradients are dense.
 
     .. warning::
         This module doesn't work with :func:`torch.autograd.grad` (i.e. it will
