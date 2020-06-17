@@ -549,8 +549,6 @@ class TestNN(NNTestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
-
-
     def test_to(self):
         m = nn.Linear(3, 5)
         self.assertIs(m, m.to('cpu'))
@@ -11443,7 +11441,213 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
 
+class TestModuleGlobalHooks(TestCase):
 
+    def tearDown(self):
+        nn.modules.module._global_backward_hooks = OrderedDict()
+        nn.modules.module._global_forward_hooks = OrderedDict()
+        nn.modules.module._global_forward_pre_hooks = OrderedDict()
+
+    def test_module_global_hooks(self):
+        module = nn.Sigmoid
+
+        module_1 = module()
+        module_2 = module()
+        module_3 = module()
+
+        input = torch.ones(5, 5, requires_grad=True)
+
+        counter = {
+            'forwards': 0,
+            'backwards': 0
+        }
+
+        def fw_hook(inc, h_module, input, output):
+            self.assertIsInstance(input, tuple)
+            self.assertTrue(isinstance(output, torch.Tensor))
+            self.assertTrue(isinstance(h_module, module))
+            self.assertEqual(input[0], torch.ones(5, 5))
+            self.assertEqual(output, torch.Tensor(5, 5).fill_(1 / (1 + 1 / math.e)))
+            counter['forwards'] += inc
+
+        def bw_hook(inc, h_module, grad_input, grad_output):
+            self.assertIsInstance(grad_input, tuple)
+            self.assertIsInstance(grad_output, tuple)
+            self.assertTrue(isinstance(h_module, module))
+            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
+            counter['backwards'] += inc
+
+        test_fwd = nn.modules.module.register_module_forward_hook(lambda *args: fw_hook(1, *args))
+
+        module_1(input)
+        module_2(input)
+        module_3(input)
+        self.assertEqual(counter['forwards'], 3)
+        self.assertEqual(counter['backwards'], 0)
+
+        test_bwd = nn.modules.module.register_module_backward_hook(
+            lambda *args: bw_hook(1, *args))
+
+        output_1 = module_1(input)
+        output_2 = module_2(input)
+        output_3 = module_3(input)
+        self.assertEqual(counter['forwards'], 6)
+        self.assertEqual(counter['backwards'], 0)
+
+        output_1.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        output_2.backward(torch.ones(5, 5) * 2, retain_graph=False)
+        output_3.backward(torch.ones(5, 5) * 2, retain_graph=False)
+        self.assertEqual(counter['forwards'], 6)
+        self.assertEqual(counter['backwards'], 3)
+
+        output_1.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        self.assertEqual(counter['forwards'], 6)
+        self.assertEqual(counter['backwards'], 4)
+
+        test2_fwd = nn.modules.module.register_module_forward_hook(lambda *args: fw_hook(2, *args))
+
+        output = module_1(input)
+        output = module_2(input)
+        output = module_3(input)
+        self.assertEqual(counter['forwards'], 15)
+        self.assertEqual(counter['backwards'], 4)
+
+        test2_bwd = nn.modules.module.register_module_backward_hook(lambda *args: bw_hook(2, *args))
+
+        module_1(input).backward(torch.ones(5, 5) * 2)
+        self.assertEqual(counter['forwards'], 18)
+        self.assertEqual(counter['backwards'], 7)
+
+        test2_bwd.remove()
+
+        module_2(input).backward(torch.ones(5, 5) * 2)
+        self.assertEqual(counter['forwards'], 21)
+        self.assertEqual(counter['backwards'], 8)
+
+        test2_fwd.remove()
+
+        module_3(input).backward(torch.ones(5, 5) * 2)
+        self.assertEqual(counter['forwards'], 22)
+        self.assertEqual(counter['backwards'], 9)
+
+        test_fwd.remove()
+        test_bwd.remove()
+
+    def test_module_global_hook_invalid_outputs(self):
+        module = nn.Sigmoid()
+        input = torch.randn(5, 5, requires_grad=True)
+
+        def bw_fail1(self, grad_input, grad_output):
+            return grad_input[:-1]
+
+        def bw_fail2(self, grad_input, grad_output):
+            return grad_input + (torch.randn(2, 2),)
+
+        with nn.modules.module.register_module_backward_hook(bw_fail1):
+            with self.assertRaisesRegex(RuntimeError, 'got 0, but expected 1'):
+                module(input).sum().backward()
+
+        with nn.modules.module.register_module_backward_hook(bw_fail2):
+            with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
+                module(input).sum().backward()
+
+    def test_module_backward_global_hook_writeable(self):
+        module = nn.Sigmoid()
+        input = torch.randn(5, 5, requires_grad=True)
+        sig_x = torch.nn.functional.sigmoid(input)
+
+        def bw_hook(module, grad_input, grad_output):
+            for grad in grad_input:
+                self.assertTrue(isinstance(grad, torch.Tensor))
+            for grad in grad_output:
+                self.assertTrue(isinstance(grad, torch.Tensor))
+            return tuple(gi * 2 for gi in grad_input)
+
+        nn.modules.module.register_module_backward_hook(bw_hook)
+        module(input).backward(torch.ones(5, 5))
+        expected_grad = sig_x * (1 - sig_x) * 2
+        self.assertEqual(input.grad, expected_grad)
+
+    def test_module_global_forward_preforward_hook_writeable(self):
+        module = nn.Sigmoid()
+        input = torch.randn(5, 5, requires_grad=True)
+        sig_x = torch.nn.functional.sigmoid(input)
+
+        def forward_pre_hook(m, input):
+            return torch.nn.functional.relu(input[0])
+
+        def forward_hook(m, input, output):
+            return -output
+
+        nn.modules.module.register_module_forward_pre_hook(forward_pre_hook)
+        nn.modules.module.register_module_forward_hook(forward_hook)
+        output = module(input)
+        expected_res = -torch.nn.functional.sigmoid(torch.nn.functional.relu(input))
+        self.assertEqual(output, expected_res)
+        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        mask = (input > 0).double()
+        expected_grad = -sig_x * (1 - sig_x) * 2 * mask
+        self.assertEqual(input.grad, expected_grad)
+
+    def test_global_and_local_hooks_order(self):
+        module = nn.Sigmoid()
+
+        global_forward_pre_called = False
+        local_forward_pre_called = False
+        global_forward_called = False
+        local_forward_called = False
+        global_backward_called = False
+        local_backward_called = False
+
+        def global_forward_pre_hook(m, input):
+            nonlocal global_forward_pre_called
+            self.assertTrue(not local_forward_pre_called)
+            global_forward_pre_called = True
+            return input
+
+        def local_forward_pre_hook(m, input):
+            nonlocal local_forward_pre_called
+            self.assertTrue(global_forward_pre_called)
+            local_forward_pre_called = True
+            return input
+
+        def global_forward_hook(m, input, output):
+            nonlocal global_forward_called
+            self.assertTrue(not local_forward_called)
+            global_forward_called = True
+            return output
+
+        def local_forward_hook(m, input, output):
+            nonlocal local_forward_called
+            self.assertTrue(global_forward_called)
+            local_forward_called = True
+            return output
+
+        def global_backward_hook(m, input, output):
+            nonlocal global_backward_called
+            self.assertTrue(not local_backward_called)
+            global_backward_called = True
+            return input
+
+        def local_backward_hook(m, input, output):
+            nonlocal local_backward_called
+            self.assertTrue(global_backward_called)
+            local_backward_called = True
+            return input
+
+        input = torch.randn(5, 5, requires_grad=True)
+        nn.modules.module.register_module_forward_pre_hook(global_forward_pre_hook)
+        module.register_forward_pre_hook(local_forward_pre_hook)
+        nn.modules.module.register_module_forward_hook(global_forward_hook)
+        module.register_forward_hook(local_forward_hook)
+        nn.modules.module.register_module_backward_hook(global_backward_hook)
+        module.register_backward_hook(local_backward_hook)
+
+        output = module(input)
+        self.assertTrue(local_forward_called and local_forward_pre_called and global_forward_called and global_forward_pre_called)
+
+        output.backward(torch.ones(5, 5), retain_graph=True)
+        self.assertTrue(local_backward_called and global_backward_called)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
