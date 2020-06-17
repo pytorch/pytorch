@@ -551,6 +551,8 @@
   self: grad
   source: grad.index_select(dim, index).expand_as(source)
   index: non_differentiable
+  result: index_add_forward(self_fw_grad, source_fw_grad, dim, index, self)
+
 
 - name: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)

@@ -2915,3 +2915,19 @@ Tensor max_forward(const Tensor& self_fw_grad, const Tensor& self, const Tensor&
   return out_fw_grad;
 }
 
+Tensor index_add_forward(const Tensor& self_fw_grad, const Tensor& source_fw_grad, int dim, const Tensor& index, const Tensor& self) {
+  if (self_fw_grad.defined()) {
+    if (source_fw_grad.defined()) {
+      self_fw_grad.index_add_(dim, index, source_fw_grad);
+    }
+    return self_fw_grad;
+  } else {
+    Tensor out_fw_grad;
+    if (source_fw_grad.defined()){
+      out_fw_grad = at::zeros(self.sizes(), self.options());
+      out_fw_grad.index_add_(dim, index, source_fw_grad);
+    }
+    return out_fw_grad;
+  }
+}
+

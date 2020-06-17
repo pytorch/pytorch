@@ -187,7 +187,10 @@ def get_analytical_jacobian_fw(fn, input, output):
                          'Please call to_dense() on the output of fn for gradcheck.')
     jacobian = make_jacobian(input, output.numel())
 
-    diff_input = _differentiable_outputs(input)
+    diff_input = []
+    for inp in input:
+        if torch.is_tensor(inp) and inp.requires_grad==True:
+            diff_input.append(inp)
     for i, inp in enumerate(diff_input):
         fw_grad = torch.zeros_like(inp)
         try:
@@ -236,7 +239,8 @@ def gradcheck(
     check_sparse_nnz: bool = False,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
-    mode: str = "all"
+    mode: str = "all",
+    stacklevel = 2
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -364,11 +368,11 @@ def gradcheck(
             except RuntimeError as e:
                 msg = str(e)
                 if "Trying to use forward prop with" in msg:
-                    warnings.warn("Failed to compute gradcheck using fw mode: {}".format(msg))
+                    warnings.warn("Failed to compute gradcheck using fw mode: {}".format(msg), stacklevel=stacklevel)
                     continue
                 elif "Cannot set as a forward grad a Tensor that already has a forward grad." in msg:
                     warnings.warn("Failed to compute gradcheck using fw mode because the user provided "
-                                  "function also uses forward gradient")
+                                  "function also uses forward gradient", stacklevel=stacklevel)
                     continue
                 else:
                     raise e
@@ -546,4 +550,4 @@ def gradgradcheck(
         return grad_inputs
 
     return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
-                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad)
+                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad, stacklevel=3)
