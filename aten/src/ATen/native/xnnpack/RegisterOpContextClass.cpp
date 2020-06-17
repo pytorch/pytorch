@@ -58,10 +58,10 @@ TORCH_LIBRARY(prepacked, m) {
 }
 
 TORCH_LIBRARY_IMPL(prepacked, CPU, m) {
-  m.impl("linear_clamp_prepack", createLinearClampPrePackOpContext);
-  m.impl("linear_clamp_run", internal::linear::linear_clamp_run);
-  m.impl("conv2d_clamp_prepack", createConv2dClampPrePackOpContext);
-  m.impl("conv2d_clamp_run", internal::convolution2d::conv2d_clamp_run);
+  m.impl("linear_clamp_prepack", TORCH_FN(createLinearClampPrePackOpContext));
+  m.impl("linear_clamp_run", TORCH_FN(internal::linear::linear_clamp_run));
+  m.impl("conv2d_clamp_prepack", TORCH_FN(createConv2dClampPrePackOpContext));
+  m.impl("conv2d_clamp_run", TORCH_FN(internal::convolution2d::conv2d_clamp_run));
 }
 
 } // namespace xnnpack
