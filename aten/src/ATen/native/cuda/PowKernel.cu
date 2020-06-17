@@ -106,7 +106,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
     });
   } else if (isFloatingType(iter.dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "pow_cuda", [&]() {
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "pow_cuda", [&] {		    
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "pow_cuda", [&] {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
           return pow_(base, exp);
 	});
@@ -166,7 +166,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     });
   } else if (isFloatingType(iter.dtype()) || exp_scalar.isIntegral(false)) {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "pow_cuda", [&]() {
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "pow_cuda", [&] {		    
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "pow_cuda", [&] {
         const auto exp = exp_scalar.to<scalar_t>();
         pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
       });
