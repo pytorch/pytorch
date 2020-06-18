@@ -10,14 +10,13 @@ class WindowsJob:
         vscode_spec,
         cuda_version,
         force_on_cpu=False,
-        run_on_prs_pred=lambda job: job.vscode_spec.year != 2019,
+        master_only_pred=lambda job: job.vscode_spec.year != 2019,
     ):
-
         self.test_index = test_index
         self.vscode_spec = vscode_spec
         self.cuda_version = cuda_version
         self.force_on_cpu = force_on_cpu
-        self.run_on_prs_pred = run_on_prs_pred
+        self.master_only_pred = master_only_pred
 
     def gen_tree(self):
 
@@ -69,7 +68,7 @@ class WindowsJob:
             "requires": prerequisite_jobs,
         }
 
-        if self.run_on_prs_pred(self):
+        if self.master_only_pred(self):
             props_dict[
                 "filters"
             ] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
@@ -113,28 +112,29 @@ class VcSpec:
     def render(self):
         return "_".join(filter(None, [self.prefixed_year(), self.dotted_version()]))
 
+def FalsePred(_):
+    return False
+
+def TruePred(_):
+    return True
 
 WORKFLOW_DATA = [
-    WindowsJob(None, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    # VS2017 CUDA-10.1
+    WindowsJob(None, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1), master_only_pred=FalsePred),
     WindowsJob(1, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
-    WindowsJob(2, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    # VS2017 no-CUDA (builds only)
     WindowsJob(None, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
-    WindowsJob(1, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
-    WindowsJob(2, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
+    WindowsJob(None, VcSpec(2017, ["14", "16"]), None),
+    # VS2019 CUDA-10.1
     WindowsJob(None, VcSpec(2019), CudaVersion(10, 1)),
     WindowsJob(1, VcSpec(2019), CudaVersion(10, 1)),
     WindowsJob(2, VcSpec(2019), CudaVersion(10, 1)),
-    WindowsJob(None, VcSpec(2017, ["14", "11"]), None),
-    WindowsJob(1, VcSpec(2017, ["14", "11"]), None),
-    WindowsJob(2, VcSpec(2017, ["14", "11"]), None),
-    WindowsJob(None, VcSpec(2017, ["14", "16"]), None),
-    WindowsJob(1, VcSpec(2017, ["14", "16"]), None),
-    WindowsJob(2, VcSpec(2017, ["14", "16"]), None),
+    # VS2019 CPU-only
     WindowsJob(None, VcSpec(2019), None),
     WindowsJob(1, VcSpec(2019), None),
-    WindowsJob(2, VcSpec(2019), None),
+    WindowsJob(2, VcSpec(2019), None, master_only_pred=TruePred),
     WindowsJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
-    WindowsJob(2, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
+    WindowsJob(2, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
 ]
 
 
