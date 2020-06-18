@@ -530,8 +530,19 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
             traces_.get()),
         ONNXIFI_STATUS_SUCCESS);
     current_batch_size = extractOutputBatchSizes();
+    onnxEventState eventState;
+    onnxStatus eventStatus;
     CAFFE_ENFORCE_EQ(
-        lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+        (*onnxWaitEventForPointer_)(
+            output_fence.event, timeout_, &eventState, &eventStatus),
+        ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        eventState,
+        ONNXIFI_EVENT_STATE_SIGNALLED,
+        "Onnxifi run timeouted out after ",
+        timeout_,
+        " ms.");
+    CAFFE_ENFORCE_EQ(eventStatus, ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
   }
