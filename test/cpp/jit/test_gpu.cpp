@@ -207,13 +207,6 @@ void testGPU_FusionExprEvalBasic() {
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-  auto* bid_x = add(tv3->axis(0)->rawExtent(), new Int(0));
-  auto* tid_x = add(tv3->axis(-1)->rawExtent(), new Int(0));
-
-  GPULower gpulw(&fusion);
-  std::stringstream cdg;
-  gpulw.printKernel(cdg);
-  std::cout << cdg.str() << std::endl;
   // 1. Create an evaluation context
   EvaluationContext eval_context(&fusion);
 
@@ -239,11 +232,6 @@ void testGPU_FusionExprEvalBasic() {
   checkIntValue(&eval_context, tv3->axis(0)->rawExtent(), 2);
   checkIntValue(&eval_context, tv3->axis(1)->rawExtent(), 4);
   checkIntValue(&eval_context, tv3->axis(2)->rawExtent(), 128);
-
-  const auto bid_x_val = ExpressionEvaluator::evaluate(bid_x, &eval_context);
-  std::cout << "bid x value " << bid_x_val.value() << std::endl;
-  const auto tid_x_val = ExpressionEvaluator::evaluate(bid_x, &eval_context);
-  std::cout << "tid x value " << tid_x_val.value() << std::endl;
 }
 
 // Evaluate expressions in a more complex IR
@@ -2878,8 +2866,8 @@ void testGPU_FusionReductionJ() {
   tv1->split(1, 128);
   auto tv2 = tv1->rFactor({1});
 
-  tv0->computeAt(tv1, 2);
-  //tv0->computeAt(tv2, 3);
+  //tv0->computeAt(tv1, 2);
+  tv0->computeAt(tv2, 3);
 
   tv0->axis(0)->parallelize(ParallelType::BIDx);
   tv1->axis(0)->parallelize(ParallelType::BIDx);
