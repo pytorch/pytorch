@@ -2,13 +2,6 @@
 
 set -ex
 
-if [[ "$UBUNTU_VERSION" == "14.04" ]]; then
-  # cmake 2 is too old
-  cmake3=cmake3
-else
-  cmake3=cmake
-fi
-
 if [[ "$UBUNTU_VERSION" == "18.04"* ]]; then
   cmake3="cmake=3.10*"
 else
