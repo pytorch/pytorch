@@ -296,11 +296,11 @@ Tensor& nansum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
                        bool keepdim, optional<ScalarType> opt_dtype) {
   // For integral types, use existing sum as
   // integral types don't have `Nan`.
-  auto dtype = self.scalar_type();
-  if (c10::isIntegralType(dtype, true)){
+  if (c10::isIntegralType(self.scalar_type(), true)){
     return at::sum_out(result, self, dim, keepdim, opt_dtype);
   }
 
+  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   auto iter = make_reduction("nansum", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
     result = result.zero_();
