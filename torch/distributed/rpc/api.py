@@ -4,12 +4,13 @@ import functools
 import logging
 import numbers
 import threading
+from typing import Generic, TypeVar
 
 import torch
 import torch.distributed as dist
-from torch.jit import Future  # noqa F401
 
 from . import (
+    PyRRef,
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
@@ -348,6 +349,25 @@ def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_optio
                     arg, arg_type, type(arg)
                 )
             )
+
+
+T = TypeVar("T")
+GenericWithOneTypeVar = Generic[T]
+
+
+try:
+    class RRef(PyRRef, GenericWithOneTypeVar):
+        # Combine the implementation class and the type class.
+        pass
+except TypeError as exc:
+    # TypeError: metaclass conflict: the metaclass of a derived class
+    # must be a (non-strict) subclass of the metaclasses of all its bases
+    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):
+        pass
+
+    class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta):
+        # Combine the implementation class and the type class.
+        pass
 
 
 @_require_initialized
