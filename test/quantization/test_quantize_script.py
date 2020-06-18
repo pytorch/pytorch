@@ -2116,8 +2116,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         options = itertools.product([1, 2, 3], [True, False])
         for dim, tracing in options:
-            # TODO: handle affine == False (separate PR)
-            instance_norm = instance_norm_modules[dim](4, affine=True)
+            instance_norm = instance_norm_modules[dim](4)
             m = self.checkGraphModeOp(
                 instance_norm, data[dim], "quantized::instance_norm", tracing)
             FileCheck().check_not("aten::instance_norm") \
