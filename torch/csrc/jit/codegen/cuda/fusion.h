@@ -211,6 +211,7 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
 
  private:
   // Sets of all Vals/Exprs registered with this fusion
+  // (val_deque_ is not owning the objects)
   std::unordered_set<Val*> val_set_;
   std::deque<Val*> val_deque_;
   std::unordered_set<Expr*> expr_set_;

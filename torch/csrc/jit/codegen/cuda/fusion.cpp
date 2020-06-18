@@ -58,19 +58,11 @@ std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
 }
 
 Fusion::~Fusion() {
-  {
-    auto it = val_set_.begin();
-    while (it != val_set_.end()) {
-      auto del = it;
-      it = ++it;
-      delete (*del);
-    }
+  for (auto ptr : val_set_) {
+    delete ptr;
   }
-  auto it = expr_set_.begin();
-  while (it != expr_set_.end()) {
-    auto del = it;
-    it = ++it;
-    delete (*del);
+  for (auto ptr : expr_set_) {
+    delete ptr;
   }
 };
 
@@ -191,20 +183,16 @@ std::unordered_set<Val*> Fusion::inputsOf(Val* val) {
 void Fusion::validateInputs() {
   std::unordered_set<Val*> all_inputs;
   for (Val* out : outputs()) {
-    auto outs_inputs = inputsOf(out);
-    std::set_union(
-        all_inputs.begin(),
-        all_inputs.end(),
-        outs_inputs.begin(),
-        outs_inputs.end(),
-        std::inserter(all_inputs, all_inputs.begin()));
+    for (Val* input : inputsOf(out)) {
+      all_inputs.insert(input);
+    }
   }
-  for (Val* inp : all_inputs) {
-    if (!inp->isConstScalar())
+  for (Val* input : all_inputs) {
+    if (!input->isConstScalar())
       TORCH_CHECK(
-          hasInput(inp),
+          hasInput(input),
           "Could not figure out how ",
-          inp,
+          input,
           " is generated, however it was not specified as an input.");
   }
 }
