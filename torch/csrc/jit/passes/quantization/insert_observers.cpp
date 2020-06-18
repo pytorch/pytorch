@@ -47,8 +47,10 @@ void fillQConfigMap(
     const c10::optional<QConfig>& parent_qconfig = c10::nullopt) {
   c10::optional<QConfig> qconfig;
   if (qconfig_dict.find(key) != qconfig_dict.end()) {
+    GRAPH_DEBUG("Got module config for key:", key);
     qconfig = qconfig_dict.at(key);
   } else {
+    GRAPH_DEBUG("Inheriting qconfig from parent module:", key);
     qconfig = parent_qconfig;
   }
   map[module._ivalue()] = qconfig;
@@ -251,10 +253,23 @@ class ModuleCloneHelper {
 
 class InsertObserversHelper {
  public:
-  explicit InsertObserversHelper(const ModuleQConfigMap& map)
-      : module_qconfig_map_(map) {}
+  explicit InsertObserversHelper(
+      const ModuleQConfigMap& map, QuantType quant_type)
+      : module_qconfig_map_(map), quant_type_(quant_type) {}
 
+  // TODO: replace (module, method_name) with graph?
+  // preprocess to clean up the graph from tracing
   void preprocess(Module& module, const std::string& method_name);
+
+  // Fill the map between the caller input/output to input/output
+  // of called graph, this is used to navigate through the graph
+  // to find the observer for a given value
+  void fillBoundaryValueMap(Module& module, const std::string& method_name);
+
+
+  // analyze the graph and record necessary information that can
+  // be used in insert observers
+  void analyze(Module& module, const std::string& method_name);
 
   /**
    * Recursively insert observers for the method, also we'll process
@@ -289,10 +304,6 @@ class InsertObserversHelper {
       std::unordered_set<Value*> graph_observed_values =
           std::unordered_set<Value*>());
 
-  void setQuantType(QuantType quant_type) {
-    quant_type_ = quant_type;
-  }
-
  private:
   std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
   insertObserversFor(
@@ -326,11 +337,6 @@ class InsertObserversHelper {
       const std::unordered_set<Value*>& block_observed_values) {
     return block_observed_values.count(v) || observed_values_.count(v);
   }
-
-  // Fill the map between the caller input/output to input/output
-  // of called graph, this is used to navigate through the graph
-  // to find the observer for a given value
-  void fillBoundaryValueMap(Module& module, const std::string& method_name);
 
   // Fill the map from value to the corresponding observer module
   // this map is used in insertObservers to actually insert
@@ -799,6 +805,7 @@ void InsertObserversHelper::insertObserverFor(
   if (observed_values_.count(v)) {
     return;
   }
+  GRAPH_DEBUG("Inserting observer for:", v->debugName());
   Module observer = observer_module.deepcopy();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
@@ -899,6 +906,12 @@ void InsertObserversHelper::fillPassThroughValueMap(
 void InsertObserversHelper::fillBoundaryValueMap(
     Module& module,
     const std::string& method_name) {
+  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_method);
+    const auto& invoked_method_name = std::get<1>(invoked_method);
+    fillBoundaryValueMap(invoked_module, invoked_method_name);
+  }
+
   auto graph = module.get_method(method_name).graph();
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
@@ -924,19 +937,26 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // add mapping from callsite value to value in called graph
         for (auto i = 0U; i < g->outputs().size(); ++i) {
           auto* return_val = g->outputs()[i];
+          GRAPH_DEBUG("Boundary Map[return]:", n->output(i)->debugName(),
+                      " -> ", return_val->debugName());
           boundary_value_map_[n->output(i)].insert(return_val);
         }
         for (auto i = 0U; i < g->inputs().size(); ++i) {
           auto caller_input_index = i + input_offset;
           auto* caller_input = n->input(caller_input_index);
           auto* input_val = g->inputs()[i];
+          GRAPH_DEBUG("Boundary Map[input]:", caller_input->debugName(),
+                      " -> ", input_val->debugName());
           boundary_value_map_[caller_input].insert(input_val);
         }
       } else if (n->kind() == prim::If) {
         for (Block* subblock : n->blocks()) {
           blocks_to_visit.push(subblock);
           for (Value* v : n->outputs()) {
-            boundary_value_map_[v].insert(subblock->outputs()[v->offset()]);
+            Value* subblock_output = subblock->outputs()[v->offset()];
+            GRAPH_DEBUG("Boundary Map[if_output]:", v->debugName(),
+                        " -> ", subblock_output->debugName());
+            boundary_value_map_[v].insert(subblock_output);
           }
         }
       } else {
@@ -970,12 +990,23 @@ void InsertObserversHelper::preprocess(
   replaceConvolutionWithAtenConv(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
+}
+
+void InsertObserversHelper::analyze(
+    Module& module,
+    const std::string& method_name) {
+  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_method);
+    const auto& invoked_method_name = std::get<1>(invoked_method);
+    analyze(invoked_module, invoked_method_name);
+  }
 
   // fill out various internal state which will be later used in
-  // insertObservers to insert the correct observers
+  // insertObservers to insert the correct observer
   addValuesToDelayObservation(module, method_name);
   fillValueObserverMap(module, method_name);
-  fillBoundaryValueMap(module, method_name);
+  Method method = module.get_method(method_name);
+  auto graph = method.graph();
   fillPassThroughValueMap(graph);
 }
 
@@ -1021,6 +1052,8 @@ void InsertObserversHelper::fillValueObserverMap(
   auto qconfig = *qconfig_opt;
   for (auto* v : graph->inputs()) {
     if (valueNeedsToBeQuantized(v)) {
+      GRAPH_DEBUG("Recording observer for ", v->debugName());
+      GRAPH_DUMP("In graph:", v->owningGraph());
       observer_for_value_[v] = getObserverModuleFor(v, qconfig);
     }
   }
@@ -1032,6 +1065,8 @@ void InsertObserversHelper::fillValueObserverMap(
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
         if (valueNeedsToBeQuantized(v)) {
+          GRAPH_DEBUG("Recording observer for ", v->debugName());
+          GRAPH_DUMP("In graph:", v->owningGraph());
           observer_for_value_[v] = getObserverModuleFor(v, qconfig);
         }
       }
@@ -1046,11 +1081,16 @@ void InsertObserversHelper::fillValueObserverMap(
 c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
   if (observer_for_value_.count(v)) {
     auto observer = observer_for_value_.at(v);
+    GRAPH_DEBUG("Got observer module config for:", v->debugName());
     return observer;
   }
   c10::optional<Module> result;
   if (boundary_value_map_.count(v)) {
     for (Value* next : boundary_value_map_.at(v)) {
+      GRAPH_DEBUG("Going through boundary map:", v->debugName(), " --> ",
+                  next->debugName());
+      GRAPH_DUMP("From graph:", v->owningGraph());
+      GRAPH_DUMP("To graph:", next->owningGraph());
       auto observer_opt = getObserverFor(next);
       if (observer_opt) {
         // Need to make sure all values are
@@ -1065,6 +1105,8 @@ c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
       }
     }
   }
+  GRAPH_DEBUG("Observer module config for ", v->debugName(), ":",
+              result.has_value());
   return result;
 }
 
@@ -1125,7 +1167,7 @@ InsertObserversHelper::insertObserversFor(
     }
 
     for (auto* v : block->inputs()) {
-      block_input_observers.push_back(getObserverFor(v));
+      block_input_observers.emplace_back(getObserverFor(v));
     }
 
     for (auto* v : block->outputs()) {
@@ -1153,11 +1195,13 @@ InsertObserversHelper::insertObserversFor(
     }
   }
   // NB: Why do we need to process the graph even if it's visited?
-  // Reason is `graph_observed_values` can
+  // Reason is `block_observed_values` can
   // change depending on where the method is called, and
   // outputs that's been observed(third item of the returned result)
   // can change depending on that, so for each graph we'll need to go through
-  // the whole process of inserting observers
+  // the whole process of inserting observers, the observers inserted in this
+  // block won't change, but the information we return to the caller will change
+  // based on `block_observed_values`
 
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(block);
@@ -1369,9 +1413,14 @@ Module InsertObservers(
   // Since the types are changed after clone, we need to fill
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
-  InsertObserversHelper helper(module_qconfig_map);
-  helper.setQuantType(quant_type);
+  GRAPH_DEBUG("Quant type:", quant_type);
+  InsertObserversHelper helper(module_qconfig_map, quant_type);
   helper.preprocess(module, method_name);
+  helper.fillBoundaryValueMap(module, method_name);
+  // analyze needs to run after fillBoundaryValueMap
+  // since we need to know the boundary value mapping to trace
+  // through the calls
+  helper.analyze(module, method_name);
   helper.insertObservers(module, method_name, /* is_entry_point */ true);
   return module;
 }
