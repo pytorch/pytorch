@@ -12,6 +12,7 @@ void inBatchBroadcast(
     std::unordered_set<std::string>& to_broadcast_blobs,
     int32_t batch_size,
     ShapeInfoMap& shape_hints) {
+  int current_pos = net->op_size();
   caffe2::NetDef broadcast_net;
   broadcast_net.CopyFrom(*net);
   broadcast_net.clear_op();
@@ -25,7 +26,9 @@ void inBatchBroadcast(
         {new_blob},
         {MakeArgument<int>("tiles", batch_size),
          MakeArgument<int>("axis", 0),
-         MakeArgument<int>("dynamic", 1)}));
+         // Indicating that we are tiling to max_batch_size
+         MakeArgument<int>("dynamic", 1),
+         MakeArgument<int>("net_pos", current_pos++)}));
     auto it = shape_hints.find(blob);
     CAFFE_ENFORCE(it != shape_hints.end(), "Cannot find shape info for ", blob);
     auto& shape = it->second;

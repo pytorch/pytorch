@@ -37,6 +37,21 @@ struct AggregatedNetworkData {
   uint64_t totalErrors{0};
 };
 
+struct TransportRegistration {
+  std::shared_ptr<tensorpipe::transport::Context> transport;
+  int64_t priority;
+  std::string address;
+};
+
+C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+
+struct ChannelRegistration {
+  std::shared_ptr<tensorpipe::channel::Context> channel;
+  int64_t priority;
+};
+
+C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+
 // TensorPipeAgent leverages TensorPipe (https://github.com/pytorch/tensorpipe)
 // to transparently move tensors and payloads through the fastest available
 // transport or channel. It acts like a hybrid RPC transport, providing shared
@@ -84,15 +99,18 @@ class TensorPipeAgent : public RpcAgent {
   // Returns NetworkSourceInfo struct
   NetworkSourceInfo getNetworkSourceInfo();
 
+  static std::string guessUvAddress(
+      tensorpipe::transport::uv::Context& uvContext);
+
+#ifdef TP_ENABLE_SHM
+  static std::string createUniqueShmAddr();
+#endif
+
  private:
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void collectNames();
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
-
-#ifdef TP_ENABLE_SHM
-  std::string createUniqueShmAddr();
-#endif
 
   // TensorPipe read function that could be used to read response messages
   // by client, and read request messages by server.

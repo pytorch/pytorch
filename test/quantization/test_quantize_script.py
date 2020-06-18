@@ -13,7 +13,6 @@ from torch.quantization import per_channel_dynamic_qconfig
 from torch.quantization import default_observer
 from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
-from torch.quantization import get_default_qconfig
 
 # torch.quantization.quantize_script
 from torch.quantization.quantize_script import script_qconfig
@@ -1202,37 +1201,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
     """
-    def _test_op_impl(self, module, data, quantized_op, tracing=False, debug=False, check=True, eval_mode=True):
-        if debug:
-            print('Testing:', str(module))
-        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
-        if eval_mode:
-            module = module.eval()
-        *inputs, target = data[0]
-        model = get_script_module(module, tracing, inputs).eval()
-        models = {}
-        outputs = {}
-        for d in [True, False]:
-            # TODO: _test_only_eval_fn --> default_eval_fn
-            models[d] = quantize_script(
-                model, qconfig_dict, _test_only_eval_fn, [data], inplace=False, debug=d)
-            # make sure it runs
-            outputs[d] = models[d](*inputs)
-
-        if debug:
-            print('debug graph:', models[True].graph)
-            print('non debug graph:', models[False].graph)
-
-        if check:
-            # debug and non-debug option should have the same numerics
-            self.assertEqual(outputs[True], outputs[False])
-
-            # non debug graph should produce quantized op
-            FileCheck().check(quantized_op) \
-                       .run(models[False].graph)
-
-        return models[False]
-
     @skipIfNoFBGEMM
     def test_quantized_conv(self):
         conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
@@ -1246,12 +1214,10 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 return self.conv(x)
 
         options = itertools.product([1, 2, 3], [True, False])
-        input_data = {1 : self.img_data_1d,
-                      2 : self.img_data,
-                      3 : self.img_data_3d}
         for dim, tracing in options:
-            model = self._test_op_impl(
-                Conv(dim), input_data[dim], "quantized::conv{}d".format(dim), tracing)
+            model = self.checkGraphModeOp(
+                Conv(dim), self.img_data_dict[dim],
+                "quantized::conv{}d".format(dim), tracing)
             # make sure there is only one quantize_per_tensor for input
             # and conv2d_prepack is folded
             FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
@@ -1290,7 +1256,6 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             def forward(self, x):
                 return F.relu(self.conv(x), True)
 
-        input_data = {1 : self.img_data_1d, 2 : self.img_data, 3 : self.img_data_3d}
         options = itertools.product([1, 2, 3], [True, False])
         for dim, tracing in options:
             for orig_m in [ConvNdRelu(dim, True),
@@ -1298,9 +1263,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                            ConvNdFunctionalRelu(dim),
                            ConvNdInplaceFunctionalRelu(dim)]:
                 conv_name = "conv{}d".format(dim)
-                data = input_data[dim]
-                m = self._test_op_impl(
-                    orig_m, data, "quantized::conv{}d_relu(".format(dim), tracing=tracing)
+                m = self.checkGraphModeOp(
+                    orig_m, self.img_data_dict[dim], "quantized::conv{}d_relu(".format(dim), tracing=tracing)
 
                 FileCheck().check_not("aten::conv{}d(".format(dim)) \
                            .check_not("aten::relu") \
@@ -1330,7 +1294,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                  torch.randn(1, 2, 5, 5, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for tracing in [True, False]:
-            m = self._test_op_impl(QuantizedAdd(), data, "quantized::add", tracing)
+            m = self.checkGraphModeOp(QuantizedAdd(), data, "quantized::add", tracing)
             FileCheck().check_count("quantized::add", 3, exactly=True) \
                        .run(m.graph)
             FileCheck().check_not("aten::add") \
@@ -1436,7 +1400,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                        AddFunctionalRelu(), InplaceAddFunctionalRelu(),
                        AddInplaceFunctionalRelu(), InplaceAddInplaceFunctionalRelu()]:
             for tracing in [True, False]:
-                m = self._test_op_impl(m_orig, data, "quantized::add_relu(", tracing=tracing)
+                m = self.checkGraphModeOp(m_orig, data, "quantized::add_relu(", tracing=tracing)
                 FileCheck().check_count("quantized::add_relu(", 2, exactly=True) \
                            .run(m.graph)
                 FileCheck().check_not("aten::add(") \
@@ -1496,8 +1460,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                              (NonQuantizedInplaceAdd(), False)]:
             for tracing in [True, False]:
                 op = "quantized::add" if quantized else "aten::add"
-                m = self._test_op_impl(m, data, op, tracing)
-                # TODO: remove after refactor of _test_op_impl
+                m = self.checkGraphModeOp(m, data, op, tracing)
+                # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
                     FileCheck().check_not("aten::add") \
                                .check_not("aten::add_") \
@@ -1551,8 +1515,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             for tracing in [True, False]:
                 op = "quantized::add_scalar" if quantized else "aten::add"
                 # TODO: fix debug=True numerics
-                m = self._test_op_impl(m, data, op, tracing, check=False)
-                # TODO: remove after refactor of _test_op_impl
+                m = self.checkGraphModeOp(m, data, op, tracing, check=False)
+                # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
                     FileCheck().check_not("aten::add") \
                                .check_not("aten::add_") \
@@ -1645,7 +1609,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                   AddFunctionalRelu(), InplaceAddFunctionalRelu(),
                   AddInplaceFunctionalRelu(), InplaceAddInplaceFunctionalRelu()]:
             for tracing in [True, False]:
-                m = self._test_op_impl(m, data, "quantized::add_relu(", tracing)
+                m = self.checkGraphModeOp(m, data, "quantized::add_relu(", tracing)
                 FileCheck().check_not("aten::add(") \
                            .check_not("aten::add_(") \
                            .check_not("aten::relu(") \
@@ -1725,9 +1689,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                   InplaceAddScalarInplaceFunctionalRelu()]:
             for tracing in [True, False]:
                 # quantized::add_scalar_relu or quantized::add_scalar_relu_out
-                # TODO: split this after refactor of _test_op_impl
+                # TODO: split this after refactor of checkGraphModeOp
                 # TODO: fix debug=True numerics
-                m = self._test_op_impl(m, data, "quantized::add_scalar_relu", tracing, check=False)
+                m = self.checkGraphModeOp(m, data, "quantized::add_scalar_relu", tracing, check=False)
                 FileCheck().check_not("aten::add(") \
                            .check_not("aten::add_(") \
                            .check_not("aten::relu(") \
@@ -1763,62 +1727,68 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                  torch.randn(1, 2, 5, 5, dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         for tracing in [True, False]:
-            m = self._test_op_impl(QuantizedCat(), data, "quantized::cat", tracing)
+            m = self.checkGraphModeOp(QuantizedCat(), data, "quantized::cat", tracing)
             FileCheck().check_not("aten::cat") \
                        .run(m.graph)
 
-            m = self._test_op_impl(NonQuantizedCat(), data, "aten::cat", tracing)
+            m = self.checkGraphModeOp(NonQuantizedCat(), data, "aten::cat", tracing)
             FileCheck().check_not("quantized::cat") \
                        .run(m.graph)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(M, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
                 return self.bn(x)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        for tracing in [True, False]:
-            model = self._test_op_impl(M(), data, "quantized::batch_norm2d", tracing)
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            model = self.checkGraphModeOp(M(dim), self.img_data_dict[dim], "quantized::batch_norm", tracing)
 
             FileCheck().check_not("aten::batch_norm") \
                        .run(model.graph)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+
         class BNRelu(torch.nn.Module):
-            def __init__(self, inplace):
+            def __init__(self, dim, inplace):
                 super(BNRelu, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
                 self.relu = torch.nn.ReLU(inplace=inplace)
 
             def forward(self, x):
                 return self.relu(self.bn(x))
 
         class BNFuncRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(BNFuncRelu, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
                 return F.relu(self.bn(x), False)
 
         class BNFuncInplaceRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(BNFuncInplaceRelu, self).__init__()
-                self.bn = torch.nn.BatchNorm2d(3).to(torch.float)
+                self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
                 return F.relu(self.bn(x), True)
 
-        data = [(torch.rand((1, 3, 10, 10), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        for instance in [BNRelu(True), BNRelu(False), BNFuncRelu(), BNFuncInplaceRelu()]:
-            for tracing in [True, False]:
-                model = self._test_op_impl(instance, data, "quantized::batch_norm2d_relu", tracing)
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            for instance in [BNRelu(dim, True), BNRelu(dim, False),
+                             BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
+                model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
+                                              "quantized::batch_norm_relu", tracing)
                 FileCheck().check_not("aten::batch_norm") \
                            .check_not("aten::relu") \
                            .check_not("aten::relu_") \
@@ -1873,8 +1843,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                              (NonQuantizedInplaceMul(), False)]:
             for tracing in [True, False]:
                 op = "quantized::mul" if quantized else "aten::mul"
-                m = self._test_op_impl(m, data, op, tracing)
-                # TODO: remove after refactor of _test_op_impl
+                m = self.checkGraphModeOp(m, data, op, tracing)
+                # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
                     FileCheck().check_not("aten::mul") \
                                .check_not("aten::mul_") \
@@ -1927,8 +1897,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             for tracing in [True, False]:
                 op = "quantized::mul_scalar" if quantized else "aten::mul"
                 # TODO: fix debug=True numerics
-                m = self._test_op_impl(m, data, op, tracing, check=False)
-                # TODO: remove after refactor of _test_op_impl
+                m = self.checkGraphModeOp(m, data, op, tracing, check=False)
+                # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
                     FileCheck().check_not("aten::mul") \
                                .check_not("aten::mul_") \
@@ -2021,7 +1991,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                   MulFunctionalRelu(), InplaceMulFunctionalRelu(),
                   MulInplaceFunctionalRelu(), InplaceMulInplaceFunctionalRelu()]:
             for tracing in [True, False]:
-                m = self._test_op_impl(m, data, "quantized::mul_relu(", tracing)
+                m = self.checkGraphModeOp(m, data, "quantized::mul_relu(", tracing)
                 FileCheck().check_not("aten::mul(") \
                            .check_not("aten::mul_(") \
                            .check_not("aten::relu(") \
@@ -2102,7 +2072,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             for tracing in [True, False]:
                 # quantized::mul_scalar_relu or quantized::mul_scalar_relu_out
                 # TODO: fix debug=True numerics
-                m = self._test_op_impl(m, data, "quantized::mul_scalar_relu", tracing, check=False)
+                m = self.checkGraphModeOp(m, data, "quantized::mul_scalar_relu", tracing, check=False)
                 FileCheck().check_not("aten::mul(") \
                            .check_not("aten::mul_(") \
                            .check_not("aten::relu(") \
@@ -2115,7 +2085,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         data = [(torch.rand((1, 2, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         hardswish = torch.nn.Hardswish()
         for tracing in [True, False]:
-            m = self._test_op_impl(hardswish, data, "quantized::hardswish", tracing)
+            m = self.checkGraphModeOp(hardswish, data, "quantized::hardswish", tracing)
             FileCheck().check_not("aten::hardswish") \
                        .run(m.graph)
 
@@ -2123,7 +2093,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         data = [(torch.rand((1, 2, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         layer_norm = torch.nn.LayerNorm([2, 5, 5])
         for tracing in [True, False]:
-            m = self._test_op_impl(layer_norm, data, "quantized::layer_norm", tracing)
+            m = self.checkGraphModeOp(layer_norm, data, "quantized::layer_norm", tracing)
             FileCheck().check_not("aten::layer_norm") \
                        .run(m.graph)
 
@@ -2131,7 +2101,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         data = [(torch.rand((1, 4, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         group_norm = torch.nn.GroupNorm(2, 4)
         for tracing in [True, False]:
-            m = self._test_op_impl(group_norm, data, "quantized::group_norm", tracing)
+            m = self.checkGraphModeOp(group_norm, data, "quantized::group_norm", tracing)
             FileCheck().check_not("aten::group_norm") \
                        .run(m.graph)
 
@@ -2148,7 +2118,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         for dim, tracing in options:
             # TODO: handle affine == False (separate PR)
             instance_norm = instance_norm_modules[dim](4, affine=True)
-            m = self._test_op_impl(
+            m = self.checkGraphModeOp(
                 instance_norm, data[dim], "quantized::instance_norm", tracing)
             FileCheck().check_not("aten::instance_norm") \
                        .run(m.graph)
@@ -2160,16 +2130,20 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 super(M, self).__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu6 = torch.nn.ReLU6()
+                self.relu6_ = torch.nn.ReLU6(True)
                 self.hardtanh = torch.nn.Hardtanh()
+                self.hardtanh_ = torch.nn.Hardtanh(inplace=True)
 
             def forward(self, x):
                 x = self.conv(x)
                 x = self.relu6(x)
+                self.relu6_(x)
                 x = F.relu6(x)
                 x = torch.clamp(x, -3, 3)
                 x = x.clamp(-2.5, 2.5)
                 # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
                 x = self.hardtanh(x)
+                self.hardtanh_(x)
                 x = F.hardtanh(x)
                 F.hardtanh_(x)
                 return x
@@ -2177,14 +2151,14 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         data = [(torch.rand((1, 2, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         options = itertools.product(["aten::clamp", "aten::hardtanh", "aten::hardtanh_"], [True, False])
         for op, tracing in options:
-            m = self._test_op_impl(M(), data, op, tracing)
+            m = self.checkGraphModeOp(M(), data, op, tracing)
             FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                        .run(m.graph)
 
             FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                        .run(m.graph)
 
-    def test_quantize_general_shape_ops(self):
+    def test_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general shape ops like aten::flatten
         without actually checking for execution of these ops
@@ -2210,8 +2184,14 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = x.reshape([-1])
                 x = x.resize_(1, 1, x.numel())
                 x = x.view(-1)
+                # prim::ListConstruct
                 xs = [x, x]
-                y, x = xs
+                # prim::ListUnpack
+                x, y = xs
+                # prim::TupleConstruct
+                xs = (x, x)
+                # prim::TupleUnpack
+                x, y = xs
                 x = x.transpose(1, 2)
                 x = x.contiguous()
                 x, y = torch.chunk(x, 2)
@@ -2223,6 +2203,13 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = self.relu(x)
                 x = F.relu(x)
                 x.relu_()
+                x = x.squeeze(0)
+                x.squeeze_(0)
+                x = torch.squeeze(x, 0)
+                x = x.unsqueeze(0)
+                x.unsqueeze_(0)
+                x = torch.unsqueeze(x, 0)
+                x = x.repeat(4, 2)
                 y = []
                 y.append(x)
                 x, _ = y
@@ -2251,7 +2238,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                    .check("aten::dequantize") \
                    .run(m.graph)
 
-    def test_quantize_general_value_ops(self):
+    def test_general_value_ops(self):
         """ A test that checks correct patterns are produced for
         all supported general value ops like aten::avg_pool2d \
         without actually checking for execution of these ops
@@ -2287,7 +2274,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = F.adaptive_avg_pool2d(x, (1, 1))
                 x = F.adaptive_avg_pool3d(x, (1, 1, 1))
                 x = torch.mean(x)
+                x = torch.mean(x, [2, 3], False)
                 x = x.mean()
+                x = x.mean([2, 3], True)
                 # interpolate node will introduce 3 quantize_per_tensor ops
                 x = F.interpolate(x, 4, mode='nearest')  # interpolate node
                 x = F.upsample(x, (32, 32))  # interpolate node
@@ -2339,7 +2328,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         # mapping from number of quant for the op to the number of these ops
         # for example, for `3` in the key means for this type of op
         # we'll have 3 quantize_per_tensor
-        num_op_by_num_quant = {1: 33, 2: 2, 3: 3}
+        num_op_by_num_quant = {1: 35, 2: 2, 3: 3}
         num_quantize_per_tensor = 1  # for output
         for num_quant, num_op in num_op_by_num_quant.items():
             num_quantize_per_tensor += num_op * num_quant
@@ -2358,7 +2347,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                    .check("aten::dequantize(") \
                    .run(m2.graph)
 
-class TestQuantizeDynamicScript(QuantizationTestCase):
+class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
     def test_prepare_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2452,21 +2441,7 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                        .check("return") \
                        .run(m.graph)
 
-    def test_finalize_for_linear_dynamic(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.fc = torch.nn.Linear(5, 5).float()
-
-            def forward(self, x):
-                return self.fc(x)
-
-        qconfig_dict = {'': default_dynamic_qconfig}
-        model = torch.jit.script(M()).eval()
-        model = quantize_dynamic_script(model, qconfig_dict)
-        FileCheck().check("quantized::linear_dynamic") \
-                   .run(model.graph)
-
+    @override_qengines
     def test_dynamic_multi_op(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2477,14 +2452,14 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 x = x + 5
                 return self.fc1(x)
 
-        m = torch.jit.script(M())
-        qconfig_dict = {'' : default_dynamic_qconfig}
-        model = quantize_dynamic_script(m, qconfig_dict)
-        # add op is not dynamically quantized.
-        FileCheck().check("aten::add") \
-                   .check("quantized::linear_dynamic") \
-                   .run(model.graph)
+        x = torch.randn(5, 5)
+        for tracing in [True, False]:
+            model = self.checkGraphModeOp(M(), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+            # add op is not dynamically quantized.
+            FileCheck().check("aten::add") \
+                       .run(model.graph)
 
+    @override_qengines
     def test_dynamic_quant_multi_uses(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2496,13 +2471,11 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 size2 = x.size()
                 return self.fc(x), size1, size2
 
-        model = torch.jit.script(M()).eval()
-        qconfig_dict = {'': default_dynamic_qconfig}
-
-        model = quantize_dynamic_script(model, qconfig_dict)
-        FileCheck().check("quantized::linear_dynamic") \
-                   .check_not("aten::_choose_qparams_per_tensor") \
-                   .run(model.graph)
+        x = torch.randn(5, 5)
+        for tracing in [True, False]:
+            model = self.checkGraphModeOp(M(), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+            FileCheck().check_not("aten::_choose_qparams_per_tensor") \
+                       .run(model.graph)
 
     @override_qengines
     def test_dynamic_shared_weights(self):
@@ -2574,11 +2547,11 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
         model = torch.jit.script(M()).eval()
         data = torch.randn(5, 5, dtype=torch.float)
         qconfig_dict = {'': default_dynamic_qconfig}
-        m1 = quantize_dynamic_script(model, qconfig_dict)
-        out_graph = m1(data)
-        FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
-                   .check_not("aten::_choose_qparams_per_tensor") \
-                   .run(m1.graph)
+        for tracing in [True, False]:
+            m1 = self.checkGraphModeOp(M(), data, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+            FileCheck().check_count("quantized::linear_dynamic(", 2, exactly=True) \
+                       .check_not("aten::_choose_qparams_per_tensor") \
+                       .run(m1.graph)
 
         # Check to make sure weight observers run correctly
         ref_qparams = []
@@ -2611,17 +2584,41 @@ class TestQuantizeDynamicScript(QuantizationTestCase):
                 return self.fc2(x)
 
         qconfig_dict = {'': default_dynamic_qconfig}
-        model = torch.jit.script(M()).eval()
-        qconfig = script_qconfig(default_dynamic_qconfig)
-        ref_qparams = []
-        wt_module = wrap_cpp_module(qconfig.weight)
-        for wt in [model.fc.weight, model.fc2.weight]:
-            wt_module(wt)
-            qparams = wt_module.calculate_qparams()
-            ref_qparams.append((qparams[0].item(), qparams[1].item()))
-        model = prepare_dynamic_script(model, qconfig_dict)
-        model = convert_dynamic_script(model, debug=True)
-        graph_params = []
-        for x, obs in model._modules._c.items():
-            graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
-        self.assertEqual(ref_qparams, graph_params)
+        eager_model = M().eval()
+        x = torch.rand(5, 5)
+        for tracing in [True, False]:
+            model = get_script_module(eager_model, tracing, x)
+            qconfig = script_qconfig(default_dynamic_qconfig)
+            ref_qparams = []
+            wt_module = wrap_cpp_module(qconfig.weight)
+            for wt in [model.fc.weight, model.fc2.weight]:
+                wt_module(wt)
+                qparams = wt_module.calculate_qparams()
+                ref_qparams.append((qparams[0].item(), qparams[1].item()))
+            model = prepare_dynamic_script(model, qconfig_dict)
+            model = convert_dynamic_script(model, debug=True)
+            graph_params = []
+            for x, obs in model._modules._c.items():
+                if tracing:
+                    graph_params.append((obs.getattr('4_scale_0'), obs.getattr('4_zero_point_0')))
+                else:
+                    graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
+            self.assertEqual(ref_qparams, graph_params)
+
+class TestQuantizeScriptPTDQOps(QuantizationTestCase):
+    """ Test graph mode post training dynamic quantization works
+    for individual ops end to end.
+    """
+    @override_qengines
+    def test_quantized_linear_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                return self.fc(x)
+
+        x = torch.rand(5, 5)
+        for tracing in [True, False]:
+            model = self.checkGraphModeOp(M(), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)

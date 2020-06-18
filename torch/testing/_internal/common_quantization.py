@@ -15,10 +15,11 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert
+    default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
+    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_script, quantize_script
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
 import unittest
+from torch.testing import FileCheck
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -133,6 +134,7 @@ def skipIfNoFBGEMM(fn):
 def get_script_module(model, tracing, data):
     return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
 
+
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
     def setUp(self):
@@ -149,6 +151,9 @@ class QuantizationTestCase(TestCase):
         self.img_data_3d = [(torch.rand(1, 3, 5, 5, 5, dtype=torch.float),
                              torch.randint(0, 1, (1,), dtype=torch.long))
                             for _ in range(2)]
+        self.img_data_dict = {1 : self.img_data_1d,
+                              2 : self.img_data,
+                              3 : self.img_data_3d}
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
@@ -215,8 +220,16 @@ class QuantizationTestCase(TestCase):
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
-    # calib_data follows the same schema as calib_data for
-    # test_only_eval_fn, i.e. (input iterable, output iterable)
+    def checkDynamicQuantizedModule(self, mod, reference_module_type, dtype):
+        r"""Checks that mod has been swapped for an nnqd.Linear
+            module, the bias is float.
+        """
+        wt_dtype_map = {torch.qint8: 'quantized_dynamic', torch.float16: 'quantized_fp16'}
+        self.assertEqual(type(mod), reference_module_type)
+        if hasattr(mod, '_all_weight_values'):
+            for packed_params in mod._all_weight_values:
+                self.assertEqual(packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype])
+
     def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
         scripted = torch.jit.script(orig_mod)
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
@@ -235,7 +248,6 @@ class QuantizationTestCase(TestCase):
 
         buffer.seek(0)
         loaded_mod = torch.jit.load(buffer)
-
         # Pending __get_state_ and __set_state__ support
         # See tracking task https://github.com/pytorch/pytorch/issues/23984
         if check_save_load:
@@ -246,6 +258,49 @@ class QuantizationTestCase(TestCase):
             ref_output = orig_mod(inp)
             scripted_output = test_mod(inp)
             self.assertEqual(scripted_output, ref_output)
+
+
+    def checkGraphModeOp(self, module, data, quantized_op, tracing=False, debug=False, check=True, eval_mode=True, dynamic=False):
+        if debug:
+            print('Testing:', str(module))
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+
+        if eval_mode:
+            module = module.eval()
+        if dynamic:
+            qconfig_dict = {'': default_dynamic_qconfig}
+            inputs = data
+        else:
+            *inputs, target = data[0]
+        model = get_script_module(module, tracing, inputs).eval()
+        models = {}
+        outputs = {}
+        for d in [True, False]:
+            # TODO: _test_only_eval_fn --> default_eval_fn
+            if dynamic:
+                models[d] = quantize_dynamic_script(model, qconfig_dict, debug=d)
+                # make sure it runs
+                outputs[d] = models[d](inputs)
+            else:
+                models[d] = quantize_script(
+                    model, qconfig_dict, test_only_eval_fn, [data], inplace=False, debug=d)
+                # make sure it runs
+                outputs[d] = models[d](*inputs)
+
+        if debug:
+            print('debug graph:', models[True].graph)
+            print('non debug graph:', models[False].graph)
+
+        if check:
+            # debug and non-debug option should have the same numerics
+            self.assertEqual(outputs[True], outputs[False])
+
+            # non debug graph should produce quantized op
+            FileCheck().check(quantized_op) \
+                       .run(models[False].graph)
+
+        return models[False]
+
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models
@@ -278,14 +333,34 @@ class SingleLayerLinearDynamicModel(torch.nn.Module):
         x = self.fc1(x)
         return x
 
-class LSTMDynamicModel(torch.nn.Module):
-    def __init__(self):
+class RNNDynamicModel(torch.nn.Module):
+    def __init__(self, mod_type):
         super().__init__()
-        self.qconfig = default_qconfig
-        self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+        self.qconfig = default_dynamic_qconfig
+        if mod_type == 'GRU':
+            self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
+        if mod_type == 'LSTM':
+            self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
 
     def forward(self, x):
-        x = self.lstm(x)
+        x = self.mod(x)
+        return x
+
+class RNNCellDynamicModel(torch.nn.Module):
+    def __init__(self, mod_type):
+        super().__init__()
+        self.qconfig = default_dynamic_qconfig
+        if mod_type == 'GRUCell':
+            self.mod = torch.nn.GRUCell(2, 2).to(dtype=torch.float)
+        if mod_type == 'LSTMCell':
+            self.mod = torch.nn.LSTMCell(2, 2).to(dtype=torch.float)
+        if mod_type == 'RNNReLU':
+            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='relu').to(dtype=torch.float)
+        if mod_type == 'RNNTanh':
+            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='tanh').to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.mod(x)
         return x
 
 class ConvModel(torch.nn.Module):
