@@ -390,7 +390,7 @@ def prepare_model_outputs(
         q_module,
         inplace=True,
         white_list=white_list,
-        observer_white_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST,
+        observer_supported_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST,
     )
 
 
