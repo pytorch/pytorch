@@ -306,18 +306,19 @@
 
 - func: add_relu.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
   dispatch:
     CPU: add_relu
   supports_named_tensor: True
 
 - func: add_relu_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
-  variants: method
+  variants: function
   dispatch:
     CPU: add_relu_
   supports_named_tensor: True
 
 - func: add_relu.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  variants: function
   dispatch:
     CPU: add_relu_out
   supports_named_tensor: True
