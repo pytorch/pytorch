@@ -104,16 +104,10 @@ class MkldnnConv2d(_MkldnnConvNd):
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
 
-class MkldnnConv3d(torch.jit.ScriptModule):
-    __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
+class MkldnnConv3d(_MkldnnConvNd):
     def __init__(self, dense_module):
-        super(MkldnnConv3d, self).__init__()
-
-        self.stride = dense_module.stride
-        self.padding = dense_module.padding
-        self.dilation = dense_module.dilation
-        self.groups = dense_module.groups
+        super(MkldnnConv3d, self).__init__(dense_module)
 
         self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv3d_weight(
             dense_module.weight.to_mkldnn(),
@@ -121,17 +115,6 @@ class MkldnnConv3d(torch.jit.ScriptModule):
             self.stride,
             self.dilation,
             self.groups))
-        if dense_module.bias is not None:
-            self.register_buffer('bias', dense_module.bias.to_mkldnn())
-        else:
-            # TODO: Remove this once ScriptModule supports registering None buffer
-            self.register_buffer(
-                'bias',
-                torch.zeros([dense_module.weight.size(0)], dtype=torch.float).to_mkldnn())
-
-    @torch.jit.script_method
-    def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense(), self.training)
 
     @torch.jit.script_method
     def __setstate__(self, state):
@@ -144,16 +127,6 @@ class MkldnnConv3d(torch.jit.ScriptModule):
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
 
-    @torch.jit.script_method
-    def forward(self, x):
-        return torch.conv3d(
-            x,
-            self.weight,
-            self.bias,
-            self.stride,
-            self.padding,
-            self.dilation,
-            self.groups)
 
 class MkldnnBatchNorm(torch.jit.ScriptModule):
     __constants__ = ['exponential_average_factor', 'eps']
