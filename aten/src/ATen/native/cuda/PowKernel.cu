@@ -113,7 +113,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
       AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "pow_cuda", [&] {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
           return pow_(base, exp);
-	});
+        });
       });
     });
   } else {
