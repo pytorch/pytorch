@@ -79,4 +79,49 @@ task sourcesJar(type: Jar) {
     classifier = 'sources'
 }
 
+def getLibtorchHeadersDir() {
+  def abi = ABI_FILTERS.split(",")[0]
+  return "$rootDir/../build_android_$abi/include";
+}
+
+afterEvaluate {
+  if (POM_PACKAGING == 'aar') {
+    android.libraryVariants.all { variant ->
+      variant.outputs.each { output ->
+        File f = output.outputFile
+        if (f.name.endsWith(".aar")) {
+          output.assemble.finalizedBy addFolderToAarTask(
+              "addHeadersToAar" + variant.name,
+              f.path,
+              getLibtorchHeadersDir(),
+              "headers")
+        }
+      }
+    }
+  }
+}
+
+def addFolderToAarTask(taskName, aarPath, folderPath, folderPathInAar) {
+  def tmpDir = file("${buildDir}/${taskName}")
+  tmpDir.mkdir()
+  def tmpDirFolder = file("${tmpDir.path}/${folderPathInAar}")
+  tmpDirFolder.mkdir()
+  return tasks.create(name: taskName) {
+    doLast {
+      copy {
+        from zipTree(aarPath)
+        into tmpDir
+      }
+      copy {
+        from fileTree(folderPath)
+        into tmpDirFolder
+      }
+      ant.zip(destfile: aarPath) {
+        fileset(dir: tmpDir.path)
+      }
+      delete tmpDir
+    }
+  }
+}
+
 artifacts.add('archives', sourcesJar)
