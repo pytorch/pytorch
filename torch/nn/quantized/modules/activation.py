@@ -125,7 +125,7 @@ class Hardswish(torch.nn.Hardswish):
         return Hardswish(float(scale), int(zero_point))
 
 class ELU(torch.nn.ELU):
-    r"""This is the quantized equivalent of `torch.nn.ELU`.
+    r"""This is the quantized equivalent of :class:`torch.nn.ELU`.
     """
     def __init__(self, scale, zero_point, alpha=1.):
         super(ELU, self).__init__(alpha)
