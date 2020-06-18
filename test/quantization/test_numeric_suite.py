@@ -228,7 +228,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         q_model = quantize(model, default_eval_fn, self.img_data)
         module_swap_list = [SubModule]
         ob_dict = compare_model_stub(
-            model, q_model, module_swap_list, data, ShadowLogger
+            model, q_model, module_swap_list, self.img_data[0][0], ShadowLogger
         )
         self.assertTrue(isinstance(q_model.mod1, Shadow))
         self.assertFalse(isinstance(q_model.conv, Shadow))
