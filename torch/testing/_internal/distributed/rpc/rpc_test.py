@@ -822,8 +822,7 @@ class RpcTest(RpcAgentTestFixture):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
 
-            for fut in futs:
-                fut.wait()
+            for fut in torch.futures.collect_all(futs).wait():
                 self.assertEqual(fut.wait(), 0)
 
             # Phase 2: Only worker2 has workload.
@@ -835,9 +834,8 @@ class RpcTest(RpcAgentTestFixture):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
 
-            for fut in futs:
-                fut.wait()
-                self.assertEqual(fut.wait(), 0)
+            for val in torch.futures.wait_all(futs):
+                self.assertEqual(val, 0)
 
     def test_wait_all_workers(self):
         rpc.init_rpc(
@@ -1242,9 +1240,9 @@ class RpcTest(RpcAgentTestFixture):
             futs.append(fut)
 
         j = 0
-        for fut in futs:
+        for val in torch.futures.wait_all(futs):
             self.assertEqual(
-                fut.wait(), my_tensor_function(torch.ones(j, j), torch.ones(j, j))
+                val, my_tensor_function(torch.ones(j, j), torch.ones(j, j))
             )
             j += 1
 
@@ -1310,8 +1308,8 @@ class RpcTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(worker_name(dst_rank), f, args=args)
             futs.append(fut)
 
-        for fut in futs:
-            self.assertEqual(fut.wait(), 0)
+        for val in torch.futures.wait_all(futs):
+            self.assertEqual(val, 0)
         tok = time.time()
         print(
             "Rank {} finished testing {} times in {} seconds.".format(
@@ -2450,7 +2448,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_cuda(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         t1 = torch.rand(3, 3).cuda(0)
@@ -2944,6 +2941,56 @@ class RpcTest(RpcAgentTestFixture):
 
         wait_until_owners_and_forks_on_rank(1, 1, rank=1)
 
+    @dist_init(setup_rpc=False)
+    def test_init_pg_then_rpc(self):
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        # Test RPC.
+        next_rank = (self.rank + 1) % self.world_size
+        ret = rpc.rpc_sync(worker_name(next_rank), torch.add, args=(torch.ones(2, 2), 1))
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+        # Test PG
+        dist.barrier()
+
+    @dist_init(setup_rpc=False)
+    def test_init_rpc_then_pg(self):
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
+        # Test RPC.
+        next_rank = (self.rank + 1) % self.world_size
+        ret = rpc.rpc_sync(worker_name(next_rank), torch.add, args=(torch.ones(2, 2), 1))
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+        # Test PG
+        dist.barrier()
+
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
@@ -3175,6 +3222,8 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         )
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref.to_here(0.01)
+
+        rref.to_here()
 
     @dist_init(faulty_messages=[])
     def test_rpc_builtin_timeout(self):
