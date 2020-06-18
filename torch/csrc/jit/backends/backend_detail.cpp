@@ -6,41 +6,19 @@ namespace jit {
 namespace detail {
 
 namespace {
-// Get a reference to the registry of all currently registered backends. The
-// primary use for this is to create Python bindings for lowering a Module to
-// every backend in the registry.
-std::vector<std::string>& getBackendRegistry() {
+std::vector<std::string>& getBackendRegistryInternal() {
   static std::vector<std::string> registry;
   return registry;
 }
-
-// Get a reference to the list of all callbacks that should be called when a
-// backend is registered. This is primarily used for creating Python bindings
-// for lowering to backends from Python.
-std::vector<BackendRegistrationCallback>& getBackendRegistrationCallbacks() {
-  static std::vector<BackendRegistrationCallback> callbacks;
-  return callbacks;
-}
 } // namespace
 
-void registerBackend(const std::string& backend_name) {
-  // Call all registered callbacks on this backend.
-  for (auto& callback : getBackendRegistrationCallbacks()) {
-    callback(backend_name);
-  }
-
-  // Add the backend to the backend registry.
-  getBackendRegistry().emplace_back(backend_name);
+const std::vector<std::string>& getBackendRegistry() {
+  return getBackendRegistryInternal();
 }
 
-void addBackendRegistrationCallback(BackendRegistrationCallback callback) {
-  // Call this callback on all registered backends.
-  for (auto& backend : getBackendRegistry()) {
-    callback(backend);
-  }
-
-  // Add the callback to the callback registry.
-  getBackendRegistrationCallbacks().emplace_back(std::move(callback));
+void registerBackend(const std::string& backend_name) {
+  // Add the backend to the backend registry.
+  getBackendRegistryInternal().emplace_back(backend_name);
 }
 
 c10::FunctionSchema getPreprocessSchema() {
@@ -86,7 +64,6 @@ c10::FunctionSchema getExecuteSchema() {
       /*arguments=*/{self, handle, input},
       /*returns=*/{output});
 }
-
 } // namespace detail
 } // namespace jit
 } // namespace torch

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
+#include <torch/csrc/jit/backends/backend_python.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
