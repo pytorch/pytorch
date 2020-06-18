@@ -109,7 +109,7 @@ class RandomSampler(Sampler):
         if self.replacement:
             for _ in range(self.num_samples // n):
                 yield from torch.randint(high=n, size=(n,), dtype=torch.int64, generator=self.generator).tolist()
-            yield from torch.randint(high=n, size=(self.num_samples % n), dtype=torch.int64, generator=self.generator).tolist()
+            yield from torch.randint(high=n, size=(self.num_samples % n,), dtype=torch.int64, generator=self.generator).tolist()
         else:
             yield from torch.randperm(n, generator=self.generator).tolist()
 
