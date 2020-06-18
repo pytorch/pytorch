@@ -349,6 +349,21 @@ TEST(Vec256TestFloat, CopyTest) {
   ASSERT_TRUE(check_equal(a, b));
 }
 
+TEST(Vec256TestFloat, arangeTest) {
+  at::Tensor arange_output_ref = at::zeros({8});
+  at::Tensor arange_output_vectorized = at::zeros({8});
+  float base = 7.f;
+  float step = 5.f;
+  float* ref_output_ptr = arange_output_ref.data_ptr<float>();
+  for (int64_t i = 0; i < 8; ++i) {
+    ref_output_ptr[i] = base + i * step;
+  }
+  float* vec_output_ptr = arange_output_vectorized.data_ptr<float>();
+  auto arange_output = Vec256<float>::arange(base, step);
+  arange_output.store(vec_output_ptr);
+  ASSERT_TRUE(check_equal(arange_output_ref, arange_output_vectorized));
+}
+
 // Checks blend and blendv.
 TEST(Vec256TestFloat, Blend) {
   at::Tensor a = at::rand({23, 23});
