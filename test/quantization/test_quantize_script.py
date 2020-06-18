@@ -11,6 +11,7 @@ from torch.quantization import (
     QConfig,
     default_dynamic_qconfig,
     default_observer,
+    per_channel_dynamic_qconfig,
     default_per_channel_weight_observer,
     default_qconfig,
     get_default_qconfig,
