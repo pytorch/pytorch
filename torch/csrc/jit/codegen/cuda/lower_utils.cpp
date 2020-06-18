@@ -200,49 +200,6 @@ struct CloneLoopNest : public OptOutMutator {
 };
 
 struct ReplaceExprsInScope : public OptOutDispatch {
- private:
-  std::unordered_map<Expr*, Expr*> replacement_map_;
-
-  void handle(Expr* expr) final {
-    OptOutDispatch::handle(expr);
-  }
-
-  void handle(ForLoop* fl) final {
-    for (Expr* expr : fl->body().exprs()) {
-      auto it = replacement_map_.find(expr);
-      if (it == replacement_map_.end()) {
-        handle(expr);
-        continue;
-      }
-      fl->body().insert_before(expr, replacement_map_[expr]);
-      fl->body().erase(expr);
-    }
-  }
-
-  void handle(IfThenElse* ite) final {
-    for (Expr* expr : ite->body().exprs()) {
-      auto it = replacement_map_.find(expr);
-      if (it == replacement_map_.end()) {
-        handle(expr);
-        continue;
-      }
-      ite->body().insert_before(expr, replacement_map_[expr]);
-      ite->body().erase(expr);
-    }
-    for (Expr* expr : ite->elseBody().exprs()) {
-      auto it = replacement_map_.find(expr);
-      if (it == replacement_map_.end()) {
-        handle(expr);
-        continue;
-      }
-      ite->elseBody().insert_before(expr, replacement_map_[expr]);
-      ite->elseBody().erase(expr);
-    }
-  }
-
-  ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> _replacement_map)
-      : replacement_map_(std::move(_replacement_map)) {}
-
  public:
   static void replace(
       Expr* scope,
@@ -250,6 +207,37 @@ struct ReplaceExprsInScope : public OptOutDispatch {
     ReplaceExprsInScope reis(std::move(replacement_map));
     reis.handle(scope);
   }
+
+ private:
+  explicit ReplaceExprsInScope(std::unordered_map<Expr*, Expr*> replacement_map)
+      : replacement_map_(std::move(replacement_map)) {}
+
+  void handleScope(Scope& scope) {
+    for (size_t i = 0; i < scope.size(); ++i) {
+      const auto it = replacement_map_.find(scope[i]);
+      if (it == replacement_map_.end()) {
+        handle(scope[i]);
+        continue;
+      }
+      scope[i] = it->second;
+    }
+  }
+
+  void handle(Expr* expr) final {
+    OptOutDispatch::handle(expr);
+  }
+
+  void handle(ForLoop* fl) final {
+    handleScope(fl->body());
+  }
+
+  void handle(IfThenElse* ite) final {
+    handleScope(ite->body());
+    handleScope(ite->elseBody());
+  }
+
+ private:
+  std::unordered_map<Expr*, Expr*> replacement_map_;
 };
 
 struct FirstInnerMostScope : private OptInDispatch {

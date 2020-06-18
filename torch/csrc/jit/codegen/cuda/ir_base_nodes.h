@@ -247,10 +247,6 @@ struct TORCH_CUDA_API Val : public Statement {
   const DataType dtype_;
 };
 
-// TODO: We should use this for the following:
-//    Fusion
-//    IfThenElse
-//    ForLoop
 struct TORCH_CUDA_API Scope {
  public:
   const std::vector<Expr*>& exprs() const noexcept {
@@ -275,6 +271,14 @@ struct TORCH_CUDA_API Scope {
 
   auto size() const {
     return exprs_.size();
+  }
+
+  auto& operator[](size_t i) {
+    return exprs_[i];
+  }
+
+  auto& operator[](size_t i) const {
+    return exprs_[i];
   }
 
   // Insert expr before ref
