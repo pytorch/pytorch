@@ -32,6 +32,10 @@ namespace {
 static inline __host__ __device__ at::Half pow_(at::Half base, at::Half exp) {
   return static_cast<at::Half>(std::pow(static_cast<float>(base), static_cast<float>(exp)));
 }
+// pow for at::BFloat16
+static inline __host__ __device__ at::BFloat16 pow_(at::BFloat16 base, at::BFloat16 exp) {
+  return static_cast<at::BFloat16>(std::pow(static_cast<float>(base), static_cast<float>(exp)));
+}
 // pow (floating, floating/int)
 template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ typename std::enable_if<std::is_floating_point<Base_type>::value && (std::is_same<Base_type, Exp_type>::value || std::is_same<Exp_type, int>::value), Base_type>::type
