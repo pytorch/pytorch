@@ -25,11 +25,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
 )
-from torch.testing._internal.common_quantized import (
-    override_quantized_engine,
-    supported_qengines,
-    override_qengines,
-)
+from torch.testing._internal.common_quantized import override_qengines
 
 
 class SubModule(torch.nn.Module):
@@ -87,7 +83,6 @@ class ModelWithFunctionals(torch.nn.Module):
 
 
 class TestEagerModeNumericSuite(QuantizationTestCase):
-
     @override_qengines
     def test_compare_weights_conv_static(self):
         r"""Compare the weights of float and static quantized conv layer
@@ -103,10 +98,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             for k, v in weight_dict.items():
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
-        model_list = [
-            AnnotatedConvModel(qengine),
-            AnnotatedConvBnReLUModel(qengine),
-        ]
+        model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):
@@ -182,17 +174,16 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             for k, v in ob_dict.items():
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
-        model_list = [
-            AnnotatedConvModel(qengine),
-            AnnotatedConvBnReLUModel(qengine),
-        ]
+        model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
         module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):
                 model.fuse_model()
             q_model = quantize(model, default_eval_fn, self.img_data)
-            compare_and_validate_results(model, q_model, module_swap_list, self.img_data[0][0])
+            compare_and_validate_results(
+                model, q_model, module_swap_list, self.img_data[0][0]
+            )
 
     @override_qengines
     def test_compare_model_stub_linear_static(self):
@@ -242,9 +233,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         self.assertTrue(isinstance(q_model.mod1, Shadow))
         self.assertFalse(isinstance(q_model.conv, Shadow))
         for k, v in ob_dict.items():
-            torch.testing.assert_allclose(
-                v["float"], v["quantized"].dequantize()
-            )
+            torch.testing.assert_allclose(v["float"], v["quantized"].dequantize())
 
     @override_qengines
     def test_compare_model_stub_functional_static(self):
@@ -319,10 +308,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             for k, v in act_compare_dict.items():
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
-        model_list = [
-            AnnotatedConvModel(qengine),
-            AnnotatedConvBnReLUModel(qengine),
-        ]
+        model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):
@@ -384,9 +370,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             "my_scalar_mul.stats",
             "quant.stats",
         }
-        self.assertTrue(
-            act_compare_dict.keys() == expected_act_compare_dict_keys
-        )
+        self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
         for k, v in act_compare_dict.items():
             self.assertTrue(v["float"].shape == v["quantized"].shape)
 
