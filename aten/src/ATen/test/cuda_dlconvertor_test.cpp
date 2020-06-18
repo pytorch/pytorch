@@ -5,6 +5,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAContext.h>
 
 #include <string.h>
@@ -43,7 +44,7 @@ TEST(TestDlconvertor, TestDlconvertorCUDAHIP) {
   Tensor a = rand({3, 4}, at::kCUDA);
   DLManagedTensor* dlMTensor = toDLPack(a);
 
-#ifdef __HIP_PLATFORM_HCC__
+#if AT_ROCM_ENABLED()
   ASSERT_TRUE(dlMTensor->dl_tensor.ctx.device_type == DLDeviceType::kDLROCM);
 #else
   ASSERT_TRUE(dlMTensor->dl_tensor.ctx.device_type == DLDeviceType::kDLGPU);

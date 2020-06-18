@@ -1,4 +1,5 @@
 #include <ATen/DLConvertor.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/Functions.h>
 
 #include <iostream>
@@ -76,8 +77,9 @@ DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
       ctx.device_type = DLDeviceType::kDLCPU;
       break;
     case DeviceType::CUDA:
-#ifdef __HIP_PLATFORM_HCC__
-      // while it is cuda to us, everyone else says HIP
+#if AT_ROCM_ENABLED()
+      // ROCM, if enabled will look like cuda to PyTorch
+      // while everyone else should see HIP
       ctx.device_type = DLDeviceType::kDLROCM;
 #else
       ctx.device_type = DLDeviceType::kDLGPU;
@@ -99,7 +101,7 @@ static Device getATenDevice(const DLContext& ctx) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
-#ifndef __HIP_PLATFORM_HCC__
+#if ! AT_ROCM_ENABLED()
     // if we are compiled under HIP, we cannot do cuda
     case DLDeviceType::kDLGPU:
       return at::Device(DeviceType::CUDA, ctx.device_id);
@@ -107,7 +109,7 @@ static Device getATenDevice(const DLContext& ctx) {
     case DLDeviceType::kDLOpenCL:
       return at::Device(DeviceType::OPENCL, ctx.device_id);
     case DLDeviceType::kDLROCM:
-#ifdef __HIP_PLATFORM_HCC__
+#if AT_ROCM_ENABLED()
       // this looks funny, we need to return CUDA here to masquerade
       return at::Device(DeviceType::CUDA, ctx.device_id);
 #else
