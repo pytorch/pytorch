@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
@@ -321,6 +322,10 @@ script::Module optimizeForMobile(
 
   if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
     removeDropout(cloned_module);
+  }
+
+  if (!optimization_blacklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
+    FuseAddRelu(cloned_module);
   }
 
   return cloned_module;
