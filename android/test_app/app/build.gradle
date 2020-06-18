@@ -124,9 +124,10 @@ dependencies {
     localImplementation project(':pytorch_android')
     localImplementation project(':pytorch_android_torchvision')
 
-    nativeBuildImplementation(name: 'pytorch_android-1.6.0-SNAPSHOT', ext: 'aar')
-    nativeBuildImplementation(name: 'pytorch_android_torchvision-1.6.0-SNAPSHOT', ext: 'aar')
-    extractForNativeBuild(name: 'pytorch_android-1.6.0-SNAPSHOT', ext: 'aar')
+    nativeBuildImplementation(name: 'pytorch_android-release', ext: 'aar')
+    nativeBuildImplementation(name: 'pytorch_android_torchvision-release', ext: 'aar')
+    // Commented due to dependency on local copy of pytorch_android aar to aars folder
+    //extractForNativeBuild(name: 'pytorch_android-release', ext: 'aar')
 
     nightlyImplementation 'org.pytorch:pytorch_android:1.6.0-SNAPSHOT'
     nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.6.0-SNAPSHOT'

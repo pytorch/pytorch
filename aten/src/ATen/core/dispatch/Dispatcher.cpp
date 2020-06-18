@@ -198,6 +198,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   OperatorName op_name,
   c10::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
+  c10::optional<impl::CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
@@ -205,7 +206,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   auto op = findOrRegisterName_(op_name);
 
-  auto handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(inferred_function_schema), std::move(debug));
+  auto handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(cpp_signature), std::move(inferred_function_schema), std::move(debug));
 
   ++op.operatorIterator_->def_and_impl_count;
 
