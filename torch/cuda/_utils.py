@@ -1,9 +1,10 @@
 import torch
 import torch._six
 from typing import Optional, Union
+from torch.types import Device
 
 
-def _get_device_index(device: Optional[Union[str, torch.device, int]], optional=False) -> int:
+def _get_device_index(device: Union[Device, int], optional=False) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
 
