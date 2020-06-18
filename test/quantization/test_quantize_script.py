@@ -1214,6 +1214,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                         self.relu = torch.nn.ReLU()
                 else:
                     self.relu = torch.nn.Identity()
+
             def forward(self, x):
                 return self.relu(self.linear(x))
 
@@ -1229,6 +1230,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                         self.relu = torch.nn.ReLU()
                 else:
                     self.relu = torch.nn.Identity()
+
             def forward(self, x):
                 return self.relu(F.linear(x, self.w, self.b))
 
