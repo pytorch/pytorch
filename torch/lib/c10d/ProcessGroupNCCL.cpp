@@ -298,6 +298,18 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
 #endif
+
+  if (blockingWait_) {
+    // Abort all NCCL Communicators on Process Group Destruction
+    std::unique_lock<std::mutex> lock(mutex_);
+    for (auto it = devNCCLCommMap_.begin(); it != devNCCLCommMap_.end(); it++) {
+      auto& ncclComms = it->second;
+
+      for (const auto& ncclComm : ncclComms) {
+        ncclComm->ncclCommAbort();
+      }
+    }
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
