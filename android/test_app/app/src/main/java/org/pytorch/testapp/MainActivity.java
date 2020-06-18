@@ -102,7 +102,6 @@ public class MainActivity extends AppCompatActivity {
     final long moduleForwardDuration = SystemClock.elapsedRealtime() - moduleForwardStartTime;
     final float[] scores = outputTensor.getDataAsFloatArray();
     final long analysisDuration = SystemClock.elapsedRealtime() - startTime;
-    Log.i(TAG, "XXX scores:" + Arrays.toString(scores));
     return new Result(scores, moduleForwardDuration, analysisDuration);
   }
 
@@ -122,7 +121,6 @@ public class MainActivity extends AppCompatActivity {
   @UiThread
   protected void handleResult(Result result) {
     String message = String.format("forwardDuration:%d", result.moduleForwardDuration);
-    Log.i(TAG, "XXX:" + message);
     mTextViewStringBuilder.insert(0, '\n').insert(0, message);
     if (mTextViewStringBuilder.length() > TEXT_TRIM_SIZE) {
       mTextViewStringBuilder.delete(TEXT_TRIM_SIZE, mTextViewStringBuilder.length());

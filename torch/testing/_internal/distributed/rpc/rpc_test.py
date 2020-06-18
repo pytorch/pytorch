@@ -2448,7 +2448,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_cuda(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         t1 = torch.rand(3, 3).cuda(0)
@@ -3223,6 +3222,8 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         )
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref.to_here(0.01)
+
+        rref.to_here()
 
     @dist_init(faulty_messages=[])
     def test_rpc_builtin_timeout(self):

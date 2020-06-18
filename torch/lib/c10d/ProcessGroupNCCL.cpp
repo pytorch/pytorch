@@ -564,11 +564,8 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
     if (t.sizes() != first.sizes()) {
       throw std::runtime_error("Tensors must have identical size");
     }
-    if (t.strides() != first.strides()) {
-      throw std::runtime_error("Tensors must have identical strides");
-    }
-    if (!t.is_non_overlapping_and_dense()) {
-      throw std::runtime_error("Tensors must be non-overlapping and dense");
+    if (!t.is_contiguous()) {
+      throw std::runtime_error("Tensors must be contiguous");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
@@ -608,13 +605,9 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     }
 
     for (const auto& t : tensor_lists[i]) {
-      if (t.sizes() != other[i].sizes()) {
+      if (t.numel() != other[i].numel()) {
         throw std::runtime_error(
             "All tensor operands to scatter/gather must have the same size");
-      }
-      if (t.strides() != other[i].strides()) {
-        throw std::runtime_error(
-            "All tensor operands to scatter/gather must have the same layout (strides)");
       }
     }
     // Flatten the tensors (from all ranks) into a single big tensor.

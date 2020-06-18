@@ -73,9 +73,7 @@ def backward(
     all tensors that don't need gradient tensors).
 
     This function accumulates gradients in the leaves - you might need to zero
-    ``.grad`` attributes or set them to ``None`` before calling it.
-    See :ref:`Default gradient layouts<default-grad-layouts>`
-    for details on the memory layout of accumulated gradients.
+    them before calling it.
 
     .. note::
         Using this method with ``create_graph=True`` will create a reference cycle
