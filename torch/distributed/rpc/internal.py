@@ -72,6 +72,11 @@ class _InternalRPCPickler:
         # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
         # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
         # so puting rref's dispatch table here
+        #
+        # The return value of a `rpc.remote(..)` call is type of `rpc.PyRRef`.
+        # The deserialized RRef object on an RPC receiver side is type of `rpc.PyRRef`.
+        p.dispatch_table[dist.rpc.PyRRef] = self._rref_reducer
+        # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call

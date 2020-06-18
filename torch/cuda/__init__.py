@@ -15,7 +15,7 @@ import traceback
 import warnings
 import threading
 from torch._six import raise_from
-from ._utils import _get_device_index
+from ._utils import _get_device_index, _dummy_type
 import torch._C
 
 try:
@@ -403,14 +403,6 @@ from .random import *
 
 
 from ..storage import _StorageBase
-
-
-def _dummy_type(name):
-    def init_err(self):
-        class_name = self.__class__.__name__
-        raise RuntimeError(
-            "Tried to instantiate dummy base class {}".format(class_name))
-    return type(storage_name, (object,), {"__init__": init_err})
 
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
