@@ -55,6 +55,7 @@ def generate_code(ninja_global=None,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
+            selected_op_list=selected_op_list,
         )
         gen_unboxing_wrappers(
             declarations_path or DECLARATIONS_PATH,
