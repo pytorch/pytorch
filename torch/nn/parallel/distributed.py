@@ -148,6 +148,46 @@ class DistributedDataParallel(Module):
         (e.g. BatchNorm stats) are broadcast from the module in process of rank
         0, to all other replicas in the system in every iteration.
 
+    .. note::
+        If you are using DistributedDataParallel in conjunction with the
+        :ref:`distributed-rpc-framework`, you should always use
+        :meth:`torch.distributed.autograd.backward` to compute gradients and
+        :class:`torch.distributed.optim.DistributedOptimizer` for optimizing
+        parameters.
+
+    Example::
+        >>> import torch.distributed.autograd as dist_autograd
+        >>> from torch.nn.parallel import DistributedDataParallel as DDP
+        >>> from torch import optim
+        >>> from torch.distributed.optim import DistributedOptimizer
+        >>> from torch.distributed.rpc import RRef
+        >>>
+        >>> t1 = torch.rand((3, 3), requires_grad=True)
+        >>> t2 = torch.rand((3, 3), requires_grad=True)
+        >>> rref = rpc.remote("worker1", torch.add, args=(t1, t2))
+        >>> ddp_model = DDP(my_model)
+        >>>
+        >>> # Setup optimizer
+        >>> optimizer_params = [rref]
+        >>> for param in ddp_model.parameters():
+        >>>     optimizer_params.append(RRef(param))
+        >>>
+        >>> dist_optim = DistributedOptimizer(
+        >>>     optim.SGD,
+        >>>     optimizer_params,
+        >>>     lr=0.05,
+        >>> )
+        >>>
+        >>> with dist_autograd.context() as context_id:
+        >>>     pred = ddp_model(rref.to_here())
+        >>>     loss = loss_func(pred, loss)
+        >>>     dist_autograd.backward(context_id, loss)
+        >>>     dist_optim.step()
+
+    .. warning::
+        Using DistributedDataParallel in conjuction with the
+        :ref:`distributed-rpc-framework` is experimental and subject to change.
+
     Args:
         module (Module): module to be parallelized
         device_ids (list of int or torch.device): CUDA devices. This should
@@ -320,9 +360,6 @@ class DistributedDataParallel(Module):
                 "Please consider using one DDP instance per device or per "
                 "module replica by explicitly setting device_ids or "
                 "CUDA_VISIBLE_DEVICES. "
-                "NB: There is a known issue in nn.parallel.replicate that "
-                "prevents a single DDP instance to operate on multiple model "
-                "replicas."
             )
 
             # only create replicas for single-device CUDA modules
