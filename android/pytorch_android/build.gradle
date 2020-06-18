@@ -15,6 +15,11 @@ android {
         ndk {
             abiFilters ABI_FILTERS.split(",")
         }
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
     }
     buildTypes {
         debug {
