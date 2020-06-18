@@ -9,7 +9,7 @@ else
   cmake3=cmake
 fi
 
-if [[ "$UBUNTU_VERSION" == "18.04" ]]; then
+if [[ "$UBUNTU_VERSION" == "18.04"* ]]; then
   cmake3="cmake=3.10*"
 else
   cmake3="${cmake3}=3.5*"

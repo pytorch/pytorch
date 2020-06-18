@@ -126,7 +126,7 @@ case "$image" in
     KATEX=yes
     ;;
   pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7)
-    UBUNTU_VERSION=18.04-rc
+    UBUNTU_VERSION=16.04-rc
     CUDA_VERSION=11.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
