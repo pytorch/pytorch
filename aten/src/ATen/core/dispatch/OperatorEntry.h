@@ -110,7 +110,9 @@ public:
         CppSignature::make<FuncType>().name(),
         " but the operator was registered with ",
         cpp_signature_->name(),
-        " This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
+        " (",
+        debug_.value(),
+        ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
     );
   }
 
