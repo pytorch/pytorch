@@ -23,3 +23,6 @@ def fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b):
     conv_b = (conv_b - bn_rm) * bn_var_rsqrt * bn_w + bn_b
 
     return torch.nn.Parameter(conv_w), torch.nn.Parameter(conv_b)
+
+def fuse_conv_bn_script(model):
+    return torch.jit._recursive.wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))

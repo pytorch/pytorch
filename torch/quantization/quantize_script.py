@@ -5,6 +5,7 @@ import enum
 import torch
 from .qconfig import QConfig
 from torch.jit._recursive import wrap_cpp_module
+from torch.nn.utils.fusion import fuse_conv_bn_script
 
 # Quantization type (dynamic quantization, static quantization).
 # Should match the c++ enum in quantization_type.h
@@ -35,7 +36,7 @@ def _prepare_script(model, qconfig_dict, inplace=False, quant_type=QuantType.STA
     if not all(isinstance(x, str) for x in qconfig_dict.keys()):
         raise ValueError('qconfig_dict should only contain names(str) as keys.')
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
-    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+    model = fuse_conv_bn_script(model)
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
                                                                scripted_qconfig_dict,
