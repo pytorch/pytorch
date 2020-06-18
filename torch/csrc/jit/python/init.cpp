@@ -537,7 +537,10 @@ void initJITBindings(PyObject* module) {
           [](script::Module& module) { return FoldPrePackingOps(module); })
       .def(
           "_jit_pass_optimize_for_mobile",
-          [](script::Module& module) { return optimizeForMobile(module); })
+          [](script::Module& module,
+             std::set<MobileOptimizerType>& optimization_blacklist) {
+            return optimizeForMobile(module, optimization_blacklist);
+          })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
@@ -667,6 +670,14 @@ void initJITBindings(PyObject* module) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
           });
+
+  py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
+      .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
+      .value(
+          "INSERT_FOLD_PREPACK_OPS",
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)
+      .value("REMOVE_DROPOUT", MobileOptimizerType::REMOVE_DROPOUT)
+      .export_values();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
