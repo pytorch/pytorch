@@ -2093,7 +2093,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         data = [(torch.rand((1, 2, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
         elu = torch.nn.ELU()
         for tracing in [True, False]:
-            m = self._test_op_impl(elu, data, "quantized::elu", tracing)
+            m = self.checkGraphModeOp(elu, data, "quantized::elu", tracing)
             FileCheck().check_not("aten::elu") \
                        .run(m.graph)
 
@@ -2124,8 +2124,7 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         options = itertools.product([1, 2, 3], [True, False])
         for dim, tracing in options:
-            # TODO: handle affine == False (separate PR)
-            instance_norm = instance_norm_modules[dim](4, affine=True)
+            instance_norm = instance_norm_modules[dim](4)
             m = self.checkGraphModeOp(
                 instance_norm, data[dim], "quantized::instance_norm", tracing)
             FileCheck().check_not("aten::instance_norm") \
@@ -2217,6 +2216,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                 x = x.unsqueeze(0)
                 x.unsqueeze_(0)
                 x = torch.unsqueeze(x, 0)
+                x = x.detach()
+                x.detach_()
                 x = x.repeat(4, 2)
                 y = []
                 y.append(x)
