@@ -473,7 +473,36 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
-      module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
+      module,
+      "TensorPipeRpcBackendOptions",
+      rpcBackendOptions,
+      R"(
+          The backend options for ``TensorPipeAgent``, derived from
+          ``RpcBackendOptions``.
+
+          Arguments:
+              num_worker_threads (int, optional): The number of threads in the
+                  thread-pool used by ``TensorPipeAgent`` to execute requests
+                  (default: 16).
+              _transports (list, optional): THIS IS AN ADVANCED PARAMETER, DO
+                  NOT USE UNLESS INSTRUCTED TO. The names of the TensorPipe
+                  transports that the agent should register, in order of
+                  decreasing priority.
+              _channels (list, optional): THIS IS AN ADVANCED PARAMETER, DO NOT
+                  USE UNLESS INSTRUCTED TO. The names of the TensorPipe channels
+                  that the agent should register, in order of decreasing
+                  priority.
+              rpc_timeout (float, optional): The default timeout, in seconds,
+                  for RPC requests (default: 60 seconds). If the RPC has not
+                  completed in this timeframe, an exception indicating so will
+                  be raised. Callers can override this timeout for individual
+                  RPCs in :meth:`~torch.distributed.rpc.rpc_sync` and
+                  :meth:`~torch.distributed.rpc.rpc_async` if necessary.
+              init_method (str, optional): The URL to initialize the distributed
+                  store used for rendezvous. It takes any value accepted for the
+                  same argument of :meth:`~torch.distributed.init_process_group`
+                  (default: ``env://``).
+      )")
       .def(
           py::init<
               int,
@@ -487,7 +516,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
           py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
-          "num_worker_threads", &TensorPipeRpcBackendOptions::numWorkerThreads);
+          "num_worker_threads",
+          &TensorPipeRpcBackendOptions::numWorkerThreads,
+          R"(
+              The number of threads in the thread-pool used by
+              ``TensorPipeAgent`` to execute requests.
+          )");
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);
