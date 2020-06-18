@@ -2756,7 +2756,6 @@ Tensor mkldnn_convolution_forward(const Tensor& self_fw_grad, const Tensor& weig
   }
 
   if (weight_fw_grad.defined()) {
-    TORCH_CHECK(bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
     auto val = at::mkldnn_convolution(self, weight_fw_grad, bias_fw_grad, padding, stride, dilation, groups);
     if (out_fw_grad.defined()) {
       out_fw_grad = out_fw_grad + val;
@@ -2779,8 +2778,29 @@ Tensor thnn_conv2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight
   }
 
   if (weight_fw_grad.defined()) {
-    TORCH_CHECK(bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
     auto val = std::get<0>(at::thnn_conv2d_forward(self, weight_fw_grad, kernel_size, bias_fw_grad, stride, padding));
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + val;
+    } else {
+      out_fw_grad = val;
+    }
+  } else {
+    TORCH_CHECK(!bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
+  }
+
+  return out_fw_grad;
+}
+
+Tensor slow_conv_dilated2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, IntArrayRef kernel_size, const Tensor& bias_fw_grad,
+        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
+  Tensor out_fw_grad;
+
+  if (self_fw_grad.defined()) {
+    out_fw_grad = at::slow_conv_dilated2d(self_fw_grad, weight, kernel_size, Tensor(), stride, padding, dilation);
+  }
+
+  if (weight_fw_grad.defined()) {
+    auto val = at::slow_conv_dilated2d(self, weight_fw_grad, kernel_size, bias_fw_grad, stride, padding, dilation);
     if (out_fw_grad.defined()) {
       out_fw_grad = out_fw_grad + val;
     } else {
@@ -2902,6 +2922,27 @@ Tensor stack_forward(TensorList tensors, int64_t dim) {
   return out_fw_grad;
 }
 
+Tensor cat_forward(TensorList tensors, int64_t dim) {
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (auto& t: tensors) {
+    any_defined |= t.fw_grad().defined();
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+
+    for (auto& t: tensors) {
+      fw_grads.push_back(t.fw_grad().defined()? t.fw_grad(): at::zeros_like(t));
+    }
+
+    out_fw_grad = at::cat(fw_grads, dim);
+  }
+
+  return out_fw_grad;
+}
+
 Tensor max_forward(const Tensor& self_fw_grad, const Tensor& self, const Tensor& result) {
   Tensor out_fw_grad;
   if (self_fw_grad.defined()) {
@@ -2929,5 +2970,15 @@ Tensor index_add_forward(const Tensor& self_fw_grad, const Tensor& source_fw_gra
     }
     return out_fw_grad;
   }
+}
+
+// Utility function used in derivatives.yaml for different loss functions
+static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+  if (reduction == at::Reduction::Mean) {
+    return unreduced.mean();
+  } else if (reduction == at::Reduction::Sum) {
+    return unreduced.sum();
+  }
+  return unreduced;
 }
 

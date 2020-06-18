@@ -273,7 +273,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
     return _tuple_postprocess(outputs, is_outputs_tuple), _tuple_postprocess(vjp, is_inputs_tuple)
 
 
-def jvp(func, inputs, v=None, create_graph=False, strict=False):
+def jvp(func, inputs, v=None, create_graph=False, strict=False, fw_mode=True):
     r"""Function that computes the dot product between  the Jacobian of
     the given function at the point given by the inputs and a vector ``v``.
 
@@ -295,6 +295,9 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
             independent of it. If ``False``, we return a Tensor of zeros as the
             jvp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
+        fw_mode (bool, optional): If ``True``, forward mode AD will be used to
+            compute the jvp otherwise, the backward of backward is used (sometimes
+            called the double backwards trick).
 
     Returns:
         jvp (tuple of Tensors or Tensor): result of the dot product with
@@ -321,15 +324,10 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         >>> jvp(adder, inputs, v)
         (tensor([2.2399, 2.5005]),
          tensor([5., 5.]))
-
-    Note:
-        The jvp is currently computed by using the backward of the backward
-        (sometimes called the double backwards trick) as we don't have support
-        for forward mode AD in PyTorch at the moment.
     """
 
 
-    if True:
+    if fw_mode:
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
         inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=False)
 
@@ -351,6 +349,10 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
 
         grad_res = tuple(out.fw_grad for out in outputs)
+        for i, g in enumerate(grad_res):
+            if g is None and strict:
+                raise RuntimeError("The output of the user-provided function is independent of "
+                                   "input {}. This is not allowed in strict mode.".format(i))
 
         # cleanup
         for el_inp in inputs:

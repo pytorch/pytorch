@@ -5101,7 +5101,9 @@ class TestAutogradFunctional(TestCase):
 
     def test_jvp_err_check_strict(self):
         def foo(a):
-            return a.detach()
+            out = a.detach()
+            out.fw_grad = None
+            return out
 
         def bar(a):
             # Make a non-leaf Tensor that requires_grad but that is not connected to the input
@@ -5109,13 +5111,13 @@ class TestAutogradFunctional(TestCase):
 
         inp = torch.rand(4)
         v = torch.rand(4)
-        with self.assertRaisesRegex(RuntimeError, "The gradient with respect to the input is independent of entry 0"):
+        with self.assertRaisesRegex(RuntimeError, "The output of the user-provided function is independent of input 0"):
             res = autogradF.jvp(foo, inp, v, strict=True)
         res = autogradF.jvp(foo, inp, v, strict=False)
         self._assert_same_struct(res[1], res[0])
         self.assertEqual(res[1].abs().sum(), 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "The gradient with respect to the input is independent of entry 0"):
+        with self.assertRaisesRegex(RuntimeError, "The output of the user-provided function is independent of input 0"):
             res = autogradF.jvp(bar, inp, v, strict=True)
         res = autogradF.jvp(bar, inp, v, strict=False)
         self._assert_same_struct(res[1], res[0])
@@ -5199,8 +5201,15 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
 
-        gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v))
-        gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v))
+        res = autogradF.jvp(reducer, inputs, v, create_graph=True, fw_mode=False)
+        self._assert_same_struct(res[1], res[0])
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+
+        gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v), mode="backward")
+        gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v), mode="backward")
+        gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True, fw_mode=False), (inputs, v))
+        gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True, fw_mode=False), (inputs, v))
 
         def adder(x, y):
             return 2 * x + 3 * y, x * y
@@ -5208,18 +5217,24 @@ class TestAutogradFunctional(TestCase):
         inputs = (torch.rand(2, requires_grad=True), torch.rand(2, requires_grad=True))
         v = (torch.tensor([1., 0.], requires_grad=True), torch.tensor([1., 0.], requires_grad=True))
 
-        gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
-        gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
+        gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v, mode="backward")
+        gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v, mode="backward")
+        gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True, fw_mode=False)[1], inputs + v)
+        gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True, fw_mode=False)[1], inputs + v)
 
+        fw_mode = True
         def foo(*args):
             x, y = args[:2]
             v = args[2:]
 
             x = x.cos()
-            val, grad = autogradF.jvp(adder, (x, y), v, create_graph=True)
+            val, grad = autogradF.jvp(adder, (x, y), v, create_graph=True, fw_mode=fw_mode)
 
             return val[0].exp() + val[1].exp() + grad[0].exp() + grad[1].exp() + x.exp() + y.exp()
 
+        gradcheck(foo, inputs + v, mode="backward")
+        gradgradcheck(foo, inputs + v, mode="backward")
+        fw_mode = False
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)
 

@@ -275,13 +275,10 @@ def gradcheck(
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
-<<<<<<< HEAD
         check_undefined_grad (bool, options): if True, check if undefined output grads
             are supported and treated as zeros
-=======
         mode (str, optional): which mode of computation should be used. Can be "backward" to test
             backward mode AD, "forward" to test forward mode AD or "all" to test all of them.
->>>>>>> gradcheck update
 
     Returns:
         True if all differences satisfy allclose condition
@@ -423,17 +420,23 @@ def gradcheck(
 
             def check_undefined_grad_support(output_to_check):
                 grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_to_check]
-                try:
-                    grads_input = torch.autograd.grad(output_to_check,
-                                                      diff_input_list,
-                                                      grads_output,
-                                                      allow_unused=True)
-                except RuntimeError:
-                    warn_bc_breaking()
-                    return fail_test((
-                        'Expected backward function to handle undefined output grads. '
-                        'Please look at "Notes about undefined output gradients" in '
-                        '"tools/autograd/derivatives.yaml"'))
+                grads_input = torch.autograd.grad(output_to_check,
+                                                  diff_input_list,
+                                                  grads_output,
+                                                  allow_unused=True,
+                                                  retain_graph=True)
+                # try:
+                #     grads_input = torch.autograd.grad(output_to_check,
+                #                                       diff_input_list,
+                #                                       grads_output,
+                #                                       allow_unused=True,
+                #                                       retain_graph=True)
+                # except RuntimeError:
+                #     warn_bc_breaking()
+                #     return fail_test((
+                #         'Expected backward function to handle undefined output grads. '
+                #         'Please look at "Notes about undefined output gradients" in '
+                #         '"tools/autograd/derivatives.yaml"'))
 
                 for gi, i in zip(grads_input, diff_input_list):
                     if (gi is not None) and (not gi.eq(0).all()):
@@ -456,6 +459,7 @@ def gradcheck(
                         for idx, o in enumerate(output_to_check)])
 
             for output_to_check in outputs_to_check:
+                print("loop")
                 if not check_undefined_grad_support(output_to_check):
                     return False
 

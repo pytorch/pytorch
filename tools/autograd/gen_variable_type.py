@@ -1251,7 +1251,7 @@ def emit_body(declaration):
     else:
         if requires_fw_derivatives:
             body.extend(emit_fw_derivatives())
-        elif not undifferentiable:
+        elif not undifferentiable and requires_derivative:
             body.append(emit_forbid_fw_derivatives())
 
     if requires_derivative:
