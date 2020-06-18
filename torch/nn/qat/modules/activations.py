@@ -43,7 +43,7 @@ class Hardswish(nn.Hardswish):
         return qat_hardswish
 
 class ELU(nn.ELU):
-    r"""This is the QAT equivalent of `torch.nn.ELU`.
+    r"""This is the QAT equivalent of :class:`torch.nn.ELU`.
     """
     _FLOAT_MODULE = nn.ELU
 
