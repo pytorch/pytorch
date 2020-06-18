@@ -125,7 +125,7 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-bionic-cuda11.0-cudnn8-py3-gcc7)
+  pytorch-linux-bionic-cuda11.0-cudnn8-py3-gcc8)
     UBUNTU_VERSION=18.04-rc
     CUDA_VERSION=11.0
     CUDNN_VERSION=8

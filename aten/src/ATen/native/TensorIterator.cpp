@@ -989,18 +989,8 @@ bool TensorIterator::fast_set_up(const TensorIteratorConfig& config) {
             op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor.strides(), op.options());
             op.current_dtype = op.target_dtype;
           }
-          else if (config.resize_outputs_ && !op.is_read_write) {
-            // Note: This restride logic is for some of the tensor types, eg. qtensor.
-            //       These tensor class allocate a contigious output tensor directly no matter
-            //       what memory format the input tensors are. So we need to restride output here for fast setup.
-            //       We will revisit this logic when doing the TensorIterator refactor work and
-            //       it would probably be better to move this logic out of TensorIterator.
-
-            // Check whether output tensor needs restride, output's stride can be different than input tensors
-            if (i != i_defined && !op.tensor.strides().equals(operands_[i_defined].tensor.strides())) {
-              op.tensor.as_strided_(op.tensor.sizes(), operands_[i_defined].tensor.strides());
-            }
-          }
+          // defined tensors always have the same shape and strides here, no re-stride outputs happens.
+          // see [Note: stride check for non contiguous tensors in fast setup]
         }
         break;
       }
@@ -1049,9 +1039,8 @@ FastSetupType TensorIterator::compute_fast_setup_type(const TensorIteratorConfig
   }
   if (is_non_overlapping_and_dense) {
     int64_t prev = -1;
-    // iterate from back to favor inputs' strides, then we check output strides.
-    // if only the output's strides is inconstent but all inputs' strides are equal,
-    // it is still a NON_OVERLAPPING_DENSE case and output will be restrided in fast_set_up()
+    // Fast setup is allowed only when all the defined tensors have the same shape and strides,
+    // Iterate from back to check input tensors' strides first, then output tensors'.
     for (int64_t i = ntensors() - 1; i >= 0; --i) {
       const auto& op = operands_[i];
       if (op.tensor.defined()) {
@@ -1060,9 +1049,16 @@ FastSetupType TensorIterator::compute_fast_setup_type(const TensorIteratorConfig
           continue;
         }
         if (!operands_[prev].tensor.strides().equals(op.tensor.strides())) {
-          if (!config.resize_outputs_ || !op.is_output || op.is_read_write) {
-            return FastSetupType::NONE;
-          }
+          // [Note: stride check for non contiguous tensors in fast setup]
+          // We prevent 3 cases doing fast setup here:
+          // 1. input tensors have different strides.
+          // 2. output tensors have different strides.
+          // 3. input tensors have the same strides, but output tensors have different strides with input tensors.
+          //    We don't allow re-stride output tensors in this case since it is not compatible with
+          //    numpy. The behavior in numpy is that if the output tensor has same shape as the input
+          //    tensor but different strides, the strides of output tensor will be preserved, so we do
+          //    the same in tensor iterator.
+          return FastSetupType::NONE;
         }
       }
     }
