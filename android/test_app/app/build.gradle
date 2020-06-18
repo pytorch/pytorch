@@ -41,21 +41,12 @@ android {
         buildConfigField("boolean", "NATIVE_BUILD", 'false')
         addManifestPlaceholders([APP_NAME: "@string/app_name", MAIN_ACTIVITY: "org.pytorch.testapp.MainActivity"])
     }
-    signingConfigs {
-        config {
-            storeFile file("testapp.keystore")
-            storePassword 'keystore'
-            keyAlias 'alias'
-            keyPassword 'keystore'
-        }
-    }
     buildTypes {
         debug {
             minifyEnabled false
             debuggable true
         }
         release {
-            signingConfig signingConfigs.config
             minifyEnabled false
         }
     }
