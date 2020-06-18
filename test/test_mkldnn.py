@@ -182,7 +182,7 @@ class TestMkldnn(TestCase):
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 112, 112, 112, dtype=torch.float32)
+            x = torch.randn(N, C, 55, 55, 55, dtype=torch.float32)
             for bias in [True, False]:
                 conv3d = torch.nn.Conv3d(in_channels=C,
                                          out_channels=M,
