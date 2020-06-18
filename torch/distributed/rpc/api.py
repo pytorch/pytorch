@@ -222,12 +222,12 @@ def shutdown(graceful=True):
                          complete.
 
     Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
+        >>> export MASTER_ADDR=localhost
+        >>> export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
@@ -436,12 +436,12 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         raised as they have not yet been handled.
 
     Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
+        >>> export MASTER_ADDR=localhost
+        >>> export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
@@ -662,12 +662,12 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         arguments or return values of ``func``.
 
     Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
+        >>> export MASTER_ADDR=localhost
+        >>> export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
@@ -751,12 +751,12 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         completes.
 
     Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
+        >>> export MASTER_ADDR=localhost
+        >>> export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
