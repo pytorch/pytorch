@@ -565,10 +565,6 @@ def get_testing_overrides():
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
-        torch.quantized_group_norm: lambda input, num_groups, weight, bias, eps, output_scale, output_zero_point: -1,
-        torch.quantized_instance_norm: lambda input, weight, bias, eps, output_scale, output_zero_point: -1,
-        torch.quantized_layer_norm: lambda input, normalized_shape, weight, bias, eps, output_scale, output_zero_point: -1,
-
         torch.quantized_gru_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                    col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
 

@@ -656,7 +656,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 X, x_scale, x_zero_point, dtype=torch.quint8)
             dqX = qX.dequantize()
 
-            float_mod = float_cls(dims[1], affine=True).float()
+            float_mod = float_cls(dims[1]).float()
             float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
             float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
 
