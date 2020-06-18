@@ -57,7 +57,7 @@ if is_available():
                 default, for all agents, it sets the default timeout to 60
                 seconds and performs the rendezvous with an underlying process
                 group initialized using ``init_method = "env://"``,
-                meaning that environment variables ``MASTER_ADDRESS`` and
+                meaning that environment variables ``MASTER_ADDR`` and
                 ``MASTER_PORT`` needs to be set properly. See
                 :ref:`rpc-backends` for more information and find which options
                 are available.
