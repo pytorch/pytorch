@@ -2448,7 +2448,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_cuda(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         t1 = torch.rand(3, 3).cuda(0)
