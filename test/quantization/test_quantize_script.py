@@ -2667,7 +2667,7 @@ class TestQuantizeScript(QuantizationTestCase):
         linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
         model_eager = quantize(annotated_linear_model, test_only_eval_fn, self.calib_data)
 
-        qconfig_dict = {'': torch.quantization.get_default_qconfig(torch.backends.quantized.engine)}
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
         model_script = torch.jit.script(linear_model)
         result_eager = model_eager(self.calib_data[0][0])
@@ -2732,7 +2732,7 @@ class TestQuantizeScript(QuantizationTestCase):
         # compare the result of the two quantized models later
         conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
         model_eager = quantize(annotated_conv_model, default_eval_fn, self.img_data)
-        qconfig_dict = {'': torch.quantization.get_default_qconfig(torch.backends.quantized.engine)}
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(conv_model, self.img_data[0][0])
         model_script = torch.jit.script(conv_model)
         result_eager = model_eager(self.img_data[0][0])
@@ -2825,7 +2825,7 @@ class TestQuantizeScript(QuantizationTestCase):
 
         model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
         qconfig_dict = {
-            '': torch.quantization.get_default_qconfig(torch.backends.quantized.engine),
+            '': get_default_qconfig(torch.backends.quantized.engine),
             'fc': None
         }
         model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
