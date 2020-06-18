@@ -97,7 +97,7 @@ afterEvaluate {
         if (f.name.endsWith(".aar")) {
           output.assemble.finalizedBy addFolderToAarTask(
               "addHeadersToAar" + variant.name,
-              f.path.replaceAll(variant.name, VERSION_NAME),
+              f.path,
               getLibtorchHeadersDir(),
               "headers")
         }
