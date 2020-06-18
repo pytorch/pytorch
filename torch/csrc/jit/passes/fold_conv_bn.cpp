@@ -224,8 +224,8 @@ void FoldConvBatchNormHelper::analyze(
   const auto& vmap = pattern.vmap;
   Value* pattern_conv_out = vmap.at("conv_out");
   Value* pattern_bn_out = vmap.at("bn_out");
-  Value* pattern_conv_submodule = vmap.at("conv_submodule");
-  Value* pattern_bn_submodule = vmap.at("bn_submodule");
+  Value* pattern_conv_submodule = vmap.at("conv");
+  Value* pattern_bn_submodule = vmap.at("batchnorm");
   Node* pattern_conv = pattern_conv_out->node();
   Node* pattern_bn = pattern_bn_out->node();
 
@@ -355,21 +355,17 @@ Module FoldConvBatchNorm(const Module& module) {
   // Conv2d + BatchNorm2d
   const PatternInfo pattern2d = PatternInfo::parse_from_str(
       R"(
-graph(%self, %x):
-    %conv_submodule = match::module[name=".Conv2d"](%self)
-    %conv_out = prim::CallMethod[name="forward"](%conv_submodule, %x)
-    %bn_submodule = match::module[name=".BatchNorm2d"](%self)
-    %bn_out = prim::CallMethod[name="forward"](%bn_submodule, %conv_out)
+graph(%self, %input, %conv, %batchnorm):
+    %conv_out = prim::CallMethod[name="forward"](%conv, %input)
+    %bn_out = prim::CallMethod[name="forward"](%batchnorm, %conv_out)
     return (%bn_out))",
       {is_conv2d_module, is_batchnorm2d_module});
   // Conv3d + BatchNorm3d
   const PatternInfo pattern3d = PatternInfo::parse_from_str(
       R"(
-graph(%self, %x):
-    %conv_submodule = match::module[name=".Conv3d"](%self)
-    %conv_out = prim::CallMethod[name="forward"](%conv_submodule, %x)
-    %bn_submodule = match::module[name=".BatchNorm3d"](%self)
-    %bn_out = prim::CallMethod[name="forward"](%bn_submodule, %conv_out)
+graph(%self, %input, %conv, %batchnorm):
+    %conv_out = prim::CallMethod[name="forward"](%conv, %input)
+    %bn_out = prim::CallMethod[name="forward"](%batchnorm, %conv_out)
     return (%bn_out))",
       {is_conv3d_module, is_batchnorm3d_module});
 
