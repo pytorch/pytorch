@@ -1,5 +1,6 @@
 from typing import Optional, Tuple, Union
 from .. import device as _device
+from .._C import _CudaDeviceProperties
 from .random import (
     get_rng_state as get_rng_state,
     get_rng_state_all as get_rng_state_all,
@@ -22,15 +23,6 @@ class cudaStatus:
 
 class CudaError:
     def __init__(self, code: int) -> None: ...
-
-class _CudaDeviceProperties:
-    name: str
-    major: int
-    minor: int
-    multi_processor_count: int
-    total_memory: int
-    is_integrated: int
-    is_multi_gpu_board: int
 
 _device_t = Union[_device, int]
 

@@ -178,7 +178,6 @@ class cudaStatus(object):
     SUCCESS = 0
     ERROR_NOT_READY = 34
 
-
 class CudaError(RuntimeError):
     def __init__(self, code):
         msg = _cudart.cudaGetErrorString(code).decode('utf-8')
