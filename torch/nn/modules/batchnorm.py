@@ -20,6 +20,7 @@ class _NormBase(Module):
     eps: float
     momentum: float
     affine: bool
+    use_scale: bool
     track_running_stats: bool
     # WARNING: weight and bias purposely not defined here.
     # See https://github.com/pytorch/pytorch/issues/39670
@@ -30,6 +31,7 @@ class _NormBase(Module):
         eps: float = 1e-5,
         momentum: float = 0.1,
         affine: bool = True,
+        use_scale: bool = True,
         track_running_stats: bool = True
     ) -> None:
         super(_NormBase, self).__init__()
@@ -37,9 +39,13 @@ class _NormBase(Module):
         self.eps = eps
         self.momentum = momentum
         self.affine = affine
+        self.use_scale = use_scale
         self.track_running_stats = track_running_stats
         if self.affine:
-            self.weight = Parameter(torch.Tensor(num_features))
+            if self.use_scale:
+                self.weight = Parameter(torch.Tensor(num_features))
+            else:
+                self.register_buffer('weight', None)
             self.bias = Parameter(torch.Tensor(num_features))
         else:
             self.register_parameter('weight', None)
@@ -63,15 +69,17 @@ class _NormBase(Module):
     def reset_parameters(self) -> None:
         self.reset_running_stats()
         if self.affine:
-            init.ones_(self.weight)
             init.zeros_(self.bias)
+            if self.use_scale:
+                init.ones_(self.weight)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
 
     def extra_repr(self):
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
-               'track_running_stats={track_running_stats}'.format(**self.__dict__)
+               'use_scale={use_scale}, track_running_stats={track_running_stats}'.format(
+                   **self.__dict__)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -92,9 +100,9 @@ class _NormBase(Module):
 class _BatchNorm(_NormBase):
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
-                 track_running_stats=True):
+                 use_scale=True, track_running_stats=True):
         super(_BatchNorm, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, use_scale, track_running_stats)
 
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
@@ -168,6 +176,10 @@ class BatchNorm1d(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        use_scale: a boolean value that when set to ``True`` and affine set to ``True``,
+            this module has learnable scale and bias parameters.
+            If affine set to ``True`` and use_scale set to ``False``,
+            this module has a fixed scale of 1. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -239,6 +251,10 @@ class BatchNorm2d(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        use_scale: a boolean value that when set to ``True`` and affine set to ``True``,
+            this module has learnable scale and bias parameters.
+            If affine set to ``True`` and use_scale set to ``False``,
+            this module has a fixed scale of 1. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -311,6 +327,10 @@ class BatchNorm3d(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        use_scale: a boolean value that when set to ``True`` and affine set to ``True``,
+            this module has learnable scale and bias parameters.
+            If affine set to ``True`` and use_scale set to ``False``,
+            this module has a fixed scale of 1. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -391,6 +411,10 @@ class SyncBatchNorm(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        use_scale: a boolean value that when set to ``True`` and affine set to ``True``,
+            this module has learnable scale and bias parameters.
+            If affine set to ``True`` and use_scale set to ``False``,
+            this module has a fixed scale of 1. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -430,10 +454,12 @@ class SyncBatchNorm(_BatchNorm):
         eps: float = 1e-5,
         momentum: float = 0.1,
         affine: bool = True,
+        use_scale: bool = True,
         track_running_stats: bool = True,
         process_group: Optional[Any] = None
     ) -> None:
-        super(SyncBatchNorm, self).__init__(num_features, eps, momentum, affine, track_running_stats)
+        super(SyncBatchNorm, self).__init__(num_features,
+                                            eps, momentum, affine, use_scale, track_running_stats)
         self.process_group = process_group
         # gpu_size is set through DistributedDataParallel initialization. This is to ensure that SyncBatchNorm is used
         # under supported condition (single GPU per process)
@@ -487,7 +513,8 @@ class SyncBatchNorm(_BatchNorm):
                 exponential_average_factor, self.eps)
         else:
             if not self.ddp_gpu_size:
-                raise AttributeError('SyncBatchNorm is only supported within torch.nn.parallel.DistributedDataParallel')
+                raise AttributeError(
+                    'SyncBatchNorm is only supported within torch.nn.parallel.DistributedDataParallel')
 
             return sync_batch_norm.apply(
                 input, self.weight, self.bias, self.running_mean, self.running_var,
@@ -527,6 +554,7 @@ class SyncBatchNorm(_BatchNorm):
             module_output = torch.nn.SyncBatchNorm(module.num_features,
                                                    module.eps, module.momentum,
                                                    module.affine,
+                                                   module.use_scale,
                                                    module.track_running_stats,
                                                    process_group)
             if module.affine:
