@@ -278,11 +278,11 @@ class QuantizationTestCase(TestCase):
         for d in [True, False]:
             # TODO: _test_only_eval_fn --> default_eval_fn
             if dynamic:
-                models[d] = quantize_dynamic_script(model, qconfig_dict, debug=d)
+                models[d] = quantize_dynamic_jit(model, qconfig_dict, debug=d)
                 # make sure it runs
                 outputs[d] = models[d](inputs)
             else:
-                models[d] = quantize_script(
+                models[d] = quantize_jit(
                     model, qconfig_dict, test_only_eval_fn, [data], inplace=False, debug=d)
                 # make sure it runs
                 outputs[d] = models[d](*inputs)
