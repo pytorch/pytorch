@@ -1125,6 +1125,8 @@ class TestGraphModePostTrainingStatic(QuantizationTestCase):
                 script_model.fc.weight = torch.nn.Parameter(eager_model.fc.weight.detach())
                 script_model.fc.bias = torch.nn.Parameter(eager_model.fc.bias.detach())
 
+                eager_model.fuse_modules()
+
                 model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
                 qconfig_dict = {
                     '': torch.quantization.get_default_qconfig(qengine),
