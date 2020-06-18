@@ -1,5 +1,5 @@
 #pragma once
-#include <iostream>
+#include <ostream>
 
 namespace torch {
 namespace jit {
