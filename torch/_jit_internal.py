@@ -607,6 +607,55 @@ def is_tuple(ann):
         (getattr(ann, '__origin__', None) is Tuple or
             getattr(ann, '__origin__', None) is tuple)
 
+
+def is_named_tuple(ann):
+    return inspect.isclass(ann) and issubclass(ann, tuple) and hasattr(ann, "_fields")
+
+
+def try_make_named_tuple_type(ann, instance=None, loc=None):
+    if not is_named_tuple(ann):
+        return None
+
+    if hasattr(ann, "_field_defaults") and len(ann._field_defaults) > 0:
+        msg = """Default values are currently not supported on NamedTuple fields in TorchScript.
+                Fields with default values: ["""
+        first = True
+
+        # Print out all fields with default values
+        msg += ", ".join(ann._field_defaults.keys())
+
+        if loc:
+            error_report = torch._C.ErrorReport(loc)
+            msg += error_report.what().lstrip()
+
+        raise RuntimeError(msg)
+
+    # Bail if an instance is provided and its members are not JITable themselves.
+    if instance is not None:
+        for member in instance:
+            if not torch._C._jit_try_infer_type(member):
+                return None
+
+    qualified_name = torch.jit._qualified_name(ann)
+    props = torch.jit._get_named_tuple_properties(ann)
+    new_type = torch._C.TupleType.createNamed(qualified_name, props[1], props[2])
+    existing_type = torch.jit._python_cu.get_type(qualified_name)
+
+    if existing_type:
+        if existing_type.isSubtypeOf(new_type):
+            return existing_type
+        else:
+            msg = "Cannot redefine NamedTuple: " + str(existing_type)
+            if loc:
+                error_report = torch._C.ErrorReport(loc)
+                msg += error_report.what().lstrip()
+
+            raise RuntimeError(msg)
+
+    torch.jit._python_cu.register_type(new_type)
+    return new_type
+
+
 def is_list(ann):
     if not hasattr(ann, '__module__'):
         return False

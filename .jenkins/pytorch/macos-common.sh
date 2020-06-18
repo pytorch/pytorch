@@ -20,12 +20,6 @@ if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
 fi
 export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
 source ${WORKSPACE_DIR}/miniconda3/bin/activate
-# While usually setting DYLD_FALLBACK_LIBRARY_PATH would be considered bad practice,
-# here we are using it to connect locally available shared objects to the
-# wheel-installed environment. When the package is distributed to an end-user,
-# the rpath directives will replace this.
-export DYLD_FALLBACK_LIBRARY_PATH="${CONDA_PREFIX}/lib:$DYLD_FALLBACK_LIBRARY_PATH"
-
 retry conda install -y mkl mkl-include numpy pyyaml=5.3 setuptools=46.0.0 cmake cffi ninja
 
 # The torch.hub tests make requests to GitHub.
