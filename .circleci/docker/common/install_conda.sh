@@ -25,8 +25,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   chown jenkins:jenkins /opt/conda
 
   as_jenkins() {
-    # NB 2020-05-06: this work-around may no longer be needed
-    # NB 2018-02-24: unsetting the environment variables works around a conda bug
+    # NB: unsetting the environment variables works around a conda bug
     # https://github.com/conda/conda/issues/6576
     # NB: Pass on PATH and LD_LIBRARY_PATH to sudo invocation
     # NB: This must be run from a directory that jenkins has access to,
@@ -40,9 +39,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   as_jenkins ./"${CONDA_FILE}" -b -f -p "/opt/conda"
   popd
 
-  # NB gh-37737: prefer this to setting rpath
-  echo "/opt/conda/lib" > /etc/ld.so.conf.d/conda-python.conf
-  ldconfig
+  # NB: Don't do this, rely on the rpath to get it right
+  #echo "/opt/conda/lib" > /etc/ld.so.conf.d/conda-python.conf
+  #ldconfig
   sed -e 's|PATH="\(.*\)"|PATH="/opt/conda/bin:\1"|g' -i /etc/environment
   export PATH="/opt/conda/bin:$PATH"
 
