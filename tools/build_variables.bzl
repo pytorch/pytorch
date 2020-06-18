@@ -384,6 +384,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/nn/options/vision.cpp",
     "torch/csrc/api/src/optim/adagrad.cpp",
     "torch/csrc/api/src/optim/adam.cpp",
+    "torch/csrc/api/src/optim/adamw.cpp",
     "torch/csrc/api/src/optim/lbfgs.cpp",
     "torch/csrc/api/src/optim/optimizer.cpp",
     "torch/csrc/api/src/optim/rmsprop.cpp",
