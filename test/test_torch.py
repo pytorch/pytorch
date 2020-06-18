@@ -10715,7 +10715,7 @@ class TestTorchDeviceType(TestCase):
             x.nonzero()
 
         with self.maybeWarnsRegex(UserWarning, "This overload of nonzero is deprecated"):
-            x.nonzero()
+            torch.nonzero(x)
 
     # TODO: add torch.complex64, torch.complex128
     @dtypes(torch.float, torch.double)
