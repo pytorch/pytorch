@@ -2602,7 +2602,7 @@ void testGPU_FusionSimpleBCast() {
     tv4->axis(0)->parallelize(ParallelType::BIDx);
     tv4->axis(-1)->parallelize(ParallelType::TIDx);
 
-    size_t x = 63, y = 33, z = 15;
+    constexpr int x = 63, y = 33, z = 15;
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
@@ -2651,7 +2651,7 @@ void testGPU_FusionSimpleBCast() {
 
     tv4->axis(0)->parallelize(ParallelType::BIDx);
 
-    size_t x = 63, y = 33, z = 15;
+    constexpr int x = 63, y = 33, z = 15;
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
@@ -2735,7 +2735,7 @@ void testGPU_FusionSimpleGemm() {
     tv5->axis(2)->parallelize(ParallelType::TIDx);
     tv6->axis(2)->parallelize(ParallelType::TIDx);
 
-    size_t M = 65, K = 33, N = 17;
+    constexpr int M = 65, K = 33, N = 17;
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 

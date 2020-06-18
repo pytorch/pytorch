@@ -361,9 +361,10 @@ TORCH_CUDA_API TensorView* andOp(TensorView* v1, TensorView* v2) {
 
 // REDUCTION OPERATIONS
 
-namespace {
 // TODO: How do we adjust this so we can reduce to a single scalar value?
-TensorView* newForReduction(TensorView* tv, std::vector<unsigned int> axes) {
+static TensorView* newForReduction(
+    TensorView* tv,
+    const std::vector<unsigned int>& axes) {
   auto orig_domain = TensorDomain::noReductions(tv->getRootDomain());
   std::set<unsigned int> axes_set(axes.begin(), axes.end());
 
@@ -376,15 +377,14 @@ TensorView* newForReduction(TensorView* tv, std::vector<unsigned int> axes) {
       (*(axes_set.rbegin())) < orig_domain.size(),
       "Error setting up reduction, reduction axis is outside nDims. Keep in mind reductions are relative to root domains, not modified views.");
 
-  for (decltype(orig_domain.size()) dim = 0; dim < orig_domain.size(); dim++) {
-    IterDomain* id = orig_domain[dim];
-
+  for (size_t dim = 0; dim < orig_domain.size(); dim++) {
     bool isReduction = false;
-    if ((*axes_set.begin()) == dim) {
+    if (!axes_set.empty() && *axes_set.begin() == dim) {
       isReduction = true;
       axes_set.erase(axes_set.begin());
     }
 
+    const IterDomain* id = orig_domain[dim];
     new_domain.push_back(new IterDomain(
         id->start(), id->extent(), ParallelType::Serial, isReduction));
   }
@@ -392,8 +392,6 @@ TensorView* newForReduction(TensorView* tv, std::vector<unsigned int> axes) {
   TensorDomain* td = new TensorDomain(new_domain);
   return new TensorView(td, tv->getDataType().value());
 }
-
-} // namespace
 
 TensorView* reductionOp(
     BinaryOpType reduction_op_type,
