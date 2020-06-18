@@ -60,7 +60,6 @@ public:
   template <typename Func>
   explicit CppFunction(Func* f, std::enable_if_t<c10::guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
-    , cpp_signature_(c10::impl::CppSignature::make<Func>())
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Func>>>())
     , debug_()
@@ -70,7 +69,6 @@ public:
   template <typename FuncPtr>
   explicit CppFunction(FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f.func_ptr()))
-    , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<typename FuncPtr::FuncType>>>())
     , debug_()
@@ -80,7 +78,6 @@ public:
   template <typename Lambda>
   explicit CppFunction(Lambda&& f, std::enable_if_t<c10::guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
-    , cpp_signature_(c10::impl::CppSignature::make<Lambda>())
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>())
     , debug_()
@@ -95,7 +92,6 @@ public:
   static CppFunction makeUnboxedOnly(Func* f) {
     return CppFunction(
       c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
-      /* cpp_signature */ c10::impl::CppSignature::make<Func>(),
       /* schema */ nullptr
     );
   }
@@ -104,7 +100,6 @@ public:
   static CppFunction makeFallthrough() {
     return CppFunction(
       c10::KernelFunction::makeFallthrough(),
-      /* cpp_signature */ c10::nullopt, // not known for fallthroughs
       /* schema */ nullptr
     );
   }
@@ -112,7 +107,6 @@ public:
   static CppFunction makeNamedNotSupported() {
     return CppFunction(
       c10::KernelFunction::makeNamedNotSupported(),
-      /* cpp_signature */ c10::nullopt, // not known for fallthroughs
       /* schema */ nullptr
     );
   }
@@ -122,7 +116,6 @@ public:
   static CppFunction makeFromBoxedFunction() {
     return CppFunction(
       c10::KernelFunction::makeFromBoxedFunction<func>(),
-      /* cpp_signature */ c10::nullopt, // not known for boxed functions
       /* schema */ nullptr
     );
   }
@@ -135,7 +128,6 @@ public:
 private:
   c10::optional<c10::DispatchKey> dispatch_key_;
   c10::KernelFunction func_;
-  c10::optional<c10::impl::CppSignature> cpp_signature_;
   std::unique_ptr<c10::FunctionSchema> schema_;
   std::string debug_;
 
@@ -148,7 +140,7 @@ private:
   // want users to use)
   friend class Library;
 
-  CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppSignature> cpp_signature, std::unique_ptr<c10::FunctionSchema> schema);
+  CppFunction(c10::KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema);
 };
 
 // Create a CppFunction which is associated with a specific dispatch key.

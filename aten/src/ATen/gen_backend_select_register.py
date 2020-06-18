@@ -31,11 +31,9 @@ FUNCTION_REGISTRATION = CodeTemplate("""\
 FUNCTION_DEFINITION = CodeTemplate("""\
 // ${schema_string}
 Tensor ${function_name}(${method_formals}) {
-  static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::${name}", "${overload_name}")
-    .typed<${cpp_signature}>();
+  static OperatorHandle OP = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${name}", "${overload_name}");
   ${dispatch_key_init}
-  return op.callWithDispatchKey(_dk, ${actuals});
+  return OP.callWithDispatchKey<${formals_types}>(_dk, ${actuals});
 }
 """)
 
@@ -76,7 +74,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                                                             name=option['name'],
                                                             overload_name=option['overload_name'],
                                                             dispatch_key_init=dispatch_key_init,
-                                                            cpp_signature=option['cpp_signature'],
+                                                            formals_types=option['formals_types_with_return'],
                                                             actuals=option['actuals'])
 
                 backend_select_function_registrations.append(func_reg)

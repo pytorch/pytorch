@@ -136,10 +136,8 @@ ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${cpp_signature}>();
-    return op.call(${method_actuals});
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
+    return op.call<${formals_types_with_return}>(${method_actuals});
 #endif
 }
 """)
@@ -162,10 +160,9 @@ ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
 #else
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${cpp_signature}>();
-    return op.call(${actuals});
+    static c10::OperatorHandle op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
+    return op.call<${formals_types_with_return}>(${actuals});
 #endif
 }
 """)
@@ -489,7 +486,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_with_defaults': List[str],
     'formals': List[str],
     'formals_types': List[str],
-    'cpp_signature': str,
+    'formals_types_with_return': List[str],
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -1008,7 +1005,9 @@ def create_generic(top_env, declarations):
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
 
-        option['cpp_signature'] = "{} ({})".format(option['return_type'], ", ".join(option['formals_types']))
+        option['formals_types_with_return'] = [option['return_type']]
+        if len(option['formals_types']) > 0:
+            option['formals_types_with_return'].extend(option['formals_types'])
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
