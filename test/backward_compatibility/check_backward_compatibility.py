@@ -85,6 +85,23 @@ white_list = [
     ('quantized::linear', datetime.date(2020, 6, 1)),
     ('_aten::*', datetime.date(2020, 6, 1)),
     ('_prim::*', datetime.date(2020, 6, 1)),
+    ('aten::eq', datetime.date(2020, 6, 30)),
+    ('aten::nq', datetime.date(2020, 6, 30)),
+    ('aten::lt', datetime.date(2020, 6, 30)),
+    ('aten::gt', datetime.date(2020, 6, 30)),
+    ('aten::le', datetime.date(2020, 6, 30)),
+    ('aten::ge', datetime.date(2020, 6, 30)),
+    ('aten::pow', datetime.date(2020, 6, 30)),
+    ('prim::min', datetime.date(2020, 6, 30)),
+    ('prim::max', datetime.date(2020, 6, 30)),
+    ('aten::to_here', datetime.date(2020, 6, 30)),
+    ('aten::to_here(RRef(t) self, double timeout*)', datetime.date(2020, 6, 30)),
+    ('aten::local_value', datetime.date(2020, 6, 30)),
+    ('aten::log', datetime.date(2020, 6, 30)),
+    ('aten::__and__', datetime.date(2020, 6, 30)),
+    ('aten::__or__', datetime.date(2020, 6, 30)),
+    ('aten::__xor__', datetime.date(2020, 6, 30)),
+    ('aten::split', datetime.date(2020, 6, 30)),
 ]
 
 

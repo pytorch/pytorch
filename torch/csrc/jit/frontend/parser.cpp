@@ -73,6 +73,7 @@ struct ParserImpl {
       case TK_MINUS_EQ:
       case TK_TIMES_EQ:
       case TK_DIV_EQ:
+      case TK_MOD_EQ:
       case TK_NEWLINE:
       case '=':
       case ')':
@@ -191,7 +192,8 @@ struct ParserImpl {
       case TK_PLUS_EQ:
       case TK_MINUS_EQ:
       case TK_TIMES_EQ:
-      case TK_DIV_EQ: {
+      case TK_DIV_EQ:
+      case TK_MOD_EQ: {
         int modifier = L.next().text()[0];
         return create_compound(modifier, r, {});
       } break;
@@ -385,7 +387,9 @@ struct ParserImpl {
     auto subscript_exprs =
         parseList('[', ',', ']', &ParserImpl::parseSubscriptExp);
 
-    return Subscript::create(range, Expr(value), subscript_exprs);
+    const auto whole_range =
+        SourceRange(range.source(), range.start(), L.cur().range.start());
+    return Subscript::create(whole_range, Expr(value), subscript_exprs);
   }
 
   Maybe<Expr> maybeParseTypeAnnotation() {
