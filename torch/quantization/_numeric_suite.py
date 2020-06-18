@@ -25,7 +25,12 @@ DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
     | _INCLUDE_QCONFIG_PROPAGATE_LIST
 ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
 
-NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {nnqd.Linear, nnq.Linear, nnqd.LSTM, nn.LSTM}
+NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {
+    nnqd.Linear,
+    nnq.Linear,
+    nnqd.LSTM,
+    nn.LSTM,
+}
 
 
 def _find_match(str_list, key_str, postfix):
@@ -100,14 +105,18 @@ def compare_weights(float_dict, quantized_dict):
             module_name = ".".join(split_str[:-3])
             float_weight_ih_key = module_name + ".weight_ih_l" + layer
             float_weight_hh_key = module_name + ".weight_hh_l" + layer
-            print('lstm float ih key is: ', float_weight_ih_key)
-            print('lstm float hh key is: ', float_weight_hh_key)
+            print("lstm float ih key is: ", float_weight_ih_key)
+            print("lstm float hh key is: ", float_weight_hh_key)
             if float_weight_ih_key in float_dict and float_weight_hh_key in float_dict:
                 weight_dict[key] = {}
                 weight_dict[key]["float"] = float_dict[float_weight_ih_key]
-                weight_dict[key]["quantized"] = quantized_dict[key].__getstate__()[0][4][0].__getstate__()[0][0]
+                weight_dict[key]["quantized"] = (
+                    quantized_dict[key].__getstate__()[0][4][0].__getstate__()[0][0]
+                )
                 weight_dict[key]["float"] = float_dict[float_weight_hh_key]
-                weight_dict[key]["quantized"] = quantized_dict[key].__getstate__()[0][4][1].__getstate__()[0][0]
+                weight_dict[key]["quantized"] = (
+                    quantized_dict[key].__getstate__()[0][4][1].__getstate__()[0][0]
+                )
 
     return weight_dict
 
@@ -212,6 +221,20 @@ class OutputLogger(Logger):
         return x
 
 
+def _convert_tuple_to_list(t):
+    return list(_convert_tuple_to_list(x) for x in t) if type(t) is tuple else t
+
+
+def _dequantize_tensor_list(t):
+    return (
+        list(_dequantize_tensor_list(x) for x in t)
+        if type(t) is list
+        else t.dequantize()
+        if t.is_quantized
+        else t
+    )
+
+
 class Shadow(nn.Module):
     r"""Shadow module attaches the float module to its matching quantized module
     as the shadow. Then it uses Logger module to process the outputs of both
@@ -232,21 +255,10 @@ class Shadow(nn.Module):
         self.logger = Logger()
 
     def forward(self, *x):
-        output = self.orig_module(*x)
-        if len(x) > 1:
-            if x[0].is_quantized:
-                x[0] = x[0].dequantize()
-            if x[1][0].is_quantized:
-                x[1][0] = x[1][0].dequantize()
-            if x[1][1].is_quantized:
-                x[1][1] = x[1][1].dequantize()
-            shadow_output = self.shadow_module(*x)
-        else:
-            if x[0].is_quantized:
-                x0 = x[0].dequantize()
-            else:
-                x0 = x[0]
-            shadow_output = self.shadow_module(x0)
+        xl = _convert_tuple_to_list(x)
+        output = self.orig_module(*xl)
+        xl_float = _dequantize_tensor_list(xl)
+        shadow_output = self.shadow_module(*xl_float)
         self.logger(output, shadow_output)
         return output
 
