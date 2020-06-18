@@ -846,6 +846,23 @@ void initJitScriptBindings(PyObject* module) {
     }
   }
 
+  struct DeepCopyMemoTable {
+    std::shared_ptr<IValue::HashAliasedIValueMap> map;
+  };
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
+
+  object_class.def(
+      "__deepcopy__", [](const Object& self, const py::dict& memo) {
+        if (!memo.contains(py::str("__torch_script_memo_table"))) {
+          memo["__torch_script_memo_table"] = DeepCopyMemoTable{
+              std::make_shared<IValue::HashAliasedIValueMap>()};
+        }
+        auto& ivalue_memo =
+            *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;
+        return Object(IValue(self._ivalue()).deepcopy(ivalue_memo).toObject());
+      });
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
@@ -1066,7 +1083,17 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_interface",
           [](const std::shared_ptr<CompilationUnit>& self,
-             const std::string& name) { return self->get_interface(name); });
+             const std::string& name) { return self->get_interface(name); })
+      .def(
+          "get_type",
+          [](CompilationUnit& cu, const std::string& name) {
+            return cu.get_type(name);
+          })
+      .def(
+          "register_type",
+          [](CompilationUnit& cu, const c10::NamedTypePtr& type) {
+            cu.register_type(type);
+          });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
