@@ -5,6 +5,7 @@ from cimodel.lib.miniutils import quote
 
 # TODO: make this generated from a matrix rather than just a static list
 IMAGE_NAMES = [
+    "pytorch-linux-bionic-cuda11.0-cudnn8-py3-gcc9",
     "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9",
     "pytorch-linux-bionic-py3.6-clang9",
     "pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9",
