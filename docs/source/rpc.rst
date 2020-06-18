@@ -100,7 +100,7 @@ applications can always explicitly move the input tensors to CPU on the caller
 and move it to the desired devices on the callee if necessary.
 
 .. warning::
-  TorchScript support in RPC is beta and subject to change.
+  TorchScript support in RPC is a prototype feature and subject to change.
 
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
