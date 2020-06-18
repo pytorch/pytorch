@@ -39,6 +39,11 @@ if hasattr(torch._C, '_CudaDeviceProperties'):
 else:
     _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')
 
+# Global variables dynamically populated by native code
+has_magma: bool = False
+has_half: bool = False
+default_generators: Tuple[torch._C.Generator] = ()
+
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
     if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
