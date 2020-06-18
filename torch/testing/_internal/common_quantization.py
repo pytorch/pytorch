@@ -500,10 +500,9 @@ class NormalizationTestModel(torch.nn.Module):
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.layer_norm = torch.nn.LayerNorm((8))
         self.group_norm = torch.nn.GroupNorm(2, 8)
-        # TODO: add handling for affine=False (future PR)
-        self.instance_norm1d = torch.nn.InstanceNorm1d(8, affine=True)
-        self.instance_norm2d = torch.nn.InstanceNorm2d(8, affine=True)
-        self.instance_norm3d = torch.nn.InstanceNorm3d(8, affine=True)
+        self.instance_norm1d = torch.nn.InstanceNorm1d(8)
+        self.instance_norm2d = torch.nn.InstanceNorm2d(8)
+        self.instance_norm3d = torch.nn.InstanceNorm3d(8)
 
     def forward(self, x):
         x = self.quant(x)
@@ -523,9 +522,9 @@ class NormalizationQATTestModel(torch.nn.Module):
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.layer_norm = torch.nn.LayerNorm((8))
         self.group_norm = torch.nn.GroupNorm(2, 8)
-        self.instance_norm1d = torch.nn.InstanceNorm1d(4, affine=True)
-        self.instance_norm2d = torch.nn.InstanceNorm2d(4, affine=True)
-        self.instance_norm3d = torch.nn.InstanceNorm3d(4, affine=True)
+        self.instance_norm1d = torch.nn.InstanceNorm1d(4)
+        self.instance_norm2d = torch.nn.InstanceNorm2d(4)
+        self.instance_norm3d = torch.nn.InstanceNorm3d(4)
         self.fc2 = torch.nn.Linear(8, 2)
 
     def forward(self, x):
