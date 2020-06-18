@@ -119,8 +119,8 @@ how a given function should be treated on the callee side.
 
 .. _rpc-backends:
 
-RPC Backends
-------------
+Backends
+^^^^^^^^
 
 The RPC module can leverage different backends to perform the communication
 between the nodes. The backend to be used can be specified in the
@@ -138,7 +138,7 @@ to configure the backend's behavior.
 
 
 Process Group Backend
-^^^^^^^^^^^^^^^^^^
+"""""""""""""""""""""
 
 The Process Group agent, which is the default, instantiates a process group from
 the :mod:`~torch.distributed` module and utilizes its point-to-point
@@ -155,16 +155,39 @@ of the system. These limitations, and others, might have been mitigated but,
 instead, a separate backend, based on a more tailored library, was introduced to
 address them more fundamentally.
 
+Example::
+
+    >>> import os
+    >>> from torch.distributed import rpc
+    >>> os.environ['MASTER_ADDR'] = 'localhost'
+    >>> os.environ['MASTER_PORT'] = '29500'
+    >>>
+    >>> rpc.init_rpc(
+    >>>     "worker1",
+    >>>     rank=0,
+    >>>     world_size=2,
+    >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
+    >>>         num_send_recv_threads=16,
+    >>>         rpc_timeout=20 # 20 second timeout
+    >>>     )
+    >>> )
+    >>>
+    >>> # omitting init_rpc invocation on worker2
+
+
 .. autoclass:: ProcessGroupRpcBackendOptions
     :members:
     :inherited-members:
 
 
 TensorPipe Backend
-^^^^^^^^^^^^^^^^^^
+""""""""""""""""""
 
-The TensorPipe agent leverages `the TensorPipe
-library <https://github.com/pytorch/tensorpipe>`_, which provides a natively
+.. warning::
+    The TensorPipe backend is a **beta feature**.
+
+The TensorPipe agent leverages `the TensorPipe library
+<https://github.com/pytorch/tensorpipe>`_, which provides a natively
 point-to-point communication primitive specifically suited for machine learning.
 Compared to Gloo, it has the advantage of being asynchronous, which allows a
 large number of transfers to occur simultaneously, each at their own speed,
@@ -185,6 +208,26 @@ machine (one based on ringbuffers stored in shared memory, the other on the
 cross-memory attach syscalls) which can achieve lower latencies than TCP.
 The agent will be able to pick the best transport on its own, with no
 intervention required.
+
+Example::
+
+    >>> import os
+    >>> from torch.distributed import rpc
+    >>> os.environ['MASTER_ADDR'] = 'localhost'
+    >>> os.environ['MASTER_PORT'] = '29500'
+    >>>
+    >>> rpc.init_rpc(
+    >>>     "worker1",
+    >>>     rank=0,
+    >>>     world_size=2,
+    >>>     backend=rpc.BackendType.TENSORPIPE,
+    >>>     rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
+    >>>         num_worker_threads=8,
+    >>>         rpc_timeout=20 # 20 second timeout
+    >>>     )
+    >>> )
+    >>>
+    >>> # omitting init_rpc invocation on worker2
 
 .. autoclass:: TensorPipeRpcBackendOptions
     :members:

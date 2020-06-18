@@ -397,25 +397,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   :meth:`~torch.distributed.rpc.rpc_async` if necessary.
               init_method (str, optional): The URL to initialize
                   ``ProcessGroupGloo`` (default: ``env://``).
-
-
-          Example::
-              >>> import datetime, os
-              >>> from torch.distributed import rpc
-              >>> os.environ['MASTER_ADDR'] = 'localhost'
-              >>> os.environ['MASTER_PORT'] = '29500'
-              >>>
-              >>> rpc.init_rpc(
-              >>>     "worker1",
-              >>>     rank=0,
-              >>>     world_size=2,
-              >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
-              >>>         num_send_recv_threads=16,
-              >>>         rpc_timeout=20 # 20 second timeout
-              >>>     )
-              >>> )
-              >>>
-              >>> # omitting init_rpc invocation on worker2
       )")
       .def(
           py::init<int, float, std::string>(),
@@ -477,13 +458,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
       "TensorPipeRpcBackendOptions",
       rpcBackendOptions,
       R"(
-          The backend options for ``TensorPipeAgent``, derived from
-          ``RpcBackendOptions``.
+          The backend options for
+          :class:`~torch.distributed.rpc.TensorPipeAgent`, derived from
+          :class:`~torch.distributed.rpc.RpcBackendOptions`.
 
           Arguments:
               num_worker_threads (int, optional): The number of threads in the
-                  thread-pool used by ``TensorPipeAgent`` to execute requests
-                  (default: 16).
+                  thread-pool used by
+                  :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
+                  requests (default: 16).
               _transports (list, optional): THIS IS AN ADVANCED PARAMETER, DO
                   NOT USE UNLESS INSTRUCTED TO. The names of the TensorPipe
                   transports that the agent should register, in order of
@@ -520,7 +503,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &TensorPipeRpcBackendOptions::numWorkerThreads,
           R"(
               The number of threads in the thread-pool used by
-              ``TensorPipeAgent`` to execute requests.
+              :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
+              requests.
           )");
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
