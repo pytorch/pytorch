@@ -562,7 +562,7 @@ double Event::cuda_elapsed_us(const Event & e) const {
           "Events are not on the same device: ", e.device(), " vs ", device()));
   if (isRemote() && e.isRemote()) {
     // validate that cuda_us_ has been set properly.
-    TORCH_INTERNAL_ASSERT(cuda_us_ >= 0 && e.cuda_us_ >=0);
+    TORCH_INTERNAL_ASSERT(cuda_us_ >= 0 && e.cuda_us_ >= 0);
     return static_cast<double>(e.cuda_us_ - cuda_us_);
   }
   return cuda_stubs->elapsed(cuda_event, e.cuda_event);

@@ -142,7 +142,6 @@ class EventList(list):
             # this technique is proven to give a 4x speedup.
             f.write("[")
             for evt in self:
-
                 f.write(
                     '{"name": "%s", '
                     '"ph": "X", '

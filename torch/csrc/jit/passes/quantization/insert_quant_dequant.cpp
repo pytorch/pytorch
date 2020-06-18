@@ -461,6 +461,11 @@ class InsertQuantDeQuantHelper {
   void setQuantType(QuantType quant_type) {
     quant_type_ = quant_type;
   }
+
+  void setDebug(bool debug) {
+    debug_ = debug;
+  }
+
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
   void cleanup(Module& module);
@@ -561,12 +566,13 @@ class InsertQuantDeQuantHelper {
   // once
   std::unordered_set<Value*> quantized_values_;
 
-  QuantType quant_type_ = QuantType::STATIC;
-
   // Map from original weight value to GraphFunction corresponding to the
   // subgraph that includes the weight observer and dependent nodes.
   std::unordered_map<Value*, std::unique_ptr<GraphFunction>>
       weight_to_graph_fn_;
+
+  QuantType quant_type_ = QuantType::STATIC;
+  bool debug_ = false;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -1181,9 +1187,9 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
-  RemoveRedundantDequantize(graph);
   ReplicateClampScalarArgs(graph);
   propagateQuantizationOps(graph->block());
+  RemoveRedundantDequantize(graph);
 }
 
 } // namespace
@@ -1309,6 +1315,7 @@ Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
     bool inplace,
+    bool debug,
     QuantType quant_type) {
   Module module = input_module.clone(inplace);
   InsertQuantDeQuantHelper h;
@@ -1316,6 +1323,7 @@ Module InsertQuantDeQuant(
   if (quant_type == QuantType::DYNAMIC) {
     h.runWeightObserver(module, method_name);
   }
+  h.setDebug(debug);
   h.run(module, method_name);
   h.cleanup(module);
   h.propagateQuantizationOps(module);
