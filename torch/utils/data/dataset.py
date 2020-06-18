@@ -2,7 +2,9 @@ import bisect
 import warnings
 
 from torch._utils import _accumulate
-from torch import randperm, default_generator
+from torch import randperm
+# No 'default_generator' in torch/__init__.pyi
+from torch import default_generator  # type: ignore
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
 from ... import Tensor, Generator
 
@@ -29,7 +31,7 @@ class Dataset(Generic[T_co]):
     def __getitem__(self, index: int) -> T_co:
         raise NotImplementedError
 
-    def __add__(self, other: T_co) -> 'ConcatDataset[T_co]':
+    def __add__(self, other: 'Dataset[T_co]') -> 'ConcatDataset[T_co]':
         return ConcatDataset([self, other])
 
     # No `def __len__(self)` default?
@@ -143,7 +145,7 @@ class IterableDataset(Dataset[T_co]):
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
 
-    def __add__(self, other: T_co):
+    def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])
 
     # No `def __len__(self)` default?
@@ -162,7 +164,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
 
     def __init__(self, *tensors: Tensor) -> None:
         assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
-        self.tensors = tensors
+        self.tensors = list(tensors)
 
     def __getitem__(self, index):
         return tuple(tensor[index] for tensor in self.tensors)
@@ -193,7 +195,8 @@ class ConcatDataset(Dataset[T_co]):
 
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super(ConcatDataset, self).__init__()
-        assert len(datasets) > 0, 'datasets should not be an empty iterable'
+        # Cannot verify that datasets is Sized
+        assert len(datasets) > 0, 'datasets should not be an empty iterable'  # type: ignore
         self.datasets = list(datasets)
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), "ConcatDataset does not support IterableDataset"
@@ -245,7 +248,8 @@ class ChainDataset(IterableDataset):
         total = 0
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            total += len(d)
+            # Cannot verify that all self.datasets are Sized
+            total += len(d)  # type: ignore
         return total
 
 
@@ -284,7 +288,8 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
         lengths (sequence): lengths of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
-    if sum(lengths) != len(dataset):
+    # Cannot verify that dataset is Sized
+    if sum(lengths) != len(dataset):  # type: ignore
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
     indices = randperm(sum(lengths), generator=generator).tolist()
