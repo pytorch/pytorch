@@ -232,8 +232,6 @@ class Shadow(nn.Module):
         self.logger = Logger()
 
     def forward(self, *x):
-        print("x is: ", x)
-        print("in shadow, x is: ", type(x))
         output = self.orig_module(*x)
         if len(x) > 1:
             if x[0].is_quantized:
@@ -242,11 +240,13 @@ class Shadow(nn.Module):
                 x[1][0] = x[1][0].dequantize()
             if x[1][1].is_quantized:
                 x[1][1] = x[1][1].dequantize()
+            shadow_output = self.shadow_module(*x)
         else:
             if x[0].is_quantized:
-                x[0] = x[0].dequantize()
-            print("x is 1, = ", type(x), x)
-        shadow_output = self.shadow_module(*x)
+                x0 = x[0].dequantize()
+            else:
+                x0 = x[0]
+            shadow_output = self.shadow_module(x0)
         self.logger(output, shadow_output)
         return output
 
