@@ -476,8 +476,8 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
       next_offset = offset+ 1;
       // this 'if' happens for an empty parameter list, i.e. fn().
       if (offset == last_offset) {
-	last_offset = next_offset;
-	break;
+        last_offset = next_offset;
+        break;
       }
     } else {
       next_offset = offset + 2;

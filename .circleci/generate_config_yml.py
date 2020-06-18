@@ -20,7 +20,7 @@ import cimodel.data.simple.bazel_definitions
 import cimodel.data.simple.ge_config_tests
 import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.ios_definitions
-import cimodel.data.simple.android_gradle
+import cimodel.data.simple.android_definitions
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
 import cimodel.lib.miniutils as miniutils
@@ -83,7 +83,7 @@ def gen_build_workflows_tree():
     build_workflows_functions = [
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
-        cimodel.data.simple.android_gradle.get_workflow_jobs,
+        cimodel.data.simple.android_definitions.get_workflow_jobs,
         cimodel.data.simple.ios_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.ge_config_tests.get_workflow_jobs,
