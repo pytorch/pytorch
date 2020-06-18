@@ -19,6 +19,10 @@ class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
         min_ = -10.0
         max_ = 20.0
         X = (np.random.rand(size) * (max_ - min_) + min_).astype(np.float32)
+        X_min = 0 if X.size == 0 else X.min()
+        X_max = 1 if X.size == 0 else X.max()
+        X_scale = (max(X_max, 0) - min(X_min, 0)) / 255
+        X_zero = np.round(-X_min / X_scale)
 
         op_type_list = ["Quantize", "Int8Quantize"]
         engine = "DNNLOWP"
@@ -30,19 +34,24 @@ class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
                 op_type, ["X"], ["X_q"], engine=engine, device_option=gc
             )
             net.Proto().op.extend([quantize])
+            quantize_2 = core.CreateOperator(
+                op_type, ["X", "scale", "zero"], ["X_q_2"], engine=engine, device_option=gc
+            )
+            net.Proto().op.extend([quantize_2])
 
             self.ws.create_blob("X").feed(X, device_option=gc)
+            self.ws.create_blob("scale").feed(np.array([X_scale]).astype(np.float32), device_option=gc)
+            self.ws.create_blob("zero").feed(np.array([X_zero]).astype(np.int32), device_option=gc)
             self.ws.run(net)
             X_q = self.ws.blobs["X_q"].fetch()[0]
+            X_q_2 = self.ws.blobs["X_q_2"].fetch()[0]
 
             # Dequantize results and measure quantization error against inputs
-            X_min = 0 if X.size == 0 else X.min()
-            X_max = 1 if X.size == 0 else X.max()
-            X_scale = (max(X_max, 0) - min(X_min, 0)) / 255
-            X_zero = np.round(-X_min / X_scale)
             X_dq = X_scale * (X_q - X_zero)
+            X_dq_2 = X_scale * (X_q_2 - X_zero)
 
             # should be divided by 2 in an exact math, but divide by 1.9 here
             # considering finite precision in floating-point numbers
             atol = X_scale / 1.9
             np.testing.assert_allclose(X_dq, X, atol=atol, rtol=0)
+            np.testing.assert_allclose(X_dq_2, X, atol=atol, rtol=0)

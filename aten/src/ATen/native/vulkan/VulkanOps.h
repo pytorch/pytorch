@@ -38,21 +38,27 @@ void conv2d(
     const VulkanTensor& input,
     const float* weight,
     const c10::optional<float*> bias,
-    const Conv2DParams params);
+    const Conv2DParams params,
+    c10::optional<float> output_min = c10::nullopt,
+    c10::optional<float> output_max = c10::nullopt);
 
 void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VulkanTensor& weight_prepacked,
     const c10::optional<float*> bias,
-    const Conv2DParams params);
+    const Conv2DParams params,
+    c10::optional<float> output_min = c10::nullopt,
+    c10::optional<float> output_max = c10::nullopt);
 
 void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VulkanTensor& weight_prepacked,
     const VulkanTensor& bias,
-    const Conv2DParams params);
+    const Conv2DParams params,
+    c10::optional<float> output_min = c10::nullopt,
+    c10::optional<float> output_max = c10::nullopt);
 
 void clamp(
     VulkanTensor& output,

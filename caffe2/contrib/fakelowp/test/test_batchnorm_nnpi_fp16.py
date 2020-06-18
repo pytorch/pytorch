@@ -16,6 +16,7 @@ from caffe2.python import workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.onnx.tests.test_utils import TestCase
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--glow_global_fp16=1",
                       "--glow_global_fused_scale_offset_fp16=1",

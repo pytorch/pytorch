@@ -70,20 +70,12 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case LayoutType::Kind:
       case ScalarTypeType::Kind:
       case RRefType::Kind:
-        // no op, there is nothing to tag
-        break;
       case AnyType::Kind:
       case AnyListType::Kind:
       case AnyTupleType::Kind:
       case AnyClassType::Kind:
-        // if Any type does show up, we no longer have a way to precisely
-        // recover the type information since the w.value may be an untagged
-        // List/Dict. We should prevent objects being serialized from having the
-        // Any type and if we do allow it in functions limit it to non-heap
-        // locations.
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "AnyType, AnyTupleType, AnyListType, and AnyClassType should not show up in the static type of objects");
+        // no op, there is nothing to tag
+        break;
       case TupleType::Kind: {
         auto t = w.value.toTuple();
         auto ttype = w.static_type->expect<TupleType>();
@@ -157,7 +149,7 @@ void restoreContainerTypeTags(IValue& ivalue, TypePtr type) {
   } else if (auto list_type = type->cast<ListType>()) {
     ivalue.toList().unsafeSetElementType(list_type->getElementType());
   } else {
-    AT_ERROR("Unknown type for tag restoration: " + type->python_str());
+    AT_ERROR("Unknown type for tag restoration: " + type->annotation_str());
   }
 }
 

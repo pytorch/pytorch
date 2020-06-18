@@ -52,8 +52,8 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
                 hu.arrays(
                     dims=shape,
                     elements=st.one_of(
-                        st.floats(min_value=-1.0, max_value=-0.1),
-                        st.floats(min_value=0.1, max_value=1.0),
+                        hu.floats(min_value=-1.0, max_value=-0.1),
+                        hu.floats(min_value=0.1, max_value=1.0),
                     )),
                 hu.arrays(
                     dims=shape,
@@ -206,8 +206,8 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
                 hu.arrays(
                     dims=shape,
                     elements=st.one_of(
-                        st.floats(min_value=-1.0, max_value=-0.1),
-                        st.floats(min_value=0.1, max_value=1.0),
+                        hu.floats(min_value=-1.0, max_value=-0.1),
+                        hu.floats(min_value=0.1, max_value=1.0),
                     )),
                 hu.arrays(
                     dims=shape,
@@ -215,7 +215,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
                 ),
                 hu.arrays(
                     dims=shape,
-                    elements=st.floats(min_value=0.1, max_value=1.0),
+                    elements=hu.floats(min_value=0.1, max_value=1.0),
                 ),
             )
         ),

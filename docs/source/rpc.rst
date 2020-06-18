@@ -113,6 +113,15 @@ and move it to the desired devices on the callee if necessary.
     :members:
     :inherited-members:
 
+
+The RPC package also provides decorators which allow applications to specify
+how a given function should be treated on the callee side.
+
+.. warning::
+  The ``rpc.functions`` package is experimental and subject to change.
+
+.. autofunction:: torch.distributed.rpc.functions.async_execution
+
 .. _rref:
 
 
@@ -130,7 +139,7 @@ parameters during training. See :ref:`remote-reference-protocol` for more
 details.
 
 .. autoclass:: RRef
-    :members:
+    :inherited-members:
 
 
 .. toctree::

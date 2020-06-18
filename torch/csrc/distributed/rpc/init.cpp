@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
@@ -94,7 +95,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // triggered in this context because it conflicts with the struct
           // torch::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
-          .def(py::detail::hash(py::self));
+          .def(py::detail::hash(py::self)) // NOLINT
+          .def("__repr__", [](const WorkerInfo& workerInfo) {
+            std::ostringstream os;
+            os << workerInfo;
+            return os.str();
+          });
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -116,7 +122,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
-      shared_ptr_class_<PyRRef>(module, "RRef", R"(
+      shared_ptr_class_<PyRRef>(module, "PyRRef", R"(
           A class encapsulating a reference to a value of some type on a remote
           worker. This handle will keep the referenced remote value alive on the
           worker. A ``UserRRef`` will be deleted when 1) no references to it in
@@ -204,11 +210,19 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "to_here",
               &PyRRef::toHere,
+              py::arg("timeout") = py::cast(kUnsetRpcTimeout),
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Blocking call that copies the value of the RRef from the owner
                   to the local node and returns it. If the current node is the
                   owner, returns a reference to the local value.
+
+                  Arguments:
+                        timeout (float, optional): Timeout for ``to_here``. If
+                        the call does not complete within this timeframe, an
+                        exception indicating so will be raised. If this argument
+                        is not provided, the default RPC timeout (60s) will be
+                        used.
               )")
           .def(
               "local_value",
@@ -397,7 +411,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>>     world_size=2,
               >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
               >>>         num_send_recv_threads=16,
-              >>>         20 # 20 second timeout
+              >>>         rpc_timeout=20 # 20 second timeout
               >>>     )
               >>> )
               >>>
@@ -461,9 +475,22 @@ PyObject* rpc_init(PyObject* /* unused */) {
   py::class_<TensorPipeRpcBackendOptions>(
       module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
       .def(
-          py::init<float, std::string>(),
+          py::init<
+              int,
+              optional<std::vector<std::string>>,
+              optional<std::vector<std::string>>,
+              float,
+              std::string>(),
+          py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
+          py::arg("_transports") = optional<std::vector<std::string>>(),
+          py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod);
+          py::arg("init_method") = kDefaultInitMethod)
+      .def_readwrite(
+          "num_worker_threads", &TensorPipeRpcBackendOptions::numWorkerThreads);
+
+  module.attr("_DEFAULT_NUM_WORKER_THREADS") =
+      py::cast(kDefaultNumWorkerThreads);
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
@@ -533,11 +560,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
   });
 
   module.def(
-      "_delete_all_user_rrefs",
+      "_delete_all_user_and_unforked_owner_rrefs",
       [](std::chrono::milliseconds timeoutMillis) {
-        RRefContext::getInstance().delAllUsers(timeoutMillis);
+        RRefContext::getInstance().delAllUsersAndUnforkedOwners(timeoutMillis);
       },
-      py::arg("timeout") = kDeleteAllUsersTimeout);
+      py::arg("timeout") = kDeleteAllUsersTimeout,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
     // NB: do not release GIL in the function. The destroyInstance() method
@@ -573,9 +601,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         const float rpcTimeoutSeconds) {
+         const float rpcTimeoutSeconds,
+         const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rpcTimeoutSeconds),
+            pyRpcPythonUdf(
+                dst,
+                pickledPythonUDF,
+                tensors,
+                rpcTimeoutSeconds,
+                isAsyncExecution),
             /* unwrap_func */ [](const py::object& value) {
               py::gil_scoped_release release;
               auto& pythonRpcHandler = PythonRpcHandler::getInstance();
@@ -598,13 +632,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
          const std::string& qualifiedNameStr,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict,
-         const float rpcTimeoutSeconds) {
+         const float rpcTimeoutSeconds,
+         const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
             dstWorkerName,
             qualifiedNameStr,
             argsTuple,
             kwargsDict,
-            rpcTimeoutSeconds));
+            rpcTimeoutSeconds,
+            isAsyncExecution));
       },
       py::call_guard<py::gil_scoped_release>());
 
@@ -616,10 +652,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   module.def(
       "_invoke_remote_python_udf",
       &pyRemotePythonUdf,
-      py::call_guard<py::gil_scoped_release>(),
-      py::arg("dst"),
-      py::arg("pickledPythonUDF"),
-      py::arg("tensors"));
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_torchscript",
@@ -670,6 +703,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
           Arguments:
             rpcTimeoutSeconds (float): Timeout value in seconds.
       )");
+
+  module.def(
+      "_enable_server_process_global_profiler",
+      &profiler::processglobal::enableServer);
+  module.def(
+      "_disable_server_process_global_profiler",
+      &profiler::processglobal::disableServer);
 
   Py_RETURN_TRUE;
 }

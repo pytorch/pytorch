@@ -8,6 +8,10 @@ import inspect
 import weakref
 import warnings
 import torch
+# This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
+# Explicitly ask to import `torch.distributed.__init__` first.
+# Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
+import torch.distributed.rpc
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
@@ -26,21 +30,54 @@ def createResolutionCallbackFromEnv(lookup_base):
     You should not use this directly, it should only be used from the other
     createResolutionCallbackFrom* functions.
     """
-    def env(qualified_name, module):
-        # We may need to resolve a qualified name, something like `torch.device`
-        # or `a.b.c.d`. We first look up `torch` or `a` in the function's closed
-        # over scope, then proceed to use the looked-up value to go down the
-        # chain.
+    def lookupInModule(qualified_name, module):
         if '.' in qualified_name:
             parts = qualified_name.split('.')
             base = parts[0]
-            remainding_pieces = '.'.join(parts[1:])
+            remaining_pieces = '.'.join(parts[1:])
             module_value = getattr(module, base)
-            return env(remainding_pieces, module_value)
+            return lookupInModule(remaining_pieces, module_value)
         else:
             return getattr(module, qualified_name)
 
-    return lambda key: env(key, lookup_base)
+    def parseNestedExpr(expr, module) -> Tuple[Any, int]:
+        i = 0
+        while i < len(expr) and expr[i] not in (',', '[', ']'):
+            i += 1
+
+        base = lookupInModule(expr[:i].strip(), module)
+        assert base is not None, "Unresolvable type {}".format(expr[:i])
+        if i == len(expr) or expr[i] != '[':
+            return base, i
+
+        assert expr[i] == '['
+        parts = []
+        while expr[i] != ']':
+            part_len = 0
+            i += 1
+            part, part_len = parseNestedExpr(expr[i:], module)
+            parts.append(part)
+            i += part_len
+        if len(parts) > 1:
+            return base[tuple(parts)], i + 1
+        else:
+            return base[parts[0]], i + 1
+
+    def parseExpr(expr, module):
+        try:
+            value, len_parsed = parseNestedExpr(expr, module)
+            assert len_parsed == len(expr), "whole expression was not parsed, falling back to c++ parser"
+            return value
+        except Exception as e:
+            """
+            The python resolver fails in several cases in known unit tests, and is intended
+            to fall back gracefully to the c++ resolver in general.  For example, python 2 style
+            annotations which are frequent in our unit tests often fail with types e.g. int not
+            resolvable from the calling frame.
+            """
+            return None
+
+    return lambda expr: parseExpr(expr, lookup_base)
 
 
 def createResolutionCallbackFromFrame(frames_up=0):
@@ -574,6 +611,55 @@ def is_tuple(ann):
         (getattr(ann, '__origin__', None) is Tuple or
             getattr(ann, '__origin__', None) is tuple)
 
+
+def is_named_tuple(ann):
+    return inspect.isclass(ann) and issubclass(ann, tuple) and hasattr(ann, "_fields")
+
+
+def try_make_named_tuple_type(ann, instance=None, loc=None):
+    if not is_named_tuple(ann):
+        return None
+
+    if hasattr(ann, "_field_defaults") and len(ann._field_defaults) > 0:
+        msg = """Default values are currently not supported on NamedTuple fields in TorchScript.
+                Fields with default values: ["""
+        first = True
+
+        # Print out all fields with default values
+        msg += ", ".join(ann._field_defaults.keys())
+
+        if loc:
+            error_report = torch._C.ErrorReport(loc)
+            msg += error_report.what().lstrip()
+
+        raise RuntimeError(msg)
+
+    # Bail if an instance is provided and its members are not JITable themselves.
+    if instance is not None:
+        for member in instance:
+            if not torch._C._jit_try_infer_type(member):
+                return None
+
+    qualified_name = torch.jit._qualified_name(ann)
+    props = torch.jit._get_named_tuple_properties(ann)
+    new_type = torch._C.TupleType.createNamed(qualified_name, props[1], props[2])
+    existing_type = torch.jit._python_cu.get_type(qualified_name)
+
+    if existing_type:
+        if existing_type.isSubtypeOf(new_type):
+            return existing_type
+        else:
+            msg = "Cannot redefine NamedTuple: " + str(existing_type)
+            if loc:
+                error_report = torch._C.ErrorReport(loc)
+                msg += error_report.what().lstrip()
+
+            raise RuntimeError(msg)
+
+    torch.jit._python_cu.register_type(new_type)
+    return new_type
+
+
 def is_list(ann):
     if not hasattr(ann, '__module__'):
         return False
@@ -622,17 +708,18 @@ class Future(Generic[T]):
     def __init__(self, types):
         self.__args__ = types
 
-class RRef(Generic[T]):
-    __slots__ = ['__args__']
-
-    def __init__(self, types):
-        self.__args__ = types
-
 def is_future(ann):
+    if ann is Future:
+        raise RuntimeError('Attempted to use torch.jit.Future without a '
+                           'contained type. Please add a contained type, e.g. '
+                           'torch.jit.Future[int]')
     return getattr(ann, "__origin__", None) is Future
 
-def is_rref(ann):
-    return getattr(ann, "__origin__", None) is RRef
+if torch.distributed.rpc.is_available():
+    from torch.distributed.rpc import RRef
+
+    def is_rref(ann):
+        return getattr(ann, "__origin__", None) is RRef
 
 try:
     import typing_extensions
