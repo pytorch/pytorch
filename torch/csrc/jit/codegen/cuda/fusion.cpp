@@ -131,6 +131,13 @@ void Fusion::addInput(Val* const input) {
           " has a reduction axis, but this does nothing in the fusion.");
   }
 
+  TORCH_CHECK(
+      input->getOrigin() == nullptr,
+      input,
+      " cannot be registered as an input as it is used as an output of an expression (",
+      input->getOrigin(),
+      ").");
+
   IRInputOutput::addInput(input);
 }
 
