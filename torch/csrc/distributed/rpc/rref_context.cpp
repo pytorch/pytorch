@@ -271,7 +271,8 @@ void RRefContext::delAllUsersAndUnforkedOwners(
       owners_.erase(iter);
     }
   }
-  // Wait for Owners to process all delete UserRRef messages.
+  // Wait for this node to process all delete UserRRef messages it may get for
+  // the OwnerRRefs that exist on this node.
   {
     std::unique_lock<std::mutex> lock(mutex_);
     bool noOwner = deleteAllUsersCV_.wait_for(

@@ -3223,6 +3223,8 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref.to_here(0.01)
 
+        rref.to_here()
+
     @dist_init(faulty_messages=[])
     def test_rpc_builtin_timeout(self):
         next_rank = (self.rank + 1) % self.world_size
