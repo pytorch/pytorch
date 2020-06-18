@@ -12,6 +12,17 @@ from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 
 from test_jit import JitTestCase, RUN_CUDA
+import itertools
+import numpy as np
+
+try:
+    from typing_extensions import Final
+except:
+    # If you don't have `typing_extensions` installed, you can use a
+    # polyfill from `torch.jit`.
+    from torch.jit import Final
+
+from typing import List, Tuple, Dict
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_profiling_executor(True)
@@ -406,6 +417,58 @@ class TestCudaFuser(JitTestCase):
         os.environ["PYTORCH_CUDA_FUSER_DISABLE_FALLBACK"] = "1"
         self.assertTrue(runDefaultTestWithSeed(28449))
 
+    def _compare(self, desc, inp1, inp2, error):
+        a = inp1.clone().detach().cpu().numpy()
+        b = inp2.clone().detach().cpu().numpy()
+        close = np.allclose(a,b, error, error)
+        if not close:
+            print(desc, close)
+            z = a - b
+            index = (np.abs(z) >= error + error * np.abs(b)).nonzero()
+            print("dif    : ", z[index])
+            print("inp1   : ", a[index])
+            print("inp2   : ", b[index])
+        return close
+
+    def _reduction_helper(self, sizes, reduction_axis, dtype, device):
+        print("****running example: ", sizes, ", reducing on ", reduction_axis)
+        class MyReduction(torch.nn.Module):
+            __constants__ = ['reduction_axis']
+            #reduction_axis : Final[List[int]]
+
+            def __init__(self):
+                super(MyReduction, self).__init__()
+                self.reduction_axis = reduction_axis
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                o = torch.add(x, y)
+                o = torch.sum(o, dim=self.reduction_axis)
+                return o
+
+        t = MyReduction()
+        x = torch.randn(sizes, dtype=dtype, device=device)
+        y = torch.randn(sizes, dtype=dtype, device=device)
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            #self.assertEqual(oo, jit_oo)
+            self.assertTrue(self._compare("comparing output failed", oo, jit_oo, 1e-4))
+        self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GROUP)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
+    @skipIfRocm
+    def test_reduction(self):
+        for x in ([7, 8, 12], [12, 8, 7, 9, 15], [128, 16, 8, 32]):
+            # note that num_dim is exclusive from len(x), so we are not reducing
+            # to single element (codegen limitation at this moment)
+            for num_reduce_dim in range(1, len(x)):
+                for axes in itertools.combinations(range(len(x)), num_reduce_dim):
+                    self._reduction_helper((12, 8, 7, 4, 8), axes, torch.float32, "cuda")
 
 class TestPassManagerCudaFuser(JitTestCase):
 

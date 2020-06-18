@@ -134,6 +134,7 @@ void testGPU_FusionExprEvalConstants() {
   checkIntValue(&eval_context, neg(mul(sub(a, b), div(a, b))), -8);
   checkIntValue(&eval_context, mod(a, b), 1);
   checkIntValue(&eval_context, ceilDiv(a, b), 3);
+  checkIntValue(&eval_context, b, 3);
 }
 
 // Evaluate basic scalar operations with bound values
@@ -206,6 +207,13 @@ void testGPU_FusionExprEvalBasic() {
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
+  auto* bid_x = add(tv3->axis(0)->rawExtent(), new Int(0));
+  auto* tid_x = add(tv3->axis(-1)->rawExtent(), new Int(0));
+
+  GPULower gpulw(&fusion);
+  std::stringstream cdg;
+  gpulw.printKernel(cdg);
+  std::cout << cdg.str() << std::endl;
   // 1. Create an evaluation context
   EvaluationContext eval_context(&fusion);
 
@@ -216,7 +224,6 @@ void testGPU_FusionExprEvalBasic() {
   // b. You must use the original (rootDomain) extents
   //  (ex. `tv0->getRootDomain()[0]->extent()`
   //   instead of `tv0->axis(0)->extent()`)
-  //
   eval_context.bind(tv0->getRootDomain()[0]->extent(), 6);
   eval_context.bind(tv0->getRootDomain()[1]->extent(), 128);
   eval_context.bind(tv1->getRootDomain()[0]->extent(), 6);
@@ -232,6 +239,11 @@ void testGPU_FusionExprEvalBasic() {
   checkIntValue(&eval_context, tv3->axis(0)->rawExtent(), 2);
   checkIntValue(&eval_context, tv3->axis(1)->rawExtent(), 4);
   checkIntValue(&eval_context, tv3->axis(2)->rawExtent(), 128);
+
+  const auto bid_x_val = ExpressionEvaluator::evaluate(bid_x, &eval_context);
+  std::cout << "bid x value " << bid_x_val.value() << std::endl;
+  const auto tid_x_val = ExpressionEvaluator::evaluate(bid_x, &eval_context);
+  std::cout << "tid x value " << tid_x_val.value() << std::endl;
 }
 
 // Evaluate expressions in a more complex IR
@@ -2519,6 +2531,7 @@ void testGPU_FusionReduction5() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
+/*
 void testGPU_FusionReductionJ() {
   torch::jit::fuser::cuda::CudaKernel prog;
   Fusion& fusion = *prog.fusion_;
@@ -2584,6 +2597,7 @@ void testGPU_FusionReductionJ() {
   auto aten_output = input.sum({1, 2});
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
+*/
 
 void testGPU_FusionReductionTFT() {
   torch::jit::fuser::cuda::CudaKernel prog;
@@ -2848,7 +2862,6 @@ void testGPU_FusionReductionJ() {
 }
 */
 
-/*
 void testGPU_FusionReductionJ() {
   torch::jit::fuser::cuda::CudaKernel prog;
   Fusion& fusion = *prog.fusion_;
@@ -2864,27 +2877,22 @@ void testGPU_FusionReductionJ() {
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
   tv1->split(1, 128);
   auto tv2 = tv1->rFactor({1});
-  std::cout << "fusion 1: \n" << fusion << std::endl;
 
   tv0->computeAt(tv1, 2);
-  tv0->computeAt(tv2, 3);
-  std::cout << "fusion 2: \n" << fusion << std::endl;
-  tv1->axis(0)->parallelize(ParallelType::BIDx);
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
-
-  //tv0->axis(-1)->parallelize(ParallelType::TIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  //tv0->computeAt(tv2, 3);
 
   tv0->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(0)->parallelize(ParallelType::BIDx);
-  std::cout << "fusion 3: \n" << fusion << std::endl;
+  tv0->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
 
   GPULower gpulw(&fusion);
   std::stringstream cdg;
   gpulw.printKernel(cdg);
   std::cout << cdg.str() << std::endl;
 }
-*/
 
 void testGPU_FusionSimpleBCast() {
   {
