@@ -5,7 +5,6 @@ import enum
 import torch
 from .qconfig import QConfig
 from torch.jit._recursive import wrap_cpp_module
-from torch.nn.utils.fusion import fuse_conv_bn_script
 
 # Quantization type (dynamic quantization, static quantization).
 # Should match the c++ enum in quantization_type.h
@@ -28,6 +27,9 @@ def script_qconfig(qconfig):
 
 def script_qconfig_dict(qconfig_dict):
     return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
+
+def fuse_conv_bn_script(model):
+    return torch.jit._recursive.wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
 
 def _prepare_script(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC):
     assert not inplace, "The inplace support is still in development"

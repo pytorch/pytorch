@@ -22,6 +22,7 @@ from torch.quantization.quantize_script import quantize_script
 from torch.quantization.quantize_script import prepare_dynamic_script
 from torch.quantization.quantize_script import convert_dynamic_script
 from torch.quantization.quantize_script import quantize_dynamic_script
+from torch.quantization.quantize_script import fuse_conv_bn_script
 
 # Testing utils
 from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
@@ -39,8 +40,6 @@ from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
 
 from torch.jit._recursive import wrap_cpp_module
-
-from torch.nn.utils.fusion import fuse_conv_bn_script
 
 # Standard library
 import itertools
