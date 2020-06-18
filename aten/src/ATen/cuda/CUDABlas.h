@@ -34,10 +34,6 @@ void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 template <>
-void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>));
-template <>
-void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>));
-template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 #ifdef __HIP_PLATFORM_HCC__
 template <>
@@ -60,6 +56,10 @@ template <>
 void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double));
 template <>
 void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float));
+template <>
+void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>));
+template <>
+void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>));
 template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
 #ifdef __HIP_PLATFORM_HCC__
