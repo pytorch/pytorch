@@ -71,7 +71,7 @@ class RandomSampler(Sampler):
 
     Arguments:
         data_source (Dataset): dataset to sample from
-        replacement (bool): samples are drawn with replacement if ``True``, default=``False``
+        replacement (bool): samples are drawn on-demand  with replacement if ``True``, default=``False``
         num_samples (int): number of samples to draw, default=`len(dataset)`. This argument
             is supposed to be specified only when `replacement` is ``True``.
         generator (Generator): Generator used in sampling.
@@ -105,11 +105,14 @@ class RandomSampler(Sampler):
     def __iter__(self):
         n = len(self.data_source)
         if self.generator is None:
-            self.generator = torch.default_generator
+            generator = torch.Generator()
+            generator.manual_seed(generator.initial_seed())
+        else:
+            generator = self.generator
         if self.replacement:
-            for _ in range(self.num_samples // n):
-                yield from torch.randint(high=n, size=(n,), dtype=torch.int64, generator=self.generator).tolist()
-            yield from torch.randint(high=n, size=(self.num_samples % n,), dtype=torch.int64, generator=self.generator).tolist()
+            for _ in range(self.num_samples // 32):
+                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).tolist()
+            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).tolist()
         else:
             yield from torch.randperm(n, generator=self.generator).tolist()
 
