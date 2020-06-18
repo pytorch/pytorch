@@ -55,7 +55,7 @@ if is_available():
                 process group agent. If using the default
                 ``rpc_backend_options``, RPC would initialize the underlying
                 process group backend using ``init_method = "env://"``,
-                meaning that environment variables ``MASTER_ADDRESS`` and
+                meaning that environment variables ``MASTER_ADDR`` and
                 ``MASTER_PORT`` needs to be set properly. See
                 :class:`~torch.distributed.rpc.ProcessGroupRpcBackendOptions`
                 for examples.
