@@ -37,13 +37,13 @@ android {
         }
         buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
         buildConfigField("String", "LOGCAT_TAG", "@string/app_name")
-        buildConfigField("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 224, 224}")
+        //buildConfigField("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 224, 224}")
         buildConfigField("boolean", "NATIVE_BUILD", 'false')
         addManifestPlaceholders([APP_NAME: "@string/app_name", MAIN_ACTIVITY: "org.pytorch.testapp.MainActivity"])
     }
     signingConfigs {
         config {
-            storeFile file("testapp.keystore")
+            storeFile file("../testapp.keystore")
             storePassword 'keystore'
             keyAlias 'alias'
             keyPassword 'keystore'
@@ -75,7 +75,7 @@ android {
         }
         resnet18 {
             dimension "model"
-            applicationIdSuffix ".resneti18"
+            applicationIdSuffix ".resnet18"
             buildConfigField("String", "MODULE_ASSET_NAME", "\"resnet18.pt\"")
             addManifestPlaceholders([APP_NAME: "RN18"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
@@ -133,9 +133,9 @@ dependencies {
     localImplementation project(':pytorch_android')
     localImplementation project(':pytorch_android_torchvision')
 
-    nativeBuildImplementation(name: 'pytorch_android-1.6.0-SNAPSHOT', ext: 'aar')
+    nativeBuildImplementation(name: 'pytorch_android-release', ext: 'aar')
     nativeBuildImplementation(name: 'pytorch_android_torchvision-1.6.0-SNAPSHOT', ext: 'aar')
-    extractForNativeBuild(name: 'pytorch_android-1.6.0-SNAPSHOT', ext: 'aar')
+    extractForNativeBuild(name: 'pytorch_android-release', ext: 'aar')
 
     nightlyImplementation 'org.pytorch:pytorch_android:1.6.0-SNAPSHOT'
     nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.6.0-SNAPSHOT'
@@ -149,6 +149,8 @@ dependencies {
     cameraImplementation "androidx.camera:camera-core:$camerax_version"
     cameraImplementation "androidx.camera:camera-camera2:$camerax_version"
     cameraImplementation 'com.google.android.material:material:1.0.0-beta01'
+
+    implementation 'com.android.ndk.thirdparty:curl:7.68.0-alpha-1'
 }
 
 task extractAARForNativeBuild {

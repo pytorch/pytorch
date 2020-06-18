@@ -119,13 +119,13 @@ public static String assetFilePath(Context context, String assetName) {
   @Nullable
   protected Result doModuleForward() {
     if (mModule == null) {
-      final long[] shape = BuildConfig.INPUT_TENSOR_SHAPE;
+      final long[] shape = new long[]{1, 3, 224, 224};//BuildConfig.INPUT_TENSOR_SHAPE;
       long numElements = 1;
       for (int i = 0; i < shape.length; i++) {
         numElements *= shape[i];
       }
       mInputTensorBuffer = Tensor.allocateFloatBuffer((int) numElements);
-      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE);
+      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, new long[]{1, 3, 224, 224});
       PyTorchAndroid.setNumThreads(1);
       mModule = PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
     }
