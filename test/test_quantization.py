@@ -55,6 +55,7 @@ from quantization.test_quantize_script import TestQuantizeScriptJitPasses  # noq
 from quantization.test_quantize_script import TestQuantizeScriptPTSQOps  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeDynamicScriptJitPasses  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeScriptPTDQOps  # noqa: F401
+from quantization.test_quantize_script import TestQuantizeScript  # noqa: F401
 
 # Tooling: numric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401

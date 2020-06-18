@@ -343,14 +343,17 @@ class TestQuantizedOps(TestCase):
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
-        channels_last = (True, False)
-        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last]
+        channels_last_list = (True, False)
+        affine_list = (True, False)
+        combined = [side_lens, torch_types, y_scales, y_zero_points,
+                    channels_last_list, affine_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                side_len, torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                side_len, torch_type, Y_scale, Y_zero_point, channels_last, \
+                    affine = test_case
                 shapes = [side_len] * 4
 
                 # In the FP kernel, mean and variance are calculated in floating point.
@@ -391,8 +394,12 @@ class TestQuantizedOps(TestCase):
 
                 # Initialize the weights non-randomly for reproducibility, to avoid
                 # flaky tests
-                weight = torch.ones(*qX.size()[1:], dtype=torch.float) * 0.5
-                bias = torch.ones(*qX.size()[1:], dtype=torch.float) * 1
+                if affine:
+                    weight = torch.ones(*qX.size()[1:], dtype=torch.float) * 0.5
+                    bias = torch.ones(*qX.size()[1:], dtype=torch.float) * 1
+                else:
+                    weight = None
+                    bias = None
                 epsilon = 1e-5
 
                 qY = torch.ops.quantized.layer_norm(
@@ -1681,15 +1688,17 @@ class TestQuantizedOps(TestCase):
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
         channels_last_list = [True, False]
+        affine_list = [True, False]
         combined = [batches_list, num_groups_list, channels_per_groups, elements_per_channels,
-                    torch_types, y_scales, y_zero_points, channels_last_list]
+                    torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
                 batches, num_groups, channels_per_group, elements_per_channel, \
-                    torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                    torch_type, Y_scale, Y_zero_point, channels_last, \
+                    affine = test_case
                 num_channels = num_groups * channels_per_group
                 # minimum rank for for channels_last
                 shapes = (batches, num_channels, elements_per_channel, 1)
@@ -1715,11 +1724,15 @@ class TestQuantizedOps(TestCase):
                     _get_random_tensor_and_q_params(shapes, 1.0, torch_type)
 
                 # Initialize the weights non-randomly for reproducibility
-                weight = torch.ones(num_channels).float() * 0.5
-                bias = torch.ones(num_channels).float()
-                for i in range(num_channels):
-                    weight[i] *= i
-                    bias[i] *= i
+                if affine:
+                    weight = torch.ones(num_channels).float() * 0.5
+                    bias = torch.ones(num_channels).float()
+                    for i in range(num_channels):
+                        weight[i] *= i
+                        bias[i] *= i
+                else:
+                    weight = None
+                    bias = None
 
                 eps = 0.001
 
@@ -1767,13 +1780,14 @@ class TestQuantizedOps(TestCase):
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
         channels_last_list = (True, False)
-        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last_list]
+        affine_list = (True, False)
+        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                side_len, torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                side_len, torch_type, Y_scale, Y_zero_point, channels_last, affine = test_case
                 shapes = [side_len] * 4
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
@@ -1797,11 +1811,15 @@ class TestQuantizedOps(TestCase):
                     _get_random_tensor_and_q_params(shapes, 1.0, torch_type)
 
                 num_channels = shapes[1]
-                weight = torch.rand(num_channels).float() * 0.5
-                bias = torch.rand(num_channels).float()
-                for i in range(num_channels):
-                    weight[i] *= i
-                    bias[i] *= i
+                if affine:
+                    weight = torch.rand(num_channels).float() * 0.5
+                    bias = torch.rand(num_channels).float()
+                    for i in range(num_channels):
+                        weight[i] *= i
+                        bias[i] *= i
+                else:
+                    weight = None
+                    bias = None
                 eps = 0.001
 
                 qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
