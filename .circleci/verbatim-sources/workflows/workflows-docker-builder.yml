@@ -8,6 +8,9 @@
                 - master
     jobs:
       - docker_build_job:
+          name: "pytorch-linux-bionic-cuda11.0-cudnn8-py3-gcc7"
+          image_name: "pytorch-linux-bionic-cuda11.0-cudnn8-py3-gcc7"
+      - docker_build_job:
           name: "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9"
           image_name: "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9"
       - docker_build_job:
