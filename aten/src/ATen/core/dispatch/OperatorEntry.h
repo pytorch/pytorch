@@ -2,6 +2,7 @@
 
 #include <ATen/core/dispatch/DispatchTable.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <list>
 
@@ -82,7 +83,7 @@ public:
   void prepareForDeregistration();
 
   // Postcondition: caller is responsible for disposing of the kernel
-  std::list<KernelEntry>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  std::list<KernelEntry>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
   void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelEntry>::iterator kernel);
 
   void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
@@ -99,6 +100,20 @@ public:
   // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic
   void setManuallyBoxedKernel_(KernelFunction::InternalBoxedKernelFunction* func) {
     dispatchTable_.setManuallyBoxedKernel_(func);
+  }
+
+  // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
+  template<class FuncType>
+  void assertSignatureIsCorrect() {
+    TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == *cpp_signature_),
+        "Tried to access operator ", name_, " with a wrong signature. Accessed with ",
+        CppSignature::make<FuncType>().name(),
+        " but the operator was registered with ",
+        cpp_signature_->name(),
+        " (",
+        debug_.value(),
+        ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
+    );
   }
 
 private:
@@ -145,6 +160,13 @@ private:
   ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelEntry>> kernels_;
 
   std::mutex kernelsMutex_; // protects kernels_
+
+  // signature_hash_ is set to the hash of the function signature if any of
+  // the kernels was created in a way that allowed us to know the function
+  // signature (i.e. by supplying an unboxed C++ kernel function).
+  // If this is set, it will be used in unboxed function calls
+  // to verify their arguments against the known function signature.
+  c10::optional<CppSignature> cpp_signature_;
 
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.

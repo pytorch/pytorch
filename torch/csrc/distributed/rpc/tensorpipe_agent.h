@@ -18,9 +18,61 @@ namespace rpc {
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
+struct TransportRegistration {
+  std::shared_ptr<tensorpipe::transport::Context> transport;
+  int64_t priority;
+  std::string address;
+};
+
+C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+
+struct ChannelRegistration {
+  std::shared_ptr<tensorpipe::channel::Context> channel;
+  int64_t priority;
+};
+
+C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+
+constexpr auto kDefaultNumWorkerThreads = 16;
+
 struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
-  TensorPipeRpcBackendOptions(float rpc_timeout, std::string init_method)
-      : RpcBackendOptions(rpc_timeout, init_method) {}
+  TensorPipeRpcBackendOptions(
+      int numWorkerThreads,
+      optional<std::vector<std::string>> transports,
+      optional<std::vector<std::string>> channels,
+      float rpc_timeout,
+      std::string init_method)
+      : RpcBackendOptions(rpc_timeout, init_method),
+        numWorkerThreads(numWorkerThreads),
+        transports(std::move(transports)),
+        channels(std::move(channels)) {
+    TORCH_CHECK(
+        numWorkerThreads > 0,
+        "num_worker_threads must be positive, got ",
+        numWorkerThreads);
+
+    if (transports.has_value()) {
+      for (const std::string& transportName : transports.value()) {
+        TORCH_CHECK(
+            TensorPipeTransportRegistry()->Has(transportName),
+            "Unknown transport: ",
+            transportName);
+      }
+    }
+
+    if (channels.has_value()) {
+      for (const std::string& channelName : channels.value()) {
+        TORCH_CHECK(
+            TensorPipeChannelRegistry()->Has(channelName),
+            "Unknown channel: ",
+            channelName);
+      }
+    }
+  }
+
+  int numWorkerThreads;
+  const optional<std::vector<std::string>> transports;
+  const optional<std::vector<std::string>> channels;
 };
 
 // Struct to track the network source metrics
@@ -36,21 +88,6 @@ struct AggregatedNetworkData {
   uint64_t totalRecvBytes{0};
   uint64_t totalErrors{0};
 };
-
-struct TransportRegistration {
-  std::shared_ptr<tensorpipe::transport::Context> transport;
-  int64_t priority;
-  std::string address;
-};
-
-C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
-
-struct ChannelRegistration {
-  std::shared_ptr<tensorpipe::channel::Context> channel;
-  int64_t priority;
-};
-
-C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
 // TensorPipeAgent leverages TensorPipe (https://github.com/pytorch/tensorpipe)
 // to transparently move tensors and payloads through the fastest available
@@ -174,8 +211,9 @@ class TensorPipeAgent : public RpcAgent {
         pendingResponseMessage_;
   };
 
-  // TODO: configure thread pool size through RpcBackendOptions.
-  ThreadPool threadPool_{16};
+  const TensorPipeRpcBackendOptions opts_;
+
+  ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
   std::shared_ptr<tensorpipe::Listener> listener_;
   std::unordered_map<worker_id_t, ClientPipe> connectedPipes_;
@@ -188,7 +226,6 @@ class TensorPipeAgent : public RpcAgent {
   ::c10d::PrefixStore rankToNameStore_;
   ::c10d::PrefixStore nameToAddressStore_;
   const int worldSize_;
-  const TensorPipeRpcBackendOptions opts_;
 
   // The join method is required to behave like a barrier and perform collective
   // operations. For simplicity and reliability, we offload this to a process
