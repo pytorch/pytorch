@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <sstream>
 
@@ -16,7 +17,9 @@ void confirmPendingUser(
     const FutureMessage& futureMessage,
     const ForkId& expectedForkId) {
   if (!futureMessage.hasError()) {
-    auto rr = RemoteRet::fromMessage(futureMessage.constValue());
+    auto msgType = futureMessage.constValue().type();
+    auto rpc = deserializeResponse(futureMessage.constValue(), msgType);
+    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
     TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
   } else {
     // Handle errors, such as timeouts, by invoking the error handler on the
@@ -53,7 +56,9 @@ c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
         ctx.delForkOfOwner(rref_ptr->rrefId(), rref_ptr->rrefId());
     return deletedRRef;
   } else {
-    auto rr = RemoteRet::fromMessage(futureMessage.constValue());
+    auto msgType = futureMessage.constValue().type();
+    auto rpc = deserializeResponse(futureMessage.constValue(), msgType);
+    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
     TORCH_INTERNAL_ASSERT(
         rr->rrefId() == rr->forkId(),
         "Expecting an OwnerRRef as RemoteRet but got a fork.");
