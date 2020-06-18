@@ -527,6 +527,11 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals': List[str],
     'formals_types': List[str],
     'cpp_signature': str,
+    # 'schema_order_cpp_signature' is like 'cpp_signature' but keeps them in the
+    # order they are defined in the JIT function schema while
+    # 'cpp_signature' does some modifications (e.g. reorders out arguments
+    # and packs TensorOptions)
+    'schema_order_cpp_signature': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -954,7 +959,7 @@ def create_generic(top_env, declarations):
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
 
     def native_get_formals(option, schema_order, include_constants=False):
-        # type: (FunctionOption, bool) -> List[AtFormal]
+        # type: (FunctionOption, bool, bool) -> List[AtFormal]
         seen = set()  # type: Set[str]
         pos_args = []
         kwd_args = []
