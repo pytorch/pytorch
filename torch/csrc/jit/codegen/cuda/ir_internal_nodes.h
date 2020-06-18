@@ -39,14 +39,14 @@ struct TORCH_CUDA_API UnaryOp : public Expr {
   UnaryOp(UnaryOp&& other) = delete;
   UnaryOp& operator=(UnaryOp&& other) = delete;
 
-  Val* out() const noexcept {
+  Val* out() const {
     return out_;
   }
-  Val* in() const noexcept {
+  Val* in() const {
     return in_;
   }
 
-  UnaryOpType getUnaryOpType() const noexcept {
+  UnaryOpType getUnaryOpType() const {
     return unary_op_type_;
   }
 
@@ -54,8 +54,8 @@ struct TORCH_CUDA_API UnaryOp : public Expr {
 
  private:
   const UnaryOpType unary_op_type_;
-  Val* const out_;
-  Val* const in_;
+  Val* const out_ = nullptr;
+  Val* const in_ = nullptr;
 };
 
 /*
@@ -74,17 +74,17 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
   BinaryOp(BinaryOp&& other) = delete;
   BinaryOp& operator=(BinaryOp&& other) = delete;
 
-  Val* out() const noexcept {
+  Val* out() const {
     return out_;
   }
-  Val* lhs() const noexcept {
+  Val* lhs() const {
     return lhs_;
   }
-  Val* rhs() const noexcept {
+  Val* rhs() const {
     return rhs_;
   }
 
-  BinaryOpType getBinaryOpType() const noexcept {
+  BinaryOpType getBinaryOpType() const {
     return binary_op_type_;
   }
 
@@ -92,9 +92,9 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
 
  private:
   const BinaryOpType binary_op_type_;
-  Val* const out_;
-  Val* const lhs_;
-  Val* const rhs_;
+  Val* const out_ = nullptr;
+  Val* const lhs_ = nullptr;
+  Val* const rhs_ = nullptr;
 };
 
 /*
@@ -111,18 +111,18 @@ struct TORCH_CUDA_API BroadcastOp : public Expr {
   BroadcastOp(BroadcastOp&& other) = delete;
   BroadcastOp& operator=(BroadcastOp&& other) = delete;
 
-  Val* out() const noexcept {
+  Val* out() const {
     return out_;
   }
-  Val* in() const noexcept {
+  Val* in() const {
     return in_;
   }
 
   bool sameAs(const BroadcastOp* const other) const;
 
  private:
-  Val* const out_;
-  Val* const in_;
+  Val* const out_ = nullptr;
+  Val* const in_ = nullptr;
 };
 
 /*
@@ -142,17 +142,17 @@ struct TORCH_CUDA_API ReductionOp : public Expr {
   ReductionOp(ReductionOp&& other) = delete;
   ReductionOp& operator=(ReductionOp&& other) = delete;
 
-  Val* out() const noexcept {
+  Val* out() const {
     return out_;
   }
-  Val* in() const noexcept {
+  Val* in() const {
     return in_;
   }
-  Val* init() const noexcept {
+  Val* init() const {
     return init_;
   }
 
-  BinaryOpType getReductionOpType() const noexcept {
+  BinaryOpType getReductionOpType() const {
     return reduction_op_type_;
   }
 
@@ -165,9 +165,9 @@ struct TORCH_CUDA_API ReductionOp : public Expr {
 
  private:
   const BinaryOpType reduction_op_type_;
-  Val* const init_;
-  Val* const out_;
-  Val* const in_;
+  Val* const init_ = nullptr;
+  Val* const out_ = nullptr;
+  Val* const in_ = nullptr;
 };
 
 struct TORCH_CUDA_API TernaryOp : public Expr {
@@ -180,21 +180,21 @@ struct TORCH_CUDA_API TernaryOp : public Expr {
   TernaryOp(TernaryOp&& other) = delete;
   TernaryOp& operator=(TernaryOp&& other) = delete;
 
-  Val* out() const noexcept {
+  Val* out() const {
     return out_;
   }
 
-  Val* in1() const noexcept {
+  Val* in1() const {
     return in1_;
   }
-  Val* in2() const noexcept {
+  Val* in2() const {
     return in2_;
   }
-  Val* in3() const noexcept {
+  Val* in3() const {
     return in3_;
   }
 
-  TernaryOpType getTernaryOpType() const noexcept {
+  TernaryOpType getTernaryOpType() const {
     return ternary_op_type_;
   }
 
@@ -202,10 +202,10 @@ struct TORCH_CUDA_API TernaryOp : public Expr {
 
  private:
   const TernaryOpType ternary_op_type_;
-  Val* const out_;
-  Val* const in1_;
-  Val* const in2_;
-  Val* const in3_;
+  Val* const out_ = nullptr;
+  Val* const in1_ = nullptr;
+  Val* const in2_ = nullptr;
+  Val* const in3_ = nullptr;
 };
 
 /*
@@ -245,15 +245,15 @@ struct TORCH_CUDA_API IterDomain : public Val {
       IterDomain* in,
       unsigned int factor);
 
-  bool isReduction() const noexcept {
+  bool isReduction() const {
     return is_reduction_domain_;
   }
 
-  bool isRFactorProduct() const noexcept {
+  bool isRFactorProduct() const {
     return is_rfactor_domain_;
   }
 
-  bool isBroadcast() const noexcept {
+  bool isBroadcast() const {
     return is_broadcast_domain_;
   }
 
@@ -307,11 +307,11 @@ struct TORCH_CUDA_API IterDomain : public Val {
           " .");
   }
 
-  ParallelType parallel_method() const noexcept {
+  ParallelType parallel_method() const {
     return parallel_method_;
   }
 
-  Val* start() const noexcept {
+  Val* start() const {
     return start_;
   }
   Val* extent() const;
@@ -326,12 +326,12 @@ struct TORCH_CUDA_API IterDomain : public Val {
   IterDomain& operator=(IterDomain&& other) = delete;
 
  private:
-  Val* const start_;
-  Val* const extent_;
+  Val* const start_ = nullptr;
+  Val* const extent_ = nullptr;
   ParallelType parallel_method_ = ParallelType::Serial;
-  bool is_reduction_domain_;
-  bool is_rfactor_domain_;
-  bool is_broadcast_domain_;
+  bool is_reduction_domain_ = false;
+  bool is_rfactor_domain_ = false;
+  bool is_broadcast_domain_ = false;
 };
 /*
  * TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
@@ -376,7 +376,7 @@ struct TORCH_CUDA_API TensorDomain : public Val {
       const std::vector<IterDomain*>& lhs,
       const std::vector<IterDomain*>& rhs);
 
-  const std::vector<IterDomain*>& domain() const noexcept {
+  const std::vector<IterDomain*>& domain() const {
     return domain_;
   }
 
@@ -386,19 +386,19 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
-  const std::vector<IterDomain*>& noReductions() const noexcept {
+  const std::vector<IterDomain*>& noReductions() const {
     return no_reduction_domain_;
   }
 
-  const std::vector<IterDomain*>& noBroadcasts() const noexcept {
+  const std::vector<IterDomain*>& noBroadcasts() const {
     return no_bcast_domain_;
   }
 
-  const std::vector<IterDomain*>& rootDomain() const noexcept {
+  const std::vector<IterDomain*>& rootDomain() const {
     return root_domain_;
   };
 
-  const std::vector<IterDomain*>& rfactorDomain() const noexcept {
+  const std::vector<IterDomain*>& rfactorDomain() const {
     return rfactor_domain_;
   };
 
@@ -460,25 +460,25 @@ struct TORCH_CUDA_API Split : public Expr {
 
   Split(IterDomain* _outer, IterDomain* _inner, IterDomain* _in, Int* _factor);
 
-  IterDomain* outer() const noexcept {
+  IterDomain* outer() const {
     return outer_;
   }
-  IterDomain* inner() const noexcept {
+  IterDomain* inner() const {
     return inner_;
   }
-  IterDomain* in() const noexcept {
+  IterDomain* in() const {
     return in_;
   }
-  Int* factor() const noexcept {
+  Int* factor() const {
     return factor_;
   }
   bool sameAs(const Split* const other) const;
 
  private:
-  IterDomain* const outer_;
-  IterDomain* const inner_;
-  IterDomain* const in_;
-  Int* const factor_;
+  IterDomain* const outer_ = nullptr;
+  IterDomain* const inner_ = nullptr;
+  IterDomain* const in_ = nullptr;
+  Int* const factor_ = nullptr;
 };
 
 /*
@@ -498,22 +498,22 @@ struct TORCH_CUDA_API Merge : public Expr {
   Merge(Merge&& other) = delete;
   Merge& operator=(Merge&& other) = delete;
 
-  IterDomain* out() const noexcept {
+  IterDomain* out() const {
     return out_;
   }
-  IterDomain* outer() const noexcept {
+  IterDomain* outer() const {
     return outer_;
   }
-  IterDomain* inner() const noexcept {
+  IterDomain* inner() const {
     return inner_;
   }
 
   bool sameAs(const Merge* const other) const;
 
  private:
-  IterDomain* const out_;
-  IterDomain* const outer_;
-  IterDomain* const inner_;
+  IterDomain* const out_ = nullptr;
+  IterDomain* const outer_ = nullptr;
+  IterDomain* const inner_ = nullptr;
 };
 
 /*
@@ -539,32 +539,32 @@ struct TORCH_CUDA_API ForLoop : public Expr {
   ForLoop(ForLoop&& other) = delete;
   ForLoop& operator=(ForLoop&& other) = delete;
 
-  Val* index() const noexcept {
+  Val* index() const {
     return index_;
   }
 
-  IterDomain* iter_domain() const noexcept {
+  IterDomain* iter_domain() const {
     return iter_domain_;
   }
 
-  Scope& body() noexcept {
+  Scope& body() {
     return body_;
   }
 
-  const Scope& constBody() const noexcept {
+  const Scope& constBody() const {
     return body_;
   }
 
   bool sameAs(const ForLoop* other) const;
-  Expr* parentScope() const noexcept {
+  Expr* parentScope() const {
     return parent_scope_;
   }
 
  private:
-  Val* const index_;
+  Val* const index_ = nullptr;
   IterDomain* const iter_domain_;
   Scope body_;
-  Expr* parent_scope_;
+  Expr* parent_scope_ = nullptr;
 };
 
 /*
@@ -590,41 +590,41 @@ struct TORCH_CUDA_API IfThenElse : public Expr {
   IfThenElse(IfThenElse&& other) = delete;
   IfThenElse& operator=(IfThenElse&& other) = delete;
 
-  Bool* cond() const noexcept {
+  Bool* cond() const {
     return cond_;
   }
 
-  const Scope& constBody() const noexcept {
+  const Scope& constBody() const {
     return body_;
   }
 
-  const Scope& constElseBody() const noexcept {
+  const Scope& constElseBody() const {
     return else_body_;
   }
 
-  Scope& body() noexcept {
+  Scope& body() {
     return body_;
   }
 
-  Scope& elseBody() noexcept {
+  Scope& elseBody() {
     return else_body_;
   }
 
-  bool hasElse() const noexcept {
+  bool hasElse() const {
     return !else_body_.empty();
   }
 
   bool sameAs(const IfThenElse* other) const;
 
-  Expr* parentScope() const noexcept {
+  Expr* parentScope() const {
     return parent_scope_;
   }
 
  private:
-  Bool* const cond_;
+  Bool* const cond_ = nullptr;
   Scope body_;
   Scope else_body_;
-  Expr* parent_scope_;
+  Expr* parent_scope_ = nullptr;
 };
 
 /*
@@ -665,18 +665,18 @@ struct TORCH_CUDA_API TensorIndex : public Val {
   // uint.
   Val* index(int i) const;
 
-  const std::vector<Val*>& indices() const noexcept {
+  const std::vector<Val*>& indices() const {
     return indices_;
   }
 
-  const TensorView* view() const noexcept {
+  const TensorView* view() const {
     return view_;
   }
 
   bool sameAs(const TensorIndex* const other) const;
 
  private:
-  const TensorView* view_;
+  const TensorView* view_ = nullptr;
   std::vector<Val*> indices_;
 };
 
@@ -701,18 +701,18 @@ struct TORCH_CUDA_API Allocate : public Expr {
   Allocate(Val* _tv, Val* size);
 
   DataType buf_type() const;
-  Val* extent() const noexcept {
+  Val* extent() const {
     return extent_;
   }
-  Val* buffer() const noexcept {
+  Val* buffer() const {
     return buffer_;
   }
 
   bool sameAs(const Allocate* other) const;
 
  private:
-  Val* buffer_;
-  Val* extent_;
+  Val* buffer_ = nullptr;
+  Val* extent_ = nullptr;
 };
 
 /*
@@ -735,7 +735,7 @@ struct TORCH_CUDA_API NamedScalar : public Val {
   NamedScalar(NamedScalar&& other) = delete;
   NamedScalar& operator=(NamedScalar&& other) = delete;
 
-  const std::string& name() const noexcept {
+  const std::string& name() const {
     return name_;
   }
 

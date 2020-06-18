@@ -461,7 +461,7 @@ void IRPrinter::handle(const BroadcastOp* const bop) {
 }
 
 void IRPrinter::handle(const ForLoop* const fl) {
-  if (fl->iter_domain()->isThread()) {
+  if (fl->iter_domain()->isThread() || fl->iter_domain()->isBroadcast()) {
     for (auto& expr : fl->constBody().exprs())
       handle(expr);
     return;

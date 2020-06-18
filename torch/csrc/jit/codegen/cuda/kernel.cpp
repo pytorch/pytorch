@@ -633,11 +633,7 @@ void runTestKernel(
       TORCH_INTERNAL_ASSERT(
           !entry->fusion_->outputs().empty(),
           "No output found for this kernel, aborting.");
-      if (has_reduction) {
-        kernel_args.push(input.toTensor());
-      } else {
-        kernel_args.push(input.toTensor(), outputs[0].sizes());
-      }
+      kernel_args.push(input.toTensor());
     } else {
       kernel_args.push(input);
     }

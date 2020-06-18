@@ -1060,7 +1060,7 @@ void testGPU_FusionAdvancedComputeAt() {
     TORCH_CHECK(tv0->getComputeAtView() == tv3);
     TORCH_CHECK(tv1->getComputeAtView() == tv4);
     TORCH_CHECK(tv2->getComputeAtView() == tv4);
-    TORCH_CHECK(tv3->getComputeAtView() == tv6);
+    TORCH_CHECK(tv3->getComputeAtView() == tv5);
     TORCH_CHECK(tv4->getComputeAtView() == tv5);
     TORCH_CHECK(tv5->getComputeAtView() == tv6);
     TORCH_CHECK(!tv6->hasComputeAt());
@@ -1074,7 +1074,7 @@ void testGPU_FusionAdvancedComputeAt() {
 
     tv0->computeAt(tv6, 1);
 
-    TORCH_CHECK(tv0->getComputeAtView() == tv3 && tv0->nDims() == 3);
+    TORCH_CHECK(tv0->getComputeAtView() == tv6 && tv0->nDims() == 3);
     TORCH_CHECK(tv1->getComputeAtView() == tv4 && tv1->nDims() == 3);
     TORCH_CHECK(tv2->getComputeAtView() == tv4 && tv2->nDims() == 3);
     TORCH_CHECK(tv3->getComputeAtView() == tv6 && tv3->nDims() == 3);
@@ -1148,6 +1148,7 @@ void testGPU_FusionAdvancedComputeAt() {
     fusion.addOutput(tv6);
 
     tv2->computeAt(tv4, 1);
+
     TORCH_CHECK(!tv0->hasComputeAt());
     TORCH_CHECK(!tv1->hasComputeAt());
     TORCH_CHECK(tv2->getComputeAtView() == tv4);
@@ -1494,9 +1495,6 @@ void testGPU_FusionLoopUnroll() {
   tv3->axis(0)->parallelize(ParallelType::BIDx);
 
   int inp_size = 129 * 13 * 3;
-
-  // GPULower lower(&fusion);
-  // lower.printKernel(std::cout);
 
   prog.device_ = 0;
   prog.grid((inp_size + 63) / 64);
@@ -2163,11 +2161,6 @@ void testGPU_FusionReduction() {
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-  // for(auto expr : fusion.exprs(true))
-  //   std::cout<<expr<<std::endl;
-  // GPULower lower(&fusion);
-  // lower.printKernel(std::cout);
-
   int numel_x = 65000;
   int numel_y = 1025;
 
@@ -2585,7 +2578,8 @@ void testGPU_FusionReductionTFT() {
 
 void testGPU_FusionSimpleBCast() {
   {
-    Fusion fusion;
+    torch::jit::fuser::cuda::CudaKernel prog;
+    Fusion& fusion = *prog.fusion_;
     FusionGuard fg(&fusion);
 
     // Set up your input tensor views
@@ -2594,39 +2588,251 @@ void testGPU_FusionSimpleBCast() {
     fusion.addInput(tv0);
     fusion.addInput(tv1);
 
-    TensorView* tv2 = add(tv0, tv1);
+    TensorView* tv2 = broadcast(tv0, {false, false, true});
+    TensorView* tv3 = broadcast(tv1, {true, false, false});
 
-    // tv1[I0, R1] = tv0[I0, I1]
-    TensorView* tv3 = broadcast(tv2, {false, true, true, false});
-
-    Val* tv4 = mul(tv3, makeDummyTensor(4));
-    fusion.addOutput(tv4);
-  }
-
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-
-    // Set up your input tensor views
-    TensorView* tv0 = makeDummyTensor(2);
-    TensorView* tv1 = makeDummyTensor(2);
-    fusion.addInput(tv0);
-    fusion.addInput(tv1);
-
-    TensorView* tv2 = broadcast(tv0, {true, false, false});
-    TensorView* tv3 = broadcast(tv1, {false, false, true});
-
-    TensorView* tv4 = mul(tv3, tv2);
+    TensorView* tv4 = add(tv2, tv3);
+    tv4->split(-1, 4);
+    tv4->split(0, 8);
     fusion.addOutput(tv4);
 
     tv0->computeAt(tv4, -1);
     tv1->computeAt(tv4, -1);
 
-    // GPULower lower(&fusion);
-    // lower.printKernel(std::cout);
+    tv4->axis(0)->parallelize(ParallelType::BIDx);
+    tv4->axis(-1)->parallelize(ParallelType::TIDx);
+
+    size_t x = 63, y = 33, z = 15;
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor t0 = at::randn({x, y}, options);
+    at::Tensor t1 = at::randn({y, z}, options);
+
+    at::Tensor cg_output = at::empty({x, y, z}, options);
+
+    prog.device_ = 0;
+    prog.grid(ceilDiv_(x, 8));
+    prog.block(4);
+    torch::jit::fuser::cuda::compileKernel(&prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {cg_output});
+
+    auto t2 = t0.unsqueeze(-1).expand({x, y, z});
+    auto t3 = t1.expand({x, y, z});
+    auto t4 = t2.add(t3);
+
+    TORCH_CHECK(t4.allclose(cg_output));
+  }
+
+  {
+    torch::jit::fuser::cuda::CudaKernel prog;
+    Fusion& fusion = *prog.fusion_;
+    FusionGuard fg(&fusion);
+
+    // Set up your input tensor views
+    TensorView* tv0 = makeDummyTensor(2);
+    TensorView* tv1 = makeDummyTensor(2);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    // TODO add pointwise ops on the begining before the bcast.
+
+    TensorView* tv2 = broadcast(tv0, {false, false, true});
+    TensorView* tv3 = broadcast(tv1, {true, false, false});
+
+    TensorView* tv4 = add(tv2, tv3);
+
+    tv4->merge(0, 1);
+
+    fusion.addOutput(tv4);
+
+    tv0->computeAt(tv4, -1);
+    tv1->computeAt(tv4, -1);
+
+    tv4->axis(0)->parallelize(ParallelType::BIDx);
+
+    size_t x = 63, y = 33, z = 15;
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor t0 = at::randn({x, y}, options);
+    at::Tensor t1 = at::randn({y, z}, options);
+
+    at::Tensor cg_output = at::empty({x, y, z}, options);
+
+    prog.device_ = 0;
+    prog.grid(x * y);
+    prog.block(1);
+    torch::jit::fuser::cuda::compileKernel(&prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {cg_output});
+
+    auto t2 = t0.unsqueeze(-1).expand({x, y, z});
+    auto t3 = t1.expand({x, y, z});
+    auto t4 = t2.add(t3);
+
+    TORCH_CHECK(t4.allclose(cg_output));
   }
 }
 
+void testGPU_FusionSimpleGemm() {
+  {
+    torch::jit::fuser::cuda::CudaKernel prog;
+    Fusion& fusion = *prog.fusion_;
+    FusionGuard fg(&fusion);
+
+    // Set up your input tensor views
+    TensorView* tv0 = makeDummyTensor(2); // M, K
+    TensorView* tv1 = makeDummyTensor(2); // K, N
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    TensorView* tv2 = broadcast(tv0, {false, false, true});
+    // tv2[I0, I1, B] = tv0[I0, I1]
+
+    TensorView* tv3 = broadcast(tv1, {true, false, false});
+    // tv3[B, I1, I2] = tv1[I1, I2]
+
+    // tv4[I0, I1, I2] = tv2[I0, I1, B] * tv3[B, I1, I2]
+    TensorView* tv4 = mul(tv2, tv3);
+    // tv5[I0, R1, I2] = tv4[I0, I1, I2]
+    TensorView* tv5 = sum(tv4, {1});
+    fusion.addOutput(tv5);
+
+    tv5->split(1, 32);
+    // tv5[I0, R1o, R1i{32}, I2]
+
+    auto tv6 = tv5->rFactor({1});
+    // tv6[I0, R1o, I1i{32}, I2] = tv4[I0, I1, I2]
+    // tv5[I0,    , R1i{32}, I2] = tv6[I0, R1o, I1i{32}, I2]
+
+    tv5->split(0, 4);
+    tv5->split(-1, 4);
+    // tv5[I0o, I0i{4}, R1i{32}, I2o, I2i{4}]
+    // tv5[I0o, I0i{4}, R1i{32}, I2o, I2i{4}]
+
+    tv0->computeAt(tv5, -1);
+    tv1->computeAt(tv5, -1);
+
+    // tv6[I0o, I0i{4}, R1o, I1i{32}, I2o, I2i{4}]
+    // tv5[I0o, I0i{4},    , R1i{32}, I2o, I2i{4}]
+    //--> (line symbolizes compute at location)
+    // tv4[I0o, I0i{4}, I1i{32}, I2o, I2i{4}|, I1o]
+    // tv6[I0o, I0i{4}, I1i{32}, I2o, I2i{4}|, R1o]
+    // tv5[I0o, I0i{4}, R1i{32}, I2o, I2i{4}|]
+
+    tv0->computeAt(tv6, -1);
+    tv1->computeAt(tv6, -1);
+    // tv4[I0o, I0i{4}, I1i{32}, I2o, I2i{4}, I1o |]
+    // tv6[I0o, I0i{4}, I1i{32}, I2o, I2i{4}, R1o |]
+    // tv5[I0o, I0i{4}, R1i{32}, I2o, I2i{4}|]
+
+    tv5->axis(0)->parallelize(ParallelType::BIDz);
+    tv5->axis(1)->parallelize(ParallelType::TIDz);
+
+    tv5->axis(-2)->parallelize(ParallelType::BIDy);
+    tv5->axis(-1)->parallelize(ParallelType::TIDy);
+
+    tv5->axis(2)->parallelize(ParallelType::TIDx);
+    tv6->axis(2)->parallelize(ParallelType::TIDx);
+
+    size_t M = 65, K = 33, N = 17;
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+    at::Tensor t0 = at::randn({M, K}, options);
+    at::Tensor t1 = at::randn({K, N}, options);
+
+    at::Tensor cg_output = at::empty({M, N}, options);
+
+    prog.device_ = 0;
+    prog.grid(1, ceilDiv_(N, 4), ceilDiv_(M, 4));
+
+    prog.block(32, 4, 4);
+    torch::jit::fuser::cuda::compileKernel(&prog);
+    torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {cg_output});
+
+    auto t2 = t0.matmul(t1);
+    TORCH_CHECK(
+        t2.allclose(cg_output, 1e-5, 1e-5),
+        "Error of: ",
+        t2.sub(cg_output).abs().max());
+  }
+}
+
+// This test currently requires a combination of broadcast and reduction
+// operations and parellelization strategy that is currently not supported.
+// It is a goal to get this example working and this test is added so we
+// can continue working on getting this example fixed. Right now it
+// produces an incorrect result. Either we need to error coherently on the
+// optimization strategy we don't support and set this test to one we do support
+// or we need to get this schedule working correctly.
+void testGPU_FusionSoftmax() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* input_tv0 = makeDummyTensor(3);
+  fusion.addInput(input_tv0);
+
+  TensorView* max_val_tv1 =
+      reductionOp(BinaryOpType::Max, {2}, new Float(0), input_tv0);
+  TensorView* bcast_max_tv2 = broadcast(max_val_tv1, {false, false, true});
+  TensorView* exp_tv3 = sub(input_tv0, bcast_max_tv2);
+  TensorView* sum_exp_tv4 =
+      reductionOp(BinaryOpType::Add, {2}, new Float(0), exp_tv3);
+  TensorView* bcast_sum_tv5 = broadcast(sum_exp_tv4, {false, false, true});
+  TensorView* output_tv6 = div(exp_tv3, bcast_sum_tv5);
+
+  max_val_tv1->split(-1, 32);
+  TensorView* max_val_rf_tv7 = max_val_tv1->rFactor({-2});
+  sum_exp_tv4->split(-1, 32);
+  TensorView* sum_exp_rf_tv8 = sum_exp_tv4->rFactor({-2});
+
+  exp_tv3->computeAt(sum_exp_rf_tv8, {2});
+
+  max_val_rf_tv7->axis(0)->parallelize(ParallelType::BIDx);
+  max_val_tv1->axis(0)->parallelize(ParallelType::BIDx);
+  bcast_max_tv2->axis(0)->parallelize(ParallelType::BIDx);
+  sum_exp_rf_tv8->axis(0)->parallelize(ParallelType::BIDx);
+  sum_exp_tv4->axis(0)->parallelize(ParallelType::BIDx);
+  bcast_sum_tv5->axis(0)->parallelize(ParallelType::BIDx);
+  output_tv6->axis(0)->parallelize(ParallelType::BIDx);
+
+  max_val_rf_tv7->axis(1)->parallelize(ParallelType::BIDy);
+  max_val_tv1->axis(1)->parallelize(ParallelType::BIDy);
+  bcast_max_tv2->axis(1)->parallelize(ParallelType::BIDy);
+  sum_exp_rf_tv8->axis(1)->parallelize(ParallelType::BIDy);
+  sum_exp_tv4->axis(1)->parallelize(ParallelType::BIDy);
+  bcast_sum_tv5->axis(1)->parallelize(ParallelType::BIDy);
+  output_tv6->axis(1)->parallelize(ParallelType::BIDy);
+
+  max_val_rf_tv7->axis(-1)->parallelize(ParallelType::TIDx);
+  max_val_tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  bcast_max_tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  exp_tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  sum_exp_rf_tv8->axis(-1)->parallelize(ParallelType::TIDx);
+  sum_exp_tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  bcast_sum_tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  output_tv6->axis(-1)->parallelize(ParallelType::TIDx);
+
+  fusion.addOutput(output_tv6);
+
+  prog.device_ = 0;
+  prog.grid(32, 32);
+  prog.block(32);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({32, 32, 128}, options);
+  at::Tensor cg_output = at::empty({32, 32, 128}, options);
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {t0}, {cg_output});
+
+  auto t2 = at::_softmax(t0, -1, false);
+  // TORCH_CHECK(
+  //     t2.allclose(cg_output, 1e-5, 1e-5),
+  //     "Error of: ",
+  //     t2.sub(cg_output).abs().max());
+}
 // Similar to FusionReduction but uses grid reduction
 void testGPU_FusionGridReduction1() {
   const int gdimx = 32;

@@ -65,13 +65,13 @@ struct IndexCompute : public BackwardVisitor {
   // Otherwise warning on runBackward as it hides an overloaded virtual
   // using TransformIter::runBackward;
 
-  IndexCompute(TensorDomain* td, const std::vector<Val*>& _indices);
+  IndexCompute(const TensorDomain* td, const std::vector<Val*>& _indices);
   std::unordered_map<IterDomain*, Val*> index_map_;
   std::vector<Val*> indices_;
 
  public:
   static std::vector<Val*> get(
-      TensorDomain* td,
+      const TensorDomain* td,
       const std::vector<Val*>& _indices);
 };
 
@@ -80,39 +80,39 @@ struct Index {
  private:
   // Producer indexing if it's in shared or local memory
   static TensorIndex* getProducerIndex_impl(
-      TensorView* producer,
-      TensorView* consumer,
+      const TensorView* producer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
   // Consumer indexing if it's in shared or local memory
   static TensorIndex* getConsumerIndex_impl(
-      TensorView* consumer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
- public:
   // Producer if it's in global memory
   static TensorIndex* getGlobalProducerIndex(
-      TensorView* producer,
-      TensorView* consumer,
+      const TensorView* producer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
   // Consumer indexing if it's in global memory
   static TensorIndex* getGlobalConsumerIndex(
-      TensorView* consumer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
+ public:
   // Indexing functions
   // Consumer = Producer
   // i.e. T0 = T1... -> T0 is the consumer, T1 is the producer
   // Producer indexing dispatch
   static TensorIndex* getProducerIndex(
-      TensorView* producer,
-      TensorView* consumer,
+      const TensorView* producer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
   // Consumer index dispatch
   static TensorIndex* getConsumerIndex(
-      TensorView* consumer,
+      const TensorView* consumer,
       const std::vector<ForLoop*>& loops);
 
   // Will run inds through back prop index computation for tv

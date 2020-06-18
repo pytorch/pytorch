@@ -160,7 +160,7 @@ BroadcastOp::BroadcastOp(Val* _out, Val* _in)
         ndims++;
 
     TORCH_INTERNAL_ASSERT(
-        ndims == (int)static_cast<TensorView*>(in_)->nDims(),
+        ndims == (int)in_->as<TensorView>()->domain()->noReductions().size(),
         "Invalid broadcast op. Non-broadcasted dims don't match from input to output.");
   } else {
     TORCH_INTERNAL_ASSERT(
