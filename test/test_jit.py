@@ -137,8 +137,8 @@ def doAutodiffCheck(testname):
         'test_nn_batch_norm',
         'test_nn_max_pool2d_with_indices',
         # AutogradJitGenerated
-        'test___rdiv___constant',
-        'test___rdiv___scalar_constant',
+        'test___rtruediv___constant',
+        'test___rtruediv___scalar_constant',
         'test_split',
         'test_split_dim',
         'test_split_dim_neg0',
@@ -11030,37 +11030,34 @@ a")
         m_c = m.copy()
 
     def test_script_forward_method_replacement(self):
-        # We want to support the use case of having a different `forward` method
-        # when we are not in scripting mode.
+        # We want to support the use case of attaching a different `forward` method
         class LowLevelModule(torch.nn.Module):
             def __init__(self):
                 super(LowLevelModule, self).__init__()
 
-            def forward(self, *args, **kwargs):
-                # Generic forward dispatch, when we are not in scripting mode
-                assert not torch.jit.is_scripting()
-                return self.forward_pytorch(*args, **kwargs) * 2
+            def forward(self, input: torch.Tensor):
+                # Generic forward dispatch
+                return self.forward_pytorch(input) * 2
 
         class TestModule(LowLevelModule):
             def __init__(self):
                 super(TestModule, self).__init__()
-                # Replace the forward method if we know we are not in scripting mode
-                if not torch.jit.is_scripting():
-                    self.forward = types.MethodType(LowLevelModule.forward, self)
+                # Replace the forward method
+                self.forward = types.MethodType(LowLevelModule.forward, self)
 
             def forward_pytorch(self, input: torch.Tensor):
                 return torch.tensor(123)
 
             def forward(self, input: torch.Tensor):
-                # Scripting should only use this forward method
-                assert torch.jit.is_scripting()
+                # Should not use this forward method
+                raise AssertionError("This method should not be used")
                 return self.forward_pytorch(input)
 
         m = TestModule()
         self.assertEqual(m(torch.tensor(1)), torch.tensor(246))
 
         m_scripted = torch.jit.script(m)
-        self.assertEqual(m_scripted(torch.tensor(1)), torch.tensor(123))
+        self.assertEqual(m_scripted(torch.tensor(1)), torch.tensor(246))
 
     # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
     @suppress_warnings
@@ -17990,8 +17987,8 @@ class TestJitGeneratedFunctional(JitTestCase):
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
 UBSAN_BLACKLISTED_TESTS = [
-    "test___rdiv___constant",
-    "test___rdiv___scalar_constant",
+    "test___rtruediv___constant",
+    "test___rtruediv___scalar_constant",
     "test_addcdiv",
     "test_addcdiv_broadcast_all",
     "test_addcdiv_broadcast_rhs",

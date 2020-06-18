@@ -15,14 +15,15 @@ namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-// For 32 bit arm rely on neon for 64 bit advanced vector extension
-// Currently only suuporting aarch64 for two reasons.
-// 1. For some reason arm_neon.h does not export all the intrinsics.
-//    Thought about using inline assembly for not supported ones.
-// 2. However android nkd r21 has problems with compiling aarch32.
+// Right now contains only aarch64 implementation.
+// Due to follow two reasons aarch32 is not currently supported.
+// 1. Due to difference in ISA been aarch32 and aarch64, intrinsics
+//    that work for aarch64 dont work for aarch32.
+// 2. Android NDK r21 has problems with compiling aarch32.
 //    Clang seg faults.
 //    https://github.com/android/ndk/issues/1248
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
+// Most likely we will do aarch32 support with inline asm.
 #if defined(__aarch64__)
 
 #ifdef __BIG_ENDIAN__
@@ -61,19 +62,11 @@ public:
   }
   Vec256() {}
   Vec256(float32x4x2_t v) : values(v) {}
-  Vec256(float val) {
-    values.val[0] = vdupq_n_f32(val);
-    values.val[1] = vdupq_n_f32(val);
-  }
+  Vec256(float val) : values{vdupq_n_f32(val), vdupq_n_f32(val) } {}
   Vec256(float val0, float val1, float val2, float val3,
-         float val4, float val5, float val6, float val7) {
-    values.val[0] = {val0, val1, val2, val3};
-    values.val[1] = {val4, val5, val6, val7};
-  }
-  Vec256(float32x4_t val0, float32x4_t val1) {
-    values.val[0] = val0;
-    values.val[1] = val1;
-  }
+         float val4, float val5, float val6, float val7) :
+         values{val0, val1, val2, val3, val4, val5, val6, val7} {}
+  Vec256(float32x4_t val0, float32x4_t val1) : values{val0, val1} {}
   operator float32x4x2_t() const {
     return values;
   }
@@ -128,9 +121,10 @@ public:
   }
   template<typename step_t>
   static Vec256<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
-    return Vec256<float>(
-      base,            base +     step, base + 2 * step, base + 3 * step,
-      base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
+    const Vec256<float> base_vec(base);
+    const Vec256<float> step_vec(step);
+    const Vec256<float> step_sizes(0, 1, 2, 3, 4, 5, 6, 7);
+    return fmadd(step_sizes, step_vec, base_vec);
   }
   static Vec256<float> set(const Vec256<float>& a, const Vec256<float>& b,
                            int64_t count = size()) {
