@@ -734,7 +734,7 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t 
   scalar_t *h_data;
 
   THTensor_(resize1d)(hist, nbins);
-  THTensor_(zero)(hist);
+  THTensor_wrap(hist).zero_();
   minval = minvalue;
   maxval = maxvalue;
   if (minval == maxval)

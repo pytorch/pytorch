@@ -1008,8 +1008,7 @@ void initJitScriptBindings(PyObject* module) {
            std::shared_ptr<mobile::CompilationUnit>>())
       .def(
           "find_method",
-          [](mobile::Module& m,
-             const std::string& method_name) {
+          [](mobile::Module& m, const std::string& method_name) {
             auto method = m.find_method(method_name);
             return method != nullptr;
           },

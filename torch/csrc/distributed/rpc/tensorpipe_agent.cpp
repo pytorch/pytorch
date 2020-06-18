@@ -364,6 +364,19 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
   responseMessage.setId(messageId);
   if (!error) {
+    for (const auto& tensor : responseMessage.tensors()) {
+      if (!tensor.device().is_cpu()) {
+        responseMessage = createExceptionResponse(
+            c10::str(
+                "TensorPipe RPC backend only supports CPU tensors, please ",
+                "move your tensors to CPU before sending them over RPC. Found ",
+                "tensor on device: ",
+                tensor.device()),
+            responseMessage.id());
+        break;
+      }
+    }
+
     pipeWrite(
         pipe,
         std::move(responseMessage),
@@ -407,14 +420,21 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       pipe,
       [this, pipe](
           const tensorpipe::Error& error, Message&& requestMessage) mutable {
-        // FIXME Find a way for the client to tell the server they are done with
-        // the pipe and are intentionally shutting it down. Perhaps sending an
-        // empty message?
         if (error) {
-          LOG(WARNING)
-              << "RPC agent for " << workerInfo_.name_
-              << " encountered error when reading incoming request from "
-              << pipe->getRemoteName() << ": " << error.what();
+          // FIXME This is not a correct way to check whether this error was
+          // "intentionally" caused by the remote end shutting down. We should
+          // find a better way, Perhaps sending an empty message?
+          if ((error.isOfType<tensorpipe::PipeClosedError>() &&
+               !rpcAgentRunning_.load()) ||
+              error.isOfType<tensorpipe::transport::EOFError>()) {
+            // This is expected.
+          } else {
+            LOG(WARNING)
+                << "RPC agent for " << workerInfo_.name_
+                << " encountered error when reading incoming request from "
+                << pipe->getRemoteName() << ": " << error.what()
+                << " (this is expected to happen during shutdown)";
+          }
           return;
         }
 
@@ -485,6 +505,14 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
         requestMessage.type(),
         " but RPC is no longer running on this node.");
     throw std::runtime_error(err);
+  }
+
+  for (const auto& tensor : requestMessage.tensors()) {
+    TORCH_CHECK(
+        tensor.device().is_cpu(),
+        "TensorPipe RPC backend only supports CPU tensors, please move your ",
+        "tensors to CPU before sending them over RPC. Found tensor on device: ",
+        tensor.device());
   }
 
   const auto& url = findWorkerURL(toWorkerInfo);

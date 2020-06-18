@@ -181,6 +181,10 @@ class ShadowLogger(Logger):
         self.stats["quantized"] = None
 
     def forward(self, x, y):
+        if len(x) > 1:
+            x = x[0]
+        if len(y) > 1:
+            y = y[0]
         if self.stats["quantized"] is None:
             self.stats["quantized"] = x.detach()
         else:
@@ -228,17 +232,22 @@ class Shadow(nn.Module):
         self.logger = Logger()
 
     def forward(self, *x):
+        print("x is: ", x)
+        print("in shadow, x is: ", type(x))
+        output = self.orig_module(*x)
         if len(x) > 1:
-            output = self.orig_module(*x)
-            shadow_output = self.shadow_module(*x)
-            self.logger(output[0], shadow_output[0])
+            if x[0].is_quantized:
+                x[0] = x[0].dequantize()
+            if x[1][0].is_quantized:
+                x[1][0] = x[1][0].dequantize()
+            if x[1][1].is_quantized:
+                x[1][1] = x[1][1].dequantize()
         else:
-            x = x[0]
-            output = self.orig_module(x)
-            if x.is_quantized:
-                x = x.dequantize()
-            shadow_output = self.shadow_module(x)
-            self.logger(output, shadow_output)
+            if x[0].is_quantized:
+                x[0] = x[0].dequantize()
+            print("x is 1, = ", type(x), x)
+        shadow_output = self.shadow_module(*x)
+        self.logger(output, shadow_output)
         return output
 
     def add(self, x, y):
@@ -415,7 +424,7 @@ def prepare_model_outputs(
         q_module,
         inplace=True,
         white_list=white_list,
-        observer_white_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST,
+        observer_supported_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST,
     )
 
 
