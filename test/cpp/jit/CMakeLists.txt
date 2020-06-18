@@ -4,6 +4,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
+  ${JIT_TEST_ROOT}/test_backend.cpp
   ${JIT_TEST_ROOT}/test_base.cpp
   ${JIT_TEST_ROOT}/test_base.h
   ${JIT_TEST_ROOT}/test_class_import.cpp

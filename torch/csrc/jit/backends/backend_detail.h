@@ -18,11 +18,11 @@ void addBackendRegistrationCallback(BackendRegistrationCallback callback);
 
 // Register the provided \p lowering_function in the backend registry
 // under the name \p backend_name.
-void registerBackend(const std::string& backend_name);
+void TORCH_API registerBackend(const std::string& backend_name);
 
-c10::FunctionSchema getPreprocessSchema();
-c10::FunctionSchema getCompileSchema();
-c10::FunctionSchema getExecuteSchema();
+c10::FunctionSchema TORCH_API getPreprocessSchema();
+c10::FunctionSchema TORCH_API getCompileSchema();
+c10::FunctionSchema TORCH_API getExecuteSchema();
 
 template <typename TBackendInterface>
 std::function<void(Stack&)> getPreprocessFunc() {
