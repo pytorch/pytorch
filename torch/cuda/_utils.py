@@ -1,8 +1,9 @@
 import torch
 import torch._six
+from typing import Union
 
 
-def _get_device_index(device, optional=False):
+def _get_device_index(device: Union[str, torch.device, int, None], optional=False) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
 
@@ -33,3 +34,11 @@ def _get_device_index(device, optional=False):
             raise ValueError('Expected a cuda device with a specified index '
                              'or an integer, but got: {}'.format(device))
     return device_idx
+
+
+def _dummy_type(name: str) -> type:
+    def init_err(self):
+        class_name = self.__class__.__name__
+        raise RuntimeError(
+            "Tried to instantiate dummy base class {}".format(class_name))
+    return type(name, (object,), {"__init__": init_err})
