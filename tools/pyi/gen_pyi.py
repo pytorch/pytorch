@@ -273,11 +273,15 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
                     print("Error while processing function {}".format(fname))
                     raise
 
-        if is_tensor:
-            if 'self: Tensor' in python_args:
-                python_args.remove('self: Tensor')
+
+        if 'self: Tensor' in python_args:
+            python_args.remove('self: Tensor')
+            if is_tensor:
                 python_args = ['self'] + python_args
             else:
+                python_args = ['input: Tensor'] + python_args
+        else:
+            if is_tensor:
                 raise Exception("method without self is unexpected")
 
         if has_out:
