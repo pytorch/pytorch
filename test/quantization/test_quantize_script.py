@@ -1239,7 +1239,8 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
         for model in [ModuleLinear(has_relu=False),
                       FuncLinear(has_relu=False)]:
-            model = self._test_op_impl(model, data, "quantized::linear")
+            model = self.checkGraphModeOp(model, data, "quantized::linear",
+                                          tracing=False)
             FileCheck() \
                 .check_count("aten::quantize_per_tensor", 1, exactly=True) \
                 .run(model.graph)
@@ -1249,8 +1250,9 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
         for f_relu in [True, False]:
             for model in [ModuleLinear(has_relu=True, f_relu=f_relu),
                           FuncLinear(has_relu=True, f_relu=f_relu)]:
-                model = self._test_op_impl(model, data,
-                                           "quantized::linear_relu")
+                model = self.checkGraphModeOp(model, data,
+                                              "quantized::linear_relu",
+                                              tracing=False)
                 checker = FileCheck().check_not("aten::linear") \
                                      .check_not("aten::relu") \
                                      .check_not("quantized::linear(") \
