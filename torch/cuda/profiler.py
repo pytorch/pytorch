@@ -15,9 +15,9 @@ DEFAULT_FLAGS = [
 
 
 def init(output_file, flags=None, output_mode='key_value'):
+    rt = cudart()
     if not hasattr(rt, 'cudaOutputMode'):
         raise AssertionError("HIP does not support profiler initialization!")
-    rt = cudart()
     flags = DEFAULT_FLAGS if flags is None else flags
     if output_mode == 'key_value':
         output_mode_enum = rt.cudaOutputMode.KeyValuePair

@@ -216,3 +216,13 @@ class _TensorBase(object):
     imag: Tensor
     _version: _bool
     ${tensor_method_hints}
+
+# Defined in torch/csrs/cuda/Module.cpp
+class _CudaDeviceProperties:
+    name: str
+    major: _int
+    minor: _int
+    multi_processor_count: _int
+    total_memory: _int
+    is_integrated: _int
+    is_multi_gpu_board: _int
