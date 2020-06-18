@@ -41,6 +41,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Whether the net has been ssaRewritten
   bool predictor_net_ssa_rewritten{false};
+
+  // Inference timeout
+  int timeout{0};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
