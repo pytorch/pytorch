@@ -828,7 +828,10 @@ class HistogramObserver(_ObserverBase):
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
+        prev_zeros = False
+        if min_val.numel() > 0 and max_val.numel() > 0:
+            prev_zeros = (min_val.item() == 0) and (max_val.item() == 0)
+        if min_val.numel() == 0 or max_val.numel() == 0 or prev_zeros:
             min_val = torch.min(x)
             max_val = torch.max(x)
             self.min_val.resize_(min_val.shape)
