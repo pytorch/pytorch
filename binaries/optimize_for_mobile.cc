@@ -53,12 +53,11 @@ int main(int argc, char** argv) {
 
   auto module = torch::jit::load(FLAGS_model);
   auto optimized_module = torch::jit::optimizeForMobile(module);
-  TORCH_CHECK(optimized_module.has_value(),
-      "Must return an optimized ScriptModule object.");
+
   if (FLAGS_save_for_mobile) {
-    optimized_module->_save_for_mobile(output_model_name);
+    optimized_module._save_for_mobile(output_model_name);
   } else {
-    optimized_module->save(output_model_name);
+    optimized_module.save(output_model_name);
   }
 
   return 0;
