@@ -1291,6 +1291,10 @@ InsertObserversHelper::insertObserversFor(
             block_observed_values.insert(n->output(i));
           }
         }
+      } else if (n->kind() == prim::Loop) {
+        TORCH_WARN_ONCE("prim::Loop is not yet supported in quantization, "
+                        "please make sure nothing needs to be quantized in the "
+                        "loop");
       }
       for (Value* v : n->outputs()) {
         propagateObservedProperty(v, block_observed_values);
