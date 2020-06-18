@@ -5,6 +5,7 @@ env
 echo "BUILD_ENVIRONMENT:$BUILD_ENVIRONMENT"
 
 export ANDROID_NDK_HOME=/opt/ndk
+export ANDROID_NDK=/opt/ndk
 export ANDROID_HOME=/opt/android/sdk
 
 # Must be in sync with GRADLE_VERSION in docker image for android
