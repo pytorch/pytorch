@@ -142,7 +142,7 @@ test_python_ge_config_legacy() {
   assert_git_not_dirty
 }
 
-test_python_all_except_nn() {
+test_python_all_except_nn_and_cpp_extensions() {
   time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
@@ -173,22 +173,9 @@ test_aten() {
 }
 
 test_torchvision() {
-  # pytorch extensions require including torch/extension.h which includes all.h
-  # which includes utils.h which includes Parallel.h.
-  # So you can call for instance parallel_for() from your extension,
-  # but the compilation will fail because of Parallel.h has only declarations
-  # and definitions are conditionally included Parallel.h(see last lines of Parallel.h).
-  # I tried to solve it #39612 and #39881 by including Config.h into Parallel.h
-  # But if Pytorch is built with TBB it provides Config.h
-  # that has AT_PARALLEL_NATIVE_TBB=1(see #3961 or #39881) and it means that if you include
-  # torch/extension.h which transitively includes Parallel.h
-  # which transitively includes tbb.h which is not available!
-  if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
-    BUILD_EXT_OPTS="--global-option=build_ext --global-option=-I$PWD/third_party/tbb/include"
-  fi
   # Check out torch/vision at Jun 11 2020 commit
   # This hash must match one in .jenkins/caffe2/test.sh
-  pip_install $BUILD_EXT_OPTS --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
+  pip_install --user git+https://github.com/pytorch/vision.git@c2e8a00885e68ae1200eb6440f540e181d9125de
 }
 
 test_libtorch() {
@@ -285,7 +272,7 @@ test_bazel() {
   tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
 
-test_cpp_extension() {
+test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
   time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
@@ -311,9 +298,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_python_nn
+  test_cpp_extensions
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_torchvision
-  test_python_all_except_nn
+  test_python_all_except_nn_and_cpp_extensions
   test_aten
   test_libtorch
   test_custom_script_ops
@@ -323,11 +311,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
   # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure 
   # cpp extension can be built correctly under this old env 
-  test_cpp_extension
+  test_cpp_extensions
 else
   test_torchvision
   test_python_nn
-  test_python_all_except_nn
+  test_python_all_except_nn_and_cpp_extensions
+  test_cpp_extensions
   test_aten
   test_libtorch
   test_custom_script_ops

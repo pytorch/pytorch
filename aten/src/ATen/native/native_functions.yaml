@@ -1366,11 +1366,6 @@
     CPU: native_group_norm_backward
     CUDA: native_group_norm_backward
 
-- func: quantized_group_norm(Tensor input, int num_groups, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
-  requires_tensor: True
-  dispatch:
-    QuantizedCPU: quantized_group_norm_impl
-
 # FFT
 
 - func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
@@ -1444,11 +1439,6 @@
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
-
-- func: quantized_instance_norm(Tensor input, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
-  requires_tensor: True
-  dispatch:
-    QuantizedCPU: quantized_instance_norm_impl
 
 - func: inverse(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1541,11 +1531,6 @@
   dispatch:
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
-
-- func: quantized_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
-  requires_tensor: True
-  dispatch:
-    QuantizedCPU: quantized_layer_norm_impl
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
