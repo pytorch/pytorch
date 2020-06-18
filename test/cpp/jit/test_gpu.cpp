@@ -3262,6 +3262,47 @@ void testGPU_FusionGridReduction6() {
   auto aten_output = input.sum({1, 2});
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
+
+void testGPU_FusionNonRedAxisBind() {
+  int bid_x = 3;
+  int tid_x = 2;
+  int red_dim = 0;
+
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 =
+      reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  tv1->split(-1, tid_x);
+  tv1->axis(-2)->parallelize(ParallelType::BIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+  prog.device_ = 0;
+  prog.grid(bid_x);
+  prog.block(tid_x);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({16, bid_x * tid_x}, options);
+  at::Tensor cg_output = at::empty({bid_x * tid_x}, options);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
+
+  auto aten_output = input.sum({red_dim});
+
+  TORCH_CHECK(
+      aten_output.allclose(cg_output),
+      "Error of: ",
+      aten_output.sub(cg_output).abs().max());
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

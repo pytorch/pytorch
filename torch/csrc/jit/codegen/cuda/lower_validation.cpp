@@ -101,15 +101,16 @@ void IRReplaceSizes() {
     std::vector<IterDomain*> new_domain_iters;
     const std::vector<IterDomain*>& root_td = tv->getRootDomain();
 
-    for (decltype(root_td.size()) i{0}; i < root_td.size(); i++) {
+    size_t dim = 0;
+    for (auto id : root_td) {
       // Output sizes could have reduction axes, which isn't what gets output.
-      if (root_td[i]->isReduction())
+      if (id->isReduction())
         continue;
 
-      Val* orig_size = root_td[i]->extent();
+      Val* orig_size = id->extent();
 
       std::stringstream ss;
-      ss << "T" << tv->name() << ".size[" << i << "]";
+      ss << "T" << tv->name() << ".size[" << dim++ << "]";
       Val* new_size =
           new NamedScalar(ss.str(), orig_size->getDataType().value());
       if (!orig_size->sameAs(new_size) ||
