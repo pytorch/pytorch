@@ -14,7 +14,6 @@ from torch.quantization import (
     per_channel_dynamic_qconfig,
     default_per_channel_weight_observer,
     default_qconfig,
-    get_default_qconfig,
     quantize,
     quantize_dynamic,
     default_weight_observer,
@@ -1230,6 +1229,37 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
     """
+    def _test_op_impl(self, module, data, quantized_op, tracing=False, debug=False, check=True, eval_mode=True):
+        if debug:
+            print('Testing:', str(module))
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        if eval_mode:
+            module = module.eval()
+        *inputs, target = data[0]
+        model = get_script_module(module, tracing, inputs).eval()
+        models = {}
+        outputs = {}
+        for d in [True, False]:
+            # TODO: _test_only_eval_fn --> default_eval_fn
+            models[d] = quantize_script(
+                model, qconfig_dict, test_only_eval_fn, [data], inplace=False, debug=d)
+            # make sure it runs
+            outputs[d] = models[d](*inputs)
+
+        if debug:
+            print('debug graph:', models[True].graph)
+            print('non debug graph:', models[False].graph)
+
+        if check:
+            # debug and non-debug option should have the same numerics
+            self.assertEqual(outputs[True], outputs[False])
+
+            # non debug graph should produce quantized op
+            FileCheck().check(quantized_op) \
+                       .run(models[False].graph)
+
+        return models[False]
+
     @skipIfNoFBGEMM
     def test_quantized_conv(self):
         conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
@@ -2613,26 +2643,20 @@ class TestQuantizeDynamicScriptJitPasses(QuantizationTestCase):
                 return self.fc2(x)
 
         qconfig_dict = {'': default_dynamic_qconfig}
-        eager_model = M().eval()
-        x = torch.rand(5, 5)
-        for tracing in [True, False]:
-            model = get_script_module(eager_model, tracing, x)
-            qconfig = script_qconfig(default_dynamic_qconfig)
-            ref_qparams = []
-            wt_module = wrap_cpp_module(qconfig.weight)
-            for wt in [model.fc.weight, model.fc2.weight]:
-                wt_module(wt)
-                qparams = wt_module.calculate_qparams()
-                ref_qparams.append((qparams[0].item(), qparams[1].item()))
-            model = prepare_dynamic_script(model, qconfig_dict)
-            model = convert_dynamic_script(model, debug=True)
-            graph_params = []
-            for x, obs in model._modules._c.items():
-                if tracing:
-                    graph_params.append((obs.getattr('4_scale_0'), obs.getattr('4_zero_point_0')))
-                else:
-                    graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
-            self.assertEqual(ref_qparams, graph_params)
+        model = torch.jit.script(M()).eval()
+        qconfig = script_qconfig(default_dynamic_qconfig)
+        ref_qparams = []
+        wt_module = wrap_cpp_module(qconfig.weight)
+        for wt in [model.fc.weight, model.fc2.weight]:
+            wt_module(wt)
+            qparams = wt_module.calculate_qparams()
+            ref_qparams.append((qparams[0].item(), qparams[1].item()))
+        model = prepare_dynamic_script(model, qconfig_dict)
+        model = convert_dynamic_script(model, debug=True)
+        graph_params = []
+        for x, obs in model._modules._c.items():
+            graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
+        self.assertEqual(ref_qparams, graph_params)
 
 class TestQuantizeScript(QuantizationTestCase):
     @override_qengines
