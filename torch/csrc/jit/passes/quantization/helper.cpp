@@ -92,6 +92,8 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "squeeze_",
     "unsqueeze",
     "unsqueeze_",
+    "detach",
+    "detach_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and

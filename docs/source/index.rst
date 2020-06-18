@@ -39,6 +39,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    torch.cuda.amp <amp>
    torch.distributed <distributed>
    torch.distributions <distributions>
+   futures
    torch.hub <hub>
    torch.jit <jit>
    nn.init
@@ -64,7 +65,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 .. toctree::
    :maxdepth: 1
    :caption: Libraries
-   
+
    torchaudio <https://pytorch.org/audio>
    torchtext <https://pytorch.org/text>
    torchvision/index
