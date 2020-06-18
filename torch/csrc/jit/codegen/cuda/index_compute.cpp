@@ -129,21 +129,28 @@ TensorIndex* Index::getGlobalProducerIndex(
   // Computed consumer indices should have everything we need for the producer
   std::vector<Val*> p_inds;
   auto p_root = TensorDomain::noReductions(producer->getRootDomain());
+  // Number of root dims that are broadcasted
+  size_t bcast_dims = 0;
   {
     auto c_root = consumer->getRootDomain();
     size_t it_c = 0, it_p = 0;
     while (it_c < c_root.size() && it_p < p_root.size()) {
-      if (c_root[it_c]->isBroadcast() && !p_root[it_p]->isBroadcast()) {
+      const bool is_bcast = p_root[it_p]->isBroadcast();
+      if (c_root[it_c]->isBroadcast() && !is_bcast) {
         it_c++;
       } else {
-        p_inds.push_back(c_inds[it_c]);
+        if (!is_bcast) {
+          p_inds.push_back(c_inds[it_c]);
+        } else {
+          bcast_dims++;
+        }
         it_c++;
         it_p++;
       }
     }
   }
   TORCH_INTERNAL_ASSERT(
-      p_inds.size() == p_root.size(),
+      p_inds.size() == p_root.size() - bcast_dims,
       "Dimensionality error in code generator while computing tensor indices.");
 
   std::vector<Val*> strided_inds;
@@ -220,7 +227,7 @@ TensorIndex* Index::getProducerIndex_impl(
       continue;
     if (producer->getMemoryType() == MemoryType::Local && ranges[i]->isThread())
       continue;
-    if (ranges[i]->isBroadcast())
+    if (producer->domain()->noReductions()[i]->isBroadcast())
       continue;
 
     used_inds.push_back(indices[i]);
@@ -322,24 +329,35 @@ TensorIndex* Index::getConsumerIndex_impl(
   std::vector<Val*> used_inds;
   std::vector<IterDomain*> used_ranges;
   bool unrolled = false;
-  for (size_t i = 0; i < loops.size(); i++) {
-    if (have_reduction_iters && consumer->axis(i)->isReduction())
-      continue;
-    if (ranges[i]->parallel_method() == ParallelType::Unroll)
-      unrolled = true;
-    if (!unrolled && consumer->hasComputeAt() &&
-        i < consumer->getThisComputeAtAxis())
-      continue;
-    if (consumer->getMemoryType() == MemoryType::Shared &&
-        ranges[i]->isBlockDim())
-      continue;
-    if (consumer->getMemoryType() == MemoryType::Local && ranges[i]->isThread())
-      continue;
-    if (ranges[i]->isBroadcast())
-      continue;
+  {
+    size_t c_i = 0, l_i = 0;
+    while (c_i < consumer->nDims() && l_i < loops.size()) {
+      if (consumer->axis(c_i)->isReduction()) {
+        c_i++;
+        if (have_reduction_iters)
+          l_i++;
+        continue;
+      }
+      if (ranges[l_i]->parallel_method() == ParallelType::Unroll)
+        unrolled = true;
 
-    used_inds.push_back(indices[i]);
-    used_ranges.push_back(ranges[i]);
+      if ((!unrolled && consumer->hasComputeAt() &&
+           c_i < consumer->getThisComputeAtAxis()) ||
+          (consumer->getMemoryType() == MemoryType::Shared &&
+           ranges[l_i]->isBlockDim()) ||
+          (consumer->getMemoryType() == MemoryType::Local &&
+           ranges[l_i]->isThread()) ||
+          (consumer->axis(c_i)->isBroadcast())) {
+        c_i++;
+        l_i++;
+        continue;
+      }
+
+      used_inds.push_back(indices[l_i]);
+      used_ranges.push_back(ranges[l_i]);
+      l_i++;
+      c_i++;
+    }
   }
 
   for (size_t i = 0; i < used_inds.size(); i++) {
