@@ -1,4 +1,7 @@
 #include <torch/csrc/autograd/functions/utils.h>
+#include <aten/src/ATen/ThreadLocalState.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
@@ -71,6 +74,16 @@ ContextPtr addRecvRpcBackward(
   return autogradContext;
 }
 
+Message getMessageWithProfiling(
+    torch::distributed::rpc::Message&& wrappedRpcMessage,
+    MessageType msgType,
+    torch::autograd::profiler::ProfilerConfig&& profilerConfig) {
+  auto wrappedProfilingMsg = RpcWithProfilingReq(
+      msgType, std::move(wrappedRpcMessage), std::move(profilerConfig));
+
+  return std::move(wrappedProfilingMsg).toMessage();
+}
+
 Message getMessageWithAutograd(
     const rpc::worker_id_t dstId,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
@@ -123,7 +136,21 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
       MessageType::FORWARD_AUTOGRAD_REQ,
       forceGradRecording);
 
-  return agent.send(dst, std::move(msg), rpcTimeoutSeconds);
+  std::shared_ptr<FutureMessage> fut;
+  // If profiler is enabled, wrap this message with profiling metadata that will
+  // tell the remote end to process this request with the profiler enabled.
+  if (torch::autograd::profiler::profilerEnabled()) {
+    auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
+    auto msgWithProfiling = getMessageWithProfiling(
+        std::move(msg),
+        rpc::MessageType::RUN_WITH_PROFILING_REQ,
+        std::move(profilerConfig));
+    fut = agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
+  } else {
+    fut = agent.send(dst, std::move(msg), rpcTimeoutSeconds);
+  }
+
+  return fut;
 }
 
 } // namespace autograd

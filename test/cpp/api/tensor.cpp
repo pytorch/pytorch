@@ -17,7 +17,7 @@ bool exactly_equal(at::Tensor left, T right) {
 }
 
 template <typename T>
-bool almost_equal(at::Tensor left, T right, T tolerance = 1e-4) {
+bool almost_equal(at::Tensor left, T right, double tolerance = 1e-4) {
   return std::abs(left.item<T>() - right) < tolerance;
 }
 
@@ -166,6 +166,26 @@ TEST(TensorTest, AtTensorCtorScalar) {
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kFloat);
   ASSERT_TRUE(almost_equal(tensor[0], 123.5));
+
+  tensor = at::tensor(c10::complex<float>(1.0, 2.0)) + 0.5;
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<float>(1.5, 2.0)));
+
+  tensor = at::tensor(c10::complex<float>(1.0, 2.0), at::dtype(at::kComplexFloat)) + 0.5;
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<float>(1.5, 2.0)));
+
+  tensor = at::tensor(c10::complex<double>(1.0, 2.0)) + 0.5;
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5, 2.0)));
+
+  tensor = at::tensor(c10::complex<float>(1.0, 2.0), at::dtype(at::kComplexDouble)) + 0.5;
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5, 2.0)));
 }
 
 TEST(TensorTest, AtTensorCtorSingleDim) {
@@ -190,6 +210,20 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
+  tensor = at::tensor({c10::complex<float>(1.5, 0.15), c10::complex<float>(1.5, 0.15), c10::complex<float>(3.125, 0.3125)});
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<float>(1.5, 0.15)));
+  ASSERT_TRUE(almost_equal(tensor[1], c10::complex<float>(1.5, 0.15)));
+  ASSERT_TRUE(almost_equal(tensor[2], c10::complex<float>(3.125, 0.3125)));
+
+  tensor = at::tensor({c10::complex<double>(1.5, 0.15), c10::complex<double>(1.5, 0.15), c10::complex<double>(3.125, 0.3125)});
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5, 0.15)));
+  ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(1.5, 0.15)));
+  ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.125, 0.3125)));
+
   tensor = at::tensor({1.1, 2.2, 3.3}, at::dtype(at::kInt));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kInt);
@@ -205,6 +239,20 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
+  tensor = at::tensor(std::vector<c10::complex<float>>({c10::complex<float>(1.5, 0.15), c10::complex<float>(1.5, 0.15), c10::complex<float>(3.125, 0.3125)}));
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kComplexFloat);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<float>(1.5, 0.15)));
+  ASSERT_TRUE(almost_equal(tensor[1], c10::complex<float>(1.5, 0.15)));
+  ASSERT_TRUE(almost_equal(tensor[2], c10::complex<float>(3.125, 0.3125)));
+
+  tensor = at::tensor(std::vector<c10::complex<double>>({c10::complex<double>(1.5, 0.15), c10::complex<double>(1.5, 0.15), c10::complex<double>(3.125, 0.3125)}));
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5, 0.15)));
+  ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(1.5, 0.15)));
+  ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.125, 0.3125)));
+
   std::vector<int> v = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   tensor = at::tensor(v);
   ASSERT_EQ(tensor.numel(), v.size());
@@ -219,6 +267,53 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_EQ(tensor.dtype(), at::kDouble);
   for (size_t i = 0; i < w.size(); ++i) {
     ASSERT_TRUE(almost_equal(tensor[i], w.at(i)));
+  }
+
+  std::vector<c10::complex<double>> x = {
+    {1.1, -1.1}, {2.2, -2.2}, {3.3, -3.3}, {4.4, -4.4}, {5.5, -5.5},
+    {6.6, -6.6}, {7.7, -7.7}, {8.8, -8.8}, {9.9, -9.9}, {10.0, -10.0}
+  };
+  tensor = at::tensor(x);
+  ASSERT_EQ(tensor.numel(), x.size());
+  ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
+  for (size_t i = 0; i < x.size(); ++i) {
+    ASSERT_TRUE(almost_equal(tensor[i], x.at(i)));
+  }
+}
+
+TEST(TensorTest, AtTensorCastRealToComplex) {
+  auto tensor = at::tensor(std::vector<double>({1.5, 2.5, 3.5}), at::kComplexDouble);
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5)));
+  ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(2.5)));
+  ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.5)));
+
+  tensor = at::tensor({1.5, 2.5, 3.5}, at::kComplexDouble);
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5)));
+  ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(2.5)));
+  ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.5)));
+
+  tensor = at::tensor(1.5, at::kComplexDouble);
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.dtype(), at::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5)));
+}
+
+TEST(TensorTest, AtTensorCastComplexToRealErrorChecks) {
+  {
+    ASSERT_THROWS_WITH(at::tensor(c10::complex<float>(0.1, 0.2), at::kFloat),
+      "\"tensor_cpu\" not implemented for 'Float'");
+  }
+  {
+    ASSERT_THROWS_WITH(at::tensor({c10::complex<float>(0.1, 0.2)}, at::kFloat),
+      "\"tensor_cpu\" not implemented for 'Float'");
+  }
+  {
+    ASSERT_THROWS_WITH(at::tensor(std::vector<c10::complex<float>>{c10::complex<float>(0.1, 0.2)}, at::kFloat),
+      "\"tensor_cpu\" not implemented for 'Float'");
   }
 }
 
@@ -524,6 +619,42 @@ TEST(TensorTest, TorchTensorCtorMultiDimErrorChecks) {
   {
     ASSERT_THROWS_WITH(torch::tensor({{{true, 2}}}),
       "Expected all elements of the tensor to have the same scalar type: Bool, but got element of scalar type: Int");
+  }
+}
+
+TEST(TensorTest, TorchTensorCastRealToComplex) {
+  auto tensor = torch::tensor(std::vector<double>({1.5, 2.5, 3.5}), torch::kComplexDouble);
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), torch::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5)));
+  ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(2.5)));
+  ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.5)));
+
+  tensor = torch::tensor({1.5, 2.5, 3.5}, torch::kComplexDouble);
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), torch::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], c10::complex<double>(1.5)));
+  ASSERT_TRUE(almost_equal(tensor[1], c10::complex<double>(2.5)));
+  ASSERT_TRUE(almost_equal(tensor[2], c10::complex<double>(3.5)));
+
+  tensor = torch::tensor(1.5, torch::kComplexDouble);
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.dtype(), torch::kComplexDouble);
+  ASSERT_TRUE(almost_equal(tensor, c10::complex<double>(1.5)));
+}
+
+TEST(TensorTest, TorchTensorCastComplexToRealErrorChecks) {
+  {
+    ASSERT_THROWS_WITH(torch::tensor(c10::complex<float>(0.1, 0.2), torch::kFloat),
+      "value cannot be converted to type float without overflow");
+  }
+  {
+    ASSERT_THROWS_WITH(torch::tensor({c10::complex<float>(0.1, 0.2), c10::complex<float>(0.3, 0.4)}, torch::kFloat),
+      "value cannot be converted to type float without overflow");
+  }
+  {
+    ASSERT_THROWS_WITH(torch::tensor(std::vector<c10::complex<float>>{c10::complex<float>(0.1, 0.2), c10::complex<float>(0.3, 0.4)}, torch::kFloat),
+      "can not do torch::tensor(complex, dtype=non-complex) because complex can not be casted to real number without loss of information");
   }
 }
 
