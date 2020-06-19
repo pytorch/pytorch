@@ -27,25 +27,25 @@ GENERATED_CPP = [
 ]
 
 libtorch_generated_sources = [
-    ":generate-code=autograd/generated/Functions.cpp",
-    ":generate-code=jit/generated/generated_unboxing_wrappers_0.cpp",
-    ":generate-code=jit/generated/generated_unboxing_wrappers_1.cpp",
-    ":generate-code=jit/generated/generated_unboxing_wrappers_2.cpp",
-    ":generate-code=autograd/generated/VariableType_0.cpp",
-    ":generate-code=autograd/generated/VariableType_1.cpp",
-    ":generate-code=autograd/generated/VariableType_2.cpp",
-    ":generate-code=autograd/generated/VariableType_3.cpp",
-    ":generate-code=autograd/generated/VariableType_4.cpp",
-    ":generate-code=autograd/generated/ProfiledType_0.cpp",
-    ":generate-code=autograd/generated/ProfiledType_1.cpp",
-    ":generate-code=autograd/generated/ProfiledType_2.cpp",
-    ":generate-code=autograd/generated/ProfiledType_3.cpp",
-    ":generate-code=autograd/generated/ProfiledType_4.cpp",
-    ":generate-code=autograd/generated/TraceType_0.cpp",
-    ":generate-code=autograd/generated/TraceType_1.cpp",
-    ":generate-code=autograd/generated/TraceType_2.cpp",
-    ":generate-code=autograd/generated/TraceType_3.cpp",
-    ":generate-code=autograd/generated/TraceType_4.cpp",
+    ":generate-code[autograd/generated/Functions.cpp]",
+    ":generate-code[jit/generated/generated_unboxing_wrappers_0.cpp]",
+    ":generate-code[jit/generated/generated_unboxing_wrappers_1.cpp]",
+    ":generate-code[jit/generated/generated_unboxing_wrappers_2.cpp]",
+    ":generate-code[autograd/generated/VariableType_0.cpp]",
+    ":generate-code[autograd/generated/VariableType_1.cpp]",
+    ":generate-code[autograd/generated/VariableType_2.cpp]",
+    ":generate-code[autograd/generated/VariableType_3.cpp]",
+    ":generate-code[autograd/generated/VariableType_4.cpp]",
+    ":generate-code[autograd/generated/ProfiledType_0.cpp]",
+    ":generate-code[autograd/generated/ProfiledType_1.cpp]",
+    ":generate-code[autograd/generated/ProfiledType_2.cpp]",
+    ":generate-code[autograd/generated/ProfiledType_3.cpp]",
+    ":generate-code[autograd/generated/ProfiledType_4.cpp]",
+    ":generate-code[autograd/generated/TraceType_0.cpp]",
+    ":generate-code[autograd/generated/TraceType_1.cpp]",
+    ":generate-code[autograd/generated/TraceType_2.cpp]",
+    ":generate-code[autograd/generated/TraceType_3.cpp]",
+    ":generate-code[autograd/generated/TraceType_4.cpp]",
     "torch/csrc/autograd/VariableTypeManual.cpp",
 ]
 
@@ -178,6 +178,7 @@ libtorch_core_sources = [
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
     "torch/csrc/jit/passes/xnnpack_rewrite.cpp",
     "torch/csrc/jit/passes/quantization/helper.cpp",
+    "torch/csrc/jit/passes/quantization/quantization_type.cpp",
     "torch/csrc/jit/passes/quantization/insert_observers.cpp",
     "torch/csrc/jit/passes/quantization/insert_quant_dequant.cpp",
     "torch/csrc/jit/passes/quantization/dedup_module_uses.cpp",
@@ -383,6 +384,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/nn/options/vision.cpp",
     "torch/csrc/api/src/optim/adagrad.cpp",
     "torch/csrc/api/src/optim/adam.cpp",
+    "torch/csrc/api/src/optim/adamw.cpp",
     "torch/csrc/api/src/optim/lbfgs.cpp",
     "torch/csrc/api/src/optim/optimizer.cpp",
     "torch/csrc/api/src/optim/rmsprop.cpp",
@@ -506,10 +508,10 @@ libtorch_python_distributed_sources = [
 
 def glob_libtorch_python_sources():
     _libtorch_python_sources = [
-        ":generate-code=autograd/generated/python_functions.cpp",
-        ":generate-code=autograd/generated/python_nn_functions.cpp",
-        ":generate-code=autograd/generated/python_torch_functions.cpp",
-        ":generate-code=autograd/generated/python_variable_methods.cpp",
+        ":generate-code[autograd/generated/python_functions.cpp]",
+        ":generate-code[autograd/generated/python_nn_functions.cpp]",
+        ":generate-code[autograd/generated/python_torch_functions.cpp]",
+        ":generate-code[autograd/generated/python_variable_methods.cpp]",
     ]
 
     _libtorch_python_sources.extend(libtorch_python_core_sources)
