@@ -1234,7 +1234,7 @@ graph(%input, %weight):
                    .check_not("aten::mul") \
                    .run(m.graph)
 
-class TestQuantizeJitPTSQOps(QuantizationTestCase):
+class TestQuantizeJitOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.
     """
@@ -2640,7 +2640,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                     graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
             self.assertEqual(ref_qparams, graph_params)
 
-class TestQuantizeJitPTDQOps(QuantizationTestCase):
+class TestQuantizeDynamicJitOps(QuantizationTestCase):
     """ Test graph mode post training dynamic quantization works
     for individual ops end to end.
     """
