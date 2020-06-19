@@ -211,7 +211,7 @@ def shutdown(graceful=True):
     RPC processes to reach this method.
 
     .. warning::
-        Warning, for :class:`~torch.futures.Future` objects returned by
+        For :class:`~torch.futures.Future` objects returned by
         :meth:`~torch.distributed.rpc.rpc_async`, ``future.wait()`` should not
         be called after ``shutdown()``.
 
