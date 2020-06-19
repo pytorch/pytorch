@@ -3,11 +3,44 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/core/Array.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/ExpandUtils.h>
 
 namespace at { namespace native {
+
+static constexpr int launch_bound2 = 4;
+
+static constexpr int launch_size_nd = 128;
+
+template<int nt, int vt, typename func_t>
+C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
+__global__ void index_elementwise_kernel(int N, func_t f) {
+  int tid = threadIdx.x;
+  int nv = nt * vt;
+  int idx = nv * blockIdx.x + tid;
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx < N) {
+      f(idx);
+      idx += nt;
+    }
+  }
+}
+
+template<int nt, int vt, typename func_t>
+static void launch_kernel(int64_t N, const func_t& f) {
+  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
+  if (N == 0) {
+    return;
+  }
+  dim3 block(nt);
+  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  index_elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
 
 template <typename func_t>
 void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
@@ -39,7 +72,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   char* in_ptr = (char*)iter.data_ptr(1);
 
   auto offset_calc = make_offset_calculator<3>(iter);
-  legacy::launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
+  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
     auto offsets = offset_calc.get(idx);
     char* out_data = out_ptr + offsets[0];
     char* in_data = in_ptr + offsets[1];
