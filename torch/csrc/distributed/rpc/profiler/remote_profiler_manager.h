@@ -16,6 +16,8 @@ class TORCH_API RemoteProfilerManager {
   static RemoteProfilerManager& getInstance();
   // Sets the current, thread-local profiling key.
   void setCurrentKey(std::string key);
+  // Returns whether the current profiling key is set.
+  bool isCurrentKeySet() const;
   // Unsets the current, thread-local profiling key to allow other RPCs to reset
   // it.
   void unsetCurrentKey();

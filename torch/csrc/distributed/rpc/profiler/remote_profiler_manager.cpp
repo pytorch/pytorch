@@ -27,6 +27,10 @@ void RemoteProfilerManager::setCurrentKey(std::string key) {
   currentThreadLocalKey_ = std::move(key);
 }
 
+bool RemoteProfilerManager::isCurrentKeySet() const {
+  return currentThreadLocalKey_ ? true : false;
+}
+
 void RemoteProfilerManager::unsetCurrentKey() {
   currentThreadLocalKey_ = c10::nullopt;
 }
