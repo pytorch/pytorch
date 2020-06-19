@@ -82,20 +82,18 @@ Message getMessageWithProfiling(
     torch::autograd::profiler::ProfilerConfig&& profilerConfig) {
   auto& remoteProfilerManager =
       torch::distributed::rpc::RemoteProfilerManager::getInstance();
+
   auto key = remoteProfilerManager.getCurrentProfilingKey();
   // generate a globally unique Id
-  auto localId = remoteProfilerManager.getNextLocalId();
-  auto localWorkerId = RpcAgent::getCurrentRpcAgent()->getWorkerInfo().id_;
-  auto globallyUniqueId =
-      torch::distributed::rpc::ProfilingId(localWorkerId, localId);
+  auto globallyUniqueProfilingId = remoteProfilerManager.getNextProfilerId();
   // Save a mapping of ID -> RPC profiling key and unset the current TLS key.
-  remoteProfilerManager.saveRPCKey(globallyUniqueId, key);
+  remoteProfilerManager.saveRPCKey(globallyUniqueProfilingId, key);
   remoteProfilerManager.unsetCurrentKey();
   auto wrappedProfilingMsg = RpcWithProfilingReq(
       msgType,
       std::move(wrappedRpcMessage),
       std::move(profilerConfig),
-      globallyUniqueId);
+      globallyUniqueProfilingId);
 
   return std::move(wrappedProfilingMsg).toMessage();
 }

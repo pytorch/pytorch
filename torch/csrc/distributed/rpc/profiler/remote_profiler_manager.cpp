@@ -46,6 +46,14 @@ std::string RemoteProfilerManager::retrieveRPCProfilingKey(
   return it->second;
 }
 
+ProfilingId RemoteProfilerManager::getNextProfilerId() {
+  auto localId = getNextLocalId();
+  auto localWorkerId = RpcAgent::getCurrentRpcAgent()->getWorkerInfo().id_;
+  auto globallyUniqueId =
+      torch::distributed::rpc::ProfilingId(localWorkerId, localId);
+  return globallyUniqueId;
+}
+
 local_id_t RemoteProfilerManager::getNextLocalId() {
   std::lock_guard<std::mutex> guard(mutex_);
   return currentLocalId_++;

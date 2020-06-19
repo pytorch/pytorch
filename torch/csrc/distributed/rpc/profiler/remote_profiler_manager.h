@@ -28,8 +28,8 @@ class TORCH_API RemoteProfilerManager {
   // Retrieves the profiling key corresponding to the given globallyUniqueId.
   // Throws if it is not found.
   std::string retrieveRPCProfilingKey(const ProfilingId& globallyUniqueId);
-  // Generates the next unique globally unique ID.
-  local_id_t getNextLocalId();
+  // Generates the next globally unique ID for profiling.
+  ProfilingId getNextProfilerId();
   // Retrieves the currently set thread-local profiling key. Throws if it is not
   // set.
   std::string& getCurrentProfilingKey();
@@ -44,6 +44,7 @@ class TORCH_API RemoteProfilerManager {
   RemoteProfilerManager operator=(const RemoteProfilerManager& other) = delete;
   RemoteProfilerManager(RemoteProfilerManager&&) = delete;
   RemoteProfilerManager& operator=(RemoteProfilerManager&&) = delete;
+  local_id_t getNextLocalId();
   std::unordered_map<ProfilingId, std::string, ProfilingId::Hash>
       profiledRpcKeys_;
   static thread_local c10::optional<std::string> currentThreadLocalKey_;
