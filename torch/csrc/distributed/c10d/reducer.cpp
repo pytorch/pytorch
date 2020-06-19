@@ -719,19 +719,6 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
   }
 }
 
-// A bucket with a single sparse tensor doesn't need to be unflattened,
-// but merely assigned to the corresponding variable its grad.
-void Reducer::finalize_bucket_sparse(Bucket& bucket) {
-  const auto result = bucket.work->result();
-  TORCH_INTERNAL_ASSERT(bucket.replicas.size() == result.size());
-  for (size_t i = 0; i < bucket.replicas.size(); i++) {
-    auto& replica = bucket.replicas[i];
-    TORCH_INTERNAL_ASSERT(replica.variables.size() == 1);
-    auto& variable = replica.variables.front();
-    variable.grad() = result[i];
-  }
-}
-
 void Reducer::finalize_backward() {
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
@@ -748,9 +735,10 @@ void Reducer::finalize_backward() {
   for (auto& bucket : buckets_) {
     TORCH_INTERNAL_ASSERT(bucket.work);
     bucket.work->wait();
-    if (bucket.expect_sparse_gradient) {
-      finalize_bucket_sparse(bucket);
-    } else {
+    if (!bucket.expect_sparse_gradient) {
+      // We don't need to finalize the sparse bucket since the sparse grad and
+      // the bucket essentially point to the same storage. As a result, once
+      // the allreduce is done, the sparse grads are automatically updated.
       finalize_bucket_dense(bucket);
     }
   }

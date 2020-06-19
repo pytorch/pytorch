@@ -37,20 +37,9 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 Tensor ${function_name}(${method_formals}) {
   static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${name}", "${overload_name}")
-    .typed<${schema_order_cpp_signature}>();
+    .typed<${function_cpp_signature}>();
   ${dispatch_key_init}
-  return op.callWithDispatchKey(_dk, ${schema_order_actuals});
-}
-""")
-
-UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
-// ${schema_string}
-Tensor ${function_name}(${method_formals}) {
-  static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::${name}", "${overload_name}")
-    .typed<${cpp_signature}>();
-  ${dispatch_key_init}
-  return op.callWithDispatchKey(_dk, ${actuals});
+  return op.callWithDispatchKey(_dk, ${function_actuals});
 }
 """)
 
@@ -97,17 +86,17 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                                                                 name=option['name'],
                                                                 overload_name=option['overload_name'],
                                                                 dispatch_key_init=dispatch_key_init,
-                                                                schema_order_cpp_signature=option['schema_order_cpp_signature'],
-                                                                schema_order_actuals=option['schema_order_actuals'])
+                                                                function_cpp_signature=option['schema_order_cpp_signature'],
+                                                                function_actuals=option['schema_order_actuals'])
                 else:
-                    method_def = UNBOXEDONLY_FUNCTION_DEFINITION.substitute(function_name=name,
-                                                                            schema_string=option['schema_string'],
-                                                                            method_formals=option['formals_with_defaults'],
-                                                                            name=option['name'],
-                                                                            overload_name=option['overload_name'],
-                                                                            dispatch_key_init=dispatch_key_init,
-                                                                            cpp_signature=option['cpp_signature'],
-                                                                            actuals=option['actuals'])
+                    method_def = FUNCTION_DEFINITION.substitute(function_name=name,
+                                                                schema_string=option['schema_string'],
+                                                                method_formals=option['formals_with_defaults'],
+                                                                name=option['name'],
+                                                                overload_name=option['overload_name'],
+                                                                dispatch_key_init=dispatch_key_init,
+                                                                function_cpp_signature=option['cpp_signature'],
+                                                                function_actuals=option['actuals'])
 
                 backend_select_function_registrations.append(func_reg)
                 backend_select_method_definitions.append(method_def)
