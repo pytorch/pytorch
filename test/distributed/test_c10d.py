@@ -2878,9 +2878,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             # Makes sure we still get info if an error occurred somewhere other than the asserts.
                             print("Caught exception during iterations at " + named_msg, flush=True)
                             raise
-                    print("after iters " + model_msg, replica_devices, flush=True)
-                    torch.cuda.synchronize()
-                    print("after iters and sync" + model_msg, replica_devices, flush=True)
+                    print("after iters, no sync " + model_msg, replica_devices, flush=True)
+                    # torch.cuda.synchronize()
+                    # print("after iters and sync" + model_msg, replica_devices, flush=True)
 
     @requires_nccl()
     @skip_if_not_multigpu
