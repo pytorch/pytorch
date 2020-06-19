@@ -2002,6 +2002,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # check two model parameters over 2 iterations
         for iteration in range(2):
+            torch.cuda.synchronize()
             # single cpu/gpu training
             step_model(model, input, target)
 
@@ -2009,6 +2010,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             step_model(ddp_model,
                        input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
                        target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])
+            torch.cuda.synchronize()
 
             # Update weights and run a second iteration to shake out errors
             update_parameters(model)
@@ -2020,6 +2022,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
+            torch.cuda.synchronize()
 
     def _test_gloo_backend(self, devices, device_ids, multi_device=False):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2822,6 +2825,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 pass
                 # dist._DEFAULT_FIRST_BUCKET_BYTES = old_DEFAULT_FIRST_BUCKET_BYTES
 
+        start_time = time.time()
+
         with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
             for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
                 with first_bucket_size(bucketsize):
@@ -2878,7 +2883,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             # Makes sure we still get info if an error occurred somewhere other than the asserts.
                             print("Caught exception during iterations at " + named_msg, flush=True)
                             raise
-                    print("after iters, no sync " + model_msg, replica_devices, flush=True)
+                    print("after iters, time = {}".format(time.time() - start_time) + model_msg,
+                          replica_devices, flush=True)
                     # torch.cuda.synchronize()
                     # print("after iters and sync" + model_msg, replica_devices, flush=True)
 
