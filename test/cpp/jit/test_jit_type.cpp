@@ -27,7 +27,7 @@ void testUnifyTypes() {
   TORCH_INTERNAL_ASSERT(out);
 
   std::stringstream ss;
-  ss << (*out)->python_str();
+  ss << (*out)->annotation_str();
   testing::FileCheck()
       .check("Optional[Tuple[Optional[int], Optional[int]]]")
       ->run(ss.str());

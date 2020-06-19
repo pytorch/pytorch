@@ -426,7 +426,9 @@ RegisterOperators reg(
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),
-
+     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
+     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
+     DEFINE_UNARY_OP(aten::neg, -a, int, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and
      // Python (on negative), we preserve the python behavior as it's more
@@ -481,8 +483,12 @@ RegisterOperators reg(
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
          float),
-
-     DEFINE_BINARY_OP(aten::pow, pow(a, b)),
+     DEFINE_SCALAR_BINARY_OP(
+         aten::pow.Scalar,
+         static_cast<double>(pow(a, b)),
+         static_cast<double>(pow(a, b)),
+         Scalar),
+     DEFINE_INT_OP(aten::pow.int_to_int, pow(a, b)),
      // min and max are in prim:: because there is a difference between
      // the python builtin 'min' and 'torch.min'
      DEFINE_BINARY_OP(prim::min, a < b ? a : b),
@@ -617,12 +623,12 @@ RegisterOperators reg(
 // these ops are not defined for Tensor
 #define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
   Operator(                                                                   \
-      "prim::min." decl_type "(" decl_type "[] l, " decl_type                 \
+      "prim::min." decl_type "_list(" decl_type "[] l, " decl_type            \
       "[] r) -> " decl_type "[]",                                             \
       minList<value_type>,                                                    \
       aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
-          "prim::max." decl_type "(" decl_type "[] l, " decl_type             \
+          "prim::max." decl_type "_list(" decl_type "[] l, " decl_type        \
           "[] r) -> " decl_type "[]",                                         \
           maxList<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \
