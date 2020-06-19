@@ -50,6 +50,7 @@ class OnnxifiOp final : public Operator<Context> {
         max_batch_size_(
             this->template GetSingleArgument<int>("max_batch_size", 0)),
         max_seq_size_(this->template GetSingleArgument<int>("max_seq_size", 0)),
+        timeout_(this->template GetSingleArgument<int>("timeout", 0)),
         nominal_batch_idx_(
             this->template GetSingleArgument<int>("nominal_batch_idx", 0)),
         adjust_quantized_offset_(this->template GetSingleArgument<int>(
@@ -285,6 +286,7 @@ class OnnxifiOp final : public Operator<Context> {
       onnxExtensionFunctionPointer p;
       decltype(onnxSetIOAndRunGraphPointer_) set;
       decltype(onnxReleaseTraceEventsPointer_) release;
+      decltype(onnxWaitEventForPointer_) waitfor;
     } u;
     if (lib_->onnxGetExtensionFunctionAddress(
             backend_id_, "onnxSetIOAndRunGraphFunction", &u.p) !=
@@ -299,6 +301,13 @@ class OnnxifiOp final : public Operator<Context> {
       onnxReleaseTraceEventsPointer_ = nullptr;
     } else {
       onnxReleaseTraceEventsPointer_ = u.release;
+    }
+    if (lib_->onnxGetExtensionFunctionAddress(
+            backend_id_, "onnxWaitEventForFunction", &u.p) !=
+        ONNXIFI_STATUS_SUCCESS) {
+      onnxWaitEventForPointer_ = nullptr;
+    } else {
+      onnxWaitEventForPointer_ = u.waitfor;
     }
 #endif
   }
@@ -358,6 +367,11 @@ class OnnxifiOp final : public Operator<Context> {
       onnxTraceEventList*);
 
   onnxStatus (*onnxReleaseTraceEventsPointer_)(onnxTraceEventList*);
+  onnxStatus (*onnxWaitEventForPointer_)(
+      onnxEvent event,
+      uint32_t timeoutMs,
+      onnxEventState* eventState,
+      onnxStatus* eventStatus);
 
   std::shared_ptr<onnxTraceEventList> traces_{nullptr};
 #endif
@@ -370,6 +384,9 @@ class OnnxifiOp final : public Operator<Context> {
 
   // max sequence lookup size
   int max_seq_size_;
+
+  // Inference timeout limits. Default 0 means no timeout.
+  int timeout_;
 
   // index of the input whose first dimension represents the batch size
   int nominal_batch_idx_{0};
@@ -412,6 +429,7 @@ class OnnxifiOp final : public Operator<Context> {
   // Whether we enable tracing in one run of inference
   bool enable_tracing_{false};
 
+  // Adjust the quantized offset to compensate mismatch of certain backend
   uint8_t adjust_quantized_offset_{0};
 };
 

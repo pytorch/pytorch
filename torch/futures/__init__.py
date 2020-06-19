@@ -1,7 +1,3 @@
-"""
-The ``torch.futures`` package contains a ``Future`` type and corresponding
-utility functions.
-"""
 import torch
 
 
@@ -10,9 +6,6 @@ class Future(torch._C.Future):
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
     also exposes a set of APIs to add callback functions and set results.
-
-    .. warning::
-        The ``torch.futures.Future`` is experimental and subject to change.
     """
     def __new__(cls):
         return super(Future, cls).__new__(cls)
@@ -56,7 +49,9 @@ class Future(torch._C.Future):
             >>> # The inserted callback will print the return value when
             >>> # receiving the response from "worker1"
             >>> cb_fut = fut.then(callback)
-            >>> chain_cb_fut = cb_fut.then(lambda x : print(f"Chained cb done. {x.wait()}"))
+            >>> chain_cb_fut = cb_fut.then(
+            >>>     lambda x : print(f"Chained cb done. {x.wait()}")
+            >>> )
             >>> fut.set_result(5)
             >>>
             >>> # Outputs are:
@@ -98,14 +93,34 @@ class Future(torch._C.Future):
 
 def collect_all(futures):
     r"""
-    Collects the Futures into a single combined Future that is completed
-    when all of the sub-futures are completed.
+    Collects the provided :class:`~torch.futures.Future` objects into a single
+    combined :class:`~torch.futures.Future` that is completed when all of the
+    sub-futures are completed.
 
     Arguments:
-        futures: a list of Futures
+        futures (list): a list of :class:`~torch.futures.Future` objects.
 
     Returns:
-        Returns a Future object to a list of the passed in Futures.
+        Returns a :class:`~torch.futures.Future` object to a list of the passed
+        in Futures.
+
+    Example::
+        >>> import torch
+        >>>
+        >>> fut0 = torch.futures.Future()
+        >>> fut1 = torch.futures.Future()
+        >>>
+        >>> fut = torch.futures.collect_all([fut0, fut1])
+        >>>
+        >>> fut0.set_result(0)
+        >>> fut1.set_result(1)
+        >>>
+        >>> fut_list = fut.wait()
+        >>> print(f"fut0 result = {fut_list[0].wait()}")
+        >>> print(f"fut1 result = {fut_list[1].wait()}")
+        >>> # outputs:
+        >>> # fut0 result = 0
+        >>> # fut1 result = 1
     """
     return torch._C._collect_all(futures)
 
@@ -115,9 +130,11 @@ def wait_all(futures):
     the list of completed values.
 
     Arguments:
-        futures: a list of Futures
+        futures (list): a list of :class:`~torch.futures.Future` object.
 
     Returns:
-        A list of the completed Future results
+        A list of the completed :class:`~torch.futures.Future` results. This
+        method will throw an error if ``wait`` on any
+        :class:`~torch.futures.Future` throws.
     """
     return [fut.wait() for fut in torch._C._collect_all(futures).wait()]
