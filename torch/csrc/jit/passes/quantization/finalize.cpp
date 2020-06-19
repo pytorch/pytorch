@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/quantization/finalize.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/quantization/quantization_patterns.h>
@@ -85,9 +86,9 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
 } // namespace
 
-void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
+void QuantFusion(std::shared_ptr<Graph>& graph, QuantType quant_type) {
   std::vector<QuantFusionInfo> patterns;
-  if (is_dynamic) {
+  if (quant_type == QuantType::DYNAMIC) {
     patterns = dynamic_quant_fusion_pattern_and_replacements();
   } else {
     patterns = quant_fusion_pattern_and_replacements();
@@ -95,7 +96,7 @@ void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
   for (const auto& info : patterns) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(info.pattern, info.replacement);
-    rewriter.runOnGraph(graph, info.filter);
+    rewriter.runOnGraph(graph, info.filters);
   }
 }
 
@@ -125,10 +126,11 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-Module Finalize(Module& module, bool is_dynamic) {
+Module Finalize(Module& module, QuantType quant_type) {
   auto graph = module.get_method("forward").graph();
   InsertPrepackUnpack(graph);
-  QuantFusion(graph, is_dynamic);
+  GRAPH_DUMP("Before QuantFusion:", graph);
+  QuantFusion(graph, quant_type);
   auto frozen = freeze_module(module);
   FoldQuantizedPrepackingOps(frozen);
   return frozen;

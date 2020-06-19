@@ -139,7 +139,7 @@ parameters during training. See :ref:`remote-reference-protocol` for more
 details.
 
 .. autoclass:: RRef
-    :members:
+    :inherited-members:
 
 
 .. toctree::

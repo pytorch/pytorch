@@ -33,6 +33,7 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "addmm",
     "matmul",
     "hardswish",
+    "batch_norm",
     "layer_norm",
     "group_norm",
     "instance_norm",
@@ -59,7 +60,6 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "_max_pool3d",
     "dropout",
     "relu",
-    "hardsigmoid",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -83,9 +83,16 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "transpose",
     "contiguous",
     "permute",
+    "repeat",
     "repeat_interleave",
     "relu",
     "relu_",
+    "squeeze",
+    "squeeze_",
+    "unsqueeze",
+    "unsqueeze_",
+    "detach",
+    "detach_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -294,9 +301,10 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
       inputs.push_back(output);
     }
     return inputs;
-  } else if (n->kind() == prim::ListUnpack) {
+  } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
     return {n->input(0)};
-  } else if (n->kind() == prim::ListConstruct) {
+  } else if (
+      n->kind() == prim::ListConstruct || n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -416,7 +424,8 @@ bool userDefinedCallFunction(Node* n) {
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
 }
 
-bool nodeQuantizable(Node* n, bool is_dynamic) {
+bool nodeQuantizable(Node* n, QuantType quant_type) {
+  bool is_dynamic = quant_type == QuantType::DYNAMIC;
   return isFunctionNode(
       n,
       /* call_funcs = */
@@ -427,7 +436,7 @@ bool nodeQuantizable(Node* n, bool is_dynamic) {
                  : _static_quantizable_aten_funcs);
 }
 
-bool useQuantizable(const Use& use, bool is_dynamic) {
+bool useQuantizable(const Use& use, QuantType quant_type) {
   for (const auto& func_input : _observe_inputs_aten_func) {
     if (matchAtenFuncToUse(use, func_input.func_name, c10::nullopt)) {
       return use.offset == func_input.arg_index;
@@ -440,7 +449,7 @@ bool useQuantizable(const Use& use, bool is_dynamic) {
     }
   }
 
-  return nodeQuantizable(use.user, is_dynamic);
+  return nodeQuantizable(use.user, quant_type);
 }
 
 std::shared_ptr<Graph> getCallFunctionGraph(Node* n) {
@@ -468,6 +477,14 @@ bool alwaysRaisesException(Block* block) {
     }
   }
   return false;
+}
+
+// Check if a value in the graph is a Scalar value
+bool isScalar(Value* v) {
+  auto iv = toIValue(v);
+  return v->type()->isSubtypeOf(NumberType::get()) ||
+      (v->type()->isSubtypeOf(TensorType::get()) && iv && iv->isTensor() &&
+       iv->toTensor().dim() == 0);
 }
 
 // =================== Graph/Module analysis helper functions ============
@@ -598,6 +615,26 @@ bool is_conv3d_module(
     const std::unordered_map<std::string, Value*>& vmap) {
   return is_module(
       match, vmap, "conv", "__torch__.torch.nn.modules.conv.Conv3d");
+}
+
+bool is_batchnorm2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
+}
+
+bool is_batchnorm3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
 }
 
 } // namespace jit

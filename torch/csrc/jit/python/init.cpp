@@ -45,6 +45,7 @@
 #include <torch/csrc/jit/passes/quantization/fusion_passes.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
+#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
@@ -190,30 +191,35 @@ void initJITBindings(PyObject* module) {
              const std::string& method_name,
              const py::dict& qconfig_dict,
              bool inplace,
-             bool is_dynamic) {
+             int quant_type_int) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
                 c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
+            auto quant_type = static_cast<QuantType>(quant_type_int);
             return InsertObservers(
-                module, method_name, dict, inplace, is_dynamic);
+                module, method_name, dict, inplace, quant_type);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
           py::arg("inplace"),
-          py::arg("is_dynamic") = false)
+          py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_insert_quant_dequant",
           [](Module& module,
              const std::string& method_name,
              bool inplace,
-             bool is_dynamic) {
-            return InsertQuantDeQuant(module, method_name, inplace, is_dynamic);
+             bool debug,
+             int quant_type_int) {
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return InsertQuantDeQuant(
+                module, method_name, inplace, debug, quant_type);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("inplace"),
-          py::arg("is_dynamic") = false)
+          py::arg("debug"),
+          py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_insert_prepack_unpack",
           [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
@@ -242,11 +248,12 @@ void initJITBindings(PyObject* module) {
           [](Module& module) { SwapFunctionalLinear(module); })
       .def(
           "_jit_pass_quant_finalize",
-          [](Module& module, bool is_dynamic) {
-            return Finalize(module, is_dynamic);
+          [](Module& module, int quant_type_int) {
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return Finalize(module, quant_type);
           },
           py::arg("module"),
-          py::arg("is_dynamic") = false)
+          py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
@@ -530,7 +537,10 @@ void initJITBindings(PyObject* module) {
           [](script::Module& module) { return FoldPrePackingOps(module); })
       .def(
           "_jit_pass_optimize_for_mobile",
-          [](script::Module& module) { return optimizeForMobile(module); })
+          [](script::Module& module,
+             std::set<MobileOptimizerType>& optimization_blacklist) {
+            return optimizeForMobile(module, optimization_blacklist);
+          })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
@@ -660,6 +670,14 @@ void initJITBindings(PyObject* module) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
           });
+
+  py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
+      .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
+      .value(
+          "INSERT_FOLD_PREPACK_OPS",
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)
+      .value("REMOVE_DROPOUT", MobileOptimizerType::REMOVE_DROPOUT)
+      .export_values();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
@@ -833,11 +851,17 @@ void initJITBindings(PyObject* module) {
           [](Argument& self) -> py::object {
             return (self.N()) ? py::cast(*self.N()) : py::none();
           })
-      .def_property_readonly("default_value", [](Argument& self) -> py::object {
-        if (!self.default_value())
-          return py::none();
-        IValue v = *self.default_value();
-        return toPyObject(std::move(v));
+      .def_property_readonly(
+          "default_value",
+          [](Argument& self) -> py::object {
+            if (!self.default_value()) {
+              return py::none();
+            }
+            IValue v = *self.default_value();
+            return toPyObject(std::move(v));
+          })
+      .def("has_default_value", [](Argument& self) -> py::bool_ {
+        return self.default_value().has_value();
       });
   m.def("_jit_get_all_schemas", []() {
     const std::vector<std::shared_ptr<Operator>>& operations =
@@ -951,6 +975,22 @@ void initJITBindings(PyObject* module) {
   m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
     return fut->wait();
   });
+
+  m.def(
+      "_collect_all",
+      [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
+          -> std::shared_ptr<jit::PythonFutureWrapper> {
+        auto typePtr =
+            futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
+        c10::List<c10::intrusive_ptr<c10::ivalue::Future>> asList(
+            c10::FutureType::create(typePtr));
+        asList.reserve(futures.size());
+        for (const auto& f : futures) {
+          asList.push_back(f->fut);
+        }
+        return std::make_shared<jit::PythonFutureWrapper>(
+            c10::collectAll(asList));
+      });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);

@@ -800,39 +800,40 @@ class TestTypePromotion(TestCase):
 
     @onlyOnCPUAndCUDA
     def test_cat_different_dtypes(self, device):
-        x = torch.tensor([1, 2, 3], device=device, dtype=torch.int8)
-        y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
-        expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int32)
-        out = torch.cat([x, y])
-        self.assertEqual(out, expected_out, exact_dtype=True)
-        z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
-        expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
-                                    device=device, dtype=torch.int32)
-        out = torch.cat([x, y, z])
-        self.assertEqual(out, expected_out, exact_dtype=True)
+        dtypes = torch.testing.get_all_dtypes(include_bfloat16=False)
+        for x_dtype, y_dtype in itertools.product(dtypes, dtypes):
+            x_vals, y_vals = [1, 2, 3], [4, 5, 6]
+
+            x = torch.tensor(x_vals, device=device, dtype=x_dtype)
+            y = torch.tensor(y_vals, device=device, dtype=y_dtype)
+
+            if x_dtype is torch.bool:
+                x_vals = [1, 1, 1]
+            if y_dtype is torch.bool:
+                y_vals = [1, 1, 1]
+
+            res_dtype = torch.result_type(x, y)
+            expected_res = torch.tensor(x_vals + y_vals, device=device, dtype=res_dtype)
+            res = torch.cat([x, y])
+            self.assertEqual(res, expected_res, exact_dtype=True)
 
     @onlyOnCPUAndCUDA
     def test_cat_out_different_dtypes(self, device):
-        out = torch.zeros(6, device=device, dtype=torch.int16)
-        x = torch.tensor([1, 2, 3], device=device, dtype=torch.int8)
-        y = torch.tensor([4, 5, 6], device=device, dtype=torch.int32)
-        expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=torch.int16)
-        torch.cat([x, y], out=out)
-        self.assertEqual(out, expected_out, exact_dtype=True)
-        z = torch.tensor([7, 8, 9], device=device, dtype=torch.int16)
-        out = torch.zeros(9, device=device, dtype=torch.int64)
-        expected_out = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9],
-                                    device=device, dtype=torch.int64)
-        torch.cat([x, y, z], out=out)
-        self.assertEqual(out, expected_out, exact_dtype=True)
-
-    @onlyOnCPUAndCUDA
-    def test_cat_invalid_dtype_promotion(self, device):
-        out = torch.zeros(6, device=device, dtype=torch.int16)
-        x = torch.tensor([1, 2, 3], device=device, dtype=torch.int16)
-        y = torch.tensor([4, 5, 6], device=device, dtype=torch.float)
-        with self.assertRaisesRegex(RuntimeError, 'can\'t be cast'):
-            torch.cat([x, y], out=out)
+        dtypes = torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False)
+        for x_dtype, y_dtype, out_dtype in itertools.product(dtypes, dtypes, dtypes):
+            out = torch.zeros(6, device=device, dtype=out_dtype)
+            x = torch.tensor([1, 2, 3], device=device, dtype=x_dtype)
+            y = torch.tensor([4, 5, 6], device=device, dtype=y_dtype)
+            expected_out = torch.tensor([1, 2, 3, 4, 5, 6], device=device, dtype=out_dtype)
+            if (((x_dtype.is_floating_point or y_dtype.is_floating_point) 
+                    and not (out_dtype.is_floating_point or out_dtype.is_complex))
+                    or ((x_dtype.is_complex or y_dtype.is_complex) and not out_dtype.is_complex)): 
+                # This combinations do not support type conversion to a different class out type
+                with self.assertRaises(RuntimeError):
+                    torch.cat([x, y], out=out)
+            else:
+                torch.cat([x, y], out=out)
+                self.assertEqual(out, expected_out, exact_dtype=True)
 
     # Verfies that unary ops can be safely cast (like NumPy) using their
     # out= kwargs.

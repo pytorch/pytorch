@@ -95,7 +95,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // triggered in this context because it conflicts with the struct
           // torch::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
-          .def(py::detail::hash(py::self));
+          .def(py::detail::hash(py::self)) // NOLINT
+          .def("__repr__", [](const WorkerInfo& workerInfo) {
+            std::ostringstream os;
+            os << workerInfo;
+            return os.str();
+          });
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -117,7 +122,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
-      shared_ptr_class_<PyRRef>(module, "RRef", R"(
+      shared_ptr_class_<PyRRef>(module, "PyRRef", R"(
           A class encapsulating a reference to a value of some type on a remote
           worker. This handle will keep the referenced remote value alive on the
           worker. A ``UserRRef`` will be deleted when 1) no references to it in
@@ -470,9 +475,22 @@ PyObject* rpc_init(PyObject* /* unused */) {
   py::class_<TensorPipeRpcBackendOptions>(
       module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
       .def(
-          py::init<float, std::string>(),
+          py::init<
+              int,
+              optional<std::vector<std::string>>,
+              optional<std::vector<std::string>>,
+              float,
+              std::string>(),
+          py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
+          py::arg("_transports") = optional<std::vector<std::string>>(),
+          py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod);
+          py::arg("init_method") = kDefaultInitMethod)
+      .def_readwrite(
+          "num_worker_threads", &TensorPipeRpcBackendOptions::numWorkerThreads);
+
+  module.attr("_DEFAULT_NUM_WORKER_THREADS") =
+      py::cast(kDefaultNumWorkerThreads);
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
@@ -692,6 +710,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
   module.def(
       "_disable_server_process_global_profiler",
       &profiler::processglobal::disableServer);
+
+  module.def("_set_profiler_node_id", &at::RecordFunction::setDefaultNodeId);
 
   Py_RETURN_TRUE;
 }
