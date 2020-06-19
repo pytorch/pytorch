@@ -1277,7 +1277,7 @@ except RuntimeError as e:
         def sample_stat(sampler, num_samples):
             counts = Counter(sampler)
             count_repeated = sum(val > 1 for val in counts.values())
-            return (count_repeated, min(counts.keys()), max(counts.keys()), sum(counts.values())
+            return (count_repeated, min(counts.keys()), max(counts.keys()), sum(counts.values()))
 
         # test sample with replacement
         n = len(self.dataset) + 1  # ensure at least one sample is drawn more than once
