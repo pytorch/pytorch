@@ -165,6 +165,8 @@
 import sys
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+if sys.maxsize.bit_length() == 31:
+    raise Exception("32-bit Python runtime is no longer supported by PyTorch.")
 
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
