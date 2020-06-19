@@ -9,7 +9,7 @@ namespace distributed {
 namespace rpc {
 const std::string REMOTE_PROFILING_KEY_PREFIX = "#remote_op: ";
 constexpr int kAutoIncrementBits = 48;
-thread_local c10::optional<std::string>
+/*static */ thread_local c10::optional<std::string>
     RemoteProfilerManager::currentThreadLocalKey_ = c10::nullopt;
 /*static */ RemoteProfilerManager& RemoteProfilerManager::getInstance() {
   static RemoteProfilerManager* handler = new RemoteProfilerManager();

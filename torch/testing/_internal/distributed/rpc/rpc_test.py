@@ -1107,7 +1107,7 @@ class RpcTest(RpcAgentTestFixture):
                     }
                     remote_event_name_set -= matching_event
 
-                # The set should be empty, otherwise it's contained elements did
+                # The set should be empty, otherwise its contained elements did
                 # not show up in the remote profiler output.
                 self.assertTrue(
                     remote_event_name_set == set(),
@@ -1793,7 +1793,7 @@ class RpcTest(RpcAgentTestFixture):
 
         # Say C has 2 OwnerRRefs.
         # B has 2 UserRRefs to those 2 OwnerRRefs, respectively.
-        # This call is effectively A asking B to share it's 2 UserRRefs.
+        # This call is effectively A asking B to share its 2 UserRRefs.
         rrefs = rref_of_rrefs.to_here()
 
         self.assertEqual(len(rrefs), 2)
