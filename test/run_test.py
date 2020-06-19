@@ -48,6 +48,7 @@ TESTS = [
     'test_optim',
     'test_mobile_optimizer',
     'test_xnnpack_integration',
+    'test_vulkan',
     'test_quantization',
     'test_sparse',
     'test_serialization',
@@ -126,6 +127,7 @@ ROCM_BLACKLIST = [
     'test_jit_fuser_legacy',
     'test_tensorexpr',
     'test_type_hints',
+    'test_openmp',
 ]
 
 RUN_PARALLEL_BLACKLIST = [
