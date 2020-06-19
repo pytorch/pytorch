@@ -1093,6 +1093,8 @@ class RpcTest(RpcAgentTestFixture):
                     # Ensure that we have the expected key as part of the remote
                     # event.
                     self.assertTrue(name.startswith(rpc_profiling_key))
+                    self.assertTrue(event.is_remote)
+                    self.assertTrue(event.node_id == rpc.get_worker_info(dst_worker).id)
                     # Ensure that the remote event name also contains the operator.
                     operator_name_substr = name[len(rpc_profiling_key) :]
                     # Note: we don't assert that every remote event needs to be
