@@ -9383,13 +9383,13 @@ class TestNNDeviceType(NNTestCase):
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device)),
                 (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device))]:
             self._test_module_empty_input(mod, inp, check_size=False)
-            
-        with self.assertRaisesRegex(RuntimeError, '2D or 3D \(batch mode\)'):
+
+        with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
             mod = torch.nn.ReflectionPad1d(2)
             inp = torch.randn(3, 0, 10, device=device)
             mod(inp)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
             mod = torch.nn.ReflectionPad2d(2)
             inp = torch.randn(3, 0, 10, 10, device=device)
             mod(inp)
