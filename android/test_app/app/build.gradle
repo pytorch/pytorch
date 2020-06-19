@@ -11,6 +11,9 @@ repositories {
 }
 
 android {
+    configurations {
+        extractForNativeBuild
+    }
     compileOptions {
         sourceCompatibility 1.8
         targetCompatibility 1.8
@@ -28,17 +31,28 @@ android {
         }
         externalNativeBuild {
             cmake {
+                abiFilters ABI_FILTERS.split(",")
                 arguments "-DANDROID_STL=c++_shared"
             }
         }
         buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
         buildConfigField("String", "LOGCAT_TAG", "@string/app_name")
         buildConfigField("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 224, 224}")
+        buildConfigField("boolean", "NATIVE_BUILD", 'false')
         addManifestPlaceholders([APP_NAME: "@string/app_name", MAIN_ACTIVITY: "org.pytorch.testapp.MainActivity"])
     }
     buildTypes {
         debug {
             minifyEnabled false
+            debuggable true
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
         }
     }
     flavorDimensions "model", "build", "activity"
@@ -66,6 +80,10 @@ android {
         aar {
             dimension "build"
         }
+        nativeBuild {
+            dimension "build"
+            buildConfigField("boolean", "NATIVE_BUILD", "true")
+        }
         camera {
             dimension "activity"
             addManifestPlaceholders([MAIN_ACTIVITY: "org.pytorch.testapp.CameraActivity"])
@@ -79,7 +97,6 @@ android {
                     }
                 }
             }
-
         }
     }
     packagingOptions {
@@ -92,7 +109,8 @@ android {
             def names = variant.flavors*.name
             if (names.contains("nightly")
                 || names.contains("camera")
-                || names.contains("aar")) {
+                || names.contains("aar")
+                || names.contains("nativeBuild")) {
                 setIgnore(true)
             }
         }
@@ -101,9 +119,16 @@ android {
 
 dependencies {
     implementation 'com.android.support:appcompat-v7:28.0.0'
+    implementation 'com.facebook.soloader:nativeloader:0.8.0'
 
     localImplementation project(':pytorch_android')
     localImplementation project(':pytorch_android_torchvision')
+
+    nativeBuildImplementation(name: 'pytorch_android-release', ext: 'aar')
+    nativeBuildImplementation(name: 'pytorch_android_torchvision-release', ext: 'aar')
+    // Commented due to dependency on local copy of pytorch_android aar to aars folder
+    //extractForNativeBuild(name: 'pytorch_android-release', ext: 'aar')
+
     nightlyImplementation 'org.pytorch:pytorch_android:1.6.0-SNAPSHOT'
     nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.6.0-SNAPSHOT'
 
@@ -116,4 +141,24 @@ dependencies {
     cameraImplementation "androidx.camera:camera-core:$camerax_version"
     cameraImplementation "androidx.camera:camera-camera2:$camerax_version"
     cameraImplementation 'com.google.android.material:material:1.0.0-beta01'
+}
+
+task extractAARForNativeBuild {
+    doLast {
+        configurations.extractForNativeBuild.files.each {
+            def file = it.absoluteFile
+            copy {
+                from zipTree(file)
+                into "$buildDir/$file.name"
+                include "headers/**"
+                include "jni/**"
+            }
+        }
+    }
+}
+
+tasks.whenTaskAdded { task ->
+  if (task.name.contains('externalNativeBuild')) {
+    task.dependsOn(extractAARForNativeBuild)
+  }
 }

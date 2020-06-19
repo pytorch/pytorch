@@ -18,9 +18,18 @@ def _backend_type_repr(self):
     return "BackendType." + self.name
 
 
+_backend_type_doc = """
+    An enum class of available backends.
+
+    PyTorch ships with two builtin backends: ``BackendType.PROCESS_GROUP`` and
+    ``BackendType.TENSORPIPE``. Additional ones can be registered using the
+    :func:`~torch.distributed.rpc.backend_registry.register_backend` function.
+"""
+
 # Create an enum type, `BackendType`, with empty members.
 BackendType = enum.Enum(value="BackendType", names={})
 BackendType.__repr__ = _backend_type_repr
+BackendType.__doc__ = _backend_type_doc
 
 def backend_registered(backend_name):
     """
@@ -65,6 +74,7 @@ def register_backend(
     )
     BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)
     BackendType.__repr__ = _backend_type_repr
+    BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
 
