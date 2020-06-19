@@ -60,6 +60,44 @@ Tensor mul_batching_rule(const Tensor& self, const Tensor& other) {
   return physical_args[0].newLogicalFromPhysical(result);
 }
 
+Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto size_physical = self_physical.getPhysicalShape(size);
+  auto self_physical_dim = self_physical.tensor().dim();
+
+  TORCH_CHECK(self_physical_dim <= size_physical.size(),
+       "expand: the number of sizes provided (", /*logical*/size.size(), ") ",
+       "must be greater or equal to the number of dimensions in the tensor (",
+       /*logical dim*/self.dim(), ")");
+
+  if (self_physical_dim == size_physical.size()) {
+    auto result = self_physical.tensor().expand(size_physical, implicit);
+    return self_physical.newLogicalFromPhysical(result);
+  }
+
+  TORCH_INTERNAL_ASSERT(self_physical_dim < size_physical.size());
+  // Here, we know we are expanding a (logical) tensor to a larger number
+  // of dimensions. We have to be careful because we can't call expand directly
+  // due to the presence of batch dimensions.
+  //
+  // As an example, let B0 be a batch dimension and consider expand(Tensor[B0, 3], [2, 3]).
+  // The result should be a tensor of size [B0, 2, 3].
+  // A physical view of size [B0, 3] can't directly be expanded to size [B0, 2, 3]
+  // so the strategy here is to view it first as a tensor of size [B0, 1, 3] and
+  // then expand.
+  auto self_physical_size = self_physical.tensor().sizes();
+  auto extra_dims = size_physical.size() - self_physical_dim;
+  VmapDimVector view_shape(size_physical.size(), 1);
+  std::copy(self_physical_size.begin(),
+            self_physical_size.begin() + self_physical.numBatchDims(),
+            view_shape.begin());
+  std::copy(self_physical_size.begin() + self_physical.numBatchDims(),
+            self_physical_size.end(),
+            view_shape.begin() + self_physical.numBatchDims() + extra_dims);
+  auto result = self_physical.tensor().view(view_shape).expand(size_physical, implicit);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 void batchedTensorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_CHECK(false, "NYI: Calling ", op.schema().name(), " inside of vmap");
 }
@@ -69,8 +107,15 @@ TORCH_LIBRARY_IMPL(_, Batched, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Batched, m) {
+  // NB: Ideally we would like some operators, like size.int, to "fallthrough"
+  // to the underlying implementation. However, because a BatchedTensor is a
+  // Tensor wrapper, it only has one dispatch key (Batched) on it. The resolution
+  // here is to just directly call the underlying implementation.
+  m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
+
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl_UNBOXED("mul.Tensor", mul_batching_rule);
+  m.impl("expand", expand_batching_rule);
 }
 
 } // namespace at
