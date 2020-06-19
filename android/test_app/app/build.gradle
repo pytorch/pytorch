@@ -117,6 +117,14 @@ android {
     }
 }
 
+tasks.all { task ->
+    // Disable externalNativeBuild for all but nativeBuild variant
+    if (task.name.startsWith('externalNativeBuild') 
+          && !task.name.contains('NativeBuild')) {
+        task.enabled = false
+    }
+}
+
 dependencies {
     implementation 'com.android.support:appcompat-v7:28.0.0'
     implementation 'com.facebook.soloader:nativeloader:0.8.0'
