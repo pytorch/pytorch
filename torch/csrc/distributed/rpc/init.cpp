@@ -171,7 +171,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>> rref = RRef(torch.zeros(2, 2))
               >>> # the following RPC shares the rref with worker1, reference
               >>> # count is automatically updated.
-              >>> rpc.rpc_sync("worker1", f, args(rref,))
+              >>> rpc.rpc_sync("worker1", f, args=(rref,))
           )")
           .def(
               py::init<const py::object&, const py::object&>(),
