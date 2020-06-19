@@ -1230,7 +1230,8 @@ bool OnnxifiTransformer::supportOpC2(
     auto ret = lib_->onnxGetBackendCompatibility(
         backend_id, c2_model_str.size(), c2_model_str.c_str());
     if (ret != ONNXIFI_STATUS_SUCCESS) {
-      LOG(INFO) << "Don't support c2 op " << op.type() << " (" << ret << ")";
+      LOG(INFO) << "Don't support c2 op " << op.type() << " at pos " << pos
+                << " (" << ret << ")";
       return false;
     } else {
       return true;
