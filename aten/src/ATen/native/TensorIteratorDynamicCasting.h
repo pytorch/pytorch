@@ -37,20 +37,6 @@ struct CPPTypeToScalarType {
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
 
-#undef SPECIALIZE_CPPTypeeAndStdComplexToScalarType
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template<>
-struct CPPTypeToScalarType<thrust::complex<float>> {
-  constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexFloat; }
-};
-
-template<>
-struct CPPTypeToScalarType<thrust::complex<double>> {
-  constexpr static c10::ScalarType value() { return c10::ScalarType::ComplexDouble; }
-};
-#endif
-
 }} //namespace cppmap::detail
 
 // `needs_dynamic_casting` compares the types expected by iterator
