@@ -15,7 +15,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__aarch64__)
 #include <ATen/quantized/Quantizer.h>
 #include <arm_neon.h>
 #endif
@@ -2196,7 +2196,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
 }
 #else // USE_FBGEMM
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__aarch64__)
 // Generic template defaults to naive quantize implementation
 template <typename T>
 void quantize_tensor_arm(
@@ -2228,6 +2228,7 @@ void quantize_tensor_arm<c10::quint8>(
   uint32_t i = 0;
   auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
   const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
+#if defined(__ARM_NEON__)
   // magic float and magic int to take care of rounding
   // int magic_round(float f): interpret_int32(f + 12582912.0f) - 0x4B400000
   // Some detail:
@@ -2263,30 +2264,44 @@ void quantize_tensor_arm<c10::quint8>(
   for (; i < N; ++i) {
     (*out++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
   }
+#else
+  const int16x8_t vzero_point = vdupq_n_s16((int16_t)(uint16_t)zero_point);
+  for (i = 0; i + 8 < N; i += 8) {
+    const float32x4_t vin0123 = vld1q_f32(in);
+    in += 4;
+    const float32x4_t vin4567 = vld1q_f32(in);
+    in += 4;
+    const int32x4_t v0123_rounded = vcvtnq_s32_f32(vmulq_f32(vin0123, vinv_scale));
+    const int32x4_t v4567_rounded = vcvtnq_s32_f32(vmulq_f32(vin4567, vinv_scale));
+    const int16x8_t v01234567_packed = vqaddq_s16(
+        vqmovn_high_s32(vqmovn_s32(v0123_rounded), v4567_rounded), vzero_point);
+    const uint8x8_t vout01234567 = vqmovun_s16(v01234567_packed);
+    vst1_u8(out, vout01234567);
+    out += 8;
+  }
+  for (; i < N; ++i) {
+    (*out++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
+  }
+#endif
 }
 
-#endif // __ARM_NEON__
+#endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
 void quantize_tensor_per_tensor_affine_cpu(
     Tensor rtensor,
     Tensor qtensor,
     double scale,
     int64_t zero_point) {
-#if defined(__ARM_NEON__)
+#if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
         TORCH_CHECK(
             rtensor.is_contiguous(), "Float tensor should be contiguous");
         const float* const rdata = rtensor.data_ptr<float>();
-        // If QEngine is set to QNNPACK, use caffe2 specialized Int8Quantize
-        // implementation on ARM
-        if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-          quantize_tensor_arm<scalar_t>(
-              rdata, qtensor, rtensor.numel(), scale, zero_point);
-          return;
-        }
+        quantize_tensor_arm<scalar_t>(
+            rdata, qtensor, rtensor.numel(), scale, zero_point);
       });
-#endif // __ARM_NEON__
+#else
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
@@ -2299,6 +2314,7 @@ void quantize_tensor_per_tensor_affine_cpu(
           qdata[i] = quantize_val<scalar_t>(scale, zero_point, rdata[i]);
         }
       });
+#endif // __ARM_NEON__
 }
 
 void dequantize_tensor_per_tensor_affine_cpu(

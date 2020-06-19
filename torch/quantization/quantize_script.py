@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import enum
-
 import torch
 from .qconfig import QConfig
 from torch.jit._recursive import wrap_cpp_module
@@ -54,6 +53,9 @@ def _convert_script(model, inplace=False, debug=False, quant_type=QuantType.STAT
     model.eval()
     model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', inplace, debug, quant_type))
     if not debug:
+        # Moving model parameters to CPU since quantized operators
+        # are only supported on CPU right now
+        model.cpu()
         model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, quant_type))
     return model
 
