@@ -697,11 +697,11 @@ struct DeepCopyMemoTable {
 
 IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   if (!memo.contains(py::str("__torch_script_memo_table"))) {
-    memo["__torch_script_memo_table"] = DeepCopyMemoTable{
-      std::make_shared<IValue::HashAliasedIValueMap>()};
+    memo["__torch_script_memo_table"] =
+        DeepCopyMemoTable{std::make_shared<IValue::HashAliasedIValueMap>()};
   }
   auto& ivalue_memo =
-    *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;
+      *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;
   return ivalue.deepcopy(ivalue_memo);
 }
 
@@ -866,8 +866,9 @@ void initJitScriptBindings(PyObject* module) {
 
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
-     return Object(pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
-  });
+        return Object(
+            pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
+      });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
@@ -1021,9 +1022,12 @@ void initJitScriptBindings(PyObject* module) {
       .def("_clone_instance", &Module::clone_instance)
       .def("copy", &Module::copy)
       .def("deepcopy", &Module::deepcopy)
-      .def("__deepcopy__", [](const Module& self, const py::dict& memo) {
-        return Module(pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
-      })
+      .def(
+          "__deepcopy__",
+          [](const Module& self, const py::dict& memo) {
+            return Module(
+                pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
+          })
       .def_property_readonly("qualified_name", [](const Module& self) {
         return self.type()->name()->qualifiedName();
       });
