@@ -26,8 +26,12 @@ void checkNet(NetDef& net, NetDef& expected_net) {
     ArgumentHelper helper1(op1);
     ArgumentHelper helper2(op2);
     for (auto& arg : op1.arg()) {
-      auto& name = arg.name();
-      CHECK(helper2.HasArgument(name));
+      const auto& name = arg.name();
+      if (name == "net_pos") {
+        continue;
+      }
+      CHECK(helper2.HasArgument(name))
+          << "Argument " << name << "doesn't exist";
       const auto arg1 = helper1.GetSingleArgument<int>(name, 0);
       const auto arg2 = helper2.GetSingleArgument<int>(name, 0);
       CHECK_EQ(arg1, arg2);

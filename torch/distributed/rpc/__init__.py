@@ -35,9 +35,7 @@ if is_available():
         and distributed autograd.
 
         Initializes the local RPC agent which immediately makes the current
-        process ready to send and receive RPCs. This method also properly
-        initializes a default process group backend that uses Gloo for
-        communication.
+        process ready to send and receive RPCs.
 
         Arguments:
             backend (Enum): type of RPC backend implementation. Currently,
@@ -57,7 +55,7 @@ if is_available():
                 process group agent. If using the default
                 ``rpc_backend_options``, RPC would initialize the underlying
                 process group backend using ``init_method = "env://"``,
-                meaning that environment variables ``MASTER_ADDRESS`` and
+                meaning that environment variables ``MASTER_ADDR`` and
                 ``MASTER_PORT`` needs to be set properly. See
                 :class:`~torch.distributed.rpc.ProcessGroupRpcBackendOptions`
                 for examples.

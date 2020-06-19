@@ -490,6 +490,8 @@ class QuantizedGRU(QuantizedRNNBase):
 
 
 def quantize_rnn_cell_modules(module):
+    warnings.warn("quantize_rnn_cell_modules function has been deprecated. "
+                  "Please use torch.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
@@ -534,6 +536,8 @@ def quantize_linear_modules(module, dtype=torch.int8):
 
 
 def quantize_rnn_modules(module, dtype=torch.int8):
+    warnings.warn("quantize_rnn_modules function has been deprecated. "
+                  "Please use torch.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
