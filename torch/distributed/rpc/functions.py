@@ -20,6 +20,9 @@ def async_execution(fn):
         decorators. Otherwise, RPC will not be able to detect the attributes
         installed by this decorator.
 
+    .. warning:: `autograd profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`_
+        does not work with ``async_execution`` functions.
+
     Example::
         The returned :class:`~torch.futures.Future` object can come from
         ``rpc.rpc_async``, ``Future.then(cb)``, or :class:`~torch.futures.Future`
