@@ -62,7 +62,7 @@ TORCH_LIBRARY(aten, m) {
   m.def("replace(str self, str old, str new, int max=-1) -> str");
   m.def("partition(str self, str separator) -> (str, str, str)");
   m.def("rpartition(str self, str separator) -> (str, str, str)");
-  m.def("split.str(str self, str separator=' ', int max=-1) -> str[]");
+  m.def("split.str(str self, str? separator=None, int max=-1) -> str[]");
   m.def("rsplit(str self, str separator=' ', int max=-1) -> str[]");
   m.def("join(str self, str[] values) -> str");
 

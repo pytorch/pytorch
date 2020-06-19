@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -268,6 +269,13 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph, isClampFusable);
 }
 
+void runCanonicalOptimizations(script::Module& module) {
+  auto graph = module.get_method("forward").graph();
+  // Not sure if we have models running on mobile that require loop unrolling.
+  // Perhaps language/speech models? Conservatively setting that to false.
+  runOptimization(graph, false /* no loop unrolling */);
+}
+
 } // namespace
 
 void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
@@ -301,15 +309,33 @@ void FoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
+script::Module optimizeForMobile(
+    const script::Module& m,
+    const std::set<MobileOptimizerType>& optimization_blacklist) {
   auto cloned_module = m.clone();
   cloned_module.eval();
-  cloned_module = FoldConvBatchNorm2d(cloned_module);
-  insertPrePackedOps(cloned_module);
-  cloned_module = freeze_module(cloned_module);
-  fusePrePackedLinearConvWithClamp(cloned_module);
-  FoldPrePackingOps(cloned_module);
-  removeDropout(cloned_module);
+
+  if (!optimization_blacklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
+    cloned_module = FoldConvBatchNorm2d(cloned_module);
+  }
+
+  if (!optimization_blacklist.count(
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
+    insertPrePackedOps(cloned_module);
+    cloned_module = freeze_module(cloned_module);
+    fusePrePackedLinearConvWithClamp(cloned_module);
+    FoldPrePackingOps(cloned_module);
+  }
+
+  // Run canonical optimizations post freezing
+  // since freezing inlines the graph. Otherwise we
+  // will have to explicitly call Inlining pass.
+  runCanonicalOptimizations(cloned_module);
+
+  if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
+    removeDropout(cloned_module);
+  }
+
   return cloned_module;
 }
 
@@ -335,11 +361,13 @@ void FoldPrePackingOps(script::Module& m) {
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
-c10::optional<script::Module> optimizeForMobile(const script::Module& m) {
+script::Module optimizeForMobile(
+    const script::Module& module,
+    const std::set<MobileOptimizerType>& blacklist) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
-  return c10::nullopt;
+  return module;
 }
 
 #endif

@@ -112,6 +112,14 @@ struct TORCH_API ProfilerConfig {
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;
+
+  // Returns IValues corresponding to ProfilerConfig struct, to be used for
+  // serialization.
+  at::IValue toIValue() const;
+
+  // Reconstructs a ProfilerConfig from IValues given by toIValue.
+  static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
+
 };
 
 enum class TORCH_API EventKind : uint16_t {
@@ -131,14 +139,58 @@ struct TORCH_API Event final {
       uint16_t thread_id,
       bool record_cuda,
       at::RecordFunctionHandle handle = 0,
-      std::vector<std::vector<int64_t>>&& shapes = {})
+      std::vector<std::vector<int64_t>>&& shapes = {},
+      int node_id = -1)
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
-        shapes_(shapes) {
+        shapes_(shapes),
+        node_id_(node_id) {
     record(record_cuda);
   }
+
+  // Constructor to be used in conjunction with Event::fromIValue.
+  Event(
+      EventKind kind,
+      at::StringView name,
+      uint16_t thread_id,
+      at::RecordFunctionHandle handle,
+      std::vector<std::vector<int64_t>>&& shapes,
+      int node_id,
+      bool is_remote,
+      int64_t cpu_memory_usage,
+      int64_t cpu_ns,
+      bool cuda_recorded,
+      int64_t cuda_memory_usage = 0,
+      int device = -1,
+      double cuda_us = -1)
+      : cpu_ns_(cpu_ns),
+        name_(std::move(name)),
+        kind_(kind),
+        thread_id_(thread_id),
+        handle_(handle),
+        shapes_(shapes),
+        cpu_memory_usage_(cpu_memory_usage),
+        cuda_memory_usage_(cuda_memory_usage),
+        device_(device),
+        node_id_(node_id),
+        is_remote_(is_remote),
+        cuda_us_(cuda_us) {
+    // Sanity check values that were deserialized
+    TORCH_INTERNAL_ASSERT(cpu_ns_ > 0);
+    if (cuda_recorded) {
+      TORCH_INTERNAL_ASSERT(device_ >= 0);
+      TORCH_INTERNAL_ASSERT(cuda_us_ >= 0);
+    }
+  }
+
+  // Returns IValues corresponding to event structure, to be used for
+  // serialization.
+  at::IValue toIValue() const;
+
+  // Reconstructs an event from IValues given by toIValue.
+  static Event fromIValue(const at::IValue& eventIValue);
 
   void record(bool record_cuda);
   std::string kind() const {
@@ -150,6 +202,12 @@ struct TORCH_API Event final {
     }
     throw std::runtime_error("unknown EventKind");
   }
+
+  // Get enum kind of this event.
+  EventKind eventKind() const {
+    return kind_;
+  }
+
   const char* name() const {
     return name_.str();
   }
@@ -159,12 +217,17 @@ struct TORCH_API Event final {
   std::vector<std::vector<int64_t>> shapes() const {
     return shapes_;
   }
-  double cpu_elapsed_us(const Event & e) {
+  double cpu_elapsed_us(const Event & e) const {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
-  double cuda_elapsed_us(const Event & e);
+
+  double cpu_us() const {
+    return cpu_ns_ / (1000.0);
+  }
+
+  double cuda_elapsed_us(const Event & e) const;
   bool has_cuda() const {
-    return cuda_event != nullptr;
+    return cuda_event != nullptr || (isRemote() && device_ != -1);
   }
   int device() const {
     return device_;
@@ -195,6 +258,24 @@ struct TORCH_API Event final {
     return handle_;
   }
 
+  // Node ID corresponding to this event.
+  int node_id( ) const {
+    return node_id_;
+  }
+
+  // Set Node ID on this event.
+  void setNodeId(int node_id) {
+    node_id_ = node_id;
+  }
+
+  bool isRemote() const {
+    return is_remote_;
+  }
+
+  void setCudaUs(int64_t cuda_us) {
+    cuda_us_ = cuda_us;
+}
+
 private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
@@ -207,6 +288,9 @@ private:
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
   struct CUevent_st* cuda_event = nullptr;
+  int node_id_ = 0;
+  bool is_remote_ = false;
+  int64_t cuda_us_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -253,7 +337,15 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 // across thread boundary (e.g. at::launch tasks)
 TORCH_API void enableProfiler(const ProfilerConfig&);
 TORCH_API thread_event_lists disableProfiler();
+// adds profiledEvents to the current thread local recorded events. Each event
+// will be marked with node ID given by fromNodeId.
+TORCH_API void addEventList(std::vector<Event>&& profiledEvents);
+// Returns if the profiler is currently enabled in the current thread.
 TORCH_API bool profilerEnabled();
+// Retrieve the thread_local ProfilerConfig.
+TORCH_API ProfilerConfig getProfilerConfig();
+// Writes profiled events to a stream.
+TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& events);
 
 // Usage:
 //   {
@@ -273,6 +365,33 @@ private:
   void processEvents(const std::vector<Event*>& events);
 };
 
+// A guard that enables the profiler, taking in an optional callback to process
+// the results
+// Usage:
+// {
+//   TLSProfilerGuard g([](thread_event_lists profilerResults) {
+//     // process profilerResults
+//   });
+//   Code to profile
+// }
+struct TORCH_API TLSProfilerGuard {
+  explicit TLSProfilerGuard(
+      const ProfilerConfig& cfg,
+      c10::optional<std::function<void(const thread_event_lists&)>>
+          resultCallback = c10::nullopt)
+      : cb_(std::move(resultCallback)) {
+    enableProfiler(cfg);
+  }
+  ~TLSProfilerGuard() {
+    thread_event_lists event_lists = disableProfiler();
+    if (cb_) {
+      (*cb_)(event_lists);
+    }
+  }
+
+ private:
+  c10::optional<std::function<void(const thread_event_lists&)>> cb_;
+};
 
 } // namespace profiler
 }} // namespace torch::autograd
