@@ -822,6 +822,9 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
   auto hardswish = getObservedQParamOpFusionInfo(
       "aten::hardswish", "quantized::hardswish", {}, {});
 
+  auto hardswish_ = getObservedQParamOpFusionInfo(
+      "aten::hardswish_", "quantized::hardswish", {}, {});
+
   auto layer_norm = getObservedQParamOpFusionInfo(
       "aten::layer_norm",
       "quantized::layer_norm",
@@ -940,6 +943,7 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
       {"quantized::mul", mul, quantized_mul},
       {"quantized::mul", inplace_mul, quantized_mul},
       hardswish,
+      hardswish_,
       layer_norm,
       group_norm,
       instance_norm,

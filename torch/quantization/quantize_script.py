@@ -78,6 +78,15 @@ def _quantize_script(model, qconfig_dict, run_fn=None, run_args=None, inplace=Fa
         assert run_args, "Must provide calibration dataset for post training static quantization"
         model = prepare_script(model, qconfig_dict, inplace)
         run_fn(model, *run_args)
+        print('after run_fn', model)
+        # correct (for non-inplace):
+        # obs0 qparams (tensor([0.0052]), tensor([0.]))
+        # obs1 qparams (tensor([0.0079]), tensor([0.]))
+        # incorrect (for inplace):
+        # obs0 qparams (tensor([0.0032]), tensor([0.]))
+        # obs1 qparams (tensor([0.0052]), tensor([0.]))
+        print('obs0 qparams', model._observer_0.calculate_qparams())
+        print('obs1 qparams', model._observer_1.calculate_qparams())
         # TODO: change inplace to True
         model = convert_script(model, False, debug)
 

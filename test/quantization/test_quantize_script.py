@@ -2082,12 +2082,30 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
                            .run(m.graph)
 
     def test_hardswish(self):
-        data = [(torch.rand((1, 2, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        hardswish = torch.nn.Hardswish()
-        for tracing in [True, False]:
-            m = self.checkGraphModeOp(hardswish, data, "quantized::hardswish", tracing)
-            FileCheck().check_not("aten::hardswish") \
-                       .run(m.graph)
+        class FunctionalHardswish(torch.nn.Module):
+            def __init__(self, inplace):
+                super(FunctionalHardswish, self).__init__()
+                self.inplace = inplace
+
+            def forward(self, input):
+                return torch.nn.functional.hardswish(input, inplace=self.inplace)
+
+        # TODO before land: fix inplace
+        modules = [
+            # torch.nn.Hardswish(),
+            FunctionalHardswish(True),
+            # FunctionalHardswish(False),
+        ]
+
+        # TODO before land: add false
+        for tracing in [True]:
+            print('tracing', tracing)
+            for m in modules:
+                m = self.checkGraphModeOp(
+                    m, self.img_data, "quantized::hardswish", tracing, debug=True)
+                FileCheck().check_not("aten::hardswish") \
+                           .check_not("aten::hardswish_") \
+                           .run(m.graph)
 
     def test_elu(self):
         class FunctionalELU(torch.nn.Module):
