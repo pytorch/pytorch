@@ -19,7 +19,7 @@ TEST(TestStream, RegisterStreamTest) {
     cudaStream_t stream;
     ASSERT_TRUE(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess);
     ASSERT_TRUE(cudaStreamDestroy(stream) == cudaSuccess);
-    ASSERT_THROW(at::cuda::registerCustomCUDAStream(0, stream), c10::Error);
+    ASSERT_THROW(c10::cuda::registerCustomCUDAStream(0, stream), c10::Error);
   }
 
   {
