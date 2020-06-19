@@ -1,14 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #include <cuda_runtime.h>
 
 TEST(TestStream, RegisterEventTest) {
-  if (!at::cuda::is_available()) return;
-
   {
     // Invalid device should throw
     cudaStream_t stream;
