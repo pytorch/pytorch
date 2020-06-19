@@ -101,6 +101,7 @@ white_list = [
     ('aten::__and__', datetime.date(2020, 6, 30)),
     ('aten::__or__', datetime.date(2020, 6, 30)),
     ('aten::__xor__', datetime.date(2020, 6, 30)),
+    ('aten::split', datetime.date(2020, 6, 30)),
 ]
 
 
