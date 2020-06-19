@@ -2002,6 +2002,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # check two model parameters over 2 iterations
         for iteration in range(2):
+            torch.cuda.synchronize()
             # single cpu/gpu training
             step_model(model, input, target)
 
@@ -2009,6 +2010,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             step_model(ddp_model,
                        input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
                        target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])
+            torch.cuda.synchronize()
 
             # Update weights and run a second iteration to shake out errors
             update_parameters(model)
@@ -2020,6 +2022,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
+            torch.cuda.synchronize()
 
     def _test_gloo_backend(self, devices, device_ids, multi_device=False):
         store = c10d.FileStore(self.file_name, self.world_size)
