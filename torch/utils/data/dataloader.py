@@ -296,9 +296,7 @@ class DataLoader(Generic[T_co]):
         super(DataLoader, self).__setattr__(attr, val)
 
     # We quote '_BaseDataLoaderIter' since it isn't defined yet and the definition can't be moved up
-    # since '_BaseDataLoaderIter' references 'DataLoader'. In mypy 0.720 and newer a new semantic
-    # analyzer is used that obviates the need for this but we leave the quoting in to support older
-    # versions of mypy
+    # since '_BaseDataLoaderIter' references 'DataLoader'.
     def __iter__(self) -> '_BaseDataLoaderIter':
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
