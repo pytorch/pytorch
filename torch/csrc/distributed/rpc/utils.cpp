@@ -40,7 +40,7 @@ void processRemoteProfiledEvents(
   auto& remoteProfilerManager = RemoteProfilerManager::getInstance();
   auto key = remoteProfilerManager.retrieveRPCProfilingKey(profilingId);
   remoteProfilerManager.eraseKey(profilingId);
-  auto keyPrefixStr = key + " ";
+  auto keyPrefixStr = key + rpc::REMOTE_PROFILING_KEY_PREFIX;
   std::for_each(
       events.begin(),
       events.end(),

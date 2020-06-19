@@ -144,7 +144,7 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
       wrappedMsgType,
       std::move(wrappedMessage.tensors()),
       std::move(remoteEvents),
-      std::move(profilingId));
+      profilingId);
 }
 } // namespace autograd
 } // namespace distributed

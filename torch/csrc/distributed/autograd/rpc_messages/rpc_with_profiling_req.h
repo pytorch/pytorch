@@ -17,7 +17,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
       rpc::MessageType messageType,
       rpc::Message&& wrappedMessage,
       torch::autograd::profiler::ProfilerConfig&& profilerConfig,
-      rpc::ProfilingId&& profilingKeyId);
+      rpc::ProfilingId profilingKeyId);
 
   // For receiving an RPC
   // Used in fromMessage.
@@ -27,7 +27,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
       rpc::MessageType wrappedMessageType,
       std::vector<torch::Tensor> tensors,
       torch::autograd::profiler::ProfilerConfig&& profilerConfig,
-      rpc::ProfilingId&& profilingKeyId);
+      rpc::ProfilingId profilingKeyId);
 
   // Convert this RPC Command to a Message that can be sent over the wire.
   rpc::Message toMessageImpl() && override;

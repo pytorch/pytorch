@@ -17,7 +17,7 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     rpc::MessageType messageType,
     rpc::Message&& wrappedMessage,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig,
-    rpc::ProfilingId&& profilingKeyId)
+    rpc::ProfilingId profilingKeyId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
       profilerConfig_(profilerConfig),
@@ -40,7 +40,7 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     rpc::MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig,
-    rpc::ProfilingId&& profilingKeyId)
+    rpc::ProfilingId profilingKeyId)
     : messageType_(messageType),
       wrappedRpc_(std::move(wrappedRpc)),
       wrappedMessageType_(wrappedMessageType),
@@ -142,7 +142,7 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
       wrappedMsgType,
       std::move(wrappedMessage.tensors()),
       std::move(cfg),
-      std::move(profilerId));
+      profilerId);
 }
 } // namespace autograd
 } // namespace distributed

@@ -7,7 +7,7 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-
+const std::string REMOTE_PROFILING_KEY_PREFIX = "#remote_op: ";
 constexpr int kAutoIncrementBits = 48;
 thread_local c10::optional<std::string>
     RemoteProfilerManager::currentThreadLocalKey_ = c10::nullopt;
@@ -16,7 +16,7 @@ thread_local c10::optional<std::string>
   return *handler;
 }
 
-void RemoteProfilerManager::setCurrentKey(const std::string key) {
+void RemoteProfilerManager::setCurrentKey(std::string key) {
   // We should not allow overriding the current key, it needs to be committed
   // with writeKey() explicitly first.
   if (RemoteProfilerManager::currentThreadLocalKey_) {
@@ -51,7 +51,7 @@ local_id_t RemoteProfilerManager::getNextLocalId() {
   return currentLocalId_++;
 }
 
-std::string RemoteProfilerManager::getCurrentProfilingKey() {
+std::string& RemoteProfilerManager::getCurrentProfilingKey() {
   TORCH_CHECK(
       RemoteProfilerManager::currentThreadLocalKey_,
       "Must set currentThreadLocalKey_ before calling getCurrentProfilingKey");
@@ -60,12 +60,12 @@ std::string RemoteProfilerManager::getCurrentProfilingKey() {
 
 void RemoteProfilerManager::saveRPCKey(
     ProfilingId globallyUniqueId,
-    std::string rpcProfilingKey) {
+    const std::string& rpcProfilingKey) {
   std::lock_guard<std::mutex> guard(mutex_);
   profiledRpcKeys_.emplace(
       std::piecewise_construct,
-      std::forward_as_tuple(std::move(globallyUniqueId)),
-      std::forward_as_tuple(std::move(rpcProfilingKey)));
+      std::forward_as_tuple(globallyUniqueId),
+      std::forward_as_tuple(rpcProfilingKey));
 }
 
 RemoteProfilerManager::RemoteProfilerManager() {

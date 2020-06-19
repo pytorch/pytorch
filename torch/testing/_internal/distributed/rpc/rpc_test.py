@@ -59,6 +59,18 @@ def udf_with_torch_ops(device=-1):
         t = t.relu()
         t = t.sigmoid()
 
+# Events (operator invocations) that are expected to be ran as part of the above
+# function.
+EXPECTED_REMOTE_EVENTS = [
+    "ones",
+    "ones",
+    "add",
+    "mul",
+    "relu",
+    "threshold",
+    "sigmoid",
+]
+
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
@@ -992,7 +1004,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
     @dist_init
-    def test_profiler_cuda(self):
+    def test_profiler_remote_cuda(self):
         if self.rank != 1:
             return
 
@@ -1035,16 +1047,6 @@ class RpcTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
 
-        expected_remote_events = [
-            "ones",
-            "ones",
-            "add",
-            "mul",
-            "relu",
-            "threshold",
-            "sigmoid"
-        ]
-
         events = p.function_events
         with TemporaryFileName() as fname:
             path = fname
@@ -1052,7 +1054,7 @@ class RpcTest(RpcAgentTestFixture):
             with open(path) as f:
                 trace = json.load(f)
                 event_names = [event['name'] for event in trace]
-                for expected_event_name in expected_remote_events + [RPCExecMode.ASYNC.value]:
+                for expected_event_name in EXPECTED_REMOTE_EVENTS + [RPCExecMode.ASYNC.value]:
                     event_exists = any([expected_event_name in event_name for event_name in event_names])
                     self.assertTrue(event_exists)
 
@@ -1074,6 +1076,7 @@ class RpcTest(RpcAgentTestFixture):
                 with torch.autograd.profiler.profile() as prof:
                     fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
                     fut.wait()
+
                 events = prof.function_events
                 remote_event_names = {
                     event.name: event for event in events if event.is_remote
@@ -1084,8 +1087,32 @@ class RpcTest(RpcAgentTestFixture):
                     worker_name(self.rank),
                     dst_worker,
                 )
+
+                remote_event_name_set = set(EXPECTED_REMOTE_EVENTS)
                 for name, event in remote_event_names.items():
+                    # Ensure that we have the expected key as part of the remote
+                    # event.
                     self.assertTrue(name.startswith(rpc_profiling_key))
+                    # Ensure that the remote event name also contains the operator.
+                    operator_name_substr = name[len(rpc_profiling_key) :]
+                    # Note: we don't assert that every remote event needs to be
+                    # in the above set, the set is just a representative set of
+                    # what we expect to see. The profiler can change and add more
+                    # events, but we should always expect to see this representative
+                    # set.
+                    matching_event = {
+                        remote_event_name
+                        for remote_event_name in remote_event_name_set
+                        if remote_event_name in operator_name_substr
+                    }
+                    remote_event_name_set -= matching_event
+
+                # The set should be empty, otherwise it's contained elements did
+                # not show up in the remote profiler output.
+                self.assertTrue(
+                    remote_event_name_set == set(),
+                    f"Expected {remote_event_name_set} to be included in remote profiler output.",
+                )
 
             except BaseException as e:
                 with lock:
@@ -1130,15 +1157,7 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_event,
                 RPCExecMode.ASYNC,
             )
-            expected_remote_events = [
-                "ones",
-                "ones",
-                "add",
-                "mul",
-                "relu",
-                "threshold",
-                "sigmoid",
-            ]
+
             remote_events = {event.name: event for event in events if event.is_remote}
             rpc_profiling_key = _build_rpc_profiling_key(
                 RPCExecMode.ASYNC,
@@ -1147,7 +1166,7 @@ class RpcTest(RpcAgentTestFixture):
                 worker_name(dst),
             )
 
-            for expected_remote_event_name in expected_remote_events:
+            for expected_remote_event_name in EXPECTED_REMOTE_EVENTS:
                 expected_key = rpc_profiling_key + " " + expected_remote_event_name
                 self.assertTrue(expected_key in remote_events)
                 remote_event = remote_events[expected_key]
@@ -1166,9 +1185,9 @@ class RpcTest(RpcAgentTestFixture):
             remote_events_list = [
                 convert_remote_to_local(event.name)
                 for event in events
-                if convert_remote_to_local(event.name) in expected_remote_events
+                if convert_remote_to_local(event.name) in EXPECTED_REMOTE_EVENTS
             ]
-            self.assertEqual(remote_events_list, expected_remote_events)
+            self.assertEqual(remote_events_list, EXPECTED_REMOTE_EVENTS)
 
     def run_profiling_workload(self, dst):
         fut = rpc.rpc_async(
@@ -2753,7 +2772,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
     @dist_init
-    @_skip_if_tensorpipe_agent
     def test_cuda(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         t1 = torch.rand(3, 3).cuda(0)
@@ -3247,6 +3265,56 @@ class RpcTest(RpcAgentTestFixture):
 
         wait_until_owners_and_forks_on_rank(1, 1, rank=1)
 
+    @dist_init(setup_rpc=False)
+    def test_init_pg_then_rpc(self):
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        # Test RPC.
+        next_rank = (self.rank + 1) % self.world_size
+        ret = rpc.rpc_sync(worker_name(next_rank), torch.add, args=(torch.ones(2, 2), 1))
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+        # Test PG
+        dist.barrier()
+
+    @dist_init(setup_rpc=False)
+    def test_init_rpc_then_pg(self):
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
+        # Test RPC.
+        next_rank = (self.rank + 1) % self.world_size
+        ret = rpc.rpc_sync(worker_name(next_rank), torch.add, args=(torch.ones(2, 2), 1))
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+        # Test PG
+        dist.barrier()
+
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
@@ -3479,6 +3547,8 @@ class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref.to_here(0.01)
 
+        rref.to_here()
+
     @dist_init(faulty_messages=[])
     def test_rpc_builtin_timeout(self):
         next_rank = (self.rank + 1) % self.world_size
@@ -3568,3 +3638,58 @@ class TensorPipeAgentRpcTest(TensorPipeRpcAgentTestFixture, RpcTest):
     @dist_init
     def test_verify_backend_options(self):
         self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.TENSORPIPE)
+
+    # FIXME Merge this test with the corresponding one in RpcTest.
+    @dist_init(setup_rpc=False)
+    def test_set_and_get_num_worker_threads(self):
+        NUM_THREADS = 27
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+            num_worker_threads=NUM_THREADS
+        )
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        info = rpc.api._get_current_rpc_agent().get_debug_info()
+        self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREADS)
+        rpc.shutdown()
+
+    # FIXME Merge this test with the corresponding one in RpcTest.
+    @dist_init(setup_rpc=False)
+    def test_tensorpipe_set_default_timeout(self):
+        timeout = 0.5
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+            num_worker_threads=self.rpc_backend_options.num_worker_threads,
+            rpc_timeout=timeout
+        )
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        default_timeout = rpc.get_rpc_timeout()
+        self.assertEqual(default_timeout, timeout)
+        rpc.shutdown()
+
+    # FIXME Merge this test with the corresponding one in RpcTest.
+    @dist_init(setup_rpc=False)
+    def test_tensorpipe_options_throw_on_timedelta_timeout(self):
+        from datetime import timedelta
+
+        timeout = timedelta()
+        # Ensure that constructing TensorPipeRpcBackendOptions with timedelta fails
+        with self.assertRaisesRegex(TypeError, "incompatible constructor arguments"):
+            rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+                init_method=self.rpc_backend_options.init_method,
+                num_worker_threads=self.rpc_backend_options.num_worker_threads,
+                rpc_timeout=timeout,
+            )

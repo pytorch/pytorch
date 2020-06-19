@@ -55,7 +55,7 @@ class AutocastTestLists(object):
             ("__lt__", pointwise0_fp32 + pointwise1_fp16, torch.bool),
             ("__ne__", pointwise0_fp32 + pointwise1_fp16, torch.bool),
             ("__add__", pointwise0_fp32 + pointwise1_fp16, torch.float32),
-            ("__div__", pointwise0_fp32 + pointwise1_fp16, torch.float32),
+            ("__truediv__", pointwise0_fp32 + pointwise1_fp16, torch.float32),
             ("__mul__", pointwise0_fp32 + pointwise1_fp16, torch.float32),
         ]
 

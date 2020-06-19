@@ -1,7 +1,6 @@
 import collections
 import unittest
 
-import numpy as np
 import torch
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN)
@@ -43,15 +42,15 @@ class TestOpenMP_ParallelFor(TestCase):
         return last_rss
 
     def func_rss(self, runs):
-        last_rss = self.func(runs)
-        # Do a least-mean-squares fit of last_rss to a line
-        poly = np.polynomial.Polynomial.fit(
-            range(len(last_rss)), np.array(last_rss), 1)
-        coefs = poly.convert().coef
-        # The coefs are (b, m) for the line y = m * x + b that fits the data.
-        # If m == 0 it will not be present. Assert it is missing or < 1000.
-        self.assertTrue(len(coefs) < 2 or coefs[1] < 1000,
-                        msg='memory did not stabilize, {}'.format(str(list(last_rss))))
+        last_rss = list(self.func(runs))
+        # Check that the sequence is not strictly increasing
+        is_increasing = True
+        for idx in range(len(last_rss)):
+            if idx == 0:
+                continue
+            is_increasing = is_increasing and (last_rss[idx] > last_rss[idx - 1])
+        self.assertTrue(not is_increasing,
+                        msg='memory usage is increasing, {}'.format(str(last_rss)))
 
     def test_one_thread(self):
         """Make sure there is no memory leak with one thread: issue gh-32284

@@ -95,7 +95,7 @@ Message getMessageWithProfiling(
       msgType,
       std::move(wrappedRpcMessage),
       std::move(profilerConfig),
-      std::move(globallyUniqueId));
+      globallyUniqueId);
 
   return std::move(wrappedProfilingMsg).toMessage();
 }

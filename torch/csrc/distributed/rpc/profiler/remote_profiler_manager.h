@@ -8,19 +8,23 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+extern const std::string REMOTE_PROFILING_KEY_PREFIX;
+
 class TORCH_API RemoteProfilerManager {
  public:
   // Retrieves the lazily-initialized RemoteProfilerManager singleton instance.
   static RemoteProfilerManager& getInstance();
   // Sets the current, thread-local profiling key.
-  void setCurrentKey(const std::string key);
+  void setCurrentKey(std::string key);
   // Unsets the current, thread-local profiling key to allow other RPCs to reset
   // it.
   void unsetCurrentKey();
   // inserts a pair (globallyUniqueId, key) to an in-memory map. The
   // corresponding ID is used in RPC deserialization to prefix remotely profiled
   // events with the right key.
-  void saveRPCKey(ProfilingId globallyUniqueId, std::string rpcProfilingKey);
+  void saveRPCKey(
+      ProfilingId globallyUniqueId,
+      const std::string& rpcProfilingKey);
   // Retrieves the profiling key corresponding to the given globallyUniqueId.
   // Throws if it is not found.
   std::string retrieveRPCProfilingKey(const ProfilingId& globallyUniqueId);
@@ -28,7 +32,7 @@ class TORCH_API RemoteProfilerManager {
   local_id_t getNextLocalId();
   // Retrieves the currently set thread-local profiling key. Throws if it is not
   // set.
-  std::string getCurrentProfilingKey();
+  std::string& getCurrentProfilingKey();
   // erases the globallyUniqueId from the map. This can help save memory in the
   // case that many RPCs are being profiled.
   void eraseKey(const ProfilingId& globallyUniqueId);

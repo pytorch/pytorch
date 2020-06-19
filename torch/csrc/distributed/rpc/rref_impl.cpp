@@ -135,11 +135,12 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
       !deletedOnOwner_,
       *this,
       " has been deleted. Cannot call to_here() on it after deletion.");
-  auto toHereKey = fmt::format(
-      "to_here#({})->({})",
-      RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
-      RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_);
+  auto toHereKey = std::string("");
   if (torch::autograd::profiler::profilerEnabled()) {
+    toHereKey = fmt::format(
+        "to_here#({})->({})",
+        RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+        RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_);
     auto& remoteProfilerManager =
         torch::distributed::rpc::RemoteProfilerManager::getInstance();
     remoteProfilerManager.setCurrentKey(toHereKey);

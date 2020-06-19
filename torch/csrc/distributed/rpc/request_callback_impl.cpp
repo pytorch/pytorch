@@ -843,8 +843,7 @@ void RequestCallbackImpl::processRpc(
                                              responseFuture,
                                              profiledEvents =
                                                  std::move(profiledEvents),
-                                             profilingKeyId =
-                                                 std::move(profilingKeyId)] {
+                                             profilingKeyId] {
         if (wrappedRpcResponseFuture->hasError()) {
           // Propagate error
           responseFuture->setError(wrappedRpcResponseFuture->error()->what());
