@@ -28,12 +28,12 @@ from torch.quantization import (
 
 # torch.quantization.quantize_jit
 from torch.quantization.quantize_jit import (
-    script_qconfig,
-    prepare_jit,
     convert_jit,
-    prepare_dynamic_jit,
     convert_dynamic_jit,
     fuse_conv_bn_jit,
+    prepare_jit,
+    prepare_dynamic_jit,
+    script_qconfig,
 )
 
 # Testing utils
