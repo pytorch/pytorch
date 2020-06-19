@@ -1,3 +1,4 @@
+import unittest
 import torch
 from torch.nn import functional as F
 
@@ -5,6 +6,8 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing import FileCheck
 import io
 
+@unittest.skipUnless(torch.is_vulkan_available,
+                     "Vulkan backend must be available for these tests.")
 class TestVulkanRewritePass(TestCase):
     @staticmethod
     def validate_transformed_module(
@@ -97,11 +100,27 @@ class TestVulkanRewritePass(TestCase):
                 return o
 
         data_shape = (batch_size, input_channels, height, width)
-        pattern_count_map = {"aten::relu": -1,
-                             "Tensor = aten::conv2d": -1,
+        pattern_count_map = {"Tensor = aten::conv2d": -1,
                              "vulkan_prepack::conv2d_clamp_prepack": 1,
                              "vulkan_prepack::conv2d_clamp_run": 1}
-        TestVulkanRewritePass.validate_transformed_module(Conv2DRelu(), pattern_count_map, data_shape)
+        TestVulkanRewritePass.validate_transformed_module(
+            Conv2DRelu(), pattern_count_map, data_shape)
+
+        pattern_count_map["aten::relu"] = 1
+        pattern_count_map["vulkan_prepack::conv2d_clamp_prepack"] = -1
+        TestVulkanRewritePass.validate_transformed_module(
+            Conv2DRelu(),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True)
+        pattern_count_map["aten::relu"] = -1
+        TestVulkanRewritePass.validate_transformed_module(
+            Conv2DRelu(),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True,
+            fuse_clamping_ops=True)
+
 
         class Conv2DHardtanh(torch.nn.Module):
             def __init__(self):
@@ -120,12 +139,24 @@ class TestVulkanRewritePass(TestCase):
                 return o
 
         data_shape = (batch_size, input_channels, height, width)
-        pattern_count_map = {"aten::hardtanh": -1,
-                             "Tensor = aten::conv2d": -1,
+        pattern_count_map = {"Tensor = aten::conv2d": -1,
                              "vulkan_prepack::conv2d_clamp_prepack": 1,
                              "vulkan_prepack::conv2d_clamp_run": 1}
         TestVulkanRewritePass.validate_transformed_module(Conv2DHardtanh(), pattern_count_map, data_shape)
-
+        pattern_count_map["aten::hardtanh"] = 1
+        pattern_count_map["vulkan_prepack::conv2d_clamp_prepack"] = -1
+        TestVulkanRewritePass.validate_transformed_module(
+            Conv2DHardtanh(),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True)
+        pattern_count_map["aten::hardtanh"] = -1
+        TestVulkanRewritePass.validate_transformed_module(
+            Conv2DRelu(),
+            pattern_count_map,
+            data_shape,
+            prepack_removal=True,
+            fuse_clamping_ops=True)
 
 if __name__ == "__main__":
     run_tests()

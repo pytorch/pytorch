@@ -1083,17 +1083,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_interface",
           [](const std::shared_ptr<CompilationUnit>& self,
-             const std::string& name) { return self->get_interface(name); })
-      .def(
-          "get_type",
-          [](CompilationUnit& cu, const std::string& name) {
-            return cu.get_type(name);
-          })
-      .def(
-          "register_type",
-          [](CompilationUnit& cu, const c10::NamedTypePtr& type) {
-            cu.register_type(type);
-          });
+             const std::string& name) { return self->get_interface(name); });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(

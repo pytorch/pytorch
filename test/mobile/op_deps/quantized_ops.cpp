@@ -18,16 +18,16 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other);
 template <>
 Tensor _add_out<false>(Tensor& out, const Tensor& self, const Tensor& other) {
   constexpr auto kName = "quantized::t_helper1";
-  static const c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({kName, ""}).value();
-  op.call<Tensor, Tensor>(self);
+  static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(kName, "").typed<Tensor(Tensor)>();;
+  op.call(self);
   return out;
 }
 
 template <>
 Tensor _add_out<true>(Tensor& out, const Tensor& self, const Tensor& other) {
   constexpr auto kName = "quantized::t_helper2";
-  static const c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({kName, ""}).value();
-  op.call<Tensor, Tensor>(self);
+  static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(kName, "").typed<Tensor(Tensor)>();
+  op.call(self);
   return out;
 }
 
@@ -45,8 +45,8 @@ Tensor QHelper(Tensor qa) {
   std::cout << "Op: " << opName << std::endl;
   if (callOpName != nullptr) {
     std::cout << "Call op: " << callOpName << std::endl;
-    static const c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({callOpName, ""}).value();
-    op.call<Tensor, Tensor>(qa);
+    static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(callOpName, "").typed<Tensor(Tensor)>();
+    op.call(qa);
   }
   return qa;
 }

@@ -82,10 +82,7 @@ RPC
 Before using RPC and distributed autograd primitives, initialization must take
 place. To initialize the RPC framework we need to use
 :meth:`~torch.distributed.rpc.init_rpc` which would initialize the RPC
-framework, RRef framework and distributed autograd. By default, this will also
-initialize the ``ProcessGroup`` (:meth:`~torch.distributed.init_process_group`)
-backend for RPC communication. The ``ProcessGroup`` backend internally uses gloo
-for communication.
+framework, RRef framework and distributed autograd.
 
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_rpc
@@ -109,9 +106,6 @@ and move it to the desired devices on the callee if necessary.
 .. autofunction:: shutdown
 .. autoclass:: WorkerInfo
     :members:
-.. autoclass:: ProcessGroupRpcBackendOptions
-    :members:
-    :inherited-members:
 
 
 The RPC package also provides decorators which allow applications to specify
@@ -122,8 +116,124 @@ how a given function should be treated on the callee side.
 
 .. autofunction:: torch.distributed.rpc.functions.async_execution
 
-.. _rref:
 
+.. _rpc-backends:
+
+Backends
+^^^^^^^^
+
+The RPC module can leverage different backends to perform the communication
+between the nodes. The backend to be used can be specified in the
+:func:`~torch.distributed.rpc.init_rpc` function, by passing a certain value of
+the :class:`~torch.distributed.rpc.BackendType` enum. Regardless of what backend
+is used, the rest of the RPC API won't change. Each backend also defines its own
+subclass of the :class:`~torch.distributed.rpc.RpcBackendOptions` class, an
+instance of which can also be passed to :func:`~torch.distributed.rpc.init_rpc`
+to configure the backend's behavior.
+
+.. autoclass:: BackendType
+
+.. autoclass:: RpcBackendOptions
+    :members:
+
+
+Process Group Backend
+"""""""""""""""""""""
+
+The Process Group agent, which is the default, instantiates a process group from
+the :mod:`~torch.distributed` module and utilizes its point-to-point
+communication capabilities to send RPC messages across. Internally, the process
+group uses `the Gloo library <https://github.com/facebookincubator/gloo/>`_.
+
+Gloo has been hardened by years of extensive use in PyTorch and is thus very
+reliable. However, as it was designed to perform collective communication, it
+may not always be the best fit for RPC. For example, each networking operation
+is synchronous and blocking, which means that it cannot be run in parallel with
+others. Moreover, it opens a connection between all pairs of nodes, and brings
+down all of them when one fails, thus reducing the resiliency and the elasticity
+of the system.
+
+Example::
+
+    >>> import os
+    >>> from torch.distributed import rpc
+    >>> os.environ['MASTER_ADDR'] = 'localhost'
+    >>> os.environ['MASTER_PORT'] = '29500'
+    >>>
+    >>> rpc.init_rpc(
+    >>>     "worker1",
+    >>>     rank=0,
+    >>>     world_size=2,
+    >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
+    >>>         num_send_recv_threads=16,
+    >>>         rpc_timeout=20 # 20 second timeout
+    >>>     )
+    >>> )
+    >>>
+    >>> # omitting init_rpc invocation on worker2
+
+
+.. autoclass:: ProcessGroupRpcBackendOptions
+    :members:
+    :inherited-members:
+
+
+TensorPipe Backend
+""""""""""""""""""
+
+.. warning::
+    The TensorPipe backend is a **beta feature**.
+
+The TensorPipe agent leverages `the TensorPipe library
+<https://github.com/pytorch/tensorpipe>`_, which provides a natively
+point-to-point communication primitive specifically suited for machine learning
+that fundamentally addresses some of the limitations of Gloo. Compared to Gloo,
+it has the advantage of being asynchronous, which allows a large number of
+transfers to occur simultaneously, each at their own speed, without blocking
+each other. It will only open pipes between pairs of nodes when needed, on
+demand, and when one node fails only its incident pipes will be closed, while
+all other ones will keep working as normal. In addition, it is able to support
+multiple different transports (TCP, of course, but also shared memory, NVLink,
+InfiniBand, ...) and can automatically detect their availability and negotiate
+the best transport to use for each pipe.
+
+The TensorPipe backend has been introduced in PyTorch v1.6 and is being actively
+developed. At the moment, it only supports CPU tensors, with GPU support coming
+soon. It comes with a TCP-based transport, just like Gloo. It is also able to
+automatically chunk and multiplex large tensors over multiple sockets and
+threads in order to achieve very high bandwidths. In addition to that, it packs
+two Linux-specific transports for communication between processes on a same
+machine (one based on ringbuffers stored in shared memory, the other on the
+cross-memory attach syscalls) which can achieve lower latencies than TCP.
+The agent will be able to pick the best transport on its own, with no
+intervention required.
+
+Example::
+
+    >>> import os
+    >>> from torch.distributed import rpc
+    >>> os.environ['MASTER_ADDR'] = 'localhost'
+    >>> os.environ['MASTER_PORT'] = '29500'
+    >>>
+    >>> rpc.init_rpc(
+    >>>     "worker1",
+    >>>     rank=0,
+    >>>     world_size=2,
+    >>>     backend=rpc.BackendType.TENSORPIPE,
+    >>>     rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
+    >>>         num_worker_threads=8,
+    >>>         rpc_timeout=20 # 20 second timeout
+    >>>     )
+    >>> )
+    >>>
+    >>> # omitting init_rpc invocation on worker2
+
+.. autoclass:: TensorPipeRpcBackendOptions
+    :members:
+    :inherited-members:
+
+
+.. _rref:
 
 RRef
 ----
