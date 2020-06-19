@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
-#include <torch/nn/pimpl.h>
 #include <torch/ordered_dict.h>
 
 #include <vector>

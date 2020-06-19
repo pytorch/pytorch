@@ -46,7 +46,8 @@ TEST_F(ParameterDictTest, InsertAndPop) {
   ParameterDict dict;
   dict->insert("A", torch::tensor({1.0}));
   ASSERT_EQ(dict->size(), 1);
-  ASSERT_THROWS_WITH(dict->pop("B"), "No Parameter with name B is registered");
+  ASSERT_THROWS_WITH(
+      dict->pop("B"), "No Parameter with name `B` is registered");
   torch::Tensor p = dict->pop("A");
   ASSERT_EQ(dict->size(), 0);
   ASSERT_TRUE(torch::eq(p, torch::tensor({1.0})).item<bool>());
