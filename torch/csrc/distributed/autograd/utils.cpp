@@ -89,7 +89,7 @@ Message getMessageWithProfiling(
   auto globallyUniqueId =
       torch::distributed::rpc::ProfilingId(localWorkerId, localId);
   // Save a mapping of ID -> RPC profiling key and unset the current TLS key.
-  remoteProfilerManager.saveRPCKey(globallyUniqueId, std::move(key));
+  remoteProfilerManager.saveRPCKey(globallyUniqueId, key);
   remoteProfilerManager.unsetCurrentKey();
   auto wrappedProfilingMsg = RpcWithProfilingReq(
       msgType,
