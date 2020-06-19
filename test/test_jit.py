@@ -70,6 +70,7 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 
 # Standard library
 from collections import defaultdict, namedtuple, OrderedDict
+import copy
 from copy import deepcopy
 from itertools import product, chain
 import itertools
@@ -9162,7 +9163,6 @@ a")
 
         m = torch.jit.script(M())
         # test copy
-        import copy
         copy.copy(m)
         copy.deepcopy(m)
 
