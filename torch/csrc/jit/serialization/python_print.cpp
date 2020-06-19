@@ -8,6 +8,9 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/frontend/versioned_symbols.h>
+
+#include <algorithm>
 
 using c10::QualifiedName;
 
@@ -692,9 +695,14 @@ struct PythonPrintImpl {
     }
   }
 
+  void checkVersion(const Node* const node) {
+    min_version_ = std::max(min_version_, get_min_version_for_kind(node->kind()));
+  }
+
   void printNode(Node* node, bool print_const) {
     WithSourceRange guard(&source_range_stack_, node);
     scanTypeDependencies(node);
+    checkVersion(node);
     if (!print_const && node->kind() == prim::Constant)
       return;
     switch (node->kind()) {
@@ -1392,6 +1400,9 @@ struct PythonPrintImpl {
   // when we print this, should we error if the resulting output would
   // not be able to be reparsed?
   bool enforce_importable_;
+
+  // The least version that supports all printed ops
+  uint64_t min_version_ = 0;
 };
 
 PythonPrint::PythonPrint(
@@ -1423,6 +1434,10 @@ std::string PythonPrint::str() const {
 
 const SourceRangeRecords& PythonPrint::ranges() const {
   return pImpl->body_.ranges();
+}
+
+uint64_t PythonPrint::minVersion() const {
+  return pImpl->min_version_;
 }
 
 PythonPrint::~PythonPrint() = default;

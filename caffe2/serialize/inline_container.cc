@@ -268,14 +268,19 @@ size_t ostream_write_func(
   return ret;
 }
 
-PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
-    : archive_name_(basename(file_name)) {
+PyTorchStreamWriter::PyTorchStreamWriter(
+    std::string file_name,
+    const bool _write_version_at_setup)
+    : archive_name_(basename(file_name)), write_version_at_setup_{_write_version_at_setup} {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)>& writer_func)
-    : archive_name_("archive"), writer_func_(writer_func) {
+    const std::function<size_t(const void*, size_t)>& writer_func,
+    const bool _write_version_at_setup)
+    : archive_name_("archive"),
+      writer_func_(writer_func),
+      write_version_at_setup_{_write_version_at_setup} {
   setup(archive_name_);
 }
 
@@ -304,9 +309,16 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
 
-  std::string version = c10::to_string(kProducedFileFormatVersion);
-  version.push_back('\n');
-  writeRecord("version", version.c_str(), version.size());
+  if (write_version_at_setup_) {
+    writeVersion(kProducedFileFormatVersion);
+  }
+}
+
+void PyTorchStreamWriter::writeVersion(const uint64_t version) {
+  TORCH_INTERNAL_ASSERT(version >= kProducedFileFormatVersion);
+  std::string version_string = c10::to_string(version);
+  version_string.push_back('\n');
+  writeRecord("version", version_string.c_str(), version_string.size());
 }
 
 void PyTorchStreamWriter::writeRecord(

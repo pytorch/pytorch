@@ -165,11 +165,11 @@ void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
 class ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(const std::string& filename)
-      : writer_(filename) {}
+      : writer_(filename, false) {}
 
   explicit ScriptModuleSerializer(
       const std::function<size_t(const void*, size_t)>& writer_func)
-      : writer_(writer_func) {}
+      : writer_(writer_func, false) {}
 
   void serialize(
       const Module& module,
@@ -189,6 +189,14 @@ class ScriptModuleSerializer {
     if (bytecode_format) {
       writeByteCode(module);
     }
+
+    // Acquires and writes (dynamic) version
+    uint64_t version = caffe2::serialize::kProducedFileFormatVersion;
+    for (auto& item : file_streams_) {
+      version = std::max(version, item.value().minVersion());
+    }
+
+    writer_.writeVersion(version);
   }
 
  private:
