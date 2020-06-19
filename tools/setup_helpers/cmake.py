@@ -122,7 +122,7 @@ class CMake:
         elif cmake is not None and CMake._get_version(cmake) >= LooseVersion("3.5.0"):
             return cmake_command
         else:
-            raise RuntimeError('no valid cmake or cmake3 found')
+            raise RuntimeError('no cmake or cmake3 with version >= 3.5.0 found')
 
     @staticmethod
     def _get_version(cmd):
