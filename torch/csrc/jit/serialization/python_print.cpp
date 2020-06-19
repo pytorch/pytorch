@@ -33,6 +33,7 @@ static bool isValidIdentifier(const std::string& name) {
 const static std::unordered_set<std::string> reserved_names = {
     // identifiers in the environment while parsing
     "_", // avoid the confusing unnamed _
+    "as",
     "aten",
     "attribute",
     "CONSTANTS",
@@ -75,6 +76,7 @@ const static std::unordered_set<std::string> reserved_names = {
     "return",
     "True",
     "try",
+    "with",
     "while",
     "with",
     "yield",
@@ -752,6 +754,27 @@ struct PythonPrintImpl {
         std::stringstream ss;
         ss << "fork(" << name << ")";
         printOutputDefinition(node, ss.str());
+      } break;
+      case prim::Enter: {
+        const auto in = node->inputs().at(0);
+        const auto out = node->outputs().at(0);
+        indent();
+        body_ << "with " << useOf(in);
+        if (out->uses().size() > 0) {
+          assignValue(out, genUniqueNameFor(out));
+          body_ << " as " << useOf(out);
+        }
+        body_ << ":\n";
+        level++;
+      } break;
+      case prim::Exit: {
+        // If the previous node is a prim::Enter, the with block the generated
+        // this Enter/Exit pair must have been empty.
+        if (node->prev()->kind() == prim::Enter) {
+          indent();
+          body_ << "pass\n";
+        }
+        level--;
       } break;
       case prim::Function: {
         if (enforce_importable_) {
