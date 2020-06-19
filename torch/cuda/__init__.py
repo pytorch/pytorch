@@ -14,8 +14,11 @@ import torch
 import traceback
 import warnings
 import threading
+from typing import Optional, Tuple, Union
 from torch._six import raise_from
 from ._utils import _get_device_index, _dummy_type
+from .streams import Stream, Event
+from .. import device as _device
 import torch._C
 
 try:
@@ -28,9 +31,20 @@ _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
+_device_t = Union[_device, str, int]
 
+# Define dummy _CudaDeviceProperties type if PyTorch was compiled without CUDA
+if hasattr(torch._C, '_CudaDeviceProperties'):
+    _CudaDeviceProperties = torch._C._CudaDeviceProperties
+else:
+    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')
 
-def is_available():
+# Global variables dynamically populated by native code
+has_magma: bool = False
+has_half: bool = False
+default_generators: Tuple[torch._C.Generator] = ()
+
+def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
     if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
             not torch._C._cuda_isDriverSufficient()):
@@ -175,17 +189,16 @@ def cudart():
 
 
 class cudaStatus(object):
-    SUCCESS = 0
-    ERROR_NOT_READY = 34
-
+    SUCCESS: int = 0
+    ERROR_NOT_READY: int = 34
 
 class CudaError(RuntimeError):
-    def __init__(self, code):
+    def __init__(self, code: int) -> None:
         msg = _cudart.cudaGetErrorString(code).decode('utf-8')
         super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
 
 
-def check_error(res):
+def check_error(res: int) -> None:
     if res != _cudart.cudaError.success:
         raise CudaError(res)
 
@@ -231,7 +244,7 @@ class device_of(device):
         super(device_of, self).__init__(idx)
 
 
-def set_device(device):
+def set_device(device: _device_t) -> None:
     r"""Sets the current device.
 
     Usage of this function is discouraged in favor of :any:`device`. In most
@@ -246,7 +259,7 @@ def set_device(device):
         torch._C._cuda_setDevice(device)
 
 
-def get_device_name(device=None):
+def get_device_name(device: Optional[_device_t] = None) -> str:
     r"""Gets the name of a device.
 
     Arguments:
@@ -258,7 +271,7 @@ def get_device_name(device=None):
     return get_device_properties(device).name
 
 
-def get_device_capability(device=None):
+def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
     r"""Gets the cuda capability of a device.
 
     Arguments:
@@ -275,8 +288,8 @@ def get_device_capability(device=None):
     return prop.major, prop.minor
 
 
-def get_device_properties(device):
-    _lazy_init()  # will define _get_device_properties and _CudaDeviceProperties
+def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
+    _lazy_init()  # will define _get_device_properties
     device = _get_device_index(device, optional=True)
     if device < 0 or device >= device_count():
         raise AssertionError("Invalid device id")
@@ -318,7 +331,7 @@ def stream(stream):
         torch._C._cuda_setStream(src_prev_stream._cdata)
 
 
-def device_count():
+def device_count() -> int:
     r"""Returns the number of GPUs available."""
     if is_available():
         return torch._C._cuda_getDeviceCount()
@@ -326,13 +339,13 @@ def device_count():
         return 0
 
 
-def current_device():
+def current_device() -> int:
     r"""Returns the index of a currently selected device."""
     _lazy_init()
     return torch._C._cuda_getDevice()
 
 
-def synchronize(device=None):
+def synchronize(device: _device_t = None) -> None:
     r"""Waits for all kernels in all streams on a CUDA device to complete.
 
     Arguments:
@@ -358,7 +371,7 @@ def ipc_collect():
     return torch._C._cuda_ipc_collect()
 
 
-def current_stream(device=None):
+def current_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
 
     Arguments:
@@ -368,11 +381,11 @@ def current_stream(device=None):
             (default).
     """
     _lazy_init()
-    return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream(
+    return Stream(_cdata=torch._C._cuda_getCurrentStream(
         _get_device_index(device, optional=True)))
 
 
-def default_stream(device=None):
+def default_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the default :class:`Stream` for a given device.
 
     Arguments:
@@ -382,7 +395,7 @@ def default_stream(device=None):
             (default).
     """
     _lazy_init()
-    return torch.cuda.Stream(_cdata=torch._C._cuda_getDefaultStream(
+    return Stream(_cdata=torch._C._cuda_getDefaultStream(
         _get_device_index(device, optional=True)))
 
 
@@ -500,5 +513,4 @@ torch._storage_classes.add(ComplexFloatStorage)
 from . import sparse
 from . import profiler
 from . import nvtx
-from .streams import Stream, Event
 from . import amp

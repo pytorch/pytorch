@@ -8,6 +8,10 @@ import inspect
 import weakref
 import warnings
 import torch
+# This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
+# Explicitly ask to import `torch.distributed.__init__` first.
+# Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
+import torch.distributed.rpc
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
@@ -704,12 +708,6 @@ class Future(Generic[T]):
     def __init__(self, types):
         self.__args__ = types
 
-class RRef(Generic[T]):
-    __slots__ = ['__args__']
-
-    def __init__(self, types):
-        self.__args__ = types
-
 def is_future(ann):
     if ann is Future:
         raise RuntimeError('Attempted to use torch.jit.Future without a '
@@ -717,8 +715,11 @@ def is_future(ann):
                            'torch.jit.Future[int]')
     return getattr(ann, "__origin__", None) is Future
 
-def is_rref(ann):
-    return getattr(ann, "__origin__", None) is RRef
+if torch.distributed.rpc.is_available():
+    from torch.distributed.rpc import RRef
+
+    def is_rref(ann):
+        return getattr(ann, "__origin__", None) is RRef
 
 try:
     import typing_extensions

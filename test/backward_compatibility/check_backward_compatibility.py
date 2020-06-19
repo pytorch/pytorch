@@ -21,7 +21,9 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
+    # Internal, profiler-specific ops
     ('profiler::_call_end_callbacks_on_jit_fut*', datetime.date(9999, 1, 1)),
+    ('profiler::_record_function_enter', datetime.date(9999, 1, 1)),
     ('aten::append*', datetime.date(2020, 4, 15)),
     ('aten::_min', datetime.date(2020, 9, 9)),
     ('aten::_max', datetime.date(2020, 9, 9)),
@@ -83,6 +85,9 @@ white_list = [
     ('quantized::linear_dynamic', datetime.date(2020, 6, 1)),
     ('quantized::linear_relu', datetime.date(2020, 6, 1)),
     ('quantized::linear', datetime.date(2020, 6, 1)),
+    ('aten::quantized_layer_norm', datetime.date(2020, 6, 30)),
+    ('aten::quantized_group_norm', datetime.date(2020, 6, 30)),
+    ('aten::quantized_instance_norm', datetime.date(2020, 6, 30)),
     ('_aten::*', datetime.date(2020, 6, 1)),
     ('_prim::*', datetime.date(2020, 6, 1)),
     ('aten::eq', datetime.date(2020, 6, 30)),
