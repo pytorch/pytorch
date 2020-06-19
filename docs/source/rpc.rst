@@ -100,8 +100,7 @@ and move it to the desired devices on the callee if necessary.
   TorchScript support in RPC is experimental and subject to change. Since
   v1.5.0, ``torch.distributed.rpc`` supports calling TorchScript functions as
   RPC target functions, and this will help improve parallelism on the callee
-  side as executing TorchScript functions does not require GIL. However, support
-  for calling RPC APIs within a TorchScript function is very limited.
+  side as executing TorchScript functions does not require GIL.
 
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
