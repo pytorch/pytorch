@@ -9162,8 +9162,9 @@ a")
 
         m = torch.jit.script(M())
         # test copy
-        copy.deepcopy(m)
+        import copy
         copy.copy(m)
+        copy.deepcopy(m)
 
     def test_script_forward_method_replacement(self):
         # We want to support the use case of attaching a different `forward` method
