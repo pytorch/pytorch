@@ -615,8 +615,11 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                          << clientPipe.pipe_->getRemoteName() << ": "
                          << error.what();
           }
-          auto it = clientPipe.pendingResponseMessage_.find(messageId);
-          markFutureWithError(it->second, error.what());
+          auto pendingFutIt =
+              clientPipe.pendingResponseMessage_.find(messageId);
+          if (pendingFutIt != clientPipe.pendingResponseMessage_.end()) {
+            markFutureWithError(pendingFutIt->second, error.what());
+          }
           return;
         }
 
