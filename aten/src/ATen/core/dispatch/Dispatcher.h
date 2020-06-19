@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/dispatch/OperatorEntry.h>
+#include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <c10/util/Exception.h>
 #include <c10/util/LeftRight.h>
@@ -10,6 +11,7 @@
 namespace c10 {
 
 class CAFFE2_API OperatorHandle;
+template<class FuncType> class TypedOperatorHandle;
 
 /**
  * Implement this interface and register your instance with the dispatcher
@@ -59,6 +61,7 @@ private:
     size_t def_and_impl_count = 0;
   };
   friend class OperatorHandle;
+  template<class> friend class TypedOperatorHandle;
 
 public:
   ~Dispatcher();
@@ -107,12 +110,12 @@ public:
   // ------------------------------------------------------------------------
 
   template<class Return, class... Args>
-  Return call(const OperatorHandle& op, Args... args) const;
+  Return call(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
 
   // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
   template<class Return, class... Args>
-  Return callWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
+  Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
 
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
@@ -120,7 +123,7 @@ public:
   // This will mask out the current key *and all previous keys* from the
   // eligible set, and reinvoke the dispatcher.
   template<class Return, class... Args>
-  Return redispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const;
+  Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const;
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
@@ -148,7 +151,7 @@ public:
    */
   // NB: steals the inferred function schema, as we may need to hold on to
   // it for a bit until the real schema turns up
-  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
    * Register a new operator by name.
@@ -232,7 +235,7 @@ private:
  * This handle can be used to register kernels with the dispatcher or
  * to lookup a kernel for a certain set of arguments.
  */
-class CAFFE2_API OperatorHandle final {
+class CAFFE2_API OperatorHandle {
 public:
   OperatorHandle(OperatorHandle&&) noexcept = default;
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
@@ -263,14 +266,10 @@ public:
     return operatorIterator_->op.checkInvariants();
   }
 
-  template<class Return, class... Args>
-  Return call(Args... args) const {
-    return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
-  }
-
-  template<class Return, class... Args>
-  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
+  template<class FuncType>
+  TypedOperatorHandle<FuncType> typed() const {
+    operatorIterator_->op.assertSignatureIsCorrect<FuncType>();
+    return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
 
   void callBoxed(Stack* stack) const {
@@ -281,8 +280,41 @@ private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}
   friend class Dispatcher;
+  template<class> friend class TypedOperatorHandle;
 
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
+};
+
+/**
+ * This is a handle to an operator schema registered with the dispatcher.
+ * It holds the same information as an OperatorHandle, but it is templated
+ * on the operator arguments and allows calling the operator in an
+ * unboxed way.
+ */
+template<class FuncType>
+class TypedOperatorHandle final {
+  static_assert(guts::false_t<FuncType>(), "FuncType in OperatorHandle::typed<FuncType> was not a valid function type");
+};
+template<class Return, class... Args>
+class TypedOperatorHandle<Return (Args...)> final : public OperatorHandle {
+public:
+  TypedOperatorHandle(TypedOperatorHandle&&) noexcept = default;
+  TypedOperatorHandle& operator=(TypedOperatorHandle&&) noexcept = default;
+  TypedOperatorHandle(const TypedOperatorHandle&) = default;
+  TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
+
+  Return call(Args... args) const {
+    return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
+  }
+
+  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
+  }
+
+private:
+  explicit TypedOperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
+  : OperatorHandle(std::move(operatorIterator)) {}
+  friend class OperatorHandle;
 };
 
 namespace detail {
@@ -290,7 +322,7 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const {
+inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
@@ -298,18 +330,18 @@ inline Return Dispatcher::callWithDispatchKey(const OperatorHandle& op, Dispatch
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::call(const OperatorHandle& op, Args... args) const {
+inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(backendsWithoutFallthrough_, DispatchKeySet::FULL, args...);
+  auto dispatchKey = dispatchTable.dispatchKeyExtractor().template getDispatchKeyUnboxed<Args...>(backendsWithoutFallthrough_, DispatchKeySet::FULL, args...);
   return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::redispatch(const OperatorHandle& op, DispatchKey currentDispatchKey, Args... args) const {
+inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(
+  auto dispatchKey = dispatchTable.dispatchKeyExtractor().template getDispatchKeyUnboxed<Args...>(
     backendsWithoutFallthrough_,
     DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
     args...);
