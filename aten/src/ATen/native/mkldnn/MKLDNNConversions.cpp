@@ -53,10 +53,6 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef dilation,
     int64_t groups) {
 
-  auto stride_vec = expand_param_if_needed(stride, "stride", 2);
-  auto padding_vec = expand_param_if_needed(padding, "padding", 2);
-  auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
-
   auto w = itensor_from_mkldnn(self);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
@@ -73,10 +69,10 @@ Tensor mkldnn_reorder_conv2d_weight(
       ideep::convolution_forward::expected_weights_desc(
           w.get_dims(),
           w.get_data_type(),
-          {stride_vec.cbegin(), stride_vec.cend()},
-          {padding_vec.cbegin(), padding_vec.cend()},
-          {padding_vec.cbegin(), padding_vec.cend()},
-          {dilation_vec.cbegin(), dilation_vec.cend()},
+          {stride.begin(), stride.end()},
+          {padding.begin(), padding.end()},
+          {padding.begin(), padding.end()},
+          {dilation.begin(), dilation.end()},
           groups,
           ideep::algorithm::convolution_direct);
   ideep::tensor result;
@@ -93,20 +89,16 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef dilation,
     int64_t groups) {
 
-  auto stride_vec = expand_param_if_needed(stride, "stride", 3);
-  auto padding_vec = expand_param_if_needed(padding, "padding", 3);
-  auto dilation_vec = expand_param_if_needed(dilation, "dilation", 3);
-
   auto w = itensor_from_mkldnn(self);
 
   auto desc =
       ideep::convolution_forward::expected_weights_desc(
           w.get_dims(),
           w.get_data_type(),
-          {stride_vec.cbegin(), stride_vec.cend()},
-          {padding_vec.cbegin(), padding_vec.cend()},
-          {padding_vec.cbegin(), padding_vec.cend()},
-          {dilation_vec.cbegin(), dilation_vec.cend()},
+          {stride.begin(), stride.end()},
+          {padding.begin(), padding.end()},
+          {padding.begin(), padding.end()},
+          {dilation.begin(), dilation.end()},
           groups,
           ideep::algorithm::convolution_direct);
   ideep::tensor result;
