@@ -989,7 +989,14 @@ void initJITBindings(PyObject* module) {
           asList.push_back(f->fut);
         }
         return std::make_shared<jit::PythonFutureWrapper>(
-            c10::collectAll(asList));
+            c10::collectAll(asList),
+            /* unwrap_func */ [futures](const py::object& /*unused*/) {
+              // throw errors when calling wait() on the returned Future if
+              // any of the original futures would throw.
+              for (auto& fut : futures) {
+                fut->wait();
+              }
+            });
       });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
