@@ -2828,12 +2828,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     model_msg = "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(self.rank, formats,
                                                                                              dtypes, bucketsize)
                     try:
-                        print(model_msg)
+                        print(model_msg, replica_devices, flush=True)
                         m = ConvNet(layer_devs, formats, dtypes)
                         m_ddp = DistributedDataParallel(copy.deepcopy(m),
                                                         device_ids=replica_devices,
                                                         process_group=process_group,
                                                         bucket_cap_mb=bucketsize)
+                        torch.cuda.synchronize()
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
@@ -2848,10 +2849,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                         iter_msg = "iter = {} ".format(it) + model_msg
                         named_msg = iter_msg
                         try:
-                            print(iter_msg)
+                            print(iter_msg, replica_devices, flush=True)
                             F.mse_loss(m(input).float(), target).backward()
                             F.mse_loss(m_ddp(input[local_batch_start: local_batch_end]).float(),
                                        target[local_batch_start: local_batch_end]).backward()
+                            torch.cuda.synchronize()
                             for i, ((layer_name, m_child), m_ddp_child) in enumerate(zip(m.named_children(),
                                                                                          m_ddp.module.children())):
                                 named_msg = layer_name + ".weight" + " " + iter_msg

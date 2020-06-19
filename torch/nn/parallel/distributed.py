@@ -561,9 +561,8 @@ class DistributedDataParallel(Module):
                         # data without a deep copy.  Unfortunately, that wiped out the
                         # allreduce hook attached to param's AccumulateGrad function,
                         # likely causing https://github.com/pytorch/pytorch/issues/37079.
-                        # TODO:  If set_ becomes safe to use here, use set_.  Otherwise,
-                        # find another way to steal tensor's data.
-                        # param.detach().set_(tensor) might work.
+                        # TODO:  If set_ becomes safe to use here, use set_.
+                        # Otherwise, find another safe way to steal tensor's data.
                         param.copy_(tensor)
                         # Assume we have just run the optimizer and zeroed the
                         # grads of the parameters on the root model. We need
