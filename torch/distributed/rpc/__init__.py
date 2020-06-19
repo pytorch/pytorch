@@ -18,6 +18,7 @@ if is_available() and not torch._C._rpc_init():
 if is_available():
     from . import api, backend_registry, functions, _set_profiler_node_id
     from .api import *  # noqa: F401
+    from .backend_registry import BackendType
     from .server_process_global_profiler import (
         _server_process_global_profile,
     )
@@ -25,7 +26,7 @@ if is_available():
 
     def init_rpc(
         name,
-        backend=backend_registry.BackendType.PROCESS_GROUP,
+        backend=BackendType.PROCESS_GROUP,
         rank=-1,
         world_size=None,
         rpc_backend_options=None,
@@ -38,27 +39,28 @@ if is_available():
         process ready to send and receive RPCs.
 
         Arguments:
-            backend (Enum): type of RPC backend implementation. Currently,
-                process group backend is the only available backend
-                implementation. (default: ``RpcBackend.PROCESS_GROUP``).
+            backend (BackendType, optional): The type of RPC backend
+                implementation. Supported values include
+                ``BackendType.PROCESS_GROUP`` (the default) and
+                ``BackendType.TENSORPIPE``. See :ref:`rpc-backends` for more
+                information.
             name (str): a globally unique name of this node. (e.g.,
                 ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
                 Name can only contain number, alphabet, underscore, and/or dash,
                 and must be shorter than 128 characters.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
-            rpc_backend_options (RpcBackendOptions): The options passed to
-                RpcAgent constructor. It contains RpcAgent specific
-                initialization configurations. By default, it contains
-                ``rpc_timeout = timedelta(seconds=60)``,
-                ``init_method = "env://"``, ``num_send_recv_threads = 4`` for
-                process group agent. If using the default
-                ``rpc_backend_options``, RPC would initialize the underlying
-                process group backend using ``init_method = "env://"``,
+            rpc_backend_options (RpcBackendOptions, optional): The options
+                passed to the RpcAgent constructor. It must be an agent-specific
+                subclass of :class:`~torch.distributed.rpc.RpcBackendOptions`
+                and contains agent-specific initialization configurations. By
+                default, for all agents, it sets the default timeout to 60
+                seconds and performs the rendezvous with an underlying process
+                group initialized using ``init_method = "env://"``,
                 meaning that environment variables ``MASTER_ADDR`` and
                 ``MASTER_PORT`` needs to be set properly. See
-                :class:`~torch.distributed.rpc.ProcessGroupRpcBackendOptions`
-                for examples.
+                :ref:`rpc-backends` for more information and find which options
+                are available.
         """
 
         if not rpc_backend_options:
