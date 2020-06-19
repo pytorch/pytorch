@@ -1169,7 +1169,8 @@ class RpcTest(RpcAgentTestFixture):
             )
 
             for expected_remote_event_name in EXPECTED_REMOTE_EVENTS:
-                expected_key = rpc_profiling_key + " " + expected_remote_event_name
+                REMOTE_OP_STR = "#remote_op: "
+                expected_key = rpc_profiling_key + REMOTE_OP_STR + expected_remote_event_name
                 self.assertTrue(expected_key in remote_events)
                 remote_event = remote_events[expected_key]
                 # Remote event should have a node ID corresponding to the worker
@@ -1178,10 +1179,10 @@ class RpcTest(RpcAgentTestFixture):
 
             # Validate order remote events show up in profiling output.
             def convert_remote_to_local(event_name):
+                remote_op_key = rpc_profiling_key + REMOTE_OP_STR
                 return event_name[
-                    event_name.find(rpc_profiling_key + " ")
-                    + len(rpc_profiling_key)
-                    + 1 :
+                    event_name.find(remote_op_key)
+                    + len(remote_op_key) :
                 ]
 
             remote_events_list = [
