@@ -24,6 +24,9 @@ from quantization.test_quantized_module import TestDynamicQuantizedModule  # noq
 # Quantization Aware Training
 from quantization.test_qat_module import TestQATModule  # noqa: F401
 
+# Quantization specific fusion passes
+from quantization.test_fusion_passes import TestFusionPasses  # noqa: F401
+
 # Module
 # TODO: merge the fake quant per tensor and per channel test cases
 # TODO: some of the tests are actually operator tests, e.g. test_forward_per_tensor, and
@@ -50,7 +53,9 @@ from quantization.test_quantize import TestModelNumerics  # noqa: F401
 # 2. Graph mode quantization
 from quantization.test_quantize_script import TestQuantizeScriptJitPasses  # noqa: F401
 from quantization.test_quantize_script import TestQuantizeScriptPTSQOps  # noqa: F401
-from quantization.test_quantize_script import TestQuantizeDynamicScript  # noqa: F401
+from quantization.test_quantize_script import TestQuantizeDynamicScriptJitPasses  # noqa: F401
+from quantization.test_quantize_script import TestQuantizeScriptPTDQOps  # noqa: F401
+from quantization.test_quantize_script import TestQuantizeScript  # noqa: F401
 
 # Tooling: numric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401

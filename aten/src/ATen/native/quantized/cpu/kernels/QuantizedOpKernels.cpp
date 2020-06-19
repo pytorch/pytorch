@@ -15,7 +15,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__aarch64__)
 #include <ATen/quantized/Quantizer.h>
 #include <arm_neon.h>
 #endif
@@ -630,6 +630,75 @@ void qclamp_kernel(
         });
   });
 }
+
+void qthreshold_kernel(
+  // TODO: For future tasks, since output quantization parameters are set equal to
+  // the input ones, it might make sense to implement this completely in the
+  // quantized domain.
+   const Tensor& qx,
+   Scalar threshold_scalar,
+   Scalar value_scalar,
+   Tensor& qy) {
+
+  // defines input and output scales and zero_points
+  int64_t input_zero_point = qx.q_zero_point();
+  float input_scale = qx.q_scale();
+  int64_t output_zero_point = qy.q_zero_point();
+  float output_scale = qy.q_scale();
+  float inv_output_scale = 1.0 / output_scale;
+
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qthreshold", [&]() {
+    qy = at::_empty_affine_quantized(
+      qx.sizes(),
+      at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
+      qx.q_scale(),
+      qx.q_zero_point(),
+      c10::nullopt);
+
+    // vectorized
+    using Vec = Vec256<float>;
+    using qVec = Vec256<scalar_t>;
+    // defines the iterator
+    auto iter = TensorIterator::unary_op(qy, qx);
+    // defines the vectorized versions
+    Vec input_scale_vec = Vec(input_scale);
+    Vec input_zero_point_vec = Vec(input_zero_point);
+    Vec input_scale_neg_zp_premul_vec = input_scale_vec * input_zero_point_vec.neg();
+    // defines the floating-point versions of threshold and value
+    float threshold_float = threshold_scalar.to<float>();
+    float value_float = value_scalar.to<float>();
+    Vec threshold_vec = Vec(threshold_float);
+    Vec value_vec = Vec(value_float);
+
+    // Naive implemenentation: uses dequantize/execute/quantize routine
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value_qx) -> scalar_t {
+          // dequantize
+          const auto x = at::native::dequantize_val(input_scale, input_zero_point, value_qx);
+          // Applies the Threshold operation
+          const auto y = x > threshold_float ? x : value_float;
+          // quantize
+          return at::native::quantize_val<scalar_t>(output_scale, output_zero_point, y);
+        },
+        [&](qVec value_qx) -> qVec {
+          // dequantize
+          auto dx_vec = value_qx.dequantize(
+            input_scale_vec, input_zero_point_vec, input_scale_neg_zp_premul_vec);
+          for (int idx = 0; idx < dx_vec.size(); ++idx) {
+            // check if any elements are below threshold
+            auto cmp_to_threshold = dx_vec[idx] > threshold_vec;
+            if (cmp_to_threshold.zero_mask()) {
+              // blend
+              dx_vec[idx] = Vec::blendv(value_vec, dx_vec[idx], cmp_to_threshold);
+              }
+            }
+          // quantize
+          return qVec::quantize(dx_vec, output_scale, output_zero_point, inv_output_scale);
+        });
+  });
+}
+
 
 void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
   const auto i_scale = qx.q_scale();
@@ -1905,24 +1974,18 @@ void fake_quant_grad_per_channel_cpu(
       });
 }
 
-template <typename T>
-void quantized_layer_norm_kernel_impl(
-    const Tensor& X,
-    const Tensor& gamma,
-    const Tensor& beta,
-    int64_t M,
-    int64_t N,
-    float eps,
-    Tensor* Y) {
-
-}
-
-void quantized_layer_norm_kernel(
-    const Tensor& X,
-    const Tensor& gamma,
-    const Tensor& beta,
-    int64_t M,
-    int64_t N,
+// Assumes X is composed of M groups of N elements. Normalizes each of the
+// groups and optionally applies affine scaling. Useful for LayerNorm,
+// GroupNorm, InstanceNorm.
+void quantized_normalize_kernel(
+    const Tensor& X, // input tensor
+    const Tensor& gamma, // weight (optional)
+    const Tensor& beta, // bias (optional)
+    bool affine_per_channel, // scaling applied elementwise if false, per channel if true
+    int num_channels, // only used if affine_per_channel is set
+    int num_groups, // only used if affine_per_channel is set
+    int64_t M, // number of groups
+    int64_t N, // number of elements in each group
     double eps,
     Tensor* Y) {
   AT_DISPATCH_QINT_TYPES(X.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
@@ -1930,10 +1993,17 @@ void quantized_layer_norm_kernel(
     using fVec = vec256::Vec256<float>;
 
     TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
-    TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == N,
+    TORCH_INTERNAL_ASSERT(
+        !gamma.defined() ||
+        (!affine_per_channel && gamma.numel() == N) ||
+        (affine_per_channel && gamma.numel() == num_channels),
         "Unexpected size of gamma");
-    TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == N,
+    TORCH_INTERNAL_ASSERT(
+        !beta.defined() ||
+        (!affine_per_channel && beta.numel() == N) ||
+        (affine_per_channel && beta.numel() == num_channels),
         "Unexpected size of beta");
+
     scalar_t* X_data = X.data_ptr<scalar_t>();
     const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
     const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
@@ -1956,6 +2026,10 @@ void quantized_layer_norm_kernel(
     int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
     int64_t kNumIntVecInLayer = N / kIntVLen;
     int64_t kNonVecRemInLayer = N % kIntVLen;
+    int channels_per_group = num_channels / num_groups;
+    int64_t NPerChannel = N / channels_per_group;
+    int64_t kNumIntVecInChannel = NPerChannel / kIntVLen;
+    int64_t kNonVecRemInChannel = NPerChannel % kIntVLen;
 
     at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
       for (int64_t i = start; i < end; ++i) {
@@ -1984,35 +2058,78 @@ void quantized_layer_norm_kernel(
         // Second pass: normalize
 
         // TODO replace with TensorIterator implementation once #33166 is fixed.
-        for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
-          int64_t vecStartIdx = vecIdx * kIntVLen;
-          auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
-          auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
-              x_fake_scale_zp_neg_premul_vec);
-          for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
-            int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
-            auto gammaVec = gamma_null
-              ? one_vec
-              : fVec::loadu(gamma_data + vecVecStartIdx);
-            auto betaVec = beta_null
-              ? zero_vec
-              : fVec::loadu(beta_data + vecVecStartIdx);
-            dqXVec[dqXVecIdx] =
-              (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
-                scale_x_div_layer_stdVec * gammaVec + betaVec;
-            qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
-              .store(Y_ptr + vecStartIdx);
+        if (affine_per_channel) {
+
+          // if scaling per channel, scaling parameters can be pre-multiplied
+          // with normalization parameters
+          for (int64_t chIdx = 0; chIdx < channels_per_group; chIdx++) {
+            int scalingIdx = (i * channels_per_group + chIdx) % (num_channels);
+            float gamma = gamma_null ? 1.0f : gamma_data[scalingIdx];
+            // scale_x / layer_std * gamma
+            float gamma_p = scale_x_div_layer_std * gamma;
+            float beta = beta_null ? 0.0f : beta_data[scalingIdx];
+            fVec gamma_p_vec(gamma_p);
+            fVec beta_vec(beta);
+
+            int64_t chStartIdx = chIdx * NPerChannel;
+            int64_t chEndIdx = chStartIdx + NPerChannel;
+
+            for (int64_t vecIdx = 0; vecIdx < kNumIntVecInChannel; vecIdx++) {
+              int64_t vecStartIdx = chStartIdx + vecIdx * kIntVLen;
+              auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+              auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+                  x_fake_scale_zp_neg_premul_vec);
+              for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+                int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
+                dqXVec[dqXVecIdx] =
+                  (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
+                    gamma_p_vec + beta_vec;
+                qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                  .store(Y_ptr + vecStartIdx);
+              }
+            }
+            for (int64_t remIdx = chEndIdx - kNonVecRemInChannel;
+                 remIdx < chEndIdx;
+                 remIdx++) {
+              auto qXVal = X_ptr[remIdx];
+              float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
+              float dqY =
+                (dqXVal - layer_mean_div_scale_x) * gamma_p + beta;
+              Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+            }
+          } // chIdx
+
+        } else {
+
+          for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
+            int64_t vecStartIdx = vecIdx * kIntVLen;
+            auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+            auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+                x_fake_scale_zp_neg_premul_vec);
+            for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+              int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
+              auto gammaVec = gamma_null
+                ? one_vec
+                : fVec::loadu(gamma_data + vecVecStartIdx);
+              auto betaVec = beta_null
+                ? zero_vec
+                : fVec::loadu(beta_data + vecVecStartIdx);
+              dqXVec[dqXVecIdx] =
+                (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
+                  scale_x_div_layer_stdVec * gammaVec + betaVec;
+              qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                .store(Y_ptr + vecStartIdx);
+            }
           }
-        }
-        for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
-          const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
-          const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
-          auto qXVal = X_ptr[remIdx];
-          float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
-          float dqY =
-            ((dqXVal - layer_mean_div_scale_x) * scale_x_div_layer_std) * gamma_v + beta_v;
-          Y_ptr[remIdx] =
-              at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+          for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+            const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
+            const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
+            auto qXVal = X_ptr[remIdx];
+            float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
+            float dqY =
+              ((dqXVal - layer_mean_div_scale_x) * scale_x_div_layer_std) * gamma_v + beta_v;
+            Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+          }
         }
       }
     }); // parallel_for
@@ -2079,7 +2196,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
 }
 #else // USE_FBGEMM
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__aarch64__)
 // Generic template defaults to naive quantize implementation
 template <typename T>
 void quantize_tensor_arm(
@@ -2111,6 +2228,7 @@ void quantize_tensor_arm<c10::quint8>(
   uint32_t i = 0;
   auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
   const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
+#if defined(__ARM_NEON__)
   // magic float and magic int to take care of rounding
   // int magic_round(float f): interpret_int32(f + 12582912.0f) - 0x4B400000
   // Some detail:
@@ -2146,30 +2264,44 @@ void quantize_tensor_arm<c10::quint8>(
   for (; i < N; ++i) {
     (*out++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
   }
+#else
+  const int16x8_t vzero_point = vdupq_n_s16((int16_t)(uint16_t)zero_point);
+  for (i = 0; i + 8 < N; i += 8) {
+    const float32x4_t vin0123 = vld1q_f32(in);
+    in += 4;
+    const float32x4_t vin4567 = vld1q_f32(in);
+    in += 4;
+    const int32x4_t v0123_rounded = vcvtnq_s32_f32(vmulq_f32(vin0123, vinv_scale));
+    const int32x4_t v4567_rounded = vcvtnq_s32_f32(vmulq_f32(vin4567, vinv_scale));
+    const int16x8_t v01234567_packed = vqaddq_s16(
+        vqmovn_high_s32(vqmovn_s32(v0123_rounded), v4567_rounded), vzero_point);
+    const uint8x8_t vout01234567 = vqmovun_s16(v01234567_packed);
+    vst1_u8(out, vout01234567);
+    out += 8;
+  }
+  for (; i < N; ++i) {
+    (*out++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
+  }
+#endif
 }
 
-#endif // __ARM_NEON__
+#endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
 void quantize_tensor_per_tensor_affine_cpu(
     Tensor rtensor,
     Tensor qtensor,
     double scale,
     int64_t zero_point) {
-#if defined(__ARM_NEON__)
+#if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
         TORCH_CHECK(
             rtensor.is_contiguous(), "Float tensor should be contiguous");
         const float* const rdata = rtensor.data_ptr<float>();
-        // If QEngine is set to QNNPACK, use caffe2 specialized Int8Quantize
-        // implementation on ARM
-        if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-          quantize_tensor_arm<scalar_t>(
-              rdata, qtensor, rtensor.numel(), scale, zero_point);
-          return;
-        }
+        quantize_tensor_arm<scalar_t>(
+            rdata, qtensor, rtensor.numel(), scale, zero_point);
       });
-#endif // __ARM_NEON__
+#else
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
@@ -2182,6 +2314,7 @@ void quantize_tensor_per_tensor_affine_cpu(
           qdata[i] = quantize_val<scalar_t>(scale, zero_point, rdata[i]);
         }
       });
+#endif // __ARM_NEON__
 }
 
 void dequantize_tensor_per_tensor_affine_cpu(
@@ -2270,6 +2403,7 @@ REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
+REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
 REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
 REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
@@ -2297,7 +2431,6 @@ REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
-REGISTER_DISPATCH(quantized_layer_norm_stub, &quantized_layer_norm_kernel);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);
@@ -2310,6 +2443,7 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     dequantize_tensor_per_channel_affine_stub,
     &dequantize_tensor_per_channel_affine_cpu);
+REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
 
 } // namespace native
 } // namespace at

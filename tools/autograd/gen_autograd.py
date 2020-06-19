@@ -27,7 +27,7 @@ import os
 import yaml
 import re
 from collections import defaultdict
-from .utils import YamlLoader, split_name_params
+from .utils import YamlLoader, split_name_params, signature_without_args
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
@@ -109,9 +109,6 @@ def load_aten_declarations(path):
         declaration['formals'] = [arg['type'] + ' ' + arg['name']
                                   for arg in declaration['arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
-        declaration['type_method_formals'] = [arg['type'] + ' ' + arg['name']
-                                              for arg in declaration['arguments']]
-        declaration['type_method_args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['api_name'] = declaration['name']
         # NB: keep this in sync with common_with_cwrap.py
         if declaration.get('overload_name'):
@@ -191,13 +188,20 @@ def load_deprecated_signatures(aten_decls, deprecated_path):
     return declarations
 
 
-def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
-    aten_decls = load_aten_declarations(aten_path)
+def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_op_list=None):
+    full_aten_decls = load_aten_declarations(aten_path)
+
+    def filter_decls(aten_decls, selected_op_list):
+        if selected_op_list is None:
+            return aten_decls
+        return [decl for decl in aten_decls if signature_without_args(decl) in selected_op_list]
+
+    aten_decls = filter_decls(full_aten_decls, selected_op_list)
 
     # Parse and load derivatives.yaml
     from .load_derivatives import load_derivatives
     autograd_functions = load_derivatives(
-        os.path.join(autograd_dir, 'derivatives.yaml'), aten_decls)
+        os.path.join(autograd_dir, 'derivatives.yaml'), full_aten_decls)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
@@ -213,8 +217,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
 
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
-    gen_variable_factories(
-        out, aten_decls, template_path, disable_autograd=disable_autograd)
+    gen_variable_factories(out, aten_decls, template_path)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):

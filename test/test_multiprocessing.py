@@ -48,23 +48,23 @@ def simple_pool_fill(tensor):
     return tensor.add(1)
 
 
-def send_tensor(queue, event, tp):
-    t = torch.ones(5, 5).type(tp)
+def send_tensor(queue, event, device, dtype):
+    t = torch.ones(5, 5, device=device, dtype=dtype)
     queue.put(t)
     queue.put(t)
     event.wait()
 
 
-def send_and_delete_tensors(queue, event, tp, count, size=5):
+def send_and_delete_tensors(queue, event, device, dtype, count, size=5):
     for i in range(count):
-        t = torch.full([size], i).type(tp)
+        t = torch.full([size], i, device=device, dtype=dtype)
         queue.put(t)
         del t
     event.wait()
 
 
-def receive_and_send_sum(queue, out_queue, event, tp, count, size=5):
-    s = torch.full([size], 0).type(tp)
+def receive_and_send_sum(queue, out_queue, event, device, dtype, count, size=5):
+    s = torch.full([size], 0, device=device, dtype=dtype)
     for i in range(count):
         t = queue.get()
         s += t
@@ -226,9 +226,9 @@ class TestMultiprocessing(TestCase):
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
 
-    def _test_sharing(self, ctx=mp, type=torch.FloatTensor, repeat=1):
+    def _test_sharing(self, ctx=mp, device='cpu', dtype=torch.float, repeat=1):
         def test_fill():
-            x = torch.zeros(5, 5).type(type)
+            x = torch.zeros(5, 5).to(device, dtype)
             q = ctx.Queue()
             e = ctx.Event()
             data = [x, x[:, 1]]
@@ -247,7 +247,7 @@ class TestMultiprocessing(TestCase):
         def test_receive():
             q = ctx.Queue()
             e = ctx.Event()
-            p = ctx.Process(target=send_tensor, args=(q, e, type))
+            p = ctx.Process(target=send_tensor, args=(q, e, device, dtype))
             p.daemon = True
             lc.check_pid(p.pid)
             p.start()
@@ -274,7 +274,7 @@ class TestMultiprocessing(TestCase):
             q = ctx.Queue()
             q.put(data)
             new_data = q.get(timeout=1)
-            self.assertEqual(new_data, data, 0)
+            self.assertEqual(new_data, data, atol=0, rtol=0)
             storage_cdata = data[0]._cdata
             self.assertEqual(new_data[0]._cdata, storage_cdata)
             for t in new_data[1:]:
@@ -294,9 +294,9 @@ class TestMultiprocessing(TestCase):
             results = p.map(simple_pool_fill, buffers, 1)
             self.assertEqual(len(results), len(buffers))
             for r in results:
-                self.assertEqual(r, torch.ones(2, 2) * 5, 0)
+                self.assertEqual(r, torch.ones(2, 2) * 5, atol=0, rtol=0)
             for b in buffers:
-                self.assertEqual(b, torch.ones(2, 2) * 4, 0)
+                self.assertEqual(b, torch.ones(2, 2) * 4, atol=0, rtol=0)
 
             p.close()
             p.join()
@@ -353,7 +353,7 @@ class TestMultiprocessing(TestCase):
         p = SubProcess(t.share_memory_())
         p.start()
         p.join(1)
-        self.assertEqual(t, torch.ones(5, 5) * 3, 0)
+        self.assertEqual(t, torch.ones(5, 5) * 3, atol=0, rtol=0)
 
     @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
     def test_autograd_errors(self):
@@ -375,7 +375,7 @@ class TestMultiprocessing(TestCase):
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_cuda_simple(self):
         torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
-        self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
+        self._test_sharing(mp.get_context('spawn'), 'cuda', torch.float)
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
@@ -384,12 +384,13 @@ class TestMultiprocessing(TestCase):
         ctx = mp.get_context('spawn')
         q = ctx.Queue()
         e = ctx.Event()
-        p = ctx.Process(target=send_and_delete_tensors, args=(q, e, torch.cuda.IntTensor, 5))
+        p = ctx.Process(target=send_and_delete_tensors, args=(q, e, 'cuda', torch.int, 5))
         p.start()
         t = []
         for _ in range(5):
             t.append(q.get())
-        self.assertEqual(t[0], torch.full([5], 0))
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(t[0], torch.full([5], 0))
         del t
         e.set()
         p.join(1)
@@ -406,9 +407,9 @@ class TestMultiprocessing(TestCase):
         e1 = ctx.Event()
         e2 = ctx.Event()
         e3 = ctx.Event()
-        p1 = ctx.Process(target=send_and_delete_tensors, args=(q1, e1, torch.cuda.LongTensor, count, size))
+        p1 = ctx.Process(target=send_and_delete_tensors, args=(q1, e1, 'cuda', torch.long, count, size))
         p2 = ctx.Process(target=receive_and_send, args=(q1, q2, e2, count))
-        p3 = ctx.Process(target=receive_and_send_sum, args=(q2, q3, e3, torch.cuda.LongTensor, count, size))
+        p3 = ctx.Process(target=receive_and_send_sum, args=(q2, q3, e3, 'cuda', torch.long, count, size))
         p1.start()
         p2.start()
         p3.start()

@@ -121,16 +121,16 @@ void testClassDerive() {
   auto methods = cu->define("foo.bar", methodSrc, nativeResolver(), &self);
   auto method = methods[0];
   cls->addAttribute("attr", TensorType::get());
-  ASSERT_TRUE(cls->getMethod(method->name()));
+  ASSERT_TRUE(cls->findMethod(method->name()));
 
   // Refining a new class should retain attributes and methods
   auto newCls = cls->refine({TensorType::get()});
   ASSERT_TRUE(newCls->hasAttribute("attr"));
-  ASSERT_TRUE(newCls->getMethod(method->name()));
+  ASSERT_TRUE(newCls->findMethod(method->name()));
 
   auto newCls2 = cls->withContained({TensorType::get()})->expect<ClassType>();
   ASSERT_TRUE(newCls2->hasAttribute("attr"));
-  ASSERT_TRUE(newCls2->getMethod(method->name()));
+  ASSERT_TRUE(newCls2->findMethod(method->name()));
 }
 
 static const auto torchbindSrc = R"JIT(

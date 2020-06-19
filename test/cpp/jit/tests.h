@@ -48,6 +48,7 @@ namespace jit {
   _(UnifyTypes)                        \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
+  _(LoopPeeler)                        \
   _(InsertBailOuts)                    \
   _(PeepholeOptimize)                  \
   _(RecordFunction)                    \
@@ -81,6 +82,8 @@ namespace jit {
   _(LiteInterpreterUpsampleNearest2d)  \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
+  _(DefaultArgTypeHinting)             \
+  _(Futures)                           \
   _(MobileTypeParser)                  \
   _(LiteInterpreterBuiltinFunction)    \
   _(LiteInterpreterPrim)               \
@@ -100,10 +103,14 @@ namespace jit {
   _(GraphExecutor)               \
   _(ModuleConversion)            \
   _(Interp)                      \
+  _(GPU_IrGraphGenerator)        \
   _(GPU_FusionDispatch)          \
   _(GPU_FusionSimpleArith)       \
+  _(GPU_FusionExprEvalConstants) \
+  _(GPU_FusionExprEvalBindings)  \
+  _(GPU_FusionExprEvalBasic)     \
+  _(GPU_FusionExprEvalComplex)   \
   _(GPU_FusionSimpleTypePromote) \
-  _(GPU_FusionCastOp)            \
   _(GPU_FusionMutator)           \
   _(GPU_FusionRegister)          \
   _(GPU_FusionTopoSort)          \
@@ -114,13 +121,25 @@ namespace jit {
   _(GPU_FusionTVReorder)         \
   _(GPU_FusionEquality)          \
   _(GPU_FusionReplaceAll)        \
+  _(GPU_FusionParser)            \
   _(GPU_FusionDependency)        \
   _(GPU_FusionCodeGen)           \
   _(GPU_FusionCodeGen2)          \
   _(GPU_FusionSimplePWise)       \
   _(GPU_FusionExecKernel)        \
   _(GPU_FusionForLoop)           \
-  _(GPU_FusionLoopUnroll)
+  _(GPU_FusionLoopUnroll)        \
+  _(GPU_FusionUnaryOps)          \
+  _(GPU_FusionBinaryOps)         \
+  _(GPU_FusionTernaryOps)        \
+  _(GPU_FusionCompoundOps)       \
+  _(GPU_FusionCastOps)           \
+  _(GPU_FusionAdvancedComputeAt) \
+  _(GPU_FusionScalarInputs)      \
+  _(GPU_FusionRFactorReplay)     \
+  _(GPU_FusionReduction)         \
+  _(GPU_FusionReduction2)        \
+  _(GPU_FusionSimpleBCast)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
