@@ -8,8 +8,47 @@
       resource_class: large
       environment:
         IMAGE_NAME: << parameters.image_name >>
+        # Enable 'docker manifest'
+        DOCKER_CLI_EXPERIMENTAL: "enabled"
+        DOCKER_BUILDKIT: 1
       steps:
         - checkout
+        - run:
+            name: Calculate docker tag
+            command: |
+              set -x
+              mkdir .circleci/shared
+              # git keeps a hash of all sub trees
+              echo "export DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)" >> .circleci/shared/env_file
+        # Saves our calculated docker tag to our workpace for later use
+        - persist_to_workspace:
+            root: .
+            paths:
+              - .circleci/shared/
+        - load_shared_env:
+            root: .
+        - run:
+            name: Check if image should be built
+            command: |
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              eval $(aws ecr get-login --no-include-email --region us-east-1)
+              set -x
+              PREVIOUS_DOCKER_TAG=$(git rev-parse "$(git merge-base HEAD << pipeline.git.base_revision >>):.circleci/docker")
+              # Check if image already exists, if it does then skip building it
+              if docker manifest inspect "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${IMAGE_NAME}:${DOCKER_TAG}"; then
+                circleci-agent step halt
+                # circleci-agent step halt doesn't actually halt the step so we need to
+                # explicitly exit the step here ourselves before it causes too much trouble
+                exit 0
+              fi
+              # If no image exists but the hash is the same as the previous hash then we should error out here
+              if [[ ${PREVIOUS_DOCKER_TAG} = ${DOCKER_TAG} ]]; then
+                echo "ERROR: Something has gone wrong and the previous image isn't available for the merge-base of your branch"
+                echo "       contact the PyTorch team to restore the original images"
+                exit 1
+              fi
         - run:
             name: build_docker_image_<< parameters.image_name >>
             no_output_timeout: "1h"
@@ -45,6 +84,7 @@
           type: string
       environment:
         PROJECT: << parameters.project >>
+        # TODO: Remove legacy image tags once we feel comfortable with new docker image tags
         IMAGE_TAG: << parameters.tags_to_keep >>
       docker:
         - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
@@ -53,6 +93,17 @@
             aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
 
       steps:
+        - checkout
+        - run:
+            # NOTE: see 'docker_build_job' for how these tags actually get built
+            name: dynamically generate tags to keep
+            no_output_timeout: "1h"
+            command: |
+              GENERATED_IMAGE_TAG=$(\
+                git log --oneline --pretty='%H' .circleci/docker \
+                  | xargs -I '{}' git rev-parse '{}:.circleci/docker' \
+                  | paste -sd "," -)
+              echo "export GENERATED_IMAGE_TAG='${GENERATED_IMAGE_TAG}'" >> ${BASH_ENV}
         - run:
             name: garbage collecting for ecr images
             no_output_timeout: "1h"
@@ -61,7 +112,7 @@
               export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
               set -x
-              /usr/bin/gc.py --filter-prefix ${PROJECT}  --ignore-tags ${IMAGE_TAG}
+              /usr/bin/gc.py --filter-prefix ${PROJECT}  --ignore-tags "${IMAGE_TAG},${GENERATED_IMAGE_TAG}"
 
   docker_hub_index_job:
       docker:

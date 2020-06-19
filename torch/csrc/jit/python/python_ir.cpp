@@ -710,6 +710,14 @@ void initPythonIRBindings(PyObject* module_) {
         return self->cast<InterfaceType>() != nullptr;
       });
 
+  using ::c10::NamedType;
+  py::class_<NamedType, Type, std::shared_ptr<NamedType>>(m, "NamedType")
+      .def("name", [](const NamedType& type) {
+        if (type.name().has_value()) {
+          return type.name().value().name();
+        }
+        return std::string();
+      });
   py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
       .def_static("get", &AnyType::get);
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
@@ -733,9 +741,16 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
       .def_static("get", &NoneType::get);
 
-  py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
+  py::class_<TupleType, NamedType, std::shared_ptr<TupleType>>(m, "TupleType")
       .def(
           py::init([](std::vector<TypePtr> a) { return TupleType::create(a); }))
+      .def_static(
+          "createNamed",
+          [](const std::string& name,
+             const std::vector<std::string>& field_names,
+             const std::vector<TypePtr>& types) {
+            return TupleType::createNamed(name, field_names, types);
+          })
       .def("elements", [](TupleType& self) {
         std::vector<TypePtr> types;
         for (const auto& type : self.elements()) {

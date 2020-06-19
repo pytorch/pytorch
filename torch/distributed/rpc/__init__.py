@@ -16,7 +16,7 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from . import api, backend_registry, functions
+    from . import api, backend_registry, functions, _set_profiler_node_id
     from .api import *  # noqa: F401
     from .server_process_global_profiler import (
         _server_process_global_profile,
@@ -55,7 +55,7 @@ if is_available():
                 process group agent. If using the default
                 ``rpc_backend_options``, RPC would initialize the underlying
                 process group backend using ``init_method = "env://"``,
-                meaning that environment variables ``MASTER_ADDRESS`` and
+                meaning that environment variables ``MASTER_ADDR`` and
                 ``MASTER_PORT`` needs to be set properly. See
                 :class:`~torch.distributed.rpc.ProcessGroupRpcBackendOptions`
                 for examples.
@@ -85,6 +85,7 @@ if is_available():
         # other nodes might not have been initialized.
         dist_autograd._init(rank)
 
+        _set_profiler_node_id(rank)
         # Initialize RPC.
         api._init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
 
