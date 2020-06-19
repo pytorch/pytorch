@@ -143,6 +143,10 @@ Arguments:
                   in a much more efficient way. Usually, you need to set this
                   to True to run backward multiple times.
 
+.. warning::
+    Distributed autograd does not support autograd graphs consisting of GPU
+    operations, only CPU operations are supported currently.
+
 Example::
     >>> import torch.distributed.autograd as dist_autograd
     >>> with dist_autograd.context() as context_id:
