@@ -15,7 +15,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
-DEFINE_DISPATCH(qadaptive_avg_pool3d_nhwc_stub);
+DEFINE_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub);
 
 namespace {
 
@@ -286,7 +286,7 @@ Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
   int64_t sizeB = output_shape.size() == 4 ? 0 : output_shape[0];
 
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
-    // Fast path for NHWC
+    // Fast path for NDHWC
     Tensor output = at::_empty_affine_quantized(
         output_shape,
         input.options().memory_format(input.suggest_memory_format()),
@@ -294,7 +294,7 @@ Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
         input.q_zero_point(),
         c10::nullopt);
     if (input.dim() == 4 || input.size(0) == 1) {
-      qadaptive_avg_pool3d_nhwc_stub(
+      qadaptive_avg_pool3d_ndhwc_stub(
           input.device().type(),
           input,
           output,
@@ -315,7 +315,7 @@ Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
       int64_t istrideB = input.stride(-5);
       at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
         for (auto b = start; b < end; b++) {
-          qadaptive_avg_pool3d_nhwc_stub(
+          qadaptive_avg_pool3d_ndhwc_stub(
               input.device().type(),
               input,
               output,

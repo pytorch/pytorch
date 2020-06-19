@@ -1350,7 +1350,6 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qX_hat = op(qX, output_size=output_size)
-            print(qX.shape, qX_hat.shape)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0,
                                        rtol=0, msg=error_message.format(name,

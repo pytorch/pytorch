@@ -1337,7 +1337,7 @@ void qadaptive_avg_pool2d_nhwc_kernel(
   });
 }
 
-void qadaptive_avg_pool3d_nhwc_kernel(
+void qadaptive_avg_pool3d_ndhwc_kernel(
     const Tensor& qx,
     Tensor& qy,
     int64_t b,
@@ -1353,7 +1353,7 @@ void qadaptive_avg_pool3d_nhwc_kernel(
     int64_t istrideD,
     int64_t istrideH,
     int64_t istrideW) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "adaptive_avg_pool3d_nhwc", [&]() {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "adaptive_avg_pool3d_ndhwc", [&]() {
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
     auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
@@ -2516,8 +2516,8 @@ REGISTER_DISPATCH(
     qadaptive_avg_pool2d_nhwc_stub,
     &qadaptive_avg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(
-    qadaptive_avg_pool3d_nhwc_stub,
-    &qadaptive_avg_pool3d_nhwc_kernel);
+    qadaptive_avg_pool3d_ndhwc_stub,
+    &qadaptive_avg_pool3d_ndhwc_kernel);
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
 REGISTER_DISPATCH(
