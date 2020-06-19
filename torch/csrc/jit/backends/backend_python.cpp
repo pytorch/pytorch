@@ -1,14 +1,18 @@
 #include <torch/csrc/jit/backends/backend_python.h>
-#include <torch/csrc/jit/backends/backend_detail.h>
 #include <ATen/core/builtin_function.h>
+#include <torch/csrc/jit/backends/backend_detail.h>
 
 namespace torch {
 namespace jit {
 namespace detail {
 
 namespace {
+// This struct combines a callback with the last backend (by index) that it has
+// been called on. This helps figure out which backends this callback still
+// needs to be called on.
 struct Callback {
-  Callback(BackendRegistrationCallback cb) : callback(std::move(cb)), last_called_on(0) {}
+  Callback(BackendRegistrationCallback cb)
+      : callback(std::move(cb)), last_called_on(0) {}
   BackendRegistrationCallback callback;
   unsigned last_called_on;
 };
