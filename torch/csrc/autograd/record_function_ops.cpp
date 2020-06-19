@@ -27,6 +27,7 @@ at::Tensor record_function_enter(const std::string& name) {
       current->end();
     }
   }
+
   rec->before(name);
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }

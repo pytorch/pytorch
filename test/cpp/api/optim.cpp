@@ -283,6 +283,31 @@ TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
       expected_parameters::Adam_with_weight_decay_and_amsgrad());
 }
 
+TEST(OptimTest, XORConvergence_AdamW) {
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(AdamWOptions(0.1)));
+}
+
+TEST(OptimTest, XORConvergence_AdamWWithAmsgrad) {
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(
+      AdamWOptions(0.1).amsgrad(true)));
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamW) {
+  check_exact_values<AdamW>(AdamWOptions(1.0), expected_parameters::AdamW());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamWWithoutWeightDecay) {
+  check_exact_values<AdamW>(
+      AdamWOptions(1.0).weight_decay(0),
+      expected_parameters::AdamW_without_weight_decay());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamWWithAMSGrad) {
+  check_exact_values<AdamW>(
+      AdamWOptions(1.0).amsgrad(true),
+      expected_parameters::AdamW_with_amsgrad());
+}
+
 TEST(OptimTest, ProducesPyTorchValues_Adagrad) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0), expected_parameters::Adagrad());

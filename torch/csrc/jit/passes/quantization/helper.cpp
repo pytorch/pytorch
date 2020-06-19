@@ -60,7 +60,6 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "_max_pool3d",
     "dropout",
     "relu",
-    "hardsigmoid",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -92,6 +91,8 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "squeeze_",
     "unsqueeze",
     "unsqueeze_",
+    "detach",
+    "detach_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
