@@ -405,6 +405,8 @@ Other Operations
     einsum
     flatten
     flip
+    fliplr
+    flipud
     rot90
     histc
     meshgrid

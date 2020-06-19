@@ -25,11 +25,12 @@ template <typename scalar_t>
 void prelu_cuda_kernel_share_weights(
   const Tensor& input,
   Tensor& result,
-  const scalar_t* weight_data) {
-  at::TensorIterator iter;
-  iter.add_output(result);
-  iter.add_input(input);
-  iter.build();
+  const scalar_t* weight_data)
+{
+  at::TensorIterator iter = TensorIteratorConfig()
+      .add_output(result)
+      .add_input(input)
+      .build();
 
   at::native::gpu_kernel(iter,
     [weight_data] GPU_LAMBDA (scalar_t input_val) {
@@ -205,12 +206,12 @@ void prelu_cuda_backward_kernel_share_weights(
   Tensor& input_grad,
   Tensor& weight_grad_collector,
   const scalar_t* weight_data) {
-  at::TensorIterator iter;
-  iter.add_output(input_grad);
-  iter.add_output(weight_grad_collector);
-  iter.add_input(input);
-  iter.add_input(grad_out);
-  iter.build();
+  at::TensorIterator iter = TensorIteratorConfig()
+      .add_output(input_grad)
+      .add_output(weight_grad_collector)
+      .add_input(input)
+      .add_input(grad_out)
+      .build();
   launch_prelu_cuda_backward_share_weights_kernel(iter, weight_data);
 }
 

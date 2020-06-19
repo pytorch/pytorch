@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NU
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
-    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS
+    BytesIOContext, skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
@@ -114,6 +114,18 @@ class AbstractTestCases:
 
         def test_dir(self):
             dir(torch)
+
+        def test_deterministic_flag(self):
+            deterministic_restore = torch.is_deterministic()
+
+            for deterministic in [True, False]:
+                torch.set_deterministic(deterministic)
+                self.assertEqual(deterministic, torch.is_deterministic())
+
+            with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
+                torch.set_deterministic(1)
+
+            torch.set_deterministic(deterministic_restore)
 
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
@@ -239,6 +251,14 @@ class AbstractTestCases:
         def test_msnpu_error(self):
             with self.assertRaisesRegex(RuntimeError, "support for msnpu"):
                 torch.zeros(1, device=torch.device('msnpu'))
+
+        def test_as_strided_neg(self):
+            error = r'as_strided: Negative strides are not supported at the ' \
+                    r'moment, got strides: \[-?[0-9]+(, -?[0-9]+)*\]'
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.as_strided(torch.ones(3, 3), (1, 1), (2, -1))
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.as_strided(torch.ones(14), (2,), (-11,))
 
         def test_polygamma_neg(self):
             with self.assertRaisesRegex(RuntimeError, r'polygamma\(n, x\) does not support negative n\.'):
@@ -1355,7 +1375,8 @@ class AbstractTestCases:
             except RuntimeError:
                 pass
             with mp.Pool(1) as pool:
-                self.assertTrue(pool.map(method, [arg]))
+                out: list = pool.map(method, [arg])
+                self.assertTrue(out[0])
 
         @staticmethod
         def _test_multinomial_invalid_probs(probs):
@@ -1364,7 +1385,7 @@ class AbstractTestCases:
                 torch.multinomial(probs.to('cpu'), 2)
                 return False  # Should not be reached
             except RuntimeError as e:
-                return 'invalid multinomial distribution' in str(e)
+                return 'probability tensor contains either `inf`, `nan` or element < 0' in str(e)
 
         @slowTest
         @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
@@ -1376,7 +1397,6 @@ class AbstractTestCases:
             self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
             self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
             self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
-            self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
         @suppress_warnings
         def test_range(self):
@@ -2613,6 +2633,14 @@ class AbstractTestCases:
             bad_src = torch.randn(*[i - 1 for i in idx_size])
             self.assertRaises(RuntimeError, lambda: torch.gather(bad_src, dim, idx))
 
+            # should throw an error when index dtype is not long
+            with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                torch.gather(src, dim, idx.to(torch.int))
+
+            # should throw an error when out.dtype != src.dtype.
+            with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                torch.gather(src, dim, idx, out=expected.to(torch.int))
+
             if test_bounds:
                 idx[0][0][0] = 23
                 self.assertRaises(RuntimeError, lambda: torch.gather(src, dim, idx))
@@ -2683,6 +2711,20 @@ class AbstractTestCases:
                             else:
                                 expected[tuple(ii)] = src
                 self.assertEqual(actual, expected, atol=0, rtol=0)
+
+                # should throw an error when self.dtype != src.dtype.
+                # we ignore the case when src is Scalar, as it gets
+                # cast via src.to<scalar_t>.
+                if not is_scalar:
+                    with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                        getattr(base.clone().type(torch.int), method)(dim, idx, src)
+
+                    with self.assertRaisesRegex(RuntimeError, 'Expected self.dtype to be equal to src.dtype'):
+                        getattr(base.clone(), method)(dim, idx, src.type(torch.int))
+
+                # should throw an error when index dtype is not long
+                with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                    getattr(base.clone(), method)(dim, idx.type(torch.int), src)
 
                 if test_bounds:
                     idx[0][0][0] = 34
@@ -3438,66 +3480,6 @@ class AbstractTestCases:
             result = torch.norm(x, 3, 1)
             expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
             self.assertEqual(result, expected)
-
-        @staticmethod
-        def _test_bernoulli(self, t_dtype, p_dtype, device):
-            for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
-                x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
-                self.assertEqual(x.bernoulli().tolist(), trivial_p)
-
-            def isBinary(t):
-                return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
-
-            p = torch.rand(5, 5, dtype=p_dtype, device=device)
-            self.assertTrue(isBinary(p.bernoulli()))
-
-            p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
-            self.assertTrue(isBinary(p.bernoulli()))
-
-            p = torch.rand(5, 5, dtype=p_dtype, device=device)
-            torch.bernoulli(torch.rand_like(p), out=p)
-            self.assertTrue(isBinary(p))
-
-            p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
-            torch.bernoulli(torch.rand_like(p), out=p)
-            self.assertTrue(isBinary(p))
-
-            t = torch.empty(10, 10, dtype=t_dtype, device=device)
-
-            t.fill_(2)
-            t.bernoulli_(0.5)
-            self.assertTrue(isBinary(t))
-
-            p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
-            t.fill_(2)
-            t.bernoulli_(p)
-            self.assertTrue(isBinary(t))
-
-            t.fill_(2)
-            torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
-            self.assertTrue(isBinary(t))
-
-            t.fill_(2)
-            t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
-            self.assertTrue(isBinary(t))
-
-        def test_bernoulli(self):
-            self._test_bernoulli(self, torch.float32, torch.float64, 'cpu')
-            # test that it works with integral tensors
-            self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
-            # test that it works with bool tensors
-            self._test_bernoulli(self, torch.bool, torch.float32, 'cpu')
-
-        @slowTest
-        def test_bernoulli_edge_cases(self):
-            # Need to draw a lot of samples to cover every random floating point number.
-            a = torch.zeros(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 0
-            num_ones = (torch.bernoulli(a) == 1).sum()
-            self.assertEqual(num_ones, 0)
-
-            b = torch.ones(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 1
-            num_zeros = (torch.bernoulli(b) == 0).sum()
-            self.assertEqual(num_zeros, 0)
 
         def test_generator_cpu(self):
             # test default generators are equal
@@ -5244,13 +5226,25 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             qy = qyraw.contiguous(memory_format=torch.channels_last)
             test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
 
-            # non contiguous case fast setup (dense, non-overlapping, same shape and sizes)
+            # non contiguous case fast setup (dense, non-overlapping, same shape and strides)
             x = xraw.permute(0, 2, 3, 1)
             y = yraw.permute(0, 2, 3, 1)
             test_memory_layout(x, y, None, None, x + y)
             qx = qxraw.permute(0, 2, 3, 1)
             qy = qyraw.permute(0, 2, 3, 1)
             test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
+
+            # non contiguous case fast setup (dense, non-overlapping)
+            # input tensors have same shape and strides
+            # output tensor have same shape as input tensors but different stride
+            # output tensor should preserve its strides in this case
+            x = xraw.permute(0, 2, 3, 1)
+            y = yraw.permute(0, 2, 3, 1)
+            out = torch.empty_like(xraw)
+            out = out.permute(0, 3, 2, 1)
+            expected_stride = out.stride()
+            test_memory_layout(x, y, None, None, torch.add(x, y, out=out))
+            self.assertEqual(expected_stride, out.stride())
 
             # non contiguous case non fast setup
             x = xraw.permute(0, 2, 3, 1)
@@ -8075,10 +8069,43 @@ class TestTorchDeviceType(TestCase):
         for i in range(1, rand_dim):
             # Check all combinations of `i` axis.
             for flip_dim in combinations(range(rand_dim), i):
-                data = torch.randn(*shape, dtype=dtype).tolist()
+                data = torch.randn(*shape, device=device, dtype=dtype)
                 torch_fn = partial(torch.flip, dims=flip_dim)
                 np_fn = partial(np.flip, axis=flip_dim)
-                self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+                self.compare_with_numpy(torch_fn, np_fn, data)
+
+    def _test_fliplr_flipud(self, torch_fn, np_fn, min_dim, max_dim, device, dtype):
+        for dim in range(min_dim, max_dim + 1):
+            shape = self._rand_shape(dim, 5, 10)
+            # Randomly scale the input
+            if dtype.is_floating_point or dtype.is_complex:
+                data = torch.randn(*shape, device=device, dtype=dtype)
+            else:
+                data = torch.randint(0, 10, shape, device=device, dtype=dtype)
+            self.compare_with_numpy(torch_fn, np_fn, data)
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_fliplr(self, device, dtype):
+        self._test_fliplr_flipud(torch.fliplr, np.fliplr, 2, 4, device, dtype)
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    def test_fliplr_invalid(self, device, dtype):
+        x = torch.randn(42).to(dtype)
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
+            torch.fliplr(x)
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 2-d."):
+            torch.fliplr(torch.tensor(42, device=device, dtype=dtype))
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_flipud(self, device, dtype):
+        self._test_fliplr_flipud(torch.flipud, np.flipud, 1, 4, device, dtype)
+
+    @dtypes(torch.int64, torch.double, torch.cdouble)
+    def test_flipud_invalid(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, "Input must be >= 1-d."):
+            torch.flipud(torch.tensor(42, device=device, dtype=dtype))
 
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
@@ -8118,10 +8145,10 @@ class TestTorchDeviceType(TestCase):
     def test_complex_rot90(self, device, dtype):
         shape = self._rand_shape(random.randint(2, 4), 5, 10)
         for rot_times in range(4):
-            data = torch.randn(*shape, dtype=dtype).tolist()
+            data = torch.randn(*shape, device=device, dtype=dtype)
             torch_fn = partial(torch.rot90, k=rot_times, dims=[0, 1])
             np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
-            self.compare_with_numpy(torch_fn, np_fn, data, device, dtype)
+            self.compare_with_numpy(torch_fn, np_fn, data)
 
     def test_signal_window_functions(self, device):
         if not TEST_SCIPY:
@@ -9214,6 +9241,8 @@ class TestTorchDeviceType(TestCase):
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
+    # Assert for illegal dtype would not be raised on XLA
+    @onlyOnCPUAndCUDA
     def test_minmax_illegal_dtype(self, device):
         x = torch.randn(5, 5, dtype=torch.float32, device=device)
         valid_values = torch.empty(5, dtype=torch.float32, device=device)
@@ -9447,7 +9476,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
-    def test_reduction_vectorized_corner(self, device, dtype):
+    def test_reduction_vectorize_along_input_corner(self, device, dtype):
         # 1D case: sum
         size = 1024 * 1024 * 64 + 3
         shift = 1
@@ -9543,23 +9572,56 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(xs1[j].item(), size[1] - i)
                 self.assertEqual(xs2[j].item(), size[1] - i)
 
+    @onlyCUDA
+    @dtypes(torch.half, torch.float, torch.double)
+    def test_reduction_vectorize_along_output(self, device, dtype):
+        def run_test(input_):
+            M, N = input_.shape
+            input_.zero_()
+            for i in range(min(M, N)):
+                input_[i][i] = 1
+            output1 = input_.argmax(dim=0)
+            output2 = input_.sum(dim=0)
+            for i in range(min(M, N)):
+                self.assertEqual(output1[i], i)
+                self.assertEqual(output2[i], 1)
+        # vec 4
+        run_test(torch.zeros(64, 64, dtype=dtype, device=device))
+        # vec 2
+        run_test(torch.zeros(64 * 64 + 2, dtype=dtype, device=device)[2:].view(64, 64))
+        run_test(torch.zeros(64, 62, dtype=dtype, device=device))
+        run_test(torch.zeros(64, 2, dtype=dtype, device=device))
+        # vec 1
+        run_test(torch.zeros(64 * 64 + 1, dtype=dtype, device=device)[1:].view(64, 64))
+        run_test(torch.zeros(64, 61, dtype=dtype, device=device))
+        run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
     @slowTest
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
-        # Requires > 8 GB of memory. So, if allocation fails just skip it.
-        try:
-            x = torch.zeros((2, 2**32), device=device, dtype=torch.int8)
-            x[:, -1] = 1
-            self.assertEqual(x.argmax(1), [x.shape[1] - 1] * 2)
-            self.assertEqual(x.max(1).indices, [x.shape[1] - 1] * 2)
-            x[:, -1] = -1
-            self.assertEqual(x.argmin(1), [x.shape[1] - 1] * 2)
-            self.assertEqual(x.min(1).indices, [x.shape[1] - 1] * 2)
-        except RuntimeError as e:
-            if 'memory' in str(e):
-                raise unittest.SkipTest('Insufficient memory')
-            raise
+        x = torch.zeros(2**31, device=device, dtype=torch.int8)
+        x[-1] = 1
+        self.assertEqual(x.argmax(0), x.shape[0] - 1)
+        self.assertEqual(x.max(0).indices, x.shape[0] - 1)
+        x[-1] = -1
+        self.assertEqual(x.argmin(0), x.shape[0] - 1)
+        self.assertEqual(x.min(0).indices, x.shape[0] - 1)
+
+    def test_argminmax_axis_with_dim_one(self, device):
+        # See: https://github.com/pytorch/pytorch/issues/38922
+        n = 32768
+        x = torch.zeros(1, n)
+        self.assertEqual(x.argmax(dim=0), torch.zeros(n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=0), torch.zeros(n, dtype=torch.int64))
+
+        self.assertEqual(x.argmax(dim=-2), torch.zeros(n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=-2), torch.zeros(n, dtype=torch.int64))
+
+        self.assertEqual(x.argmax(dim=0, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=0, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
+
+        self.assertEqual(x.argmax(dim=-2, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
+        self.assertEqual(x.argmin(dim=-2, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
 
     def test_remainder_overflow(self, device):
         # Check Integer Overflows
@@ -10878,6 +10940,73 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.dtype, dtype)
         self.assertEqual(a.size(), torch.Size([1]))
 
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_bernoulli_p(self, device, dtype):
+        for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
+            x = torch.tensor(trivial_p, dtype=dtype, device=device)
+            self.assertEqual(x.bernoulli().tolist(), trivial_p)
+
+        def isBinary(t):
+            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
+
+        p = torch.rand(5, 5, dtype=dtype, device=device)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, dtype=dtype, device=device).expand(5, 5)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, 5, dtype=dtype, device=device)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+        p = torch.rand(5, dtype=dtype, device=device).expand(5, 5)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+    # RngUniform not implemented for Integral type in XLA test
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCPU(*(torch.testing.get_all_dtypes(include_half=False, include_bfloat16=False, include_complex=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_dtypes(include_bfloat16=False, include_complex=False)))
+    def test_bernoulli_self(self, device, dtype):
+
+        def isBinary(t):
+            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
+
+        t = torch.empty(10, 10, dtype=dtype, device=device)
+
+        t.fill_(2)
+        t.bernoulli_(0.5)
+        self.assertTrue(isBinary(t))
+
+        for p_dtype in torch.testing.get_all_fp_dtypes(include_half=device.startswith('cuda'),
+                                                       include_bfloat16=False):
+            p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
+            t.fill_(2)
+            t.bernoulli_(p)
+            self.assertTrue(isBinary(t))
+
+            t.fill_(2)
+            torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
+            self.assertTrue(isBinary(t))
+
+            t.fill_(2)
+            t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
+            self.assertTrue(isBinary(t))
+
+    @slowTest
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_bernoulli_edge_cases(self, device, dtype):
+        # Need to draw a lot of samples to cover every random floating point number.
+        a = torch.zeros(10000, 10000, dtype=dtype, device=device)  # probability of drawing "1" is 0
+        num_ones = (torch.bernoulli(a) == 1).sum()
+        self.assertEqual(num_ones, 0)
+
+        b = torch.ones(10000, 10000, dtype=dtype, device=device)  # probability of drawing "1" is 1
+        num_zeros = (torch.bernoulli(b) == 0).sum()
+        self.assertEqual(num_zeros, 0)
+
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_exponential(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).exponential_(0.5)
@@ -11396,7 +11525,7 @@ class TestTorchDeviceType(TestCase):
         # complex
         m1 = torch.tensor((4.0000 + 4.0000j), dtype=torch.complex64)
         m2 = torch.tensor(4., dtype=torch.float64)
-        self.assertRaisesRegex(RuntimeError, r"result type ComplexDouble can't be cast to the desired output type Double",
+        self.assertRaisesRegex(RuntimeError, r"result type ComplexFloat can't be cast to the desired output type Double",
                                lambda: torch.add(m1, m1, out=m2))
 
 
@@ -13547,6 +13676,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
         def _test(amplitude, L, n):
@@ -13581,6 +13711,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @skipIfRocm
+    @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
         num_trials = 100
@@ -13645,6 +13776,7 @@ class TestTorchDeviceType(TestCase):
             _test(data_size, kwargs)
 
     @onlyOnCPUAndCUDA
+    @skipCPUIfNoMkl
     @skipIfRocm
     def test_batch_istft(self, device):
         original = torch.tensor([
@@ -14042,7 +14174,7 @@ class TestTorchDeviceType(TestCase):
     @deviceCountAtLeast(2)
     @onlyCUDA
     def test_cross_device_binary_ops(self, devices):
-        vals = (1, (2,))
+        vals = (1., (2.,))
         cpu_tensor = torch.randn(2, 2)
         for op in (operator.add, torch.add,
                    operator.sub, torch.sub,
@@ -14053,14 +14185,32 @@ class TestTorchDeviceType(TestCase):
                 a = torch.tensor(a, device=devices[0])
                 b = torch.tensor(b, device=devices[1])
 
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(a, b)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(b, a)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(a, cpu_tensor)
-                with self.assertRaisesRegex(RuntimeError, "expected device.+"):
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors.+"):
                     op(cpu_tensor, a)
+
+    # This test ensures that a scalar Tensor can be safely used
+    # in a binary operation in conjunction with a Tensor on all
+    # available CUDA devices
+    @deviceCountAtLeast(2)
+    @onlyCUDA
+    def test_binary_op_scalar_device_unspecified(self, devices):
+        scalar_val = torch.tensor(1.)
+        for default_device in devices:
+            with torch.cuda.device(default_device):
+                for device in devices:
+                    device_obj = torch.device(device)
+                    x = torch.rand(3, device=device)
+                    y0 = x * scalar_val
+                    self.assertEqual(y0.device, device_obj)
+                    y1 = scalar_val * x
+                    self.assertEqual(y1.device, device_obj)
+                    self.assertEqual(y0, y1)
 
     # Tests that CPU scalars (including zero dim tensors) can be used in
     # binary operations with CUDA tensors.
@@ -17140,6 +17290,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     # NumPy has the same behavior.
     @onlyOnCPUAndCUDA
     @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
+    @unittest.skipIf(IS_PPC, "Test is borken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
@@ -17430,6 +17581,49 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             a = np.array(val, dtype=torch_to_numpy_dtype_dict[dtype])
             self.assertEqual(t, torch.from_numpy(a))
 
+    def test_multinomial_invalid(self, device):
+        def test(probs):
+            with self.assertRaisesRegex(RuntimeError,
+                                        'probability tensor contains either `inf`, `nan` or element < 0'):
+                torch.multinomial(probs.to(device), 2)
+                torch.cuda.synchronize()
+
+        test(torch.Tensor([1, -1, 1]))
+        test(torch.Tensor([1, inf, 1]))
+        test(torch.Tensor([1, -inf, 1]))
+        test(torch.Tensor([1, 1, nan]))
+
+    def test_multinomial_invalid_distribution(self, device):
+        def test(probs, replacement):
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"invalid multinomial distribution \(sum of probabilities <= 0\)"):
+                torch.multinomial(probs, 2, replacement)
+                torch.cuda.synchronize()
+
+        x = torch.zeros(3, device=device)
+        y = torch.zeros(3, 3, device=device)
+        z = torch.zeros(3, 3, device=device)
+        z[1, :] = 1
+
+        test(x, False)
+        test(y, False)
+        test(z, False)
+
+        # Verify only for CPU as replacement=True
+        # throws device side assert triggered.
+        if self.device_type == 'cpu':
+            test(x, True)
+            test(y, True)
+            test(z, True)
+
+    def test_multinomial_empty(self, device):
+        probs = torch.ones(0, 3)
+        num_samples = 1
+        expected = torch.empty(0, num_samples, dtype=torch.int64)
+        for replacement in (True, False):
+            out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
+            self.assertEqual(out, expected)
+
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
 # Since linspace/logspace are deterministic, we can compute an expected
@@ -17710,7 +17904,7 @@ class TestDevicePrecision(TestCase):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
 
-        err_string = "output with device cpu doesn't match the desired device {0}".format(device)
+        err_string = "Expected all tensors to be on the same device, but found at least two devices, {0}".format(device)
 
         with self.assertRaisesRegex(RuntimeError, err_string):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)

@@ -80,6 +80,9 @@ class memory_format: ...
 
 # Defined in torch/csrc/utils/tensor_memoryformats.cpp
 contiguous_format: memory_format = ...
+channels_last: memory_format = ...
+channels_last_3d: memory_format = ...
+preserve_format: memory_format = ...
 
 # Defined in torch/csrc/QScheme.cpp
 class qscheme: ...
@@ -138,6 +141,8 @@ def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
 def _set_cudnn_benchmark(arg: _bool) -> None: ...  # THPModule_setBenchmarkCuDNN
 def _get_cudnn_deterministic() -> _bool: ...  # THPModule_deterministicCuDNN
 def _set_cudnn_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministicCuDNN
+def _get_deterministic() -> _bool: ...  # THPModule_deterministic
+def _set_deterministic(arg: _bool) -> None: ...  # THPModule_setDeterministic
 # NB: There is no Capsule type in typing, see
 # https://code.activestate.com/lists/python-dev/139675/
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
@@ -211,3 +216,13 @@ class _TensorBase(object):
     imag: Tensor
     _version: _bool
     ${tensor_method_hints}
+
+# Defined in torch/csrs/cuda/Module.cpp
+class _CudaDeviceProperties:
+    name: str
+    major: _int
+    minor: _int
+    multi_processor_count: _int
+    total_memory: _int
+    is_integrated: _int
+    is_multi_gpu_board: _int
