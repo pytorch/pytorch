@@ -109,9 +109,9 @@ struct TORCH_API ProfilerConfig {
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory) {}
   ~ProfilerConfig();
-  ProfilerState state;
-  bool report_input_shapes;
-  bool profile_memory;
+  ProfilerState state = Disabled;
+  bool report_input_shapes = false;
+  bool profile_memory = false;;
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.
@@ -280,8 +280,8 @@ private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
   at::StringView name_;
-  EventKind kind_;
-  uint16_t thread_id_;
+  EventKind kind_ = EventKind::Mark;
+  uint16_t thread_id_ = 0;
   at::RecordFunctionHandle handle_ {0};
   std::vector<std::vector<int64_t>> shapes_;
   int64_t cpu_memory_usage_ = 0;
