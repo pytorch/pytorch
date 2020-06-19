@@ -5226,13 +5226,25 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             qy = qyraw.contiguous(memory_format=torch.channels_last)
             test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
 
-            # non contiguous case fast setup (dense, non-overlapping, same shape and sizes)
+            # non contiguous case fast setup (dense, non-overlapping, same shape and strides)
             x = xraw.permute(0, 2, 3, 1)
             y = yraw.permute(0, 2, 3, 1)
             test_memory_layout(x, y, None, None, x + y)
             qx = qxraw.permute(0, 2, 3, 1)
             qy = qyraw.permute(0, 2, 3, 1)
             test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
+
+            # non contiguous case fast setup (dense, non-overlapping)
+            # input tensors have same shape and strides
+            # output tensor have same shape as input tensors but different stride
+            # output tensor should preserve its strides in this case
+            x = xraw.permute(0, 2, 3, 1)
+            y = yraw.permute(0, 2, 3, 1)
+            out = torch.empty_like(xraw)
+            out = out.permute(0, 3, 2, 1)
+            expected_stride = out.stride()
+            test_memory_layout(x, y, None, None, torch.add(x, y, out=out))
+            self.assertEqual(expected_stride, out.stride())
 
             # non contiguous case non fast setup
             x = xraw.permute(0, 2, 3, 1)
@@ -18051,12 +18063,12 @@ class TestViewOps(TestCase):
         fn(contiguous_input=False, dim0=1, dim1=2)
 
         # tensor with zero elements
-        x = torch.tensor([], device=device) # torch.Size([0])
+        x = torch.tensor([], device=device)  # torch.Size([0])
         self.assertRaisesRegex(
             RuntimeError, "Tensor must have a last dimension of size 2",
             lambda: torch.view_as_complex(x))
 
-        y = x.reshape(0,2) # torch.Size([0, 2])
+        y = x.reshape(0, 2)  # torch.Size([0, 2])
         res = torch.view_as_complex(y)
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0]))
@@ -18068,8 +18080,8 @@ class TestViewOps(TestCase):
             t = torch.randn(3, 4, dtype=dtype, device=device)
             input = self._do_transpose(t, contiguous_input)
             res = torch.view_as_real(input)
-            self.assertEqual(res[:,:,0], input.real)
-            self.assertEqual(res[:,:,1], input.imag)
+            self.assertEqual(res[:, :, 0], input.real)
+            self.assertEqual(res[:, :, 1], input.imag)
             self.assertTrue(self.is_view_of(t, res))
 
         fn()
@@ -18082,7 +18094,7 @@ class TestViewOps(TestCase):
         self.assertEqual(res.shape, torch.Size([0, 2]))
 
         # tensor with zero dim
-        x = torch.tensor(2+3j, dtype=dtype, device=device)
+        x = torch.tensor(2 + 3j, dtype=dtype, device=device)
         res = torch.view_as_real(x)
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([2]))
