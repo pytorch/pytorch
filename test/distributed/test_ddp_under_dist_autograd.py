@@ -513,6 +513,38 @@ class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
             )
         dist.destroy_process_group()
 
+    @requires_gloo()
+    @dist_init
+    def test_ddp_dist_autograd_sparse_grads(self):
+        # Each trainer uses a different random seed. Otherwise, they are going
+        # to have exactly the same initial model parameters, input, and
+        # therefore grads. That means the grads will be the same before and
+        # after DDP's all-reduce.
+        torch.manual_seed(self.rank)
+        dist.init_process_group(
+            backend="gloo",
+            init_method="file://{}".format(self.file_name),
+            world_size=self.world_size,
+            rank=self.rank)
+
+        model = nn.EmbeddingBag(10, 3, sparse=True)
+        ddp_model = DistributedDataParallel(model)
+
+        # Different inputs for each
+        input = torch.LongTensor(10).random_(0, 10)
+        offsets = torch.LongTensor([0, 4])
+
+        # Run local.
+        loss = ddp_model(input, offsets).sum()
+        loss.backward()
+
+        with dist_autograd.context() as context_id:
+            loss = ddp_model(input, offsets).sum()
+            dist_autograd.backward(context_id, [loss])
+            grads_dict = dist_autograd.get_gradients(context_id)
+            self.assertEqual(1, len(grads_dict))
+            self.assertEqual(model.weight.grad, grads_dict[model.weight])
+
 
 if __name__ == "__main__":
     run_tests()
