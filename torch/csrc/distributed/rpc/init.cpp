@@ -287,7 +287,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
-                  Create a helper proxy to easily launch an ``remote`` using
+                  Create a helper proxy to easily launch a ``remote`` using
                   the owner of the RRef as the destination to run functions on
                   the object referenced by this RRef. More specifically,
                   ``rref.remote().func_name(*args, **kwargs)`` is the same as
