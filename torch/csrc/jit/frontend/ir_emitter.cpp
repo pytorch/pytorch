@@ -3546,8 +3546,22 @@ struct to_ir {
           range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return std::make_shared<SimpleValue>(emitBasicSlice(
-          range, sv->asValue(val_range, method), subscript_exprs));
+      if(sv->kind() == "module") {
+        // TODO Special case for Sequential only, make sure not other modules
+        auto s_tuple_val = sv->asTupleValue(val_range, method);
+
+        const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        auto tupleSliceValue = emitTupleSlice(
+            val_range,
+            s_tuple_val->asValue(val_range, method),
+            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0)))),
+            NamedValue(val_range, "end", emitExpr(Expr(slice.end().get()))));
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+
+      } else {
+        return std::make_shared<SimpleValue>(emitBasicSlice(
+            range, sv->asValue(val_range, method), subscript_exprs));
+      }
     } else {
       // Desugars gather syntactic sugar foo[i]
       Value* idx = emitExpr(subscript_exprs[0]);
