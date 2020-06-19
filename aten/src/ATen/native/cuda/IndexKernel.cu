@@ -42,16 +42,6 @@ static void launch_kernel(int64_t N, const func_t& f) {
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template <int N>
-static OffsetCalculator<N> index_make_offset_calculator(const TensorIterator& iter) {
-  AT_ASSERT(N <= iter.ntensors());
-  std::array<const int64_t*, N> strides;
-  for (int i = 0; i < N; i++) {
-    strides[i] = iter.strides(i).data();
-  }
-  return OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data());
-}
-
 template <typename func_t>
 void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
   int num_indices = index_size.size();
@@ -81,7 +71,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   char* out_ptr = (char*)iter.data_ptr(0);
   char* in_ptr = (char*)iter.data_ptr(1);
 
-  auto offset_calc = index_make_offset_calculator<3>(iter);
+  auto offset_calc = make_offset_calculator<3>(iter);
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
     auto offsets = offset_calc.get(idx);
     char* out_data = out_ptr + offsets[0];

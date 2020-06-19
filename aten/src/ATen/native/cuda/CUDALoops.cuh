@@ -60,45 +60,6 @@
 
 namespace at { namespace native {
 
-// See [NOTE: Complex Operator Unification]
-// std::complex and thrust::complex don't work with some !needs_dynamic_casting optimizations.
-// They always currently map to !needs_dynamic_casting even though we sometimes rely on the ability
-// to reinterpret_cast between these representations.
-// In order to separate these concerns, we have a check for non-c10 complex separately.
-template<typename func_t, int nargs=function_traits<func_t>::arity>
-struct uses_non_c10_complex {
-  constexpr static bool check() {
-    using traits = function_traits<func_t>;
-    using type = typename traits::template arg<nargs - 1>::type;
-    constexpr bool non_c10_complex =
-        std::is_same<std::complex<float>, type>::value
-        || std::is_same<std::complex<double>, type>::value
-        || std::is_same<thrust::complex<float>, type>::value
-        || std::is_same<thrust::complex<double>, type>::value;
-
-    return c10::guts::if_constexpr<non_c10_complex>([]() {
-      return true;
-    }, /* else */ []() {
-      return uses_non_c10_complex<func_t, nargs - 1>::check();
-    });
-  }
-};
-
-template<typename func_t>
-struct uses_non_c10_complex<func_t, 0> {
-  constexpr static bool check() {
-    using traits = function_traits<func_t>;
-    using type = typename traits::result_type;
-    constexpr bool non_c10_complex =
-        std::is_same<std::complex<float>, type>::value
-        || std::is_same<std::complex<double>, type>::value
-        || std::is_same<thrust::complex<float>, type>::value
-        || std::is_same<thrust::complex<double>, type>::value;
-
-    return non_c10_complex;
-  }
-};
-
 template<typename func_t, typename policy_t>
 __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   using traits = function_traits<func_t>;
@@ -163,10 +124,6 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
-  auto input_calc = TrivialOffsetCalculator<traits::arity>();
-  auto output_calc = TrivialOffsetCalculator<1>();
-  auto loader = memory::LoadWithoutCast();
-  auto storer = memory::StoreWithoutCast();
 
   switch (vec_size) {
   case 4:
@@ -175,9 +132,14 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   case 2:
     vectorized_elementwise_kernel<2, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
     break;
-  case 1:
+  case 1: {
+    auto input_calc = TrivialOffsetCalculator<traits::arity>();
+    auto output_calc = TrivialOffsetCalculator<1>();
+    auto loader = memory::LoadWithoutCast();
+    auto storer = memory::StoreWithoutCast();
     unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, input_calc, output_calc, loader, storer);
     break;
+  }
   default:
     TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
   }
@@ -214,9 +176,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
 
   bool contiguous = iter.is_contiguous();
   bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
-  bool non_c10_complex = uses_non_c10_complex<func_t>::check();
 
-  if (!dynamic_casting && !non_c10_complex) {
+  if (!dynamic_casting) {
     if (contiguous) {
       launch_vectorized_kernel(numel, f, data);
     } else {
