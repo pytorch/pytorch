@@ -5,7 +5,7 @@
 
 #include <cuda_runtime.h>
 
-TEST(TestStream, RegisterEventTest) {
+TEST(TestStream, RegisterStreamTest) {
   {
     // Invalid device should throw
     cudaStream_t stream;
@@ -15,7 +15,7 @@ TEST(TestStream, RegisterEventTest) {
   }
 
   {
-    // Invalid stream should throw with destroyed stream
+    // Invalid(destroyed) stream should throw
     cudaStream_t stream;
     ASSERT_TRUE(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess);
     ASSERT_TRUE(cudaStreamDestroy(stream) == cudaSuccess);
@@ -23,7 +23,7 @@ TEST(TestStream, RegisterEventTest) {
   }
 
   {
-    // Stream can correctly cast back to the old stream
+    // Custom CUDAStream can cast back to the correct cudaStream_t
     cudaStream_t stream;
     ASSERT_TRUE(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess);
     ASSERT_TRUE(c10::cuda::registerCustomCUDAStream(0, stream).stream() == stream);
@@ -31,7 +31,7 @@ TEST(TestStream, RegisterEventTest) {
   }
 
   {
-    // Stream works with StreamGuard
+    // Custom CUDAStream works with StreamGuard
     cudaStream_t stream;
     ASSERT_TRUE(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess);
     c10::cuda::CUDAStream custom_stream = c10::cuda::registerCustomCUDAStream(0, stream);
