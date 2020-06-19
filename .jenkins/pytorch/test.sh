@@ -269,7 +269,7 @@ test_bazel() {
 
   get_bazel
 
-  tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+  tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
 
 test_cpp_extensions() {
