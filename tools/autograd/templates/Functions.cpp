@@ -273,12 +273,13 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
 
 Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& result) {
   at::Tensor input_copy = at::where(at::isnan(input), at::ones_like(input), input);
+  at::Tensor result_copy = at::where(at::isnan(result), at::ones_like(result), result);
   if (input_copy.dim() == 0) {
     return grad;
   }
   Tensor zero_idx = (input_copy == 0).nonzero();
   if (zero_idx.numel() == 0) {
-    return (grad * result);
+    return (grad * result_copy);
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input_copy, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
@@ -288,20 +289,21 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
 
 Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t dim, bool keepdim) {
   at::Tensor input_copy = at::where(at::isnan(input), at::ones_like(input), input);
+  at::Tensor result_copy = at::where(at::isnan(result), at::ones_like(result), result);
   if (input_copy.dim() == 0) {
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input_copy.sizes().size());
   if (!keepdim && input_copy.dim() != 1) {
     grad = grad.unsqueeze(dim);
-    result = result.unsqueeze(dim);
+    result_copy = result_copy.unsqueeze(dim);
   }
 
   Tensor zero_mask = (input_copy == 0);
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
-    return (grad * result) / input_copy;
+    return (grad * result_copy) / input_copy;
   } else {
     return prod_safe_zeros_backward(grad, input_copy, dim);
   }
