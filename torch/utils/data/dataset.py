@@ -160,11 +160,11 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     Arguments:
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
-    tensors: List[Tensor]
+    tensors: Tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
         assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
-        self.tensors = list(tensors)
+        self.tensors = tensors
 
     def __getitem__(self, index):
         return tuple(tensor[index] for tensor in self.tensors)
