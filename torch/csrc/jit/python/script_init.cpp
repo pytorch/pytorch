@@ -1016,13 +1016,6 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def(
-          "_clone",
-          [](Module& self, bool inplace) { return self.clone(inplace); },
-          py::arg("inplace") = false)
-      .def("_clone_instance", &Module::clone_instance)
-      .def("copy", &Module::copy)
-      .def("deepcopy", &Module::deepcopy)
-      .def(
           "__deepcopy__",
           [](const Module& self, const py::dict& memo) {
             return Module(

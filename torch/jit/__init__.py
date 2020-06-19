@@ -1883,12 +1883,6 @@ if _enabled:
                 # It's fairly trivial to save enough info to warn in this case.
                 return super(RecursiveScriptModule, self).__setattr__(attr, value)
 
-        def copy(self):
-            return torch.jit._recursive.wrap_cpp_module(self._c._clone())
-
-        def copy_instance(self):
-            return torch.jit._recursive.wrap_cpp_module(self._c._clone_instance())
-
         def __deepcopy__(self, memo):
             return torch.jit._recursive.wrap_cpp_module(copy.deepcopy(self._c, memo))
 
