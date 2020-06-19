@@ -21,9 +21,13 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.testing._internal.common_distributed import (
+    TEST_SKIPS,
     MultiProcessTestCase,
     simple_sparse_reduce_tests,
     skip_if_rocm,
+    skip_if_small_worldsize,
+    skip_if_lt_x_gpu,
+    skip_if_no_gpu,
 )
 
 try:
@@ -111,55 +115,6 @@ if not dist.is_available():
     sys.exit(0)
 
 
-SKIP_IF_NO_CUDA_EXIT_CODE = 75
-SKIP_IF_NO_GPU_EXIT_CODE = 76
-SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE = 77
-SKIP_IF_BACKEND_UNAVAILABLE = 78
-SKIP_IF_ROCM_EXIT_CODE = 79
-
-
-def skip_if_no_cuda_distributed(func):
-    func.skip_if_no_cuda_distributed = True
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not torch.cuda.is_available():
-            sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
-
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-def skip_if_no_gpu(func):
-    """ Nccl multigpu tests requires at least 2 GPUS. Skip if this is not met"""
-    func.skip_if_no_gpu = True
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not torch.cuda.is_available():
-            sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
-        if torch.cuda.device_count() < int(os.environ["WORLD_SIZE"]):
-            sys.exit(SKIP_IF_NO_GPU_EXIT_CODE)
-
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-def skip_if_small_worldsize(func):
-    func.skip_if_small_worldsize = True
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
-            sys.exit(SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE)
-
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 def skip_if_no_ninja(func):
 
     @wraps(func)
@@ -203,30 +158,6 @@ def require_world_size(world_size):
     return lambda func: func
 
 
-def require_num_gpus(n):
-    """
-    Require environment to have access to at least `n` GPUs.
-    Test is skipped otherwise.
-
-    Note: this check cannot run in the parent process, because calling
-    `torch.cuda.is_initialized()` will cause lazy initialization of a
-    CUDA runtime API context, and CUDA doesn't support forking.
-    """
-    def decorator(func):
-        func.skip_if_no_gpu = True
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if not torch.cuda.is_available():
-                sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
-            if torch.cuda.device_count() < n:
-                sys.exit(SKIP_IF_NO_GPU_EXIT_CODE)
-            return func(*args, **kwargs)
-        return wrapper
-
-    return decorator
-
-
 def apply_hack_for_nccl():
     # This is a hack for a known NCCL issue using multiprocess
     # in conjunction with multiple threads to manage different GPUs which
@@ -249,10 +180,10 @@ def _lock():
             lf.close()
 
 
-def _build_tensor(size, value=None):
+def _build_tensor(size, value=None, dtype=torch.float):
     if value is None:
         value = size
-    return torch.FloatTensor(size, size, size).fill_(value)
+    return torch.empty(size, size, size, dtype=dtype).fill_(value)
 
 
 def _build_multidim_tensor(dim, dim_size, value=None):
@@ -272,7 +203,7 @@ class Barrier(object):
             os.unlink(os.path.join(barrier_dir, f_name))
 
     @classmethod
-    def sync(cls, wait_for=None, timeout=5):
+    def sync(cls, wait_for=None, timeout=10):
         if wait_for is None:
             wait_for = dist.get_world_size()
         cls.barrier_id += 1
@@ -523,14 +454,13 @@ class _DistTestBase(object):
     @require_backend({"gloo", "nccl"})
     @require_backends_available({"gloo", "nccl"})
     @require_world_size(3)
-    @require_num_gpus(2)
-    @skip_if_rocm
+    @skip_if_lt_x_gpu(2)
     def test_backend_group(self):
         self._test_group_override_backend(self._init_group_test)
 
     @require_backend({"gloo", "nccl"})
     @require_backends_available({"gloo", "nccl"})
-    @require_num_gpus(3)
+    @skip_if_lt_x_gpu(3)
     def test_backend_full_group(self):
         self._test_group_override_backend(self._init_full_group_test)
 
@@ -654,25 +584,25 @@ class _DistTestBase(object):
     def _test_broadcast_helper(
         self, group, group_id, rank, cuda=False, rank_to_GPU=None
     ):
-        for ttype, value, requires_cuda in [
-            ("torch.FloatTensor", -1e-10, False),
-            ("torch.DoubleTensor", -1e-100, False),
-            ("torch.HalfTensor", -0.1, True),
-            ("torch.CharTensor", -2, False),
-            ("torch.ByteTensor", 129, False),
-            ("torch.IntTensor", -1e5, False),
-            ("torch.LongTensor", -1e15, False),
+        for dtype, value, requires_cuda in [
+            (torch.float, -1e-10, False),
+            (torch.double, -1e-100, False),
+            (torch.half, -0.1, True),
+            (torch.int8, -2, False),
+            (torch.uint8, 129, False),
+            (torch.int, -1e5, False),
+            (torch.long, -1e15, False),
         ]:
             if requires_cuda and not cuda:
                 continue
             for src in group:
-                expected_tensor = _build_tensor(src + 1, value).type(ttype)
+                expected_tensor = _build_tensor(src + 1, value, dtype)
                 if cuda:
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                 if rank == src:
                     dist.broadcast(expected_tensor, src, group_id)
                 else:
-                    tensor = _build_tensor(src + 1, -1).type(ttype)
+                    tensor = _build_tensor(src + 1, -1, dtype)
                     if cuda:
                         tensor = tensor.cuda(rank_to_GPU[rank][0])
                     dist.broadcast(tensor, src, group_id)
@@ -690,7 +620,6 @@ class _DistTestBase(object):
         BACKEND != "gloo" and BACKEND != "nccl",
         "Only Gloo and Nccl backend supports CUDA allReduce",
     )
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_broadcast_cuda(self):
         group, group_id, rank = self._init_global_test()
@@ -750,7 +679,6 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA reduce")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @skip_if_rocm
     def test_reduce_sum_cuda(self):
@@ -913,7 +841,6 @@ class _DistTestBase(object):
         BACKEND != "gloo",
         "Only Gloo backend will have CUDA allReduce tested",
     )
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_all_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
@@ -1059,7 +986,6 @@ class _DistTestBase(object):
         self._test_sparse_all_reduce_sum(lambda t: t)
 
     @unittest.skipIf(BACKEND != "gloo", "Only Gloo backend support sparse all reduce")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @skip_if_rocm
     def test_sparse_all_reduce_sum_cuda(self):
@@ -1413,7 +1339,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA all gather")
     @unittest.skipIf(BACKEND == "nccl", "CUDA all gather skipped for NCCL")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_all_gather_cuda(self):
         group, group_id, rank = self._init_global_test()
@@ -1983,7 +1908,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @skip_if_rocm
     def test_DistributedDataParallel(self):
@@ -2045,7 +1969,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
@@ -2087,7 +2010,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
         group, group_id, rank = self._init_global_test()
@@ -2135,7 +2057,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     @require_world_size(2)
     @skip_if_rocm
@@ -2185,7 +2106,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(self):
         group, group_id, rank = self._init_global_test()
@@ -2215,7 +2135,6 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
-    @skip_if_no_cuda_distributed
     @skip_if_no_gpu
     def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_gradient(self):
         group, group_id, rank = self._init_global_test()
@@ -2312,8 +2231,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 )
             except RuntimeError as e:
                 if "recompile" in e.args[0]:
-                    sys.exit(SKIP_IF_BACKEND_UNAVAILABLE)
-                    # sys.exit(0)
+                    sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
+
                 raise
 
             # Execute barrier prior to running test to ensure that every process

@@ -232,7 +232,7 @@ c10::IValue BytecodeDeserializer::readArchive(
     auto setstate = mcu->find_function(method_name);
     auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
       auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
-      if (custom_class_type && custom_class_type->getMethod("__setstate__")) {
+      if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
         return custom_class_type;
       }
       return nullptr;
@@ -246,7 +246,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       auto obj = c10::ivalue::Object::create(
           c10::StrongTypePtr(nullptr, custom_class_type), 1);
       Stack stack({obj, input});
-      custom_class_type->getMethod("__setstate__")->run(stack);
+      custom_class_type->getMethod("__setstate__").run(stack);
       return obj;
     } else {
       auto dict = std::move(input).toGenericDict();

@@ -13,6 +13,7 @@ from torch.nn import Module
 from torch.serialization import validate_cuda_device
 from torch._six import PY37, with_metaclass, string_classes, get_function_from_type
 from torch.utils import set_module
+from torch.autograd.grad_mode import _DecoratorContextManager
 
 import collections
 import contextlib
@@ -27,7 +28,6 @@ import sys
 import textwrap
 import warnings
 import weakref
-
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
@@ -83,6 +83,51 @@ def optimized_execution(should_optimize):
     finally:
         torch._C._set_graph_executor_optimize(stored_flag)
 
+@contextlib.contextmanager
+def fuser(name):
+    """
+    A context manager that facilitates switching between
+    backend fusers.
+
+    Valid names:
+    * ``fuser0`` - enables only legacy fuser
+    * ``fuser1`` - enables only NNC
+    * ``fuser2`` - enables only nvFuser
+    """
+    old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
+    old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
+    old_texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+    old_nvfuser_state = torch._C._jit_nvfuser_enabled()
+    if name == 'fuser0':  # legacy fuser
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_set_nvfuser_enabled(False)
+    elif name == 'fuser1':  # NNC
+        old_profiling_executor = torch._C._jit_set_profiling_executor(True)
+        old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_set_texpr_fuser_enabled(True)
+        torch._C._jit_set_nvfuser_enabled(False)
+    elif name == 'fuser2':  # nvFuser
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_set_texpr_fuser_enabled(False)
+        torch._C._jit_set_nvfuser_enabled(True)
+    else:
+        raise Exception("unrecognized fuser option")
+    try:
+        yield
+    finally:
+        if name == 'fuser1':  # NNC
+            torch._C._jit_set_profiling_executor(old_profiling_executor)
+            torch._C._jit_set_profiling_mode(old_profiling_mode)
+        # recover the previous values
+        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
+        torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
+        torch._C._jit_set_texpr_fuser_enabled(old_texpr_fuser_state)
+        torch._C._jit_set_nvfuser_enabled(old_nvfuser_state)
 
 DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 
@@ -219,14 +264,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
             raise ValueError("The provided filename {} does not exist".format(f))
         if os.path.isdir(f):
             raise ValueError("The provided filename {} is a directory".format(f))
-    if isinstance(map_location, string_classes):
-        map_location = torch.device(map_location)
-    elif not (map_location is None or
-              isinstance(map_location, torch.device)):
-        raise ValueError("map_location should be either None, string or torch.device, "
-                         "but got type: " + str(type(map_location)))
-    if (str(map_location).startswith('cuda')):
-        validate_cuda_device(map_location)
+
+    map_location = validate_map_location(map_location)
 
     cu = torch._C.CompilationUnit()
     if isinstance(f, str) or isinstance(f, pathlib.Path):
@@ -236,6 +275,19 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
 
     # TODO: Pretty sure this approach loses ConstSequential status and such
     return torch.jit._recursive.wrap_cpp_module(cpp_module)
+
+def validate_map_location(map_location=None):
+    if isinstance(map_location, str):
+        map_location = torch.device(map_location)
+    elif not (map_location is None or
+              isinstance(map_location, torch.device)):
+        raise ValueError("map_location should be either None, string or torch.device, "
+                         "but got type: " + str(type(map_location)))
+
+    if (str(map_location).startswith('cuda')):
+        validate_cuda_device(map_location)
+
+    return map_location
 
 def export_opnames(m):
     r"""
@@ -1098,13 +1150,21 @@ def _try_get_overloaded_fn(mod, field):
 class ScriptWarning(Warning):
     pass
 
-
 @contextlib.contextmanager
 def _disable_emit_hooks():
     hooks = torch._C._jit_get_emit_hooks()
     torch._C._jit_set_emit_hooks(None, None)
     yield
     torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+
+
+def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
+    def __enter__(self):
+        self.hooks = torch._C._jit_get_emit_hooks()
+        torch._C._jit_set_emit_hooks(None, None)
+
+    def __exit__(self, *args):
+        torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -1128,6 +1188,14 @@ def whichmodule(obj):
         except AttributeError:
             pass
     return '__main__'
+
+def _recursive_compile_class(obj, loc):
+    _qual_name = _qualified_name(obj)
+    # We're starting a new compilation, so update the error call stack in
+    # case it fails
+    error_stack = torch._C.CallStack(_qual_name, loc)
+    rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
+    _compile_and_register_class(obj, rcb, _qual_name)
 
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
@@ -1310,7 +1378,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
         if maybe_already_compiled_fn:
             return maybe_already_compiled_fn
-        ast = get_jit_def(obj)
+        ast = get_jit_def(obj, obj.__name__)
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
@@ -1325,6 +1393,10 @@ def interface(obj):
     if not _is_new_style_class(obj):
         raise RuntimeError("TorchScript interfaces must inherit from 'object'")
 
+    # Expected MRO is:
+    #   User module
+    #   torch.nn.modules.module.Module
+    #   object
     is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
 
     if not is_module_interface and len(obj.mro()) > 2:
@@ -1385,7 +1457,7 @@ def script_method(fn):
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     _rcb = _jit_internal.createResolutionCallbackFromFrame(frames_up=2)
-    ast = get_jit_def(fn, self_name="ScriptModule")
+    ast = get_jit_def(fn, fn.__name__, self_name="ScriptModule")
     return ScriptMethodStub(_rcb, ast, fn)
 
 
@@ -1486,7 +1558,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     parameters are initialized _before_ the script compiler resolve references to
 #     `self.param` or `self.module`.
 class ScriptMeta(type):
-    def __init__(cls, name, bases, attrs):
+    def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods = {}
         cls._constants_set = set(getattr(cls, '__constants__', ()))
@@ -1572,8 +1644,12 @@ if _enabled:
                 # This ensures that if we use the attr again in `__init__`, it
                 # will look like the actual value, not an instance of Attribute.
                 if isinstance(value, Attribute):
-                    if not hasattr(self, "__annotations__"):
-                        self.__annotations__ = {}
+                    # NB: Ensure that we set __annotations__ on the specific
+                    # class in question, and not on a superclass (which would
+                    # be wrong wrong wrong!).
+                    # See also https://github.com/pytorch/pytorch/issues/39463
+                    if "__annotations__" not in self.__class__.__dict__:
+                        self.__class__.__annotations__ = {}
                     self.__annotations__[attr] = value.type
                     value = value.value
                 return super(ScriptModule, self).__setattr__(attr, value)
@@ -1729,6 +1805,9 @@ if _enabled:
 
             """
             return self._c._save_for_mobile(*args, **kwargs)
+
+        def _save_to_buffer_for_lite_interpreter(self, *args, **kwargs):
+            return self._c._save_to_buffer_for_mobile(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):
             return self._c.save_to_buffer(*args, **kwargs)
@@ -2090,9 +2169,9 @@ def _check_overload_defaults(impl_defaults, overload_defaults, loc):
                 "parameter {name}".format(name=name))
 
 def _compile_function_with_overload(overload_fn, qual_name, impl_fn):
-    overload_decl = torch.jit.get_jit_def(overload_fn).decl()
+    overload_decl = torch.jit.get_jit_def(overload_fn, overload_fn.__name__).decl()
     overload_signature = torch.jit.annotations.get_signature(overload_fn, None, None, inspect.ismethod(overload_fn))
-    impl_ast = torch.jit.get_jit_def(impl_fn)
+    impl_ast = torch.jit.get_jit_def(impl_fn, impl_fn.__name__)
     overload_defaults = get_default_args(overload_fn)
     implementation_defaults = get_default_args(impl_fn)
     _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)

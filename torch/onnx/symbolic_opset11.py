@@ -8,7 +8,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_opset9 import expand
+from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
 
 
@@ -43,6 +43,16 @@ def clamp(g, self, min, max):
         min = _cast_if_not_none(min, dtype)
         max = _cast_if_not_none(max, dtype)
     return g.op("Clip", self, min, max)
+
+
+def clamp_min(g, self, min):
+    max = unused(g)
+    return clamp(g, self, min, max)
+
+
+def clamp_max(g, self, max):
+    min = unused(g)
+    return clamp(g, self, min, max)
 
 
 # Opset 11 gather accepts negative indices

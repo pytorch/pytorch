@@ -27,6 +27,8 @@ elif [[ "$image" == *-artful* ]]; then
   UBUNTU_VERSION=17.10
 elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
+elif [[ "$image" == *-focal* ]]; then
+  UBUNTU_VERSION=20.04
 fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
@@ -76,10 +78,11 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-cuda9-cudnn7-py3)
-    CUDA_VERSION=9.0
+  pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4)
+    CUDA_VERSION=9.2
     CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=5
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -136,7 +139,7 @@ case "$image" in
     PROTOBUF=yes
     ANDROID=yes
     ANDROID_NDK_VERSION=r19c
-    GRADLE_VERSION=4.10.3
+    GRADLE_VERSION=6.5
     CMAKE_VERSION=3.7.0
     NINJA_VERSION=1.9.0
     ;;
@@ -154,15 +157,46 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-rocm-py3.6-clang7)
-    ANACONDA_PYTHON_VERSION=3.6
-    CLANG_VERSION=7
+  pytorch-linux-bionic-py3.8-gcc9)
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM=yes
+    ;;
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-xenial-rocm3.3-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.3
     # newer cmake version required
     CMAKE_VERSION=3.6.3
+    ;;
+  pytorch-linux-bionic-rocm3.3-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.3
     ;;
 esac
 
@@ -179,6 +213,7 @@ tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
 # it's no longer needed.
 docker build \
        --no-cache \
+       --progress=plain \
        --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
@@ -203,7 +238,7 @@ docker build \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
-       --build-arg "ROCM=${ROCM:-}" \
+       --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

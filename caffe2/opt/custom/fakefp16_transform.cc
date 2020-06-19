@@ -23,6 +23,8 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
   std::unordered_map<std::string, std::string> fake_fp16_op_conversion_map = {
       {"FC", "Fp16FCAcc32NNPI"},
       {"Int8FC", "Int8FCFakeAcc32NNPI"},
+      {"Int8Quantize", "Int8QuantizeNNPI"},
+      {"Int8Dequantize", "Int8DequantizeNNPI"},
       {"FbFCPacked", "Fp16FCAcc32NNPI"},
       {"SparseLengthsSum", "SparseLengthsSumFakeFP16AccFP16"},
       {"SparseLengthsWeightedSum", "SparseLengthsWeightedSumFakeFP16AccFP16"},

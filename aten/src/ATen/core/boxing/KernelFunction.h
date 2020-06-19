@@ -17,6 +17,15 @@ struct OperatorKernel;
 // boxing/unboxing codepath.
 CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
 
+// Note [named_not_supported_kernel]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// This kernel implements reporting an error message saying that named tensor is
+// not supported.  This kernel doesn't rely on the Stack, and so it is special
+// cased in the dispatcher to be triggered before we attempt boxing (so we can
+// give a good error message in cases when boxing is not supported).  When
+// boxing is universally supported this can be removed.
+[[noreturn]] CAFFE2_API void named_not_supported_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
  * You can create a KernelFunction from a boxed or unboxed function/functor/lambda
@@ -66,16 +75,16 @@ public:
    *
    * > KernelFunction func = KernelFunction::makeFromUnboxedLambda(
    * >      [] (Tensor a, bool b) -> Tensor {...});
-   * > Tensor result = func.callUnboxed<Tensor, Tensor, bool>(tensor1, true);
+   * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    *
    * Or, with a boxed implementation:
    *
    * > void boxed_func(OperatorKernel*, Stack* stack) {...}
    * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
-   * > Tensor result = func.callUnboxed<Tensor, Tensor, bool>(tensor1, true);
+   * > Tensor result = func.call<Tensor, Tensor, bool>(tensor1, true);
    */
   template<class Return, class... Args>
-  Return callUnboxed(const OperatorHandle& opHandle, Args... args) const;
+  Return call(const OperatorHandle& opHandle, Args... args) const;
 
   /**
    * Create a KernelFunction from a boxed function.
@@ -104,9 +113,8 @@ public:
 
   /**
    * Create a KernelFunction from an unboxed functor and prevent creation of an
-   * unboxing-wrapper. This means that you can only call this KernelFunction
-   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
-   * or KernelFunction::callUnboxed().
+   * unboxing-wrapper. This means that you cannot call this KernelFunction
+   * using KernelFunction::callBoxed()
    *
    * This is necessary because our unboxing wrappers don't work for all types
    * yet, so if you want to use one of these types as function arguments,
@@ -135,14 +143,13 @@ public:
    * > Tensor unboxed_func(Tensor a, Tensor b) {...}
    * > KernelFunction func = KernelFunction::makeFromUnboxedFunction<decltype(unboxed_func), &unboxed_func>();
    */
-  template<class FuncType, FuncType* func, bool AllowLegacyTypes = false>
-  static KernelFunction makeFromUnboxedFunction();
+  template<class FuncPtr, bool AllowLegacyTypes = false>
+  static KernelFunction makeFromUnboxedFunction(FuncPtr);
 
   /**
    * Create a KernelFunction from an unboxed function and prevent creation of an
-   * unboxing-wrapper. This means that you can only call this KernelFunction
-   * using KernelFunction::callUnboxedOnly(), not using KernelFunction::callBoxed()
-   * or KernelFunction::callUnboxed().
+   * unboxing-wrapper. This means that you cannot call this KernelFunction
+   * using KernelFunction::callBoxed()
    *
    * This is necessary because our unboxing wrappers don't work for all types
    * yet, so if you want to use one of these types as function arguments,
@@ -153,8 +160,8 @@ public:
    * > Tensor unboxed_func(Tensor a, Tensor b) {...}
    * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(unboxed_func), &unboxed_func>();
    */
-  template<class FuncType, FuncType* func>
-  static KernelFunction makeFromUnboxedOnlyFunction();
+  template<class FuncPtr>
+  static KernelFunction makeFromUnboxedOnlyFunction(FuncPtr);
 
   /**
    * Create a KernelFunction from an unboxed function.
@@ -174,6 +181,7 @@ public:
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
 
   static KernelFunction makeFallthrough();
+  static KernelFunction makeNamedNotSupported();
 
   /**
    * Create a KernelFunction from an unboxed lambda.
@@ -202,6 +210,8 @@ private:
 
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
+
+  void checkBoxedKernel(const OperatorHandle& opHandle) const;
 
   OperatorKernel* getFunctor_() const;
 

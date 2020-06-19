@@ -36,6 +36,8 @@ DEFINE_DISPATCH(max_elementwise_stub);
 DEFINE_DISPATCH(min_elementwise_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(fmod_scalar_stub);
+DEFINE_DISPATCH(logaddexp_stub);
+DEFINE_DISPATCH(logaddexp2_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -60,8 +62,8 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (isIntegralType(result.scalar_type(), /*includeBool=*/ true)) {
-    TORCH_WARN_ONCE(
-      "Integer division of tensors using div or / is deprecated, ",
+    TORCH_CHECK(false,
+      "Integer division of tensors using div or / is no longer supported, ",
       "and in a future release div will perform true division as in Python 3. ",
       "Use true_divide or floor_divide (// in Python) instead.");
   }
@@ -75,11 +77,12 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
 Tensor div(const Tensor& self, const Tensor& other) {
   if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
       && isIntegralType(other.scalar_type(), /*includeBool=*/ true)) {
-    TORCH_WARN_ONCE(
-      "Integer division of tensors using div or / is deprecated, ",
+    TORCH_CHECK(false,
+      "Integer division of tensors using div or / is no longer supported, ",
       "and in a future release div will perform true division as in Python 3. ",
       "Use true_divide or floor_divide (// in Python) instead.");
   }
+
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter.device_type(), iter);
@@ -109,23 +112,34 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
-  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/ true),
-            "True division requires a floating output type, but got ",
-            result.scalar_type());
+  // If both inputs have integral (or bool) types, creates
+  // temporary float copies as new inputs.
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
+   && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    auto iter = TensorIterator::binary_op(result,
+                                          self.to(scalar_type),
+                                          divisor.to(scalar_type),
+                                          /*check_mem_overlap=*/ true);
+    div_stub(iter.device_type(), iter);
+    return result;
+  }
   auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
   div_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor true_divide(const Tensor& self, const Tensor& divisor) {
-  // If both inputs have integral (or bool) types, sets the output to have
-  // the default (floating) scalar type
+  // If both inputs have integral (or bool) types, creates
+  // temporary float copies as new inputs and sets the result's type to
+  // the default scalar type
   if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
    && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
     const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
     Tensor result = at::empty({0}, self.options().dtype(scalar_type));
-
-    auto iter = TensorIterator::binary_op(result, self, divisor);
+    auto iter = TensorIterator::binary_op(result,
+                                          self.to(scalar_type),
+                                          divisor.to(scalar_type));
     div_stub(iter.device_type(), iter);
     return result;
   }
@@ -270,7 +284,7 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 
 static void check_convert(Scalar scalar, ScalarType scalarType) {
   // Validate that is possible to convert scalar to tensor dtype without overflow
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
     scalar.to<scalar_t>();
   });
 }
@@ -740,6 +754,28 @@ Tensor& fmod_(Tensor& self, const Tensor& other) {
 
 Tensor& fmod_(Tensor& self, Scalar other) {
   return at::fmod_out(self, self, other);
+}
+
+Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  logaddexp_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logaddexp(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logaddexp_out(result, self, other);
+}
+
+Tensor& logaddexp2_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  logaddexp2_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor logaddexp2(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logaddexp2_out(result, self, other);
 }
 
 Tensor true_divide(const Tensor& self, Scalar divisor) {
