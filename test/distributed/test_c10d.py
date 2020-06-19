@@ -2814,12 +2814,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # argument.  The following makes sure the initial bucket also complies.
         @contextmanager
         def first_bucket_size(ddp_bucket_mb):
-            old_DEFAULT_FIRST_BUCKET_BYTES = dist._DEFAULT_FIRST_BUCKET_BYTES
-            dist._DEFAULT_FIRST_BUCKET_BYTES = int(ddp_bucket_mb * 1.e6)
+            # old_DEFAULT_FIRST_BUCKET_BYTES = dist._DEFAULT_FIRST_BUCKET_BYTES
+            # dist._DEFAULT_FIRST_BUCKET_BYTES = int(ddp_bucket_mb * 1.e6)
             try:
                 yield
             finally:
-                dist._DEFAULT_FIRST_BUCKET_BYTES = old_DEFAULT_FIRST_BUCKET_BYTES
+                pass
+                # dist._DEFAULT_FIRST_BUCKET_BYTES = old_DEFAULT_FIRST_BUCKET_BYTES
 
         with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
             for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
@@ -2827,6 +2828,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     model_msg = "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(self.rank, formats,
                                                                                              dtypes, bucketsize)
                     try:
+                        print(model_msg)
                         m = ConvNet(layer_devs, formats, dtypes)
                         m_ddp = DistributedDataParallel(copy.deepcopy(m),
                                                         device_ids=replica_devices,
@@ -2846,6 +2848,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                         iter_msg = "iter = {} ".format(it) + model_msg
                         named_msg = iter_msg
                         try:
+                            print(iter_msg)
                             F.mse_loss(m(input).float(), target).backward()
                             F.mse_loss(m_ddp(input[local_batch_start: local_batch_end]).float(),
                                        target[local_batch_start: local_batch_end]).backward()
