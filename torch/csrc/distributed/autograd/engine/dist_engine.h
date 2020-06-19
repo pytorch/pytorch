@@ -144,6 +144,10 @@ class TORCH_API DistEngine {
   // Reference to local autograd engine.
   torch::autograd::Engine& engine_;
 
+  // Ready queue used by the CPU thread in distributed engine.
+  // See Note [GPU to CPU continuations]
+  std::shared_ptr<torch::autograd::ReadyQueue> global_cpu_ready_queue_;
+
   friend class BackwardPassCleanupGuard;
 };
 
