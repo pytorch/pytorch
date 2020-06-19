@@ -377,6 +377,13 @@ class DistributedDataParallel(Module):
 
             for module_copy in self._module_copies[1:]:
                 for param, copy_param in zip(self.module.parameters(), parameters(module_copy)):
+                    # Reducer requires param copies have the same strides across replicas.
+                    # Fixes up copy_param strides in case replicate didn't match param strides.
+                    if param.layout is torch.strided and param.stride() != copy_param.stride():
+                        with torch.no_grad():
+                            copy_param.set_(copy_param.clone()
+                                                      .as_strided(param.size(), param.stride())
+                                                      .copy_(copy_param))
                     copy_param.requires_grad = param.requires_grad
 
         else:
@@ -550,7 +557,14 @@ class DistributedDataParallel(Module):
                 for tensors, module_params in zip(result[1:],
                                                   self.modules_params[1:]):
                     for tensor, param in zip(tensors, module_params):
-                        param.set_(tensor)
+                        # Formerly, this spot used param.set_(tensor) to steal tensor's
+                        # data without a deep copy.  Unfortunately, that wiped out the
+                        # allreduce hook attached to param's AccumulateGrad function,
+                        # likely causing https://github.com/pytorch/pytorch/issues/37079.
+                        # TODO:  If set_ becomes safe to use here, use set_.  Otherwise,
+                        # find another way to steal tensor's data.
+                        # param.detach().set_(tensor) might work.
+                        param.copy_(tensor)
                         # Assume we have just run the optimizer and zeroed the
                         # grads of the parameters on the root model. We need
                         # to zero the grads on all model replicas as well.
