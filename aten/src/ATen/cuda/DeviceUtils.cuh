@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cuda.h>
 #include <c10/util/complex_type.h>
 #include <c10/util/Half.h>

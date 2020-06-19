@@ -1,5 +1,7 @@
 #include <ATen/native/layer_norm.h>
 
+#include <thrust/tuple.h>
+
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -27,24 +29,26 @@ __global__ void RowwiseMomentsCUDAKernel(
     T* mean,
     T* rstd) {
   using T_ACC = acc_type<T, true>;
-  __shared__ T_ACC m_shared[C10_WARP_SIZE];
-  __shared__ T_ACC v_shared[C10_WARP_SIZE];
+  __shared__ int64_t m0_shared[C10_WARP_SIZE];
+  __shared__ T_ACC m1_shared[C10_WARP_SIZE];
+  __shared__ T_ACC m2_shared[C10_WARP_SIZE];
   const int64_t i = blockIdx.x;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
+  int64_t m0 = 0;
+  T_ACC m1 = 0;
+  T_ACC m2 = 0;
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
-    sum1 += static_cast<T_ACC>(X[index]);
-    sum2 += static_cast<T_ACC>(X[index]) * static_cast<T_ACC>(X[index]);
+    const T_ACC delta = static_cast<T_ACC>(X[index]) - m1;
+    ++m0;
+    m1 += delta / static_cast<T_ACC>(m0);
+    m2 += delta * (static_cast<T_ACC>(X[index]) - m1);
   }
-  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, m_shared);
-  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, v_shared);
+  thrust::tie(m0, m1, m2) = cuda_utils::BlockReduceMoments<T_ACC>(
+      m0, m1, m2, m0_shared, m1_shared, m2_shared);
   if (threadIdx.x == 0) {
-    const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
-    sum1 *= scale;
-    sum2 = c10::cuda::compat::max(sum2 * scale - sum1 * sum1, T_ACC(0));
-    mean[i] = sum1;
-    rstd[i] = c10::cuda::compat::rsqrt(sum2 + static_cast<T_ACC>(eps));
+    m2 = c10::cuda::compat::max(m2 / static_cast<T_ACC>(N), T_ACC(0));
+    mean[i] = m1;
+    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
   }
 }
 
@@ -327,13 +331,12 @@ void LayerNormBackwardKernelImplInternal(
   DCHECK_EQ(mean.numel(), M);
   DCHECK_EQ(rstd.numel(), M);
   DCHECK(!gamma.defined() || gamma.numel() == N);
-  const T* dY_data = dY.template data_ptr<T>();
-  const T* X_data = X.template data_ptr<T>();
-  const T* mean_data = mean.template data_ptr<T>();
-  const T* rstd_data = rstd.template data_ptr<T>();
-  const T* gamma_data =
-      gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
-  T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
+  const T* dY_data = dY.data_ptr<T>();
+  const T* X_data = X.data_ptr<T>();
+  const T* mean_data = mean.data_ptr<T>();
+  const T* rstd_data = rstd.data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+  T* dX_data = dX->defined() ? dX->data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 
   if (M == 0) {
@@ -359,10 +362,10 @@ void LayerNormBackwardKernelImplInternal(
     Tensor db = at::empty({M}, X.options().dtype(kAccType));
     Tensor scale = at::empty({M}, X.options().dtype(kAccType));
     Tensor bias = at::empty({M}, X.options().dtype(kAccType));
-    T_ACC* ds_data = ds.template data_ptr<T_ACC>();
-    T_ACC* db_data = db.template data_ptr<T_ACC>();
-    T_ACC* scale_data = scale.template data_ptr<T_ACC>();
-    T_ACC* bias_data = bias.template data_ptr<T_ACC>();
+    T_ACC* ds_data = ds.data_ptr<T_ACC>();
+    T_ACC* db_data = db.data_ptr<T_ACC>();
+    T_ACC* scale_data = scale.data_ptr<T_ACC>();
+    T_ACC* bias_data = bias.data_ptr<T_ACC>();
     ComputeInternalGradientsCUDAKernel<T>
         <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
             N, dY_data, X_data, gamma_data, ds_data, db_data);
@@ -388,9 +391,8 @@ void LayerNormBackwardKernelImplInternal(
         dX_data);
   }
   if (dgamma->defined() || dbeta->defined()) {
-    T* dgamma_data =
-        dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
-    T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
+    T* dgamma_data = dgamma->defined() ? dgamma->data_ptr<T>() : nullptr;
+    T* dbeta_data = dbeta->defined() ? dbeta->data_ptr<T>() : nullptr;
     if (M < 512) {
       // For small batch size, do colwise reduce directly.
       const int64_t B = (N + kCUDANumThreads - 1) / kCUDANumThreads;
@@ -421,6 +423,7 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
     }
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void LayerNormBackwardKernelImpl(
