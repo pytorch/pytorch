@@ -300,10 +300,8 @@ inline at::Tensor newLikeFlat(
   }
   at::DeviceGuard gpuGuard(device);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
-  std::vector<int64_t> strides{static_cast<int64_t>(t.numel())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  strides.insert(strides.end(), t.strides().begin(), t.strides().end());
-  return at::empty_strided(sizes, strides, t.options().memory_format(c10::nullopt));
+  return at::empty(sizes, t.options());
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
