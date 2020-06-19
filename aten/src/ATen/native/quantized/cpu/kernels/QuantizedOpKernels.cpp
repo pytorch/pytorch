@@ -1337,6 +1337,104 @@ void qadaptive_avg_pool2d_nhwc_kernel(
   });
 }
 
+void qadaptive_avg_pool3d_nhwc_kernel(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t sizeC,
+    int64_t isizeD,
+    int64_t isizeH,
+    int64_t isizeW,
+    int64_t osizeD,
+    int64_t osizeH,
+    int64_t osizeW,
+    int64_t istrideB,
+    int64_t istrideC,
+    int64_t istrideD,
+    int64_t istrideH,
+    int64_t istrideW) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "adaptive_avg_pool3d_nhwc", [&]() {
+    scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
+    scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
+    auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
+    auto maximum = std::numeric_limits<scalar_t::underlying>::max();
+    auto* i_p =
+        reinterpret_cast<typename scalar_t::underlying*>(idata + b * istrideB);
+
+    float input_scale = qx.q_scale();
+    float output_scale = qy.q_scale();
+    int input_zero_point = qx.q_zero_point();
+    int output_zero_point = qy.q_zero_point();
+
+    for (int64_t od = 0; od < osizeD; od++) {
+      int istartD = (int)std::floor((float)(od * isizeD) / osizeD);
+      int iendD = (int)std::ceil((float)((od + 1) * isizeD) / osizeD);
+      int kD = iendD - istartD;
+      for (int64_t oh = 0; oh < osizeH; oh++) {
+        int istartH = (int)std::floor((float)(oh * isizeH) / osizeH);
+        int iendH = (int)std::ceil((float)((oh + 1) * isizeH) / osizeH);
+        int kH = iendH - istartH;
+        for (int64_t ow = 0; ow < osizeW; ow++) {
+          auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
+              odata + b * osizeD * osizeH * osizeW * sizeC +
+              (od * osizeH * osizeW + oh * osizeW + ow) * sizeC);
+          int istartW = (int)std::floor((float)(ow * isizeW) / osizeW);
+          int iendW = (int)std::ceil((float)((ow + 1) * isizeW) / osizeW);
+          int kW = iendW - istartW;
+          int size = kD * kH * kW;
+          float multiplier = input_scale / output_scale / size;
+          int input_zero_point_m_size = -input_zero_point * size;
+          int64_t c = 0;
+          // For int8 or uint8quantization, we implicitly use int32 as
+          // accumulation Or else, it will go to the slow path
+          // TODO: support 16bit, 32bit, and etc.
+          auto* internal_i_p = i_p + istartH * istrideH + istartW * istrideW;
+
+          // TODO: more vectorization with loop interleaving
+          do_avg_pool_on_AVX2<scalar_t>(
+              internal_i_p,
+              o_p,
+              c,
+              sizeC,
+              1,
+              input_zero_point_m_size,
+              output_zero_point,
+              multiplier,
+              0,
+              kD,
+              0,
+              kH,
+              0,
+              kW,
+              istrideC,
+              istrideD,
+              istrideH,
+              istrideW);
+          // 1) The following loop handles the remaining channels
+          // 2) It also handles the Non-AVX2 path
+          for (; c < sizeC; ++c) {
+            int32_t acc_int32 = input_zero_point_m_size;
+            int64_t tcntr = 0;
+            for (int64_t id = 0; id < kD; id++) {
+              for (int64_t ih = 0; ih < kH; ih++) {
+                for (int64_t iw = 0; iw < kW; iw++) {
+                  tcntr = id * istrideD + ih * istrideH + iw * istrideW;
+                  auto val = *(internal_i_p + tcntr + c * istrideC);
+                  acc_int32 += val;
+                }
+              }
+            }
+            // clamp
+            o_p[c] = at::native::quantize_val<scalar_t>(1.0f / multiplier,
+                                                        output_zero_point,
+                                                        acc_int32).val_;
+          } // c
+        } // oh
+      } // ow
+    } // od
+  });
+}
+
 void qavg_pool2d_nhwc_kernel(
     const Tensor& qx,
     Tensor& qy,
@@ -2417,6 +2515,9 @@ REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
 REGISTER_DISPATCH(
     qadaptive_avg_pool2d_nhwc_stub,
     &qadaptive_avg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(
+    qadaptive_avg_pool3d_nhwc_stub,
+    &qadaptive_avg_pool3d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
 REGISTER_DISPATCH(

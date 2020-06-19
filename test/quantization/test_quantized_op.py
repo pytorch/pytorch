@@ -1216,7 +1216,7 @@ class TestQuantizedOps(TestCase):
                              msg=error_message.format(name + '.zero_point', scale,
                              X_hat.q_zero_point()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            output_size_h=st.integers(1, 10),
@@ -1259,7 +1259,7 @@ class TestQuantizedOps(TestCase):
                                                       qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
            output_size_h=st.integers(1, 10),
@@ -1277,10 +1277,20 @@ class TestQuantizedOps(TestCase):
         if X.shape[1] < 176:
             X = np.repeat(X, 176 / X.shape[1], 1)
 
-        X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
-        X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
-        qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
+        if X.ndim == 4:
+            X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
+            X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
+            qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw),
+                                           scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type).permute([0, 3, 1, 2])
+        else:  # ndim == 3
+            X_nchw = np.ascontiguousarray(X.transpose([1, 2, 0]))
+            X = torch.from_numpy(X_nchw).permute([2, 0, 1])
+            qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw),
+                                           scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type).permute([2, 0, 1])
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.adaptive_avg_pool2d(qX.int_repr().to(torch.double), output_size).round()
@@ -1291,6 +1301,116 @@ class TestQuantizedOps(TestCase):
             "nn.functional": torch.nn.functional.adaptive_avg_pool2d,
             "nn.quantized.functional":
                 torch.nn.quantized.functional.adaptive_avg_pool2d
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            X_hat = op(qX, output_size=output_size)
+            self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
+                                       msg="{} results are off".format(name))
+            self.assertEqual(scale, X_hat.q_scale(),
+                             msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+            self.assertEqual(zero_point, X_hat.q_zero_point(),
+                             msg=error_message.format(name + '.zero_point', scale,
+                                                      X_hat.q_zero_point()))
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           output_size_d=st.integers(1, 10),
+           output_size_h=st.integers(1, 10),
+           output_size_w=st.integers(1, 10))
+    def test_adaptive_avg_pool3d(self, X, output_size_d, output_size_h,
+                                 output_size_w):
+        X, (scale, zero_point, torch_type) = X
+
+        D, H, W = X.shape[-3:]
+        assume(output_size_d <= D)
+        assume(output_size_h <= H)
+        assume(output_size_w <= W)
+        if output_size_d == output_size_h == output_size_w:
+            output_size = output_size_h
+        else:
+            output_size = (output_size_d, output_size_h, output_size_w)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        # Run reference on int_repr + round to avoid double rounding error.
+        X_ref = torch.nn.functional.adaptive_avg_pool3d(
+            qX.int_repr().to(torch.float), output_size).round()
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.adaptive_avg_pool3d,
+            "nn.quantized.functional":
+                torch.nn.quantized.functional.adaptive_avg_pool3d
+        }
+
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, output_size=output_size)
+            print(qX.shape, qX_hat.shape)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0,
+                                       rtol=0, msg=error_message.format(name,
+                                                                        X_ref,
+                                                                        qX_hat))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             msg=error_message.format(name + '.scale', scale,
+                                                      qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             msg=error_message.format(name + '.zero_point',
+                                                      scale,
+                                                      qX_hat.q_zero_point()))
+
+    """Tests adaptive average pool operation on NHWC quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams(dtypes=torch.qint8)),
+           output_size_d=st.integers(1, 10),
+           output_size_h=st.integers(1, 10),
+           output_size_w=st.integers(1, 10))
+    def test_adaptive_avg_pool3d_ndhwc(self, X, output_size_d, output_size_h,
+                                       output_size_w):
+        X, (scale, zero_point, torch_type) = X
+        D, H, W = X.shape[-3:]
+        assume(output_size_d <= D)
+        assume(output_size_h <= H)
+        assume(output_size_w <= W)
+        if output_size_d == output_size_h == output_size_w:
+            output_size = output_size_h
+        else:
+            output_size = (output_size_d, output_size_h, output_size_w)
+
+        if X.shape[1] < 176:
+            X = np.repeat(X, 176 / X.shape[1], 1)
+
+        if X.ndim == 5:
+            X_ncdhw = np.ascontiguousarray(X.transpose([0, 2, 3, 4, 1]))
+            X = torch.from_numpy(X_ncdhw).permute([0, 4, 1, 2, 3])
+            qX = torch.quantize_per_tensor(torch.from_numpy(X_ncdhw),
+                                           scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type).permute([0, 4, 1, 2, 3])
+        else:  # ndim == 4
+            X_ncdhw = np.ascontiguousarray(X.transpose([1, 2, 3, 0]))
+            X = torch.from_numpy(X_ncdhw).permute([3, 0, 1, 2])
+            qX = torch.quantize_per_tensor(torch.from_numpy(X_ncdhw),
+                                           scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type).permute([3, 0, 1, 2])
+
+        # Run reference on int_repr + round to avoid double rounding error.
+        X_ref = torch.nn.functional.adaptive_avg_pool3d(
+            qX.int_repr().to(torch.double), output_size).round()
+
+        self.assertTrue(qX.stride() != sorted(qX.stride()))
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.adaptive_avg_pool3d,
+            "nn.quantized.functional":
+                torch.nn.quantized.functional.adaptive_avg_pool3d
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
         for name, op in ops_under_test.items():

@@ -94,6 +94,24 @@ def adaptive_avg_pool2d(input, output_size):
         raise ValueError("Input to 'quantized.adaptive_avg_pool2d' must be quantized!")
     return torch.nn.functional.adaptive_avg_pool2d(input, output_size)
 
+def adaptive_avg_pool3d(input, output_size):
+    # type: (Tensor, BroadcastingList2[int]) -> Tensor
+    r"""
+    Applies a 3D adaptive average pooling over a quantized input signal composed
+    of several quantized input planes.
+
+    .. note:: The input quantization paramteres propagate to the output.
+
+    See :class:`~torch.nn.quantized.AdaptiveAvgPool3d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or
+                     double-integer tuple)
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.adaptive_avg_pool3d' must be quantized!")
+    return torch.nn.functional.adaptive_avg_pool3d(input, output_size)
+
 def conv1d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
            padding_mode='zeros',

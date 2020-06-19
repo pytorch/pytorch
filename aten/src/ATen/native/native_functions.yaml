@@ -5767,6 +5767,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_out_cpu
     CUDA: adaptive_avg_pool3d_out_cuda
+    QuantizedCPU: quantized_adaptive_avg_pool3d_out
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
   use_c10_dispatcher: full
@@ -5774,6 +5775,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_cpu
     CUDA: adaptive_avg_pool3d_cuda
+    QuantizedCPU: quantized_adaptive_avg_pool3d
 
 - func: adaptive_avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
