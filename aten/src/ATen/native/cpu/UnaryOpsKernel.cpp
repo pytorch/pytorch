@@ -23,6 +23,7 @@
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
+#include <cpuinfo.h>
 #endif
 
 namespace at { namespace native {
@@ -197,6 +198,30 @@ static void cosh_kernel(TensorIterator& iter) {
   });
 }
 
+static void acosh_kernel(TensorIterator& iter) {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "acosh_cpu", [&]() {
+      cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::acosh(a); });
+    });
+}
+
+static void asinh_kernel(TensorIterator& iter) {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "asinh_cpu", [&]() {
+      cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::asinh(a); });
+    });
+}
+
+static void atanh_kernel(TensorIterator& iter) {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atanh_cpu", [&]() {
+      cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::atanh(a); });
+    });
+}
+
 static void digamma_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
     cpu_kernel(
@@ -261,62 +286,75 @@ static void cauchy_kernel(TensorIterator& iter, double median, double sigma, c10
   templates::cpu::cauchy_kernel(iter, median, sigma, generator);
 }
 
+void bernoulli_tensor_kernel(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::bernoulli_kernel(self, p_, generator);
+}
+
+void bernoulli_scalar_kernel_default(Tensor& self, double p, c10::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
+  templates::cpu::bernoulli_kernel(self, p, generator);
+}
+
 #if !AT_MKL_ENABLED()
-void bernoulli_mkl_kernel(Tensor &output, const double p, c10::optional<Generator> gen) {
-  // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
-  // users to report this as a bug.
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+void bernoulli_scalar_kernel(Tensor& self, double p, c10::optional<Generator> gen) {
+  bernoulli_scalar_kernel_default(self, p, gen);
 }
 #else
-void bernoulli_mkl_kernel(Tensor &self, const double p, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  int64_t seed;
-  {
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    seed = generator->random();
-  }
-  int64_t n = self.numel();
-  bool contig = self.is_contiguous();
-
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
-    at::Tensor tmp_int_tensor;
-    if (std::is_same<scalar_t, int>::value && contig) {
-      tmp_int_tensor = self;
-    } else {
-      tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
+void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> gen) {
+  if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
+    int64_t seed;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(generator->mutex_);
+      seed = generator->random();
     }
+    int64_t n = self.numel();
+    bool contig = self.is_contiguous();
 
-    scalar_t *self_ptr = self.data_ptr<scalar_t>();
-    int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
-
-    auto sample = [&](int64_t begin, int64_t end) {
-      int64_t len = end - begin;
-      if (len > 0) {
-        VSLStreamStatePtr stream;
-        vslNewStream(&stream, VSL_BRNG_MCG31, seed);
-        vslSkipAheadStream(stream, begin);
-        viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
-          sample_int_ptr + begin, p);
-        vslDeleteStream(&stream);
-
-        // vectorized copy if using buffer and contiguous, i.e., being non-int
-        // type and contiguous
-        if (!std::is_same<scalar_t, int>::value && contig) {
-          scalar_t *self_seg = self_ptr + begin;
-          int* tmp_seg = sample_int_ptr + begin;
-          at::vec256::convert<int, scalar_t>(tmp_seg, self_seg, len);
-        }
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+      at::Tensor tmp_int_tensor;
+      if (std::is_same<scalar_t, int>::value && contig) {
+        tmp_int_tensor = self;
+      } else {
+        tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
       }
-    };
 
-    parallel_for(0, n, /* grain_size= */ 800, sample);
+      scalar_t *self_ptr = self.data_ptr<scalar_t>();
+      int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
 
-    // copy_ if using buffer and non contiguous
-    if (!contig) {
-      self.copy_(tmp_int_tensor);
-    }
-  });
+      auto sample = [&](int64_t begin, int64_t end) {
+        int64_t len = end - begin;
+        if (len > 0) {
+          VSLStreamStatePtr stream;
+          vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+          vslSkipAheadStream(stream, begin);
+          viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
+            sample_int_ptr + begin, p);
+          vslDeleteStream(&stream);
+
+          // vectorized copy if using buffer and contiguous, i.e., being non-int
+          // type and contiguous
+          if (!std::is_same<scalar_t, int>::value && contig) {
+            scalar_t *self_seg = self_ptr + begin;
+            int* tmp_seg = sample_int_ptr + begin;
+            at::vec256::convert<int, scalar_t>(tmp_seg, self_seg, len);
+          }
+        }
+      };
+
+      parallel_for(0, n, /* grain_size= */ 800, sample);
+
+      // copy_ if using buffer and non contiguous
+      if (!contig) {
+        self.copy_(tmp_int_tensor);
+      }
+    });
+  } else {
+    // The situation of AMD, move to using the default version
+    bernoulli_scalar_kernel_default(self, p, gen);
+  }
 }
 #endif
 
@@ -442,7 +480,8 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
-REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
+REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
+REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
@@ -465,6 +504,9 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
+REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
+REGISTER_DISPATCH(asinh_stub, &asinh_kernel);
+REGISTER_DISPATCH(atanh_stub, &atanh_kernel);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
@@ -473,13 +515,11 @@ REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 
 
-// IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, asin)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, atan)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, ceil)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, cos)
-// IMPLEMENT_FLOAT_KERNEL(FLOATING, cosh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfc)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfinv)
@@ -492,7 +532,6 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, log2)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, round)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sin)
-// IMPLEMENT_FLOAT_KERNEL(FLOATING, sinh)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sqrt)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, tan)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, tanh)

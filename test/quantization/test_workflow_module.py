@@ -41,6 +41,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
+    override_qengines,
 )
 
 # Reference method for fake quantize
@@ -396,6 +397,20 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         qparams = myobs.calculate_qparams()
         self.assertEqual(qparams[1].item(), 0)
 
+    def test_histogram_observer_zero_inputs(self):
+        myobs = HistogramObserver(bins=3, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+        x = torch.zeros(4, requires_grad=True)
+        y = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
+        z = torch.tensor([5.0, 6.0, 7.0, 8.0])
+        myobs(x)
+        myobs(x)
+        myobs(y)
+        myobs(z)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(myobs.min_val, 2.0)
+        self.assertEqual(myobs.max_val, 8.0)
+        self.assertEqual(myobs.histogram, [2., 3., 3.])
+
 class TestFakeQuantizePerTensor(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
@@ -564,6 +579,27 @@ class TestFakeQuantizePerTensor(TestCase):
         self.assertEqual(
             zero_point_shape_before, zero_point_shape_after,
             msg="FakeQuant zero_point shape must stay consistent")
+
+    def fake_quant_scriptable(self):
+        observer = default_observer
+        quant_min = 0
+        quant_max = 255
+        fq_module = FakeQuantize(observer, quant_min, quant_max)
+        scripted_module = torch.jit.script(fq_module)
+
+        X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
+
+        fq_module(X)
+        scripted_module(X)
+        self.assertEqual(fq_module.calculate_qparams(),
+                         scripted_module.calculate_qparams())
+
+        buf = io.BytesIO()
+        torch.jit.save(scripted_module, buf)
+        buf.seek(0)
+        loaded_module = torch.jit.load(buf)
+        self.assertEqual(fq_module.calculate_qparams(),
+                         loaded_module.calculate_qparams())
 
 
 class TestFakeQuantizePerChannel(TestCase):
@@ -810,3 +846,39 @@ class TestDistributed(QuantizationTestCase):
             self.assertTrue(
                 isinstance(fused_model.conv.bn, nn.SyncBatchNorm),
                 "Expected BN to be converted to SyncBN")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @override_qengines
+    def test_device_affinity(self):
+        """
+        Tests that converting a model to QAT respects device affinity
+        """
+        class Model(nn.Module):
+
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.bn = nn.BatchNorm2d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        model = Model()
+        model.qconfig = torch.quantization.get_default_qat_qconfig(torch.backends.quantized.engine)
+        device = torch.device('cuda:0')
+        model.to(device)
+        torch.quantization.prepare_qat(model, inplace=True)
+        model_devices = {p.device for p in model.parameters()} | \
+            {p.device for p in model.buffers()}
+        self.assertEqual(len(model_devices), 1)
+        model_device = next(iter(model_devices))
+        self.assertEqual(model_device, device)
+
+        # ensure that running an input on CUDA works without any needed changes
+        input = torch.randn(4, 1, 4, 4, device=device)
+        model(input)

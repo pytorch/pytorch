@@ -2761,6 +2761,7 @@ class TestAutograd(TestCase):
                 events.append(
                     FunctionEvent(
                         id=range[2],
+                        node_id=0,
                         name="",
                         thread=thread,
                         cpu_start=range[0],
@@ -2797,8 +2798,8 @@ class TestAutograd(TestCase):
 
     def test_profiler_function_event_avg(self):
         avg = FunctionEventAvg()
-        avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
-        avg.add(FunctionEvent(id=1, name="foo", thread=0, cpu_start=20, cpu_end=30))
+        avg.add(FunctionEvent(id=0, node_id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
+        avg.add(FunctionEvent(id=1, node_id=0, name="foo", thread=0, cpu_start=20, cpu_end=30))
         avg.add(avg)
         self.assertEqual(avg.key, "foo")
 
@@ -3056,6 +3057,13 @@ class TestAutograd(TestCase):
         x = torch.randn(10, 10)
         keys = dir(x)
         self.assertIn('shape', keys)
+
+        # real and imag are only implemented for complex tensors.
+        y = torch.randn(10, 10, dtype=torch.cfloat)
+        for key in ['real', 'imag']:
+            self.assertRaises(RuntimeError, lambda: hasattr(x, key))
+            self.assertTrue(hasattr(y, key))
+            keys.remove(key)
 
         for key in keys:
             self.assertTrue(hasattr(x, key))
@@ -4318,8 +4326,9 @@ separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
-                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
-                '__radd__', 'repeat', 'expand', 'mul', 'tanh'] + separate_complex_tests
+                '__rmul__', '__rtruediv__', 'sum', 'transpose', 'round', 'add', 'roll',
+                '__radd__', 'repeat', 'expand', 'mul', 'tanh', 'flip', 'fliplr', 'flipud',
+                'rot90'] + separate_complex_tests
 
 def add_test(
         name,
@@ -4431,7 +4440,10 @@ def add_test(
                         inplace_name = name + '_'
                         # can't broadcast inplace to left hand side
                         skip_inplace = ('broadcast_lhs' in test_name or
-                                        'broadcast_all' in test_name)
+                                        'broadcast_all' in test_name or
+                                        'atanh' in test_name or
+                                        'acosh' in test_name or
+                                        'asinh' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -4509,7 +4521,7 @@ class TestAutogradFunctional(TestCase):
     def _assert_interleaved_struct(self, res, base1, base2):
         # base1 and base2 can be Tensors or tuples of Tensors.
         # If they are tuples, res should be a tuple as well.
-        # The indexing works as follow for base1, base2 being
+        # The indexing works as follows for base1, base2 being
         # - tuple, tuple: res[i][j][k][l] = (base1[i][k], base2[j][l])
         # - tuple, Tensor: res[i][k][l] = (base1[i][k], base2[l])
         # - Tensor, tuple: res[i][j][l] = (base1[i], base2[j][l])
@@ -6062,6 +6074,7 @@ class TestAutogradDeviceType(TestCase):
     def test_simple_reentrant_cross_device(self, device):
         class ReentrantFunc(Function):
             _cpu_mode = True
+
             @staticmethod
             def forward(ctx, x):
                 return x * (x + 2)

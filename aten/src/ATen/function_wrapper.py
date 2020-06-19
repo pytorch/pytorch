@@ -30,7 +30,6 @@ ${return_type} ${api_name}(${formals});
 
 LEGACY_TH_DEFINITION = CodeTemplate("""\
 ${return_type} ${api_name}(${formals}) {
-    ${named_guard_declaration}
     ${device_guard_declaration}
     ${type_definition_body}
 }
@@ -64,15 +63,19 @@ ${return_type} ${type_wrapper_name}(${formals});
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
 ${return_type} ${type_wrapper_name}(${formals}) {
-    ${named_guard_declaration}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
-NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
+NATIVE_DISPATCH_DEFINITION_CPU_BACKEND = CodeTemplate("""\
 ${return_type} ${type_wrapper_name}(${formals}) {
-    ${named_guard_declaration}
+    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
+}
+""")
+
+NATIVE_DISPATCH_DEFINITION_GENERIC_BACKEND = CodeTemplate("""\
+${return_type} ${type_wrapper_name}(${formals}) {
     ${device_init}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
@@ -92,11 +95,11 @@ m.def("${unqual_schema_string}");
 # TORCH_LIBRARY macro invocation
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
-       torch::CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}));
+       torch::CppFunction::makeUnboxedOnly(&TypeDefault::${type_wrapper_name}));
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}", TORCH_FN(TypeDefault::${type_wrapper_name}));
 """)
 
 # NB: In the ordinary, TypeDerived code generation work flow, specification
@@ -109,14 +112,14 @@ m.impl("${unqual_operator_name_with_overload}", &TypeDefault::${type_wrapper_nam
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       torch::CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name}))
+                       torch::CppFunction::makeUnboxedOnly(&${Type}::${type_wrapper_name}))
 );
 """)
 
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       &${Type}::${type_wrapper_name})
+                       TORCH_FN(${Type}::${type_wrapper_name}))
 );
 """)
 
@@ -129,43 +132,46 @@ ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
-inline ${return_type} Tensor::${api_name}(${method_formals}) const {
+${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.call<${formals_types_with_return}>(${method_actuals});
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+        .typed<${cpp_signature}>();
+    return op.call(${method_actuals});
 #endif
 }
 """)
 
 # add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals_with_defaults});
+CAFFE2_API ${return_type} ${api_name}(${formals_with_defaults});
 """)
 
 # add a method declaration in Functions.h
 DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
-C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults});
+C10_DEPRECATED CAFFE2_API ${return_type} ${api_name}(${formals_with_defaults});
 """)
 
 # add method definition in Functions.h
 C10_FUNCTION_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
-static inline ${return_type} ${api_name}(${formals}) {
+${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.call<${formals_types_with_return}>(${actuals});
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+        .typed<${cpp_signature}>();
+    return op.call(${actuals});
 #endif
 }
 """)
 
 # In order to rely on the linker to strip unused ops, it requires us to dispatch statically
-# in Functions.h and TensorMethods.h.
+# in Functions.h and TensorMethods.cpp.
 #
 # NB: The default body also needs to apply a variable guard, as in some
 # situations what we think is a default body actually does have an
@@ -483,7 +489,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_with_defaults': List[str],
     'formals': List[str],
     'formals_types': List[str],
-    'formals_types_with_return': List[str],
+    'cpp_signature': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -492,7 +498,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'method_actuals': List[str],
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
-    'named_guard_declaration': str,
     'mode': str,
     'python_module': str,
     'name': str,
@@ -511,7 +516,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_definition_body': List[str],
     'type_method_definition_dispatch': str,
     'variants': str,
-    'with_gil': bool,
 })
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
@@ -558,24 +562,6 @@ def device_guard(option, dispatch_options, dispatch_tensor):
         if dispatch_tensor:
             return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(dispatch_tensor)
     return '// DeviceGuard omitted'
-
-
-def named_guard(option, tensors, tensorlists):
-    if option.get('supports_named_tensor', False) or (len(tensors) + len(tensorlists) == 0):
-        return ''
-    # Override: supports_named_tensor = False for _th_ functions. This is because:
-    # There is always some at:: function that calls the _th_ function.
-    if option['name'].startswith('_th_'):
-        return ''
-    named_conditions = []
-    for tensor in tensors:
-        named_conditions.append('{}.has_names()'.format(tensor))
-    for tensorlist in tensorlists:
-        named_conditions.append('at::has_names({})'.format(tensorlist))
-    return ("""\
-if ({named_conditions}) {{
-    AT_ERROR("{op}", named_tensors_unsupported_error);
-}}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
 
 
 def dispatch_scalar_type(option, dispatch_options, dispatch_tensor):
@@ -901,8 +887,6 @@ def create_generic(top_env, declarations):
         if option['mode'] == 'TH':
             option['device_guard'] = False
         option['device_guard_declaration'] = device_guard(option, False, dispatch_tensor)
-        option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
-                                                        find_tensorlists(formals))
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, False, dispatch_tensor)
 
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
@@ -1024,9 +1008,7 @@ def create_generic(top_env, declarations):
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
 
-        option['formals_types_with_return'] = [option['return_type']]
-        if len(option['formals_types']) > 0:
-            option['formals_types_with_return'].extend(option['formals_types'])
+        option['cpp_signature'] = "{} ({})".format(option['return_type'], ", ".join(option['formals_types']))
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
@@ -1156,8 +1138,6 @@ def create_generic(top_env, declarations):
         dispatch_options = find_formal_by_type('TensorOptions', formals)
         guard_tensor = None if dispatch_options else find_dispatch_tensor(formals)
         option['device_guard_declaration'] = device_guard(option, dispatch_options, guard_tensor)
-        option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
-                                                        find_tensorlists(formals))
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, dispatch_options, guard_tensor)
 
         top_env['aten_ops'].append(OPERATOR_NAME_FULL.substitute(option))
@@ -1495,8 +1475,13 @@ def create_derived(backend_type_env, declarations):
                 option['native_type_method_dispatch'] = native_dispatch
                 option['device_init'] = gen_device_init(option, backend_type_env)
 
-                type_object_definitions.append(
-                    NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
+                if backend in ['CPU', 'SparseCPU', 'QuantizedCPU', 'MkldnnCPU']:
+                    # Omit the device guard entirely in these cases
+                    def_backend = NATIVE_DISPATCH_DEFINITION_CPU_BACKEND
+                else:
+                    def_backend = NATIVE_DISPATCH_DEFINITION_GENERIC_BACKEND
+
+                type_object_definitions.append(def_backend.substitute(env))
 
                 if native_dispatch:
                     if option['use_c10_dispatcher'] == 'full':

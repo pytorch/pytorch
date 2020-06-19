@@ -17,6 +17,7 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace caffe2 {
 class Tensor;
@@ -295,7 +296,7 @@ class CAFFE2_API Tensor {
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
 
-  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
+  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.cpp
   caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
@@ -668,6 +669,24 @@ protected:
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
+
+int64_t get_device(Tensor self);
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
+  // Return the grad argument in case of a hook with void return type to have an
+  // std::function with Tensor return type
+  std::function<void(Tensor)> fn(hook);
+  return _register_hook([fn](const Tensor& grad) {
+    fn(grad);
+    return Tensor();
+  });
+}
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
+  return _register_hook(hook);
+}
 
 namespace detail {
 // Helper creator for Tensor class which doesn't requires the users to pass

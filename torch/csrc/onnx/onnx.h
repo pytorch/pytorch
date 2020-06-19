@@ -7,6 +7,7 @@ enum class OperatorExportTypes {
   ONNX_ATEN, // ONNX With ATen op everywhere
   ONNX_ATEN_FALLBACK, // ONNX export with ATen fallback
   RAW, // Raw export (no ONNX)
+  ONNX_FALLTHROUGH, // Export supported ONNX ops. Pass through unsupported ops.
 };
 
 enum class TrainingMode {
