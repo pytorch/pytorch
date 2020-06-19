@@ -2,12 +2,12 @@
 #
 
 # You can set these variables from the command line.
-SPHINXOPTS    = -j auto
-SPHINXBUILD   = sphinx-build
-SPHINXPROJ    = PyTorch
-SOURCEDIR     = source
-BUILDDIR      = build
-PYCMD         = python
+SPHINXOPTS    ?= -j auto
+SPHINXBUILD   ?= sphinx-build
+SPHINXPROJ    ?= PyTorch
+SOURCEDIR     ?= source
+BUILDDIR      ?= build
+PYCMD         ?= python
 
 # Put it first so that "make" without argument is like "make help".
 help:

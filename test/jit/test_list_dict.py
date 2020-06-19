@@ -1,12 +1,13 @@
 import os
 import sys
 import inspect
-from typing import List, Dict
+from typing import Dict, List, Optional, Tuple
 from textwrap import dedent
 from collections import OrderedDict
 
 import torch
 from torch.testing import FileCheck
+from torch import Tensor
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -1033,14 +1034,17 @@ class TestList(JitTestCase):
             li = torch.jit.annotate(List[float], x.tolist())
             return li
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"Expected type hint for result of tolist()"
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError,
+            r"Expected type hint for result of tolist()",
+            "x.tolist("
         ):
             self.checkScript(to_list_missing_type_annotation, (torch.randn(5),))
 
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
             RuntimeError,
             r"Return value was annotated as having type List\[float\] but is actually of type float",
+            "return li"
         ):
             self.checkScript(to_list_incorrect_type_annotation, (torch.randn(5),))
 

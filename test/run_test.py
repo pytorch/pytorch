@@ -35,7 +35,6 @@ TESTS = [
     'distributed/test_data_parallel',
     'distributed/test_distributed',
     'test_distributions',
-    'test_docs_coverage',
     'test_expecttest',
     'test_indexing',
     'test_jit',
@@ -70,6 +69,8 @@ TESTS = [
     'test_jit_fuser_te',
     'test_tensorexpr',
     'test_openmp',
+    'distributed/nn/jit/test_instantiator',
+    'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
@@ -84,9 +85,12 @@ TESTS = [
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'test_futures',
+    'distributed/test_ddp_under_dist_autograd',
 ]
 
 WINDOWS_BLACKLIST = [
+    'distributed/nn/jit/test_instantiator',
+    'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
@@ -98,9 +102,12 @@ WINDOWS_BLACKLIST = [
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
     'distributed/test_distributed',
+    'distributed/test_ddp_under_dist_autograd',
 ]
 
 ROCM_BLACKLIST = [
+    'distributed/nn/jit/test_instantiator',
+    'distributed/nn/api/test_remote_module_spawn',
     'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
     'distributed/rpc/faulty_agent/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
@@ -109,9 +116,9 @@ ROCM_BLACKLIST = [
     'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
     'distributed/rpc/tensorpipe/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
-    'distributed/test_nccl',
     'test_determination',
     'test_multiprocessing',
     'test_jit_simple',
@@ -119,11 +126,11 @@ ROCM_BLACKLIST = [
     'test_jit_fuser_legacy',
     'test_tensorexpr',
     'test_type_hints',
+    'test_openmp',
 ]
 
 RUN_PARALLEL_BLACKLIST = [
     'test_cpp_extensions_jit',
-    'test_docs_coverage',
     'test_expecttest',
     'test_jit_disabled',
     'test_mobile_optimizer',
@@ -148,12 +155,15 @@ SLOW_TESTS = [
     'test_jit',
     'test_jit_profiling',
     'test_torch',
+    'distributed/nn/jit/test_instantiator',
+    'distributed/nn/api/test_remote_module_spawn',
     'distributed/test_distributed',
     'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
     'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
     'distributed/rpc/tensorpipe/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_rpc_spawn',
+    'distributed/test_ddp_under_dist_autograd',
     'test_cuda',
     'test_cuda_primary_ctx',
     'test_cpp_extensions_aot_ninja',
