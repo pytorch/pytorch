@@ -151,9 +151,7 @@ may not always be the best fit for RPC. For example, each networking operation
 is synchronous and blocking, which means that it cannot be run in parallel with
 others. Moreover, it opens a connection between all pairs of nodes, and brings
 down all of them when one fails, thus reducing the resiliency and the elasticity
-of the system. These limitations, and others, might have been mitigated but,
-instead, a separate backend, based on a more tailored library, was introduced to
-address them more fundamentally.
+of the system.
 
 Example::
 
@@ -188,15 +186,16 @@ TensorPipe Backend
 
 The TensorPipe agent leverages `the TensorPipe library
 <https://github.com/pytorch/tensorpipe>`_, which provides a natively
-point-to-point communication primitive specifically suited for machine learning.
-Compared to Gloo, it has the advantage of being asynchronous, which allows a
-large number of transfers to occur simultaneously, each at their own speed,
-without blocking each other. It will only open pipes between pairs of nodes when
-needed, on demand, and when one node fails only its incident pipes will be
-closed, while all other ones will keep working as normal. In addition, it is
-able to support multiple different transports (TCP, of course, but also shared
-memory, NVLink, InfiniBand, ...) and can automatically detect their availability
-and negotiate the best transport to use for each pipe.
+point-to-point communication primitive specifically suited for machine learning
+that fundamentally addresses some of the limitations of Gloo. Compared to Gloo,
+it has the advantage of being asynchronous, which allows a large number of
+transfers to occur simultaneously, each at their own speed, without blocking
+each other. It will only open pipes between pairs of nodes when needed, on
+demand, and when one node fails only its incident pipes will be closed, while
+all other ones will keep working as normal. In addition, it is able to support
+multiple different transports (TCP, of course, but also shared memory, NVLink,
+InfiniBand, ...) and can automatically detect their availability and negotiate
+the best transport to use for each pipe.
 
 The TensorPipe backend has been introduced in PyTorch v1.6 and is being actively
 developed. At the moment, it only supports CPU tensors, with GPU support coming

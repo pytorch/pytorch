@@ -467,14 +467,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   thread-pool used by
                   :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
                   requests (default: 16).
-              _transports (list, optional): THIS IS AN ADVANCED PARAMETER, DO
-                  NOT USE UNLESS INSTRUCTED TO. The names of the TensorPipe
-                  transports that the agent should register, in order of
-                  decreasing priority.
-              _channels (list, optional): THIS IS AN ADVANCED PARAMETER, DO NOT
-                  USE UNLESS INSTRUCTED TO. The names of the TensorPipe channels
-                  that the agent should register, in order of decreasing
-                  priority.
               rpc_timeout (float, optional): The default timeout, in seconds,
                   for RPC requests (default: 60 seconds). If the RPC has not
                   completed in this timeframe, an exception indicating so will
