@@ -2090,19 +2090,13 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
             def forward(self, input):
                 return torch.nn.functional.hardswish(input, inplace=self.inplace)
 
-        # TODO before land: fix inplace
-        modules = [
-            # torch.nn.Hardswish(),
-            FunctionalHardswish(True),
-            # FunctionalHardswish(False),
-        ]
+        modules = [torch.nn.Hardswish(), FunctionalHardswish(True),
+                   FunctionalHardswish(False)]
 
-        # TODO before land: add false
-        for tracing in [True]:
-            print('tracing', tracing)
+        for tracing in [True, False]:
             for m in modules:
                 m = self.checkGraphModeOp(
-                    m, self.img_data, "quantized::hardswish", tracing, debug=True)
+                    m, self.img_data, "quantized::hardswish", tracing)
                 FileCheck().check_not("aten::hardswish") \
                            .check_not("aten::hardswish_") \
                            .run(m.graph)

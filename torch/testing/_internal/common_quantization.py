@@ -7,6 +7,7 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
+import copy
 import io
 import functools
 import torch
@@ -282,8 +283,12 @@ class QuantizationTestCase(TestCase):
                 # make sure it runs
                 outputs[d] = models[d](inputs)
             else:
+                # module under test can contain in-place ops, and we depend on
+                # input data staying constant for comparisons
+                data_copy = copy.deepcopy(data)
                 models[d] = quantize_script(
-                    model, qconfig_dict, test_only_eval_fn, [data], inplace=False, debug=d)
+                    model, qconfig_dict, test_only_eval_fn, [data_copy], inplace=False,
+                    debug=d)
                 # make sure it runs
                 outputs[d] = models[d](*inputs)
 
