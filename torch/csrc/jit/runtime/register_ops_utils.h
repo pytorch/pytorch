@@ -433,6 +433,26 @@ int listCopyAndSort<at::Tensor>(Stack& stack);
 
 int listSetItem(Stack& stack);
 
+#define DEFINE_GENERIC_BINARY_OP(aten_op, op, result)            \
+  Operator(                                                      \
+      #aten_op ".int_int(int a, int b) -> " #result,             \
+      [](Stack& stack) {                                         \
+        int64_t a, b;                                            \
+        pop(stack, a, b);                                        \
+        push(stack, op);                                         \
+        return 0;                                                \
+      },                                                         \
+      aliasAnalysisFromSchema()),                                \
+      Operator(                                                  \
+          #aten_op ".float_float(float a, float b) -> " #result, \
+          [](Stack& stack) {                                     \
+            double a, b;                                         \
+            pop(stack, a, b);                                    \
+            push(stack, op);                                     \
+            return 0;                                            \
+          },                                                     \
+          aliasAnalysisFromSchema())
+
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
   Operator(                                                                    \
@@ -589,15 +609,15 @@ int listSetItem(Stack& stack);
             return 0;                                          \
           },                                                   \
           aliasAnalysisFromSchema())
-#define DEFINE_BOOL_OP(aten_op, op)        \
-  Operator(                                \
-      #aten_op "(bool a, bool b) -> bool", \
-      [](Stack& stack) {                   \
-        bool a, b;                         \
-        pop(stack, a, b);                  \
-        push(stack, op);                   \
-        return 0;                          \
-      },                                   \
+#define DEFINE_BOOL_OP(aten_op, op)             \
+  Operator(                                     \
+      #aten_op ".bool(bool a, bool b) -> bool", \
+      [](Stack& stack) {                        \
+        bool a, b;                              \
+        pop(stack, a, b);                       \
+        push(stack, op);                        \
+        return 0;                               \
+      },                                        \
       aliasAnalysisFromSchema())
 
 } // namespace jit

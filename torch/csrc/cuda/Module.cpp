@@ -396,8 +396,8 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
-static void bindCudaDeviceProperties(PyObject* module) {
-  // Add class and method to torch.cuda
+static void registerCudaDeviceProperties(PyObject* module) {
+  // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
     .def_readonly("name", &cudaDeviceProp::name)
@@ -414,6 +414,11 @@ static void bindCudaDeviceProperties(PyObject* module) {
              << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
       return stream.str();
     });
+}
+
+static void bindGetDeviceProperties(PyObject* module) {
+  // Add method to torch.cuda
+  auto m = py::handle(module).cast<py::module>();
   m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
     return at::cuda::getDeviceProperties(device);
   }, py::return_value_policy::reference);
@@ -469,8 +474,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
     PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
   }
   set_module_attr("default_generators", default_cuda_generators);
-
-  bindCudaDeviceProperties(m);
+  bindGetDeviceProperties(m);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -551,6 +555,7 @@ void initModule(PyObject *module) {
 #if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
   shared::initCudnnBindings(module);
 #endif
+  registerCudaDeviceProperties(module);
 }
 
 }}
