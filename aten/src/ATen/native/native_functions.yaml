@@ -1505,13 +1505,13 @@
 
 - func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU: layer_norm_cpu
-    CUDA: layer_norm_cuda
+    CPU: native_layer_norm
+    CUDA: native_layer_norm
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CPU: layer_norm_backward_cpu
-    CUDA: layer_norm_backward_cuda
+    CPU: native_layer_norm_backward
+    CUDA: native_layer_norm_backward
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn

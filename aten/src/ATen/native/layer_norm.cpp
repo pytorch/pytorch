@@ -17,7 +17,7 @@
 namespace at {
 namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
+std::tuple<Tensor, Tensor, Tensor> native_layer_norm(
     const Tensor& X,
     const Tensor& gamma /* optional */,
     const Tensor& beta /* optional */,
@@ -27,13 +27,12 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
-  if (M > 0) {
-    LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
-  }
+  LayerNormKernel(
+      X.device().type(), X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
-std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
+std::tuple<Tensor, Tensor, Tensor> native_layer_norm_backward(
     const Tensor& dY,
     const Tensor& X,
     const Tensor& mean,
@@ -49,15 +48,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
     dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
-    dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dgamma = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    dbeta = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dbeta = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  if (M > 0) {
-    LayerNormBackwardKernel(
-        kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  }
+  LayerNormBackwardKernel(
+      X.device().type(), dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
@@ -68,8 +65,8 @@ Tensor layer_norm(
     const Tensor& bias /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
-
-  auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto inputs =
+      _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto X = std::get<0>(inputs);
   auto gamma = std::get<1>(inputs);
   auto beta = std::get<2>(inputs);
