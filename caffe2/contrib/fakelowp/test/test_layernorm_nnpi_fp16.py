@@ -63,7 +63,7 @@ class LayerNorm(serial.SerializedTestCase):
         pred_net_ref.external_output.extend(["Y", "mean", "rstd"])
         pred_net_ref.op.add().CopyFrom(
             core.CreateOperator(
-                "LayerNormFakeFP16",
+                "LayerNormFakeFP16NNPI",
                 ["X", "gamma", "beta"],
                 ["Y", "mean", "rstd"],
                 axis=1,
