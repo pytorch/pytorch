@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -398,33 +399,37 @@ class ShapePropagator {
   }
 
   bool PropagateShapeOnNodeByRunningIt(Node* node, Operation op = nullptr) {
-    if (!canPropagateShapeByRunningIt(node))
+    try {
+      if (!canPropagateShapeByRunningIt(node))
+        return false;
+
+      if (!op)
+        op = node->getOperation();
+
+      Stack stack;
+
+      for (auto input : node->inputs()) {
+        stack.push_back(representativeValue(input));
+      }
+
+      // XXX: we're not catching any exceptions from the op for now. This
+      // is to uncover any mistakes we could make when editing this code,
+      // and eventually it shouldn't matter, because this phase should be
+      // preceded by schema checking.
+      op(stack);
+
+      AT_ASSERT(stack.size() == node->outputs().size());
+      for (size_t i = 0; i < stack.size(); ++i) {
+        // some ops may have mixed tensor/primitive outputs
+        // for primitives, we don't need to change the type because it is
+        // already its most constrained form.
+        if (stack[i].isTensor())
+          node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
+      }
+      return true;
+    } catch (...) {
       return false;
-
-    if (!op)
-      op = node->getOperation();
-
-    Stack stack;
-
-    for (auto input : node->inputs()) {
-      stack.push_back(representativeValue(input));
     }
-
-    // XXX: we're not catching any exceptions from the op for now. This
-    // is to uncover any mistakes we could make when editing this code,
-    // and eventually it shouldn't matter, because this phase should be
-    // preceded by schema checking.
-    op(stack);
-
-    AT_ASSERT(stack.size() == node->outputs().size());
-    for (size_t i = 0; i < stack.size(); ++i) {
-      // some ops may have mixed tensor/primitive outputs
-      // for primitives, we don't need to change the type because it is already
-      // its most constrained form.
-      if (stack[i].isTensor())
-        node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
-    }
-    return true;
   }
 
   void PropagateCatShape(Node* cat_node) {
@@ -1425,10 +1430,14 @@ class ShapePropagator {
       at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
       if (!maybe_dtype_option)
         return {};
-      auto dtype =
-          (maybe_dtype_option->isNone() ? at::kDouble
-                                        : maybe_dtype_option->toScalarType());
 
+      auto in_tt = node->input(0)->type()->cast<TensorType>();
+      auto in_dtype = (in_tt) ? in_tt->scalarType() : c10::nullopt;
+      auto dtype =
+          (maybe_dtype_option->isNone()
+               ? in_dtype
+               : c10::optional<c10::ScalarType>{
+                     maybe_dtype_option->toScalarType()});
       return {TensorType::create(
           dtype, device, dim, /*requires_grad=*/c10::nullopt)};
     };
