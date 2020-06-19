@@ -348,12 +348,29 @@ class IrParser {
     return false;
   }
 
+  static bool isReductionNode(const Node* const node) {
+    if (init_registry_) {
+      // TODO: mutex this guy;
+      registerJitOperator();
+      init_registry_ = false;
+    }
+
+    return jit_reduction_op_registry_.count(node->kind());
+  }
+
+  // TODO: is_reduction is too hacky here. we should categorize operation types
+  //       based on their memory accessing pattern, which would affect fusion
+  //       strategy and partition logic.
   static void registerParseRule(
       std::shared_ptr<Operator>& op,
       ParseFuncPtr parse_fn,
-      MergeQueryFuncPtr merge_query_fn = nullptr) {
+      MergeQueryFuncPtr merge_query_fn = nullptr,
+      bool is_reduction = false) {
     jit_operator_registry_[Symbol::fromQualString(op->schema().name())]
         .emplace_back(std::piecewise_construct, std::forward_as_tuple(op), std::forward_as_tuple(parse_fn, merge_query_fn));
+    if (is_reduction) {
+      jit_reduction_op_registry_.emplace(Symbol::fromQualString(op->schema().name()));
+    }
   }
 
  private:
@@ -675,7 +692,8 @@ class IrParser {
               return false;
             }
             return true;
-          });
+          },
+          true);
     }
   }
 
@@ -781,6 +799,7 @@ class IrParser {
       Symbol,
       std::vector<std::pair<std::shared_ptr<Operator>, RegistrationEntry>>>
       jit_operator_registry_;
+  static std::unordered_set<Symbol> jit_reduction_op_registry_;
   static bool init_registry_;
 };
 
@@ -788,9 +807,14 @@ std::unordered_map<
     Symbol,
     std::vector<std::pair<std::shared_ptr<Operator>, IrParser::RegistrationEntry>>>
     IrParser::jit_operator_registry_;
+std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
 bool IrParser::init_registry_ = true;
 
 } // namespace
+
+bool isReductionNode(const Node* const node) {
+  return IrParser::isReductionNode(node);
+}
 
 bool isNodeParsible(const Node* const node) {
   return IrParser::canParseNode(node);

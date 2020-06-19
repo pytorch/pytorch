@@ -57,6 +57,20 @@ inline bool isFusableNode(const Node* const node) {
   return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
 }
 
+bool hasReductionOperation(const Node* const node) {
+  if (isReductionNode(node)) {
+    return true;
+  }
+  if (node->kind() == prim::CudaFusionGroup) {
+    for (auto n : node->g(attr::Subgraph)->nodes()) {
+      if (hasReductionOperation(n)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 } // namespace
 
 bool isFusableCudaFusionGroup(const Node* const node) {
@@ -69,7 +83,9 @@ bool isFusableCudaFusionGroup(const Node* const node) {
 bool isFusableCudaFusionGroup(
     const Node* const fusion,
     const Node* const node) {
-  if (isFusableCudaFusionGroup(node)) {
+  // TODO: lift the restriction of not fusing producer containing reduction when
+  //       we have proper scheduling.
+  if (isFusableCudaFusionGroup(node) && !hasReductionOperation(node)) {
     // TODO: ensure legit fusion.
     // issue 0: currently codegen doesn't support broadcasting, except in the
     //          form of stride 0.
