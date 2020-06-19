@@ -545,7 +545,7 @@ class DistributedDataParallel(Module):
                 for tensors, module_params in zip(result[1:],
                                                   self.modules_params[1:]):
                     for tensor, param in zip(tensors, module_params):
-                        param.set_(tensor)
+                        param.copy_(tensor)
                         # Assume we have just run the optimizer and zeroed the
                         # grads of the parameters on the root model. We need
                         # to zero the grads on all model replicas as well.
