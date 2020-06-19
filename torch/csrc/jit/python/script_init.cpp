@@ -863,6 +863,7 @@ void initJitScriptBindings(PyObject* module) {
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
+
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
      return Object(pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
