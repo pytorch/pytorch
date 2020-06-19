@@ -6,6 +6,34 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
+# ATen parallelism settings
+#  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+#  NATIVE - using native thread pool for intra- and inter-op parallelism
+#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
+if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
+else()
+  set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+endif()
+
+set(AT_PARALLEL_OPENMP 0)
+set(AT_PARALLEL_NATIVE 0)
+set(AT_PARALLEL_NATIVE_TBB 0)
+
+message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
+if("${ATEN_THREADING}" STREQUAL "OMP")
+  set(AT_PARALLEL_OPENMP 1)
+elseif("${ATEN_THREADING}" STREQUAL "NATIVE")
+  set(AT_PARALLEL_NATIVE 1)
+elseif("${ATEN_THREADING}" STREQUAL "TBB")
+  if(NOT USE_TBB)
+    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
+  endif()
+  set(AT_PARALLEL_NATIVE_TBB 1)
+else()
+  message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
+endif()
+
 # ---[ Declare source file lists
 
 # ---[ ATen build
@@ -538,6 +566,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/vision.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/adamw.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
@@ -895,30 +924,6 @@ elseif(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
 endif()
 
-
-# ATen parallelism settings
-#  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
-#  NATIVE - using native thread pool for intra- and inter-op parallelism
-#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
-  set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
-else()
-  set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
-endif()
-
-message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
-if("${ATEN_THREADING}" STREQUAL "OMP")
-  target_compile_definitions(torch_cpu PUBLIC "-DAT_PARALLEL_OPENMP=1")
-elseif("${ATEN_THREADING}" STREQUAL "NATIVE")
-  target_compile_definitions(torch_cpu PUBLIC "-DAT_PARALLEL_NATIVE=1")
-elseif("${ATEN_THREADING}" STREQUAL "TBB")
-  if(NOT USE_TBB)
-    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
-  endif()
-  target_compile_definitions(torch_cpu PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
-else()
-  message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
-endif()
 set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
 if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")

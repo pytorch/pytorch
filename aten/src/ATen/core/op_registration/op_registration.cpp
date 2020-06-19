@@ -99,7 +99,7 @@ void RegisterOperators::registerOp_(Options&& options) {
 
   for (auto& kernel : options.kernels) {
     registrars_.emplace_back(
-      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
+      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.cpp_signature), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
     );
   }
 }
