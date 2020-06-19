@@ -2,6 +2,12 @@
 
 set -ex
 
+# NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
+# for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
+# find the correct image. As a result, here we have to check for
+#   "$UBUNTU_VERSION" == "18.04"*
+# instead of
+#   "$UBUNTU_VERSION" == "18.04"
 if [[ "$UBUNTU_VERSION" == "18.04"* ]]; then
   cmake3="cmake=3.10*"
 else
