@@ -933,8 +933,6 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 self.assertEqual(ref, out)
 
 
-
-
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
     @given(train_mode=st.booleans())

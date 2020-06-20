@@ -718,7 +718,15 @@ class TestCase(expecttest.TestCase):
     # atol values when comparing tensors. Used by @precisionOverride, for
     # example.
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
-    precision = 0
+    _precision: float = 0
+
+    @property
+    def precision(self) -> float:
+        return self._precision
+
+    @precision.setter
+    def precision(self, prec: float) -> None:
+        self._precision = prec
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False

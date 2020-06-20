@@ -97,7 +97,10 @@ applications can always explicitly move the input tensors to CPU on the caller
 and move it to the desired devices on the callee if necessary.
 
 .. warning::
-  TorchScript support in RPC is experimental and subject to change.
+  TorchScript support in RPC is experimental and subject to change. Since
+  v1.5.0, ``torch.distributed.rpc`` supports calling TorchScript functions as
+  RPC target functions, and this will help improve parallelism on the callee
+  side as executing TorchScript functions does not require GIL.
 
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
@@ -298,3 +301,4 @@ Tutorials
 The RPC tutorial introduces users to the RPC framework and provides two example applications using :ref:`torch.distributed.rpc<distributed-rpc-framework>` APIs.
 
 -  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
+-  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
