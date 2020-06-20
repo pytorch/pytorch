@@ -309,6 +309,38 @@ graph(%z.1 : Dynamic):
   return (%z)
 ```
 
+### With ###
+With-statements are represented in two different ways. For most of the compilation and optimization process, they are represented as a pair of `prim::Enter` and `prim::Exit` nodes that wrap the nodes corresponding to the body of the with-statement. However, with-statements are temporarily represented for the duration of the `exit_transform` pass using a block-based representation in which a `prim::With` node is inserted after the `prim::Exit` node, all of the nodes between the `prim::Exit` and `prim::Enter` are moved into the first block of the `prim::With`, and the `prim::Exit` is moved into the second block of the `prim::With`. For example, this program:
+
+```
+with c as mult:
+  y = x + mult
+```
+
+can be translated as:
+
+```
+%2 : int = prim::Constant[value=1]()
+%mult.1 : int = prim::Enter(%c.1)
+%y.1 : Tensor = aten::add(%x.1, %mult.1, %2)
+%11 : Tensor = prim::Exit(%c.1)
+```
+
+and will temporarily be transformed to:
+
+```
+%mult.1 : int = prim::Enter(%c.1)
+= prim::With()
+  block0():
+    %y.1 : Tensor = aten::add(%x.1, %mult.1, %4)
+    -> ()
+  block1():
+    %11 : Tensor = prim::Exit(%c.1)
+    -> ()
+```
+
+for the duration of the `exit_transform` pass.
+
 ## Value ##
 
 [ir.h](ir/ir.h)
