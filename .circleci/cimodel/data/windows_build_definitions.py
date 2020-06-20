@@ -120,8 +120,8 @@ def TruePred(_):
 
 WORKFLOW_DATA = [
     # VS2017 CUDA-10.1
-    WindowsJob(None, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1), master_only_pred=FalsePred),
-    WindowsJob(1, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
+    WindowsJob(None, VcSpec(2017, ["14", "13"]), CudaVersion(10, 1), master_only_pred=FalsePred),
+    WindowsJob(1, VcSpec(2017, ["14", "13"]), CudaVersion(10, 1)),
     # VS2017 no-CUDA (builds only)
     WindowsJob(None, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
     WindowsJob(None, VcSpec(2017, ["14", "16"]), None),
