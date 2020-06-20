@@ -16,7 +16,7 @@ import torch.nn.quantized.dynamic as nnqd
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_script, quantize_script
+    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit
 from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
 import unittest
 from torch.testing import FileCheck
@@ -278,11 +278,11 @@ class QuantizationTestCase(TestCase):
         for d in [True, False]:
             # TODO: _test_only_eval_fn --> default_eval_fn
             if dynamic:
-                models[d] = quantize_dynamic_script(model, qconfig_dict, debug=d)
+                models[d] = quantize_dynamic_jit(model, qconfig_dict, debug=d)
                 # make sure it runs
                 outputs[d] = models[d](inputs)
             else:
-                models[d] = quantize_script(
+                models[d] = quantize_jit(
                     model, qconfig_dict, test_only_eval_fn, [data], inplace=False, debug=d)
                 # make sure it runs
                 outputs[d] = models[d](*inputs)
