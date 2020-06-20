@@ -254,7 +254,8 @@ class ModuleCloneHelper {
 class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(
-      const ModuleQConfigMap& map, QuantType quant_type)
+      const ModuleQConfigMap& map,
+      QuantType quant_type)
       : module_qconfig_map_(map), quant_type_(quant_type) {}
 
   // TODO: replace (module, method_name) with graph?
@@ -265,7 +266,6 @@ class InsertObserversHelper {
   // of called graph, this is used to navigate through the graph
   // to find the observer for a given value
   void fillBoundaryValueMap(Module& module, const std::string& method_name);
-
 
   // analyze the graph and record necessary information that can
   // be used in insert observers
@@ -937,16 +937,22 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // add mapping from callsite value to value in called graph
         for (auto i = 0U; i < g->outputs().size(); ++i) {
           auto* return_val = g->outputs()[i];
-          GRAPH_DEBUG("Boundary Map[return]:", n->output(i)->debugName(),
-                      " -> ", return_val->debugName());
+          GRAPH_DEBUG(
+              "Boundary Map[return]:",
+              n->output(i)->debugName(),
+              " -> ",
+              return_val->debugName());
           boundary_value_map_[n->output(i)].insert(return_val);
         }
         for (auto i = 0U; i < g->inputs().size(); ++i) {
           auto caller_input_index = i + input_offset;
           auto* caller_input = n->input(caller_input_index);
           auto* input_val = g->inputs()[i];
-          GRAPH_DEBUG("Boundary Map[input]:", caller_input->debugName(),
-                      " -> ", input_val->debugName());
+          GRAPH_DEBUG(
+              "Boundary Map[input]:",
+              caller_input->debugName(),
+              " -> ",
+              input_val->debugName());
           boundary_value_map_[caller_input].insert(input_val);
         }
       } else if (n->kind() == prim::If) {
@@ -954,8 +960,11 @@ void InsertObserversHelper::fillBoundaryValueMap(
           blocks_to_visit.push(subblock);
           for (Value* v : n->outputs()) {
             Value* subblock_output = subblock->outputs()[v->offset()];
-            GRAPH_DEBUG("Boundary Map[if_output]:", v->debugName(),
-                        " -> ", subblock_output->debugName());
+            GRAPH_DEBUG(
+                "Boundary Map[if_output]:",
+                v->debugName(),
+                " -> ",
+                subblock_output->debugName());
             boundary_value_map_[v].insert(subblock_output);
           }
         }
@@ -1087,8 +1096,11 @@ c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
   c10::optional<Module> result;
   if (boundary_value_map_.count(v)) {
     for (Value* next : boundary_value_map_.at(v)) {
-      GRAPH_DEBUG("Going through boundary map:", v->debugName(), " --> ",
-                  next->debugName());
+      GRAPH_DEBUG(
+          "Going through boundary map:",
+          v->debugName(),
+          " --> ",
+          next->debugName());
       GRAPH_DUMP("From graph:", v->owningGraph());
       GRAPH_DUMP("To graph:", next->owningGraph());
       auto observer_opt = getObserverFor(next);
@@ -1105,8 +1117,8 @@ c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
       }
     }
   }
-  GRAPH_DEBUG("Observer module config for ", v->debugName(), ":",
-              result.has_value());
+  GRAPH_DEBUG(
+      "Observer module config for ", v->debugName(), ":", result.has_value());
   return result;
 }
 
@@ -1336,9 +1348,10 @@ InsertObserversHelper::insertObserversFor(
           }
         }
       } else if (n->kind() == prim::Loop) {
-        TORCH_WARN_ONCE("prim::Loop is not yet supported in quantization, "
-                        "please make sure nothing needs to be quantized in the "
-                        "loop");
+        TORCH_WARN_ONCE(
+            "prim::Loop is not yet supported in quantization, "
+            "please make sure nothing needs to be quantized in the "
+            "loop");
       }
       for (Value* v : n->outputs()) {
         propagateObservedProperty(v, block_observed_values);
