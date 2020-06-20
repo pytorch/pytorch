@@ -139,7 +139,7 @@ case "$image" in
     PROTOBUF=yes
     ANDROID=yes
     ANDROID_NDK_VERSION=r19c
-    GRADLE_VERSION=4.10.3
+    GRADLE_VERSION=6.5
     CMAKE_VERSION=3.7.0
     NINJA_VERSION=1.9.0
     ;;
@@ -213,6 +213,7 @@ tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
 # it's no longer needed.
 docker build \
        --no-cache \
+       --progress=plain \
        --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \

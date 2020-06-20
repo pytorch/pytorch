@@ -28,6 +28,7 @@
 #include <atomic>
 #include <climits>
 #include <set>
+#include <stack>
 
 namespace torch {
 namespace jit {
@@ -1046,6 +1047,9 @@ struct to_ir {
         case TK_DELETE:
           emitDelete(Delete(stmt));
           break;
+        case TK_WITH:
+          emitWith(With(stmt));
+          break;
         default:
           throw ErrorReport(stmt)
               << "Unrecognized statement kind " << kindToString(stmt.kind());
@@ -1751,6 +1755,82 @@ struct to_ir {
     auto cond = stmt.cond();
     auto emit_body = [&]() { emitStatements(stmt.body()); };
     emitLoopCommon(stmt.range(), emit_body, nullptr, {}, cond);
+  }
+
+  void emitWith(const With& stmt) {
+    auto targets = stmt.targets();
+    // Keep a stack of entered objects so they can be exited
+    // in the right order.
+    std::stack<Value*> entered;
+
+    for (const auto& target : targets) {
+      Expr e = target.target();
+
+      auto* rhs = emitExpr(e);
+      auto* n = graph->insertNode(graph->create(prim::Enter, {rhs}));
+      entered.push(rhs);
+      auto rhsClass = rhs->type()->expect<ClassType>();
+
+      if (!rhsClass) {
+        throw ErrorReport(e.range())
+            << "With item expression does not return a class type";
+      }
+
+      auto* enterMethod = rhsClass->findMethod("__enter__");
+      auto* exitMethod = rhsClass->findMethod("__exit__");
+
+      if (!enterMethod || !exitMethod) {
+        throw ErrorReport(e.range())
+            << "Object returned by with item expression does not define __enter__ and __exit__ methods";
+      }
+
+      // Check the schema of __enter__.
+      auto& enterSchema = enterMethod->getSchema();
+      if (enterSchema.arguments().size() != 1) {
+        throw ErrorReport(e.range())
+            << "__enter__ must have only one argument and one return value";
+      }
+
+      // Check the schema of __exit__.
+      auto& exitSchema = exitMethod->getSchema();
+      if (exitSchema.arguments().size() != 4) {
+        throw ErrorReport(e.range())
+            << "__exit__ must have four arguments and no return value";
+      } else {
+        if (exitSchema.returns().at(0).type() != NoneType::get()) {
+          throw ErrorReport(e.range()) << "__exit__ must have no return value";
+        }
+
+        for (unsigned i = 1; i < 4; ++i) {
+          if (exitSchema.arguments().at(i).type() != AnyType::get()) {
+            throw ErrorReport(e.range())
+                << "argument " << i
+                << " of __exit__ must have Any type; TorchScript does not currently support passing exception type, value, or traceback to the __exit__ function.";
+          }
+        }
+      }
+
+      // Set the output of the enter node to be the return type of __enter__.
+      n->output(0)->setType(enterSchema.returns().at(0).type());
+
+      // Set i = e.__enter__() so that references to i in the body of the with
+      // will resolve correctly.
+      if (target.var().present()) {
+        Var i = target.var().get();
+        environment_stack->setVar(i.range(), i.name().name(), n->output(0));
+      }
+    }
+
+    emitStatements(stmt.body());
+
+    // Insert all the corresponding prim::Exit nodes.
+    while (!entered.empty()) {
+      auto* input = entered.top();
+      entered.pop();
+      auto* n = graph->create(prim::Exit);
+      graph->insertNode(n);
+      n->addInput(input);
+    }
   }
 
   // Currently we do not support assigning exceptions to variables,
