@@ -3,9 +3,29 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import prepare
 
-from .default_mappings import DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST
+from .default_mappings import (
+    _EXCLUDE_QCONFIG_PROPAGATE_LIST,
+    _INCLUDE_QCONFIG_PROPAGATE_LIST,
+    DEFAULT_DYNAMIC_MODULE_MAPPING,
+    DEFAULT_MODULE_MAPPING,
+    DEFAULT_QAT_MODULE_MAPPING,
+)
+
+
+DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
+    set(DEFAULT_MODULE_MAPPING.values())
+    | set(DEFAULT_QAT_MODULE_MAPPING.values())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
+    | set(DEFAULT_MODULE_MAPPING.keys())
+    | set(DEFAULT_QAT_MODULE_MAPPING.keys())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
+    | _INCLUDE_QCONFIG_PROPAGATE_LIST
+) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
+
+NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {nnqd.Linear, nnq.Linear}
 
 
 def _find_match(str_list, key_str, postfix):
@@ -19,6 +39,19 @@ def _find_match(str_list, key_str, postfix):
                 return s2
             if match_string == pattern2:
                 return s2
+
+        # For matching "fc.weight" and "fc._packed_params._packed_params"
+        if postfix == "_packed_params":
+            match_string = "".join(key_str.split(".")[0:-2])
+            if len(match_string) == 0:
+                return None
+            for s2 in str_list:
+                pattern1 = "".join(s2.split(".")[0:-1])
+                pattern2 = "".join(s2.split(".")[0:-2])
+                if match_string == pattern1:
+                    return s2
+                if match_string == pattern2:
+                    return s2
     else:
         return None
 
@@ -51,6 +84,15 @@ def compare_weights(float_dict, quantized_dict):
             weight_dict[key] = {}
             weight_dict[key]["float"] = float_dict[match_key]
             weight_dict[key]["quantized"] = quantized_dict[key]
+            continue
+
+        # For matching "fc.weight" and "fc._packed_params._packed_params"
+        match_key = _find_match(float_dict, key, "_packed_params")
+        if match_key is not None:
+            weight_dict[key] = {}
+            weight_dict[key]["float"] = float_dict[match_key]
+            weight_dict[key]["quantized"] = quantized_dict[key][0]
+
     return weight_dict
 
 
@@ -171,7 +213,8 @@ class Shadow(nn.Module):
 
     def forward(self, x):
         output = self.orig_module(x)
-        x = x.dequantize()
+        if x.is_quantized:
+            x = x.dequantize()
         shadow_output = self.shadow_module(x)
         self.logger(output, shadow_output)
         return output
@@ -343,7 +386,12 @@ def prepare_model_outputs(
     float_module.qconfig = qconfig_debug
     prepare(float_module, inplace=True, white_list=white_list)
     q_module.qconfig = qconfig_debug
-    prepare(q_module, inplace=True, white_list=white_list)
+    prepare(
+        q_module,
+        inplace=True,
+        white_list=white_list,
+        observer_non_leaf_module_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST,
+    )
 
 
 def compare_model_outputs(

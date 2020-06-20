@@ -851,6 +851,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   auto* qshape_arg = onnxifi_net.add_arg();
   shape_arg->set_name("input_shape_info");
   qshape_arg->set_name("input_qshape_info");
+  std::sort(total_inputs_vec.begin(), total_inputs_vec.end());
   onnxifi_net.clear_external_input();
   for (const auto& i : total_inputs_vec) {
     onnxifi_net.add_external_input(i);
