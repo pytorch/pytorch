@@ -269,9 +269,9 @@ void LayerNormKernelImplInternal(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  DCHECK_EQ(X.numel(), M * N);
-  DCHECK(!gamma.defined() || gamma.numel() == N);
-  DCHECK(!beta.defined() || beta.numel() == N);
+  TORCH_CHECK(X.numel() == M * N);
+  TORCH_CHECK(!gamma.defined() || gamma.numel() == N);
+  TORCH_CHECK(!beta.defined() || beta.numel() == N);
   if (M == 0) {
     return;
   }
@@ -326,11 +326,11 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dgamma,
     Tensor* dbeta) {
   using T_ACC = acc_type<T, true>;
-  DCHECK_EQ(dY.numel(), M * N);
-  DCHECK_EQ(X.numel(), M * N);
-  DCHECK_EQ(mean.numel(), M);
-  DCHECK_EQ(rstd.numel(), M);
-  DCHECK(!gamma.defined() || gamma.numel() == N);
+  TORCH_CHECK(dY.numel() == M * N);
+  TORCH_CHECK(X.numel() == M * N);
+  TORCH_CHECK(mean.numel() == M);
+  TORCH_CHECK(rstd.numel() == M);
+  TORCH_CHECK(!gamma.defined() || gamma.numel() == N);
   const T* dY_data = dY.data_ptr<T>();
   const T* X_data = X.data_ptr<T>();
   const T* mean_data = mean.data_ptr<T>();
