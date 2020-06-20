@@ -7,7 +7,7 @@ import torch
 import torch.nn.quantized.functional
 
 class LayerNorm(torch.nn.LayerNorm):
-    r"""This is the quantized version of :class:`torch.nn.LayerNorm`.
+    r"""This is the quantized version of :class:`~torch.nn.LayerNorm`.
 
     Additional args:
         * **scale** - quantization scale of the output, type: double.
