@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
-#include <torch/nn/pimpl.h>
 #include <torch/ordered_dict.h>
 #include <vector>
 
@@ -16,11 +15,8 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   ParameterDictImpl() = default;
 
   explicit ParameterDictImpl(
-      torch::OrderedDict<std::string, torch::Tensor> params) {
-    parameters_.reserve(params.size());
-    for (const auto& item : params) {
-      insert(std::move(item.key()), std::move(item.value()));
-    }
+      const torch::OrderedDict<std::string, torch::Tensor>& params) {
+    parameters_ = params;
   }
 
   /// `reset()` is empty for `ParameterDict`, since it does not have
@@ -42,8 +38,8 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
 
   /// Insert the parameter along with the key into ParameterDict
   /// The parameter is set to be require grad by default
-  Tensor& insert(std::string key, Tensor param, bool requires_grad = true) {
-    return register_parameter(key, param, requires_grad);
+  Tensor& insert(std::string key, Tensor param) {
+    return register_parameter(key, param, param.requires_grad());
   }
 
   /// Remove key from the ParameterDict, and return its value
@@ -53,7 +49,7 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
         "No Parameter with name `",
         key,
         "` is registered");
-    torch::Tensor v = parameters_[key].clone();
+    torch::Tensor v = parameters_[key];
     parameters_.erase(key);
     return v;
   }
@@ -61,28 +57,13 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   /// Return the keys in the dict
   ::std::vector<std::string> keys() const {
     std::vector<std::string> keys;
-    keys.reserve(parameters_.size());
-    for (const auto& param : parameters_) {
-      keys.push_back(param.key());
-    }
-    return keys;
+    return parameters_.keys();
   }
 
   /// Return the Values in the dict
   ::std::vector<torch::Tensor> values() const {
     std::vector<torch::Tensor> values;
-    values.reserve(parameters_.size());
-    for (const auto& param : parameters_) {
-      values.push_back(param.value());
-    }
-    return values;
-  }
-
-  /// Returns an `OrderedDict` with the parameters of this `Module` along with
-  /// their keys, and if `recurse` is true also recursively of every
-  /// submodule.
-  OrderedDict<std::string, Tensor> named_parameters(bool recurse = true) const {
-    return named_parameters(recurse);
+    return parameters_.values();
   }
 
   /// Return an iterator to the start of ParameterDict
@@ -121,11 +102,7 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   void update(const Container& container) {
     parameters_.reserve(parameters_.size() + container.size());
     for (auto& item : container) {
-      // erase and overwrite the duplicate keys
-      if (contains(item.key())) {
-        pop(item.key());
-      }
-      insert(std::move(item.key()), std::move(item.value()));
+      parameters_[item.key()] = item.value();
     }
   }
 
@@ -139,7 +116,7 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
     return parameters_.contains(key);
   }
 
-  Tensor& get(std::string key) {
+  Tensor& get(const std::string& key) {
     return parameters_[key];
   }
 
