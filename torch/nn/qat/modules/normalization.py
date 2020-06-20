@@ -182,10 +182,10 @@ class InstanceNorm3d(nn.InstanceNorm3d):
 
 class LayerNorm(nn.LayerNorm):
     r"""
-    A LayerNorm module attached with FakeQuantize modules for both output
-    activation and weight, used for quantization aware training.
+    A LayerNorm module attached with FakeQuantize modules for output
+    activation, used for quantization aware training.
 
-    Similar to `torch.nn.LayerNorm`, with FakeQuantize modules initialized to
+    Similar to :class:`torch.nn.LayerNorm`, with FakeQuantize modules initialized to
     default.
 
     Attributes:

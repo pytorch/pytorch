@@ -241,6 +241,7 @@ Layers for the quantization-aware training
 * :class:`~torch.nn.qat.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.qat.Conv2d` — 2D convolution
 * :class:`~torch.nn.qat.Hardswish` — Hardswish
+* :class:`~torch.nn.qat.LayerNorm` — LayerNorm
 
 ``torch.quantization``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -352,6 +353,7 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
   quantized representation of 6
 * :class:`~torch.nn.quantized.Hardswish` — Hardswish
+* :class:`~torch.nn.quantized.LayerNorm` — LayerNorm. *Note: performance on ARM is not optimized*.
 
 ``torch.nn.quantized.dynamic``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -707,6 +709,11 @@ Hardswish
 .. autoclass:: Hardswish
     :members:
 
+LayerNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: LayerNorm
+    :members:
+
 
 torch.nn.quantized
 ----------------------------
@@ -788,6 +795,11 @@ DeQuantize
 Linear
 ~~~~~~~~~~~~~~~
 .. autoclass:: Linear
+    :members:
+
+LayerNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: LayerNorm
     :members:
 
 torch.nn.quantized.dynamic
