@@ -19,10 +19,14 @@ DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
 namespace {
 
 void checkRoundingMode(const std::string& fn_name) {
-  TORCH_WARN_ONCE(
+// Disabling this warning message for now as it is printed incorrectly. Need to fix
+
+/*  TORCH_WARN_ONCE(
       std::fegetround() != FE_TONEAREST,
       fn_name,
       " current rounding mode is not set to round-to-nearest-ties-to-even (FE_TONEAREST). This will cause accuracy issues in quantized models.");
+*/
+  return;
 }
 
 void checkCPUTensor(const std::string& fn_name, Tensor t) {
