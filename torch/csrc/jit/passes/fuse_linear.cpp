@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch {
 namespace jit {
@@ -38,7 +38,8 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
         return (%res))IR";
   // replace matmul + add pattern to linear
   SubgraphRewriter matmuladd_to_linear;
-  matmuladd_to_linear.RegisterRewritePattern(matmul_add_pattern, fused_linear_matmul);
+  matmuladd_to_linear.RegisterRewritePattern(
+      matmul_add_pattern, fused_linear_matmul);
   matmuladd_to_linear.runOnGraph(graph, aten_add_alpha_is_one);
 
   std::string matmul_pattern = R"IR(
@@ -75,7 +76,6 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
   cleanup.RegisterRewritePattern(
       linear_weight_extra_transpose, linear_weight_no_transpose);
   cleanup.runOnGraph(graph);
-
 }
 } // namespace jit
 } // namespace torch
