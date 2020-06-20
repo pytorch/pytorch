@@ -10712,6 +10712,15 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
+    @onlyOnCPUAndCUDA
+    def test_nonzero_deprecated(self, device):
+        x = torch.randn((2, 3), device=device)
+        with self.maybeWarnsRegex(UserWarning, "This overload of nonzero is deprecated"):
+            x.nonzero()
+
+        with self.maybeWarnsRegex(UserWarning, "This overload of nonzero is deprecated"):
+            torch.nonzero(x)
+
     # TODO: add torch.complex64, torch.complex128
     @dtypes(torch.float, torch.double)
     def test_normal(self, device, dtype):
