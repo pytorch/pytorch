@@ -14,12 +14,12 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 
+#include <c10/core/ScalarType.h>
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
-#include "c10/core/ScalarType.h"
 
 namespace torch {
 namespace jit {
