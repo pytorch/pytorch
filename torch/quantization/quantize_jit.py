@@ -189,4 +189,5 @@ def quantize_dynamic_jit(model, qconfig_dict, inplace=False, debug=False):
         calibrate,
         [data_loader_test])
     ```
+    """
     return _quantize_jit(model, qconfig_dict, inplace=inplace, debug=debug, quant_type=QuantType.DYNAMIC)
