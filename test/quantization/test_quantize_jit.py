@@ -1239,6 +1239,64 @@ class TestQuantizeJitOps(QuantizationTestCase):
     for individual ops end to end.
     """
     @skipIfNoFBGEMM
+    def test_linear(self):
+        class ModuleLinear(torch.nn.Module):
+            def __init__(self, has_relu=False, f_relu=False):
+                super(ModuleLinear, self).__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+                if has_relu:
+                    if f_relu:
+                        self.relu = F.relu
+                    else:
+                        self.relu = torch.nn.ReLU()
+                else:
+                    self.relu = torch.nn.Identity()
+
+            def forward(self, x):
+                return self.relu(self.linear(x))
+
+        class FuncLinear(torch.nn.Module):
+            def __init__(self, has_relu=False, f_relu=False):
+                super(FuncLinear, self).__init__()
+                self.w = torch.randn(4, 30)
+                self.b = torch.randn(4)
+                if has_relu:
+                    if f_relu:
+                        self.relu = F.relu
+                    else:
+                        self.relu = torch.nn.ReLU()
+                else:
+                    self.relu = torch.nn.Identity()
+
+            def forward(self, x):
+                return self.relu(F.linear(x, self.w, self.b))
+
+        data = [(torch.rand((1, 30), dtype=torch.float),
+                 torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
+
+        for model in [ModuleLinear(has_relu=False),
+                      FuncLinear(has_relu=False)]:
+            model = self.checkGraphModeOp(model, data, "quantized::linear",
+                                          tracing=False)
+            FileCheck() \
+                .check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                .run(model.graph)
+            FileCheck().check_not("quantized::linear_prepack") \
+                       .run(model.graph)
+
+        for f_relu in [True, False]:
+            for model in [ModuleLinear(has_relu=True, f_relu=f_relu),
+                          FuncLinear(has_relu=True, f_relu=f_relu)]:
+                model = self.checkGraphModeOp(model, data,
+                                              "quantized::linear_relu",
+                                              tracing=False)
+                checker = FileCheck().check_not("aten::linear") \
+                                     .check_not("aten::relu") \
+                                     .check_not("quantized::linear(") \
+                                     .check_not("quantized::relu(") \
+                                     .run(model.graph)
+
+    @skipIfNoFBGEMM
     def test_quantized_conv(self):
         conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
 
@@ -3050,6 +3108,8 @@ class TestQuantizeJitJit(JitTestCase):
         with torch.jit._disable_emit_hooks():
             x = torch.jit.script(Linear(10, 10))
             torch._C._jit_pass_erase_shape_information(x.graph)
+
+
 class TestQuantizeJit(QuantizationTestCase):
     @override_qengines
     def test_single_linear(self):
@@ -3220,6 +3280,8 @@ class TestQuantizeJit(QuantizationTestCase):
         script_model.sub.fc2.bias = torch.nn.Parameter(eager_model.sub.module.fc2.bias.detach())
         script_model.fc.weight = torch.nn.Parameter(eager_model.fc.weight.detach())
         script_model.fc.bias = torch.nn.Parameter(eager_model.fc.bias.detach())
+
+        eager_model.fuse_modules()
 
         model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
         qconfig_dict = {
