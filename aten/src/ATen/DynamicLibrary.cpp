@@ -12,6 +12,7 @@
 namespace at {
 
 
+#ifndef C10_MOBILE
 #ifndef _WIN32
 
 // Unix
@@ -69,6 +70,7 @@ DynamicLibrary::~DynamicLibrary() {
   FreeLibrary((HMODULE)handle);
 }
 
+#endif
 #endif
 
 } // namespace at
