@@ -2833,6 +2833,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                         m_ddp = DistributedDataParallel(copy.deepcopy(m),
                                                         device_ids=replica_devices,
                                                         process_group=process_group,
+                                                        rank_from_test=self.rank,
                                                         bucket_cap_mb=bucketsize)
                         torch.cuda.synchronize()
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
