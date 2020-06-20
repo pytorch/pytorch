@@ -347,7 +347,7 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
 
 
 def compare_model_stub(
-    float_model, q_model, module_swap_list, Logger, *data
+    float_model, q_model, module_swap_list, *data, Logger=ShadowLogger
 ):
     r"""Compare quantized module in a model with its floating point counterpart,
     feeding both of them the same input. Return a dict with key corresponding to
@@ -375,9 +375,9 @@ def compare_model_stub(
         q_model: model quantized from float_model
         module_swap_list: list of float module types at which shadow modules will
             be attached.
+        data: input data used to run the prepared q_model
         Logger: type of logger to be used in shadow module to process the outputs of
             quantized module and its float shadow module
-        data: input data used to run the prepared q_model
     """
     prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
     q_model(*data)
@@ -440,9 +440,9 @@ def prepare_model_outputs(
 def compare_model_outputs(
     float_model,
     q_model,
-    Logger,
-    white_list,
     *data,
+    Logger=OutputLogger,
+    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
 ):
     r"""Compare output activations between float and quantized models at
     corresponding locations for the same input. Return a dict with key corresponding
@@ -459,9 +459,9 @@ def compare_model_outputs(
     Args:
         float_model: float model used to generate the q_model
         q_model: model quantized from float_model
+        data: input data used to run the prepared float_model and q_model
         Logger: type of logger to be attached to float_module and q_module
         white_list: list of module types to attach logger
-        data: input data used to run the prepared float_model and q_model
 
     Return:
         act_compare_dict: dict with key corresponding to quantized module names

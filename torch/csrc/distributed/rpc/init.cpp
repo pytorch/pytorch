@@ -218,11 +218,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   owner, returns a reference to the local value.
 
                   Arguments:
-                        timeout (float, optional): Timeout for ``to_here``. If
-                        the call does not complete within this timeframe, an
-                        exception indicating so will be raised. If this argument
-                        is not provided, the default RPC timeout (60s) will be
-                        used.
+                      timeout (float, optional): Timeout for ``to_here``. If
+                          the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this
+                          argument is not provided, the default RPC timeout
+                          (60s) will be used.
               )")
           .def(
               "local_value",
@@ -287,7 +287,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
-                  Create a helper proxy to easily launch an ``remote`` using
+                  Create a helper proxy to easily launch a ``remote`` using
                   the owner of the RRef as the destination to run functions on
                   the object referenced by this RRef. More specifically,
                   ``rref.remote().func_name(*args, **kwargs)`` is the same as
