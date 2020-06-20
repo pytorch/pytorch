@@ -750,7 +750,8 @@ graph(%a_quant, %b_scalar):
 
   auto mean1 = getInputTensorQParamOpFusionInfo("aten::mean", {"%dim"});
 
-  auto mean2 = getInputTensorQParamOpFusionInfo("aten::mean", {"%dim", "%keepdim", "%out"});
+  auto mean2 = getInputTensorQParamOpFusionInfo(
+      "aten::mean", {"%dim", "%keepdim", "%out"});
 
   auto upsample_nearest1d = getInputTensorQParamOpFusionInfo(
       "aten::upsample_nearest1d", {"%output_size", "%scales"});
