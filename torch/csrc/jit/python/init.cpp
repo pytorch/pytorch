@@ -989,7 +989,22 @@ void initJITBindings(PyObject* module) {
           asList.push_back(f->fut);
         }
         return std::make_shared<jit::PythonFutureWrapper>(
-            c10::collectAll(asList));
+            c10::collectAll(asList),
+            /* unwrap_func */ [futures](const py::object& /*unused*/) {
+              // Throw errors when calling wait() on the returned Future if
+              // any of the original futures would throw.
+              // NB: PythonFutureWrapper takes an unwrap_func which serves as a
+              // callback to evalute the value in the Future. RPC uses this
+              // unwrap_func to check whether the returned py::object is a
+              // RemoteException object, and re-throw the exception if it is.
+              // By extracting the c10::ivalue::Future from PythonFutureWrapper
+              // the unwrap_func on the original PythonFutureWrapper objects are
+              // discarded, and hence it will return the RemoteException as an
+              // object instead of re-throwing it.
+              for (auto& fut : futures) {
+                fut->wait();
+              }
+            });
       });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
