@@ -6,7 +6,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing import FileCheck
 import io
 
-@unittest.skipUnless(torch.is_vulkan_available,
+@unittest.skipUnless(torch.is_vulkan_available(),
                      "Vulkan backend must be available for these tests.")
 class TestVulkanRewritePass(TestCase):
     @staticmethod
@@ -27,7 +27,7 @@ class TestVulkanRewritePass(TestCase):
             scripted_model._c = torch._C._freeze_module(scripted_model._c)
         if fuse_clamping_ops:
             torch._C._jit_pass_vulkan_fuse_clamp_w_prepacked_conv(scripted_model._c)
-        if (prepack_removal):
+        if prepack_removal:
             torch._C._jit_pass_vulkan_fold_prepacking_ops(scripted_model._c)
 
         buffer = io.BytesIO()
