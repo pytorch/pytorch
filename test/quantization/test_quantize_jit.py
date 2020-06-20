@@ -65,8 +65,6 @@ from torch.testing._internal.common_quantization import (
 )
 
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import TemporaryFileName
-from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
