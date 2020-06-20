@@ -1,4 +1,6 @@
 import concurrent.futures
+import contextlib
+import json
 import sys
 import time
 import unittest
@@ -9,6 +11,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+import torch.distributed.autograd as dist_autograd
 import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler
@@ -45,6 +48,15 @@ from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture i
 
 def foo_add():
     return torch.add(torch.ones(1), torch.ones(1))
+
+def udf_with_torch_ops(device=-1):
+    device_ctx = contextlib.suppress() if device == -1 else torch.cuda.device(device)
+    with device_ctx:
+        t1, t2 = torch.ones(1), torch.ones(1)
+        t = torch.add(t1, t2)
+        t = torch.mul(t, t)
+        t = t.relu()
+        t = t.sigmoid()
 
 
 def requires_process_group_agent(message=""):
@@ -182,6 +194,7 @@ def my_tensor_function(a, b):
 
 def my_sleep_func(seconds=1):
     time.sleep(seconds)
+    return torch.mul(torch.tensor(1), torch.tensor(1))
 
 
 def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
@@ -943,33 +956,253 @@ class RpcTest(RpcAgentTestFixture):
             self.assertIn("worker0", rpc_profiling_key)
             self.assertIn("worker1", rpc_profiling_key)
 
-    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False):
+    def check_profiling_info(self, self_worker_name, dst_worker_name, func, rpc_event, rpc_exec_mode):
+        self.assertTrue(self_worker_name in rpc_event.name)
+        self.assertTrue(dst_worker_name in rpc_event.name)
+        if isinstance(func, torch.jit.ScriptFunction):
+            self.assertTrue(torch.jit._qualified_name(func) in rpc_event.name)
+        else:
+            self.assertTrue(func.__name__ in rpc_event.name)
+        self.assertTrue(rpc_exec_mode.value in rpc_event.name)
+        self.assertEqual(rpc_event.count, 1)
+
+    @dist_init
+    def test_profiler_rpc_memory(self):
+        if self.rank != 1:
+            return
         dst = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(dst)
+        with torch.autograd.profiler.profile(profile_memory=True) as p:
+            fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+            res = fut.wait()
+
+        function_events = p.function_events
+        event_cpu_mem_usages = set(event.cpu_memory_usage for event in function_events)
+        # if cpu_memory_usage was not propagated over the wire, this set would
+        # only contain 0 (indicates no memory being profiled)
+        self.assertNotEqual({0}, event_cpu_mem_usages)
+        # No memory profiled if profile_memory=False
+        with torch.autograd.profiler.profile(profile_memory=False) as p:
+            fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+            res = fut.wait()
+
+        function_events = p.function_events
+        event_cpu_mem_usages = set(event.cpu_memory_usage for event in function_events)
+        self.assertEqual({0}, event_cpu_mem_usages)
+
+    @skip_if_lt_x_gpu(2)
+    @dist_init
+    def test_profiler_remote_cuda(self):
+        if self.rank != 1:
+            return
+
+        dst_cuda_0 = (self.rank + 1) % self.world_size
+        dst_cuda_1 = (self.rank + 2) % self.world_size
+        dst_worker_cuda_0 = worker_name(dst_cuda_0)
+        dst_worker_cuda_1 = worker_name(dst_cuda_1)
+
+        with torch.autograd.profiler.profile(use_cuda=True) as p:
+            fut1 = rpc.rpc_async(dst_worker_cuda_0, udf_with_torch_ops, args=(0, ))
+            fut2 = rpc.rpc_async(dst_worker_cuda_1, udf_with_torch_ops, args=(1, ))
+            fut1.wait()
+            fut2.wait()
+
+        function_events = p.function_events
+        for event in function_events:
+            if event.is_async:
+                self.assertEqual(0, event.cuda_time_total)
+                self.assertEqual([], event.kernels)
+                self.assertEqual(0, event.cuda_time)
+            else:
+                self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
+                self.assertGreater(event.cuda_time_total, 0)
+                self.assertEqual(1, len(event.kernels))
+                kernel = event.kernels[0]
+                if event.node_id == dst_cuda_0:
+                    self.assertEqual(kernel.device, 0)
+                if event.node_id == dst_cuda_1:
+                    self.assertEqual(kernel.device, 1)
+
+                self.assertGreater(event.cuda_time, 0)
+
+    @dist_init
+    def test_profiler_export_trace(self):
+        if self.rank != 1:
+            return
+        dst = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(dst)
+        with torch.autograd.profiler.profile() as p:
+            fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+            res = fut.wait()
+
+        expected_remote_events = [
+            "ones",
+            "ones",
+            "add",
+            "mul",
+            "relu",
+            "threshold",
+            "sigmoid"
+        ]
+
+        events = p.function_events
+        with TemporaryFileName() as fname:
+            path = fname
+            p.export_chrome_trace(path)
+            with open(path) as f:
+                trace = json.load(f)
+                event_names = [event['name'] for event in trace]
+                for expected_event_name in expected_remote_events + [RPCExecMode.ASYNC.value]:
+                    event_exists = any([expected_event_name in event_name for event_name in event_names])
+                    self.assertTrue(event_exists)
+
+    @dist_init
+    def test_profiler_remote_events_profiled(self):
+        # Tests that we can successfully invoke the profiler on a remote node,
+        # and collect the remote events back in the local profiler.
+        if self.rank != 1:
+            return
+
+        dst_ranks = [rank for rank in range(0, self.world_size) if rank != self.rank]
+        for dst in dst_ranks:
+            dst_worker = worker_name(dst)
+            with torch.autograd.profiler.profile() as prof:
+                fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+                ret = fut.wait()
+
+            events = prof.function_events
+
+            rpc_event = get_function_event(events, RPCExecMode.ASYNC.value)
+            self.check_profiling_info(
+                worker_name(self.rank),
+                dst_worker,
+                udf_with_torch_ops,
+                rpc_event,
+                RPCExecMode.ASYNC,
+            )
+            expected_remote_events = [
+                "ones",
+                "ones",
+                "add",
+                "mul",
+                "relu",
+                "threshold",
+                "sigmoid"
+            ]
+            remote_events = {
+                event.name: event
+                for event in events
+                if event.name in expected_remote_events
+            }
+
+            for expected_remote_event_name in expected_remote_events:
+                self.assertTrue(expected_remote_event_name in remote_events)
+                remote_event = remote_events[expected_remote_event_name]
+                # Remote event should have a node ID corresponding to the worker
+                # it ran on.
+                self.assertEqual(remote_event.node_id, dst)
+
+            # Validate order remote events show up in profiling output.
+            remote_events_list = [
+                event.name for event in events if event.name in expected_remote_events
+            ]
+            self.assertEqual(remote_events_list, expected_remote_events)
+
+    def run_profiling_workload(self, dst):
+        fut = rpc.rpc_async(
+            worker_name(dst),
+            torch.mul,
+            args=(
+                torch.tensor(1.0, requires_grad=True),
+                torch.tensor(1.0, requires_grad=True),
+            ),
+        )
+        fut.wait()
+
+    def validate_profiling_workload(self, dst, prof):
+        events = prof.function_events
+
+        rpc_mul_event = get_function_event(
+            events, torch.jit._find_builtin(torch.mul)
+        )
+
+        remote_events = {
+            event for event in events if event.name in ["mul"]
+        } - {rpc_mul_event}
+
+        for remote_event in remote_events:
+            self.assertEqual(remote_event.node_id, dst)
+
+        self.check_profiling_info(
+            worker_name(self.rank),
+            worker_name(dst),
+            torch.mul,
+            rpc_mul_event,
+            RPCExecMode.ASYNC,
+        )
+        # Validate that the invocations of the RPC events themselves have
+        # the current rank as the node id.
+        for evt in [rpc_mul_event]:
+            self.assertEqual(evt.node_id, self.rank)
+
+    @dist_init
+    def test_profiler_with_autograd_context(self):
+        dst = (self.rank + 1) % self.world_size
+        if self.rank == 1:
+            # Cases where we can double wrap messages with profiling information and autograd info.
+            with dist_autograd.context() as context_id:
+                with torch.autograd.profiler.profile() as prof:
+                    self.run_profiling_workload(dst)
+
+            self.validate_profiling_workload(dst, prof)
+
+            # Ensure that flipped order of ctx managers results in events being
+            # recorded as expected.
+            with torch.autograd.profiler.profile() as prof:
+                with dist_autograd.context() as context_id:
+                    self.run_profiling_workload(dst)
+
+            self.validate_profiling_workload(dst, prof)
+
+    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False, dst=None):
+        dst = dst if dst is not None else (self.rank + 1) % self.world_size
+
         # only run profiler on rank 1.
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
-                if use_record_function:
-                    record_function = torch.autograd.profiler.record_function("foo")
-                    record_function.__enter__()
-                if rpc_exec_mode == RPCExecMode.SYNC:
-                    rpc.rpc_sync(worker_name(dst), func, args=args)
-                elif rpc_exec_mode == RPCExecMode.ASYNC:
-                    fut = rpc.rpc_async(worker_name(dst), func, args=args)
-                    fut.wait()
-                else:
-                    self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
-                    rref = rpc.remote(worker_name(dst), func, args=args)
-                    rref.to_here()
-                    # To avoid flakiness, wait for the RRef to be profiled. This
-                    # means that we received the acknowledgement of successful
-                    # creation on the owner and ran the callbacks responsible
-                    # for recording the profiling event.
-                    rref._get_profiling_future().wait()
-                if use_record_function:
-                    record_function.__exit__()
+                record_function_ctx_mgr = (
+                    contextlib.suppress()
+                    if not use_record_function
+                    else torch.autograd.profiler.record_function(
+                        "foo"
+                    )
+                )
+                with record_function_ctx_mgr as rf:
+                    if rpc_exec_mode == RPCExecMode.SYNC:
+                        rpc.rpc_sync(worker_name(dst), func, args=args)
+                    elif rpc_exec_mode == RPCExecMode.ASYNC:
+                        fut = rpc.rpc_async(worker_name(dst), func, args=args)
+                        fut.wait()
+                    else:
+                        self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
+                        rref = rpc.remote(worker_name(dst), func, args=args)
+                        rref.to_here()
+                        # To avoid flakiness, wait for the RRef to be profiled. This
+                        # means that we received the acknowledgement of successful
+                        # creation on the owner and ran the callbacks responsible
+                        # for recording the profiling event.
+                        rref._get_profiling_future().wait()
 
             events = prof.function_events
             rpc_event = get_function_event(events, rpc_exec_mode.value)
+            # verify Node ID for this rpc event.
+            self.assertEqual(rpc_event.node_id, self.rank)
+            # Ensure recording of remote events.
+            remote_events = {event for event in events if event.node_id == dst} - {rpc_event}
+            self.assertGreaterEqual(len(remote_events), 1)
+            for remote_event in remote_events:
+                self.assertEqual(remote_event.node_id, dst)
+
             if use_record_function:
                 scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
@@ -980,14 +1213,7 @@ class RpcTest(RpcAgentTestFixture):
             # be recorded.
             self_worker_name = worker_name(self.rank)
             dst_worker_name = worker_name(dst)
-            self.assertTrue(self_worker_name in rpc_event.name)
-            self.assertTrue(dst_worker_name in rpc_event.name)
-            if isinstance(func, torch.jit.ScriptFunction):
-                self.assertTrue(torch.jit._qualified_name(func) in rpc_event.name)
-            else:
-                self.assertTrue(func.__name__ in rpc_event.name)
-            self.assertTrue(rpc_exec_mode.value in rpc_event.name)
-            self.assertEqual(rpc_event.count, 1)
+            self.check_profiling_info(self_worker_name, dst_worker_name, func, rpc_event, rpc_exec_mode)
             if use_record_function:
                 # verify order by ensuring that the outer context comes
                 # before the rpc event.
@@ -1004,10 +1230,10 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
-            RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1))
+            RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
         self._profiler_test_with_rpc(
-            RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1)),
+            RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1)),
             use_record_function=True
         )
 
@@ -1020,27 +1246,39 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC, torch.add, args=(torch.ones(1), torch.ones(1))
+            RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
         self._profiler_test_with_rpc(
-            RPCExecMode.ASYNC, torch.add, args=(torch.ones(1), torch.ones(1)),
+            RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1)),
             use_record_function=True
         )
 
     @dist_init
     def test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
-        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,),
-                                     use_record_function=True)
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_sleep_func, args=(1,), use_record_function=True
+        )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_sleep_func, args=(1,), dst=self.rank
+        )
 
     @dist_init
     def test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1))
+            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
         self._profiler_test_with_rpc(
-            RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)),
+            RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1)),
             use_record_function=True
+        )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE,
+            torch.mul,
+            args=(torch.ones(1), torch.ones(1)),
+            dst=self.rank,
         )
 
     @dist_init
@@ -1078,6 +1316,11 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.tensor(1),),
             use_record_function=True,
         )
+        # test remote to self
+        self._profiler_test_with_rpc(
+            RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),), dst=self.rank
+        )
+
 
     def _assert_top_level_events(self, process_global_events, expected_top_level_event_names):
         top_level_event_names = []
