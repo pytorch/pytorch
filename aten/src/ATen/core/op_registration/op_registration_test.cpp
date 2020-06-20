@@ -702,7 +702,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel<DummyKernelWithIntParam>(c10::DispatchKey::CPU)
       .kernel<MockKernel>(c10::DispatchKey::CUDA, &called_kernel));
-  }, "In registration for _test::dummy: expected schema");
+  }, "mismatched with a previous kernel that had the signature");
 }
 
 void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
@@ -813,7 +813,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutograd
   ASSERT_TRUE(op.has_value());
 
   called_autograd = false;
-  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
+  op->typed<void(Tensor)>().call(dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
   EXPECT_TRUE(called_autograd);
 }
 
@@ -826,7 +826,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU)); // note: all tensors have VariableTypeId set
   EXPECT_FALSE(called_nonautograd);
   EXPECT_TRUE(called_autograd);
 }
@@ -841,7 +841,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
 
   called_nonautograd = called_autograd = false;
   at::AutoNonVariableTypeMode _var_guard(true);
-  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 }
@@ -855,7 +855,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));  // note: all tensors have VariableTypeId set
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU));  // note: all tensors have VariableTypeId set
   EXPECT_FALSE(called_nonautograd);
   EXPECT_TRUE(called_autograd);
 }
@@ -870,7 +870,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
 
   called_nonautograd = called_autograd = false;
   at::AutoNonVariableTypeMode _var_guard(true);
-  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 }
@@ -884,14 +884,87 @@ TEST(OperatorRegistrationTest, xlaPreAutogradOverridesAutogradKernel) {
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(c10::DispatchKeySet{DispatchKey::XLA, DispatchKey::XLAPreAutograd}));
+  op->typed<void (Tensor)>().call(dummyTensor(c10::DispatchKeySet{DispatchKey::XLA, DispatchKey::XLAPreAutograd}));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 
   called_nonautograd = called_autograd = false;
-  c10::Dispatcher::singleton().call<void, Tensor>(*op, dummyTensor(DispatchKey::CPU));
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_autograd);
   EXPECT_FALSE(called_nonautograd);
+}
+
+TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingCppSignatures_thenFails) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
+    .kernel(DispatchKey::CPU, [] (int64_t) {}));
+  expectThrows<c10::Error>([] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
+      .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
+  }, "mismatched with a previous kernel that had the signature");
+}
+
+TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBackendWithMismatchingCppSignatures_thenFails) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
+    .catchAllKernel([] (int64_t) {}));
+  expectThrows<c10::Error>([] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
+      .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
+  }, "mismatched with a previous kernel that had the signature");
+}
+
+TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchAllWithMismatchingCppSignatures_thenFails) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
+    .kernel(DispatchKey::CPU, [] (int64_t) {}));
+  expectThrows<c10::Error>([] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
+      .catchAllKernel([] (const int64_t&) {}));
+  }, "mismatched with a previous kernel that had the signature");
+}
+
+TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingWithMismatchingCppSignatures_thenFails) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
+    .kernel(DispatchKey::CPU, [] (int64_t) {}));
+  expectThrows<c10::Error>([] {
+    c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
+      .typed<void(const int64_t&)>();
+  }, "Tried to access operator _test::dummy with a wrong signature");
+}
+
+TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
+    .catchAllKernel([] (int64_t) {}));
+  expectThrows<c10::Error>([] {
+    c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
+      .typed<void(const int64_t&)>();
+  }, "Tried to access operator _test::dummy with a wrong signature");
+}
+
+TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithMismatchingCppSignatures_thenFails) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("dummy(int a) -> ()");
+  m.impl("dummy", DispatchKey::CPU, [] (int64_t) {});
+  expectThrows<c10::Error>([&] {
+    m.impl("dummy", DispatchKey::CUDA, [] (const int64_t&) {});
+  }, "mismatched with a previous kernel that had the signature");
+}
+
+TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCppSignatures_thenFails) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("dummy(int a) -> ()");
+  m.impl("dummy", DispatchKey::CPU, [] (int64_t) {});
+  expectThrows<c10::Error>([] {
+    c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
+      .typed<void(const int64_t&)>();
+  }, "Tried to access operator _test::dummy with a wrong signature");
+}
+
+TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("dummy(int a) -> ()", [] (int64_t) {});
+  expectThrows<c10::Error>([] {
+    c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
+      .typed<void(const int64_t&)>();
+  }, "Tried to access operator _test::dummy with a wrong signature");
 }
 
 /**
@@ -1566,8 +1639,8 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   m.impl("fn", c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; });
   m.impl("fn", c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
      backend_generic_called = true;
-     auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""});
-     return c10::Dispatcher::singleton().redispatch<Tensor, const Tensor&>(*op, c10::DispatchKey::BackendSelect, x);
+     auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""}).value().typed<Tensor (const Tensor&)>();
+     return c10::Dispatcher::singleton().redispatch<Tensor, const Tensor&>(op, c10::DispatchKey::BackendSelect, x);
    });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
