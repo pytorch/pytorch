@@ -427,7 +427,7 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
 
 def hardswish(input, scale, zero_point):
     # type: (Tensor, float, int) -> Tensor
-    r"""This is the quantized version of :meth:`~torch.nn.functional.hardswish`.
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardswish`.
 
     Args:
         input: quantized input
@@ -490,7 +490,7 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
 
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor
-    r"""This is the quantized version of :meth:`~torch.nn.functional.hardsigmoid`.
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardsigmoid`.
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
