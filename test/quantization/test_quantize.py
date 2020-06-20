@@ -66,10 +66,12 @@ from torch.testing._internal.common_quantized import (
     override_qengines,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import suppress_warnings
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
+import unittest
 
 class TestPostTrainingStatic(QuantizationTestCase):
     def test_single_layer(self):
