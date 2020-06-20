@@ -143,6 +143,47 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   return at::_s_where(b_condition, b_self, b_other);
 }
 
+Tensor where(const Tensor& condition, Scalar self, const Tensor& other) {
+  TORCH_CHECK(condition.device() == other.device(),
+              "Expected condition, x and y to be on the same device, but condition is on ",
+              condition.device(), " and y is on", other.device());
+  TORCH_CHECK(condition.scalar_type() == ScalarType::Byte || condition.scalar_type() == ScalarType::Bool,
+              "Expected condition to have ScalarType Byte, but got ScalarType ",
+              toString(condition.scalar_type()));
+  Tensor b_condition, b_self, b_other;
+  auto self_t = at::empty({}, other.options());
+  self_t.fill_(self);
+  std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self_t, other, "where");
+  return at::_s_where(b_condition, b_self, b_other);
+}
+
+Tensor where(const Tensor& condition, const Tensor& self, Scalar other) {
+  TORCH_CHECK(condition.device() == self.device(),
+              "Expected condition, x and y to be on the same device, but condition is on ",
+              condition.device(), " and x is on", self.device());
+  TORCH_CHECK(condition.scalar_type() == ScalarType::Byte || condition.scalar_type() == ScalarType::Bool,
+              "Expected condition to have ScalarType Byte, but got ScalarType ",
+              toString(condition.scalar_type()));
+  Tensor b_condition, b_self, b_other;
+  auto other_t = at::empty({}, self.options());
+  other_t.fill_(other);
+  std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other_t, "where");
+  return at::_s_where(b_condition, b_self, b_other);
+}
+
+Tensor where(const Tensor& condition, Scalar self, Scalar other) {
+  TORCH_CHECK(condition.scalar_type() == ScalarType::Byte || condition.scalar_type() == ScalarType::Bool,
+              "Expected condition to have ScalarType Byte, but got ScalarType ",
+              toString(condition.scalar_type()));
+  Tensor b_condition, b_self, b_other;
+  auto self_t = at::empty({}, condition.options());
+  self_t.fill_(self);
+  auto other_t = at::empty({}, condition.options());
+  other_t.fill_(other);
+  std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self_t, other_t, "where");
+  return at::_s_where(b_condition, b_self, b_other);
+}
+
 std::vector<Tensor> where(const Tensor& condition) {
   return condition.nonzero_numpy();
 }
