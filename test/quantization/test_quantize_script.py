@@ -2098,18 +2098,17 @@ class TestQuantizeScriptPTSQOps(QuantizationTestCase):
 
     def test_elu(self):
         class FunctionalELU(torch.nn.Module):
-            def __init__(self, inplace):
+            def __init__(self, inplace=False):
                 super(FunctionalELU, self).__init__()
                 self.inplace = inplace
 
             def forward(self, input):
                 return torch.nn.functional.elu(input, inplace=self.inplace)
 
-        modules = [torch.nn.ELU(), torch.nn.ELU(inplace=True),
-                   FunctionalELU(True), FunctionalELU(False)]
-
-        for test_case in itertools.product([True, False], modules):
-            tracing, m = test_case
+        modules = [torch.nn.ELU, FunctionalELU]
+        for test_case in itertools.product([True, False], [True, False], modules):
+            tracing, inplace, mod_class = test_case
+            m = mod_class(inplace=inplace)
             m = self.checkGraphModeOp(m, self.img_data, "quantized::elu", tracing)
             FileCheck().check_not("aten::elu") \
                        .check_not("aten::elu_") \
