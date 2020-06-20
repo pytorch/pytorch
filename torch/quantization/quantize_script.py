@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import enum
-
 import torch
 from .qconfig import QConfig
 from torch.jit._recursive import wrap_cpp_module
@@ -28,6 +27,9 @@ def script_qconfig(qconfig):
 def script_qconfig_dict(qconfig_dict):
     return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
 
+def fuse_conv_bn_script(model):
+    return torch.jit._recursive.wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+
 def _prepare_script(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC):
     assert not inplace, "The inplace support is still in development"
     _check_is_script_module(model)
@@ -35,7 +37,7 @@ def _prepare_script(model, qconfig_dict, inplace=False, quant_type=QuantType.STA
     if not all(isinstance(x, str) for x in qconfig_dict.keys()):
         raise ValueError('qconfig_dict should only contain names(str) as keys.')
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
-    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+    model = fuse_conv_bn_script(model)
     return wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
                                                                'forward',
                                                                scripted_qconfig_dict,
@@ -54,6 +56,9 @@ def _convert_script(model, inplace=False, debug=False, quant_type=QuantType.STAT
     model.eval()
     model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', inplace, debug, quant_type))
     if not debug:
+        # Moving model parameters to CPU since quantized operators
+        # are only supported on CPU right now
+        model.cpu()
         model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c, quant_type))
     return model
 
