@@ -3234,6 +3234,28 @@ class RpcTest(RpcAgentTestFixture):
         # Test PG
         dist.barrier()
 
+    @dist_init
+    def test_wait_all_with_exception(self):
+        futs = []
+        dst = worker_name((self.rank + 1) % self.world_size)
+        for _ in range(10):
+            futs.append(rpc.rpc_async(dst, raise_func))
+
+        with self.assertRaisesRegex(ValueError, "Expected error"):
+            ret = torch.futures.wait_all(futs)
+
+    @dist_init
+    def test_wait_all_with_partial_exception(self):
+        futs = []
+        dst = worker_name((self.rank + 1) % self.world_size)
+        for _ in range(10):
+            futs.append(rpc.rpc_async(dst, torch.add, args=(torch.ones(2), 1)))
+
+        futs.append(rpc.rpc_async(dst, raise_func))
+
+        with self.assertRaisesRegex(ValueError, "Expected error"):
+            ret = torch.futures.wait_all(futs)
+
 
 class FaultyAgentRpcTest(FaultyRpcAgentTestFixture):
 
