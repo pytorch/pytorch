@@ -5,6 +5,7 @@ import enum
 import logging
 import os
 import threading
+from torch.distributed.nn import RemoteModule
 
 import torch
 from torch.distributed import rpc
@@ -545,6 +546,51 @@ class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
             self.assertEqual(1, len(grads_dict))
             self.assertEqual(model.weight.grad, grads_dict[model.weight])
 
+    @staticmethod
+    def get_remote_grads(rref, context_id):
+        return dist_autograd.get_gradients(context_id)[rref.local_value().weight]
+
+    @requires_gloo()
+    @dist_init
+    def test_ddp_dist_autograd_local_vs_remote(self):
+        # Each trainer uses a different random seed. Otherwise, they are going
+        # to have exactly the same initial model parameters, input, and
+        # therefore grads. That means the grads will be the same before and
+        # after DDP's all-reduce.
+        torch.manual_seed(self.rank)
+        dist.init_process_group(
+            backend="gloo",
+            init_method="file://{}".format(self.file_name),
+            world_size=self.world_size,
+            rank=self.rank)
+
+        remote_layer1 = RemoteModule("worker0", nn.Linear, args=(10, 5, False))
+        layer1 = nn.Linear(10, 5, False)
+        # Start with the same parameters for remote and local
+        layer1.weight = remote_layer1.module_rref.to_here().weight
+
+        # Run local case.
+        layer2 = nn.Linear(5, 1)
+        inputs = torch.rand((10, 10))
+        ddp_model = DistributedDataParallel(layer2)
+        loss = ddp_model(layer1(inputs)).sum()
+        loss.backward()
+
+        # Run remote case.
+        with dist_autograd.context() as context_id:
+            loss = ddp_model(remote_layer1(inputs)).sum()
+            dist_autograd.backward(context_id, [loss])
+            grads_dict = dist_autograd.get_gradients(context_id)
+            dist.barrier()
+            self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
+            self.assertEqual(
+                layer1.weight.grad,
+                rpc.rpc_sync(
+                    "worker0",
+                    TestDdpComparison.get_remote_grads,
+                    args=(remote_layer1.module_rref, context_id)
+                )
+            )
 
 if __name__ == "__main__":
     run_tests()
