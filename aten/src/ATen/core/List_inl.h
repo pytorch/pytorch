@@ -129,6 +129,12 @@ template<class T, class Iterator>
 void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) {
   std::swap(*lhs.iterator_, *rhs.iterator_);
 }
+
+template<class T, class Iterator>
+bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs) {
+  T lhs_tmp = lhs;
+  return lhs_tmp == rhs;
+}
 }
 
 template<class T>

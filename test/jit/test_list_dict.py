@@ -710,6 +710,13 @@ class TestList(JitTestCase):
             return a == [1, 2, 4]
         self.checkScript(test_list_remove, ())
 
+        def test_str_list_remove():
+            a = ["foo", "bar"]
+            a.remove("foo")
+
+            return a == ["bar"]
+        self.checkScript(test_str_list_remove, ())
+
     def test_list_index_not_existing(self):
         @torch.jit.script
         def list_index_not_existing():
@@ -728,6 +735,13 @@ class TestList(JitTestCase):
 
             return i == 2
         self.checkScript(list_index, ())
+
+        def list_str_index():
+            a = ["foo", "bar"]
+            i = a.index("bar")
+
+            return i == 1
+        self.checkScript(list_str_index, ())
 
     def test_tensor_list_index(self):
         def tensor_list_index():
@@ -755,6 +769,13 @@ class TestList(JitTestCase):
 
             return i == 3
         self.checkScript(list_count, ())
+
+        def list_str_count():
+            a = ["foo", "bar", "foo"]
+            i = a.count("foo")
+
+            return i == 2
+        self.checkScript(list_str_count, ())
 
     def test_list_count_not_existing(self):
         def list_count_not_existing():

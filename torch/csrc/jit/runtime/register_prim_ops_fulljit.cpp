@@ -814,6 +814,7 @@ RegisterOperators reg2({
         CREATE_SPECIALIZED_LIST_OPS("float", double)
             CREATE_SPECIALIZED_LIST_OPS("bool", bool)
                 CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
+                  CREATE_SPECIALIZED_LIST_OPS("str", std::string)
 
 #undef CREATE_GENERIC_LIST_OPS
 #undef CREATE_SPECIALIZED_LIST_OPS
@@ -880,6 +881,10 @@ RegisterOperators reg2({
     Operator(
         "aten::eq.bool_list(bool[] a, bool[] b) -> bool",
         listEq<bool>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::eq.str_list(str[] a, str[] b) -> bool",
+        listEq<std::string>,
         aliasAnalysisFromSchema()),
     Operator(
         "aten::ne.float_list(float[] a, float[] b) -> bool",
