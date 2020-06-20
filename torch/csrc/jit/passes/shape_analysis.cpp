@@ -19,6 +19,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "c10/core/ScalarType.h"
 
 namespace torch {
 namespace jit {
@@ -1427,8 +1428,13 @@ class ShapePropagator {
       if (!maybe_dtype_option)
         return {};
 
-      auto in_tt = node->input(0)->type()->cast<TensorType>();
-      auto in_dtype = (in_tt) ? in_tt->scalarType() : c10::nullopt;
+      c10::optional<c10::ScalarType> in_dtype;
+      if (auto in_tt = node->input(0)->type()->cast<TensorType>()) {
+        in_dtype = in_tt->scalarType();
+      } else {
+        in_dtype = c10::kDouble;
+      }
+
       auto dtype =
           (maybe_dtype_option->isNone()
                ? in_dtype
