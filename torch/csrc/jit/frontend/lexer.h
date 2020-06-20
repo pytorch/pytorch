@@ -107,7 +107,10 @@ namespace jit {
   _(TK_DELETE, "del", "del")                     \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
-  _(TK_IMPORT, "import", "import")
+  _(TK_IMPORT, "import", "import")               \
+  _(TK_WITH, "with", "with")                     \
+  _(TK_WITH_ITEM, "withitem", "")                \
+  _(TK_AS, "as", "as")
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters

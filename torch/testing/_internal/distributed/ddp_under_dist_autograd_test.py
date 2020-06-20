@@ -15,7 +15,6 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
 )
 from torch.testing._internal.common_utils import (
-    run_tests,
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.dist_utils import dist_init
