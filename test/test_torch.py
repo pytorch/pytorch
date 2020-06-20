@@ -2736,7 +2736,7 @@ class AbstractTestCases:
                         getattr(base.clone(), method)(dim, idx, src.type(torch.int))
 
                 # should throw an error when index dtype is not long
-                with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                with self.assertRaisesRegex(IndexError, 'Expected dtype int64 for index'):
                     getattr(base.clone(), method)(dim, idx.type(torch.int), src)
 
                 if test_bounds:

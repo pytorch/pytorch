@@ -535,11 +535,15 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool spars
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
   scatter_stub(self.device().type(), self, dim, index, source);
   return self;
 }
 
 Tensor & scatter_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
   scatter_fill_stub(self.device().type(), self, dim, index, source);
   return self;
 }

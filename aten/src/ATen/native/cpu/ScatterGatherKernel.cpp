@@ -146,13 +146,13 @@ struct cpu_scatter_gather_base_kernel {
     index_sizes[dim] = 1;
     index_strides[dim] = 0;
 
-    auto iter = TensorIterator();
-    iter.dont_compute_common_dtype();
-    iter.dont_resize_outputs();
-    iter.declare_static_shape(index.sizes(), /*squash_dim=*/dim);
-    iter.add_output(self);
-    iter.add_input(index);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .dont_resize_outputs()
+      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .add_output(self)
+      .add_input(index)
+      .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
     auto self_dim_size = ensure_nonempty_size(self, dim);
