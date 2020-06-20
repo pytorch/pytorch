@@ -4,10 +4,10 @@ import torch.nn.functional as F
 
 class Hardswish(nn.Hardswish):
     r"""
-    A Hardswish module attached with FakeQuantize modules for both output
-    activation and weight, used for quantization aware training.
+    A Hardswish module attached with FakeQuantize modules for output
+    activation, used for quantization aware training.
 
-    Similar to `torch.nn.Hardswish`, with FakeQuantize modules initialized to
+    Similar to :class:`~torch.nn.Hardswish`, with FakeQuantize modules initialized to
     default.
 
     Attributes:
