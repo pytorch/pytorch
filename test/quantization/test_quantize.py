@@ -65,8 +65,9 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
     override_qengines,
 )
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.common_utils import suppress_warnings
+from torch.testing._internal.jit_utils import JitTestCase
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
