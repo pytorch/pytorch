@@ -243,6 +243,9 @@ Layers for the quantization-aware training
 * :class:`~torch.nn.qat.Hardswish` — Hardswish
 * :class:`~torch.nn.qat.LayerNorm` — LayerNorm
 * :class:`~torch.nn.qat.GroupNorm` — GroupNorm
+* :class:`~torch.nn.qat.InstanceNorm1d` — InstanceNorm1d
+* :class:`~torch.nn.qat.InstanceNorm2d` — InstanceNorm2d
+* :class:`~torch.nn.qat.InstanceNorm3d` — InstanceNorm3d
 
 ``torch.quantization``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -356,6 +359,9 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.Hardswish` — Hardswish
 * :class:`~torch.nn.quantized.LayerNorm` — LayerNorm. *Note: performance on ARM is not optimized*.
 * :class:`~torch.nn.quantized.GroupNorm` — GroupNorm. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.InstanceNorm1d` — InstanceNorm1d. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.InstanceNorm2d` — InstanceNorm2d. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.InstanceNorm3d` — InstanceNorm3d. *Note: performance on ARM is not optimized*.
 
 ``torch.nn.quantized.dynamic``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -721,6 +727,20 @@ GroupNorm
 .. autoclass:: GroupNorm
     :members:
 
+InstanceNorm1d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm1d
+    :members:
+
+InstanceNorm2d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm2d
+    :members:
+
+InstanceNorm3d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm3d
+    :members:
 
 torch.nn.quantized
 ----------------------------
@@ -812,6 +832,21 @@ LayerNorm
 GroupNorm
 ~~~~~~~~~~~~~~~
 .. autoclass:: GroupNorm
+    :members:
+
+InstanceNorm1d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm1d
+    :members:
+
+InstanceNorm2d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm2d
+    :members:
+
+InstanceNorm3d
+~~~~~~~~~~~~~~~
+.. autoclass:: InstanceNorm3d
     :members:
 
 torch.nn.quantized.dynamic

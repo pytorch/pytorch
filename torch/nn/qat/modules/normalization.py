@@ -47,8 +47,8 @@ class GroupNorm(nn.GroupNorm):
 
 class InstanceNorm1d(nn.InstanceNorm1d):
     r"""
-    A InstanceNorm1d module attached with FakeQuantize modules for both output
-    activation and weight, used for quantization aware training.
+    A InstanceNorm1d module attached with FakeQuantize modules for output
+    activation, used for quantization aware training.
 
     Similar to `torch.nn.InstanceNorm1d`, with FakeQuantize modules initialized to
     default.
@@ -92,8 +92,8 @@ class InstanceNorm1d(nn.InstanceNorm1d):
 
 class InstanceNorm2d(nn.InstanceNorm2d):
     r"""
-    A InstanceNorm2d module attached with FakeQuantize modules for both output
-    activation and weight, used for quantization aware training.
+    A InstanceNorm2d module attached with FakeQuantize modules for output
+    activation, used for quantization aware training.
 
     Similar to `torch.nn.InstanceNorm2d`, with FakeQuantize modules initialized to
     default.
@@ -137,8 +137,8 @@ class InstanceNorm2d(nn.InstanceNorm2d):
 
 class InstanceNorm3d(nn.InstanceNorm3d):
     r"""
-    A InstanceNorm3d module attached with FakeQuantize modules for both output
-    activation and weight, used for quantization aware training.
+    A InstanceNorm3d module attached with FakeQuantize modules for output
+    activation, used for quantization aware training.
 
     Similar to `torch.nn.InstanceNorm3d`, with FakeQuantize modules initialized to
     default.
