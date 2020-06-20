@@ -132,7 +132,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 
 # add non-virtual declaration to Tensor.cpp
-C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
+TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 ${return_type} Tensor::${api_name}(${method_formals}) const {
@@ -141,22 +141,8 @@ ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${schema_order_cpp_signature}>();
-    return op.call(${schema_order_method_actuals});
-#endif
-}
-""")
-UNBOXEDONLY_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-
-// ${schema_string}
-${return_type} Tensor::${api_name}(${method_formals}) const {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_method_body}
-#else
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${cpp_signature}>();
-    return op.call(${method_actuals});
+        .typed<${tensor_method_cpp_signature}>();
+    return op.call(${tensor_method_actuals});
 #endif
 }
 """)
@@ -172,7 +158,7 @@ C10_DEPRECATED CAFFE2_API ${return_type} ${api_name}(${formals_with_defaults});
 """)
 
 # add method definition in Functions.h
-C10_FUNCTION_DEFINITION = CodeTemplate("""\
+FUNCTION_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 ${return_type} ${api_name}(${formals}) {
@@ -181,22 +167,8 @@ ${return_type} ${api_name}(${formals}) {
 #else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${schema_order_cpp_signature}>();
-    return op.call(${schema_order_actuals});
-#endif
-}
-""")
-UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
-
-// ${schema_string}
-${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${cpp_signature}>();
-    return op.call(${actuals});
+        .typed<${function_cpp_signature}>();
+    return op.call(${function_actuals});
 #endif
 }
 """)
@@ -1082,9 +1054,9 @@ def create_generic(top_env, declarations):
         option['formals_types'] = [f['type'] for f in option['formals_list']]
 
         option['cpp_signature'] = "{} ({})".format(option['return_type'], ", ".join(option['formals_types']))
-        option['schema_order_cpp_signature'] = option['cpp_signature']\
-            .replace('const TensorOptions &',
-                     'optional<ScalarType>, optional<Layout> layout, optional<Device> device, optional<bool> pin_memory')
+        option['schema_order_cpp_signature'] = "{} ({})".format(
+            option['return_type'],
+            ", ".join([f['type'] for f in schema_order_formals]))
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
@@ -1155,15 +1127,22 @@ def create_generic(top_env, declarations):
                     option, actuals=option['method_actuals'])
 
             if option['use_c10_dispatcher'] == 'full':
-                method_definition = C10_TENSOR_METHOD_DEFINITION
+                method_definition = TENSOR_METHOD_DEFINITION.substitute(
+                    option, static_dispatch_method_body=static_dispatch_method_body,
+                    tensor_method_actuals=option['schema_order_method_actuals'],
+                    tensor_method_cpp_signature=option['schema_order_cpp_signature']
+                )
             else:
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                method_definition = UNBOXEDONLY_TENSOR_METHOD_DEFINITION
+                method_definition = TENSOR_METHOD_DEFINITION.substitute(
+                    option, static_dispatch_method_body=static_dispatch_method_body,
+                    tensor_method_actuals=option['method_actuals'],
+                    tensor_method_cpp_signature=option['cpp_signature']
+                )
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body),
-                definition=method_definition.substitute(
-                    option, static_dispatch_method_body=static_dispatch_method_body))
+                definition=method_definition)
 
         def gen_namespace_function(option, multidispatch_formals):
             # type: (Any, List[AtFormal]) -> FunctionCode
@@ -1200,12 +1179,16 @@ def create_generic(top_env, declarations):
                     option, actuals=option['actuals'])
 
             if option['use_c10_dispatcher'] == 'full':
-                fn_definition = C10_FUNCTION_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body)
+                fn_definition = FUNCTION_DEFINITION.substitute(
+                    option, static_dispatch_function_body=static_dispatch_function_body,
+                    function_actuals=option['schema_order_actuals'],
+                    function_cpp_signature=option['schema_order_cpp_signature'])
             else:
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                fn_definition = UNBOXEDONLY_FUNCTION_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body)
+                fn_definition = FUNCTION_DEFINITION.substitute(
+                    option, static_dispatch_function_body=static_dispatch_function_body,
+                    function_actuals=option['actuals'],
+                    function_cpp_signature=option['cpp_signature'])
 
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
