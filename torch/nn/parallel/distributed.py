@@ -257,10 +257,13 @@ class DistributedDataParallel(Module):
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None,
                  bucket_cap_mb=25,
+                 rank_from_test=None,
                  find_unused_parameters=False,
                  check_reduction=False):
 
         super(DistributedDataParallel, self).__init__()
+
+        self.rank_from_test = rank_from_test
 
         assert any((p.requires_grad for p in module.parameters())), (
             "DistributedDataParallel is not needed when a module "
@@ -374,10 +377,10 @@ class DistributedDataParallel(Module):
             # better to not pollute the caches with these small blocks
 
             torch.cuda.synchronize()
-            print("before replicate, rank = ", torch.distributed.get_rank(self.process_group))
+            print("before replicate, rank = ", self.rank_from_test)
             self._module_copies = replicate(self.module, self.device_ids, detach=True)
             torch.cuda.synchronize()
-            print("after replicate, rank = ", torch.distributed.get_rank(self.process_group))
+            print("after replicate, rank = ", self.rank_from_test)
 
             self._module_copies[0] = self.module
 
