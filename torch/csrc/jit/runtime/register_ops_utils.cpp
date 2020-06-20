@@ -33,10 +33,9 @@ int listIndex<std::string>(Stack& stack) {
   std::string elem = pop(stack).to<std::string>();
   c10::List<std::string> list = pop(stack).to<c10::List<std::string>>();
 
-  auto pos =
-      std::find_if(list.begin(), list.end(), [&](const std::string& b) {
-        return elem == b;
-      });
+  auto pos = std::find_if(list.begin(), list.end(), [&](const std::string& b) {
+    return elem == b;
+  });
 
   if (pos != list.end()) {
     push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
@@ -68,7 +67,7 @@ int listCount<std::string>(Stack& stack) {
 
   const int64_t count =
       std::count_if(list.begin(), list.end(), [&](const std::string& b) {
-          return elem == b;
+        return elem == b;
       });
   push(stack, count);
 
@@ -147,7 +146,7 @@ int listRemove<std::string>(Stack& stack) {
   c10::List<std::string> list = pop(stack).to<c10::List<std::string>>();
 
   auto pos = std::find_if(list.begin(), list.end(), [&](const std::string& b) {
-      return elem == b;
+    return elem == b;
   });
 
   if (pos != list.end()) {

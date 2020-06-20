@@ -811,10 +811,10 @@ RegisterOperators reg2({
           aliasAnalysisFromSchema()),
 
     CREATE_SPECIALIZED_LIST_OPS("int", int64_t)
-    CREATE_SPECIALIZED_LIST_OPS("float", double)
-    CREATE_SPECIALIZED_LIST_OPS("bool", bool)
-    CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
-    CREATE_SPECIALIZED_LIST_OPS("str", std::string)
+        CREATE_SPECIALIZED_LIST_OPS("float", double)
+            CREATE_SPECIALIZED_LIST_OPS("bool", bool)
+                CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
+                    CREATE_SPECIALIZED_LIST_OPS("str", std::string)
 
 #undef CREATE_GENERIC_LIST_OPS
 #undef CREATE_SPECIALIZED_LIST_OPS
