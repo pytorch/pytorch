@@ -175,11 +175,17 @@ Tensor where(const Tensor& condition, Scalar self, Scalar other) {
   TORCH_CHECK(condition.scalar_type() == ScalarType::Byte || condition.scalar_type() == ScalarType::Bool,
               "Expected condition to have ScalarType Byte, but got ScalarType ",
               toString(condition.scalar_type()));
-  Tensor b_condition, b_self, b_other;
-  auto self_t = at::empty({}, condition.options());
+  TORCH_CHECK(self.type() == other.type(),
+              "Expected x and y to have same ScalarType, but got ",
+              toString(self.type()), " and ", toString(other.type()), " respectively");
+
+  const auto options = condition.options().dtype(self.type());;
+  auto self_t = at::empty({}, options);
   self_t.fill_(self);
-  auto other_t = at::empty({}, condition.options());
+  auto other_t = at::empty({}, options);
   other_t.fill_(other);
+
+  Tensor b_condition, b_self, b_other;
   std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self_t, other_t, "where");
   return at::_s_where(b_condition, b_self, b_other);
 }
