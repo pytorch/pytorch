@@ -242,6 +242,7 @@ Layers for the quantization-aware training
 * :class:`~torch.nn.qat.Conv2d` — 2D convolution
 * :class:`~torch.nn.qat.Hardswish` — Hardswish
 * :class:`~torch.nn.qat.LayerNorm` — LayerNorm
+* :class:`~torch.nn.qat.GroupNorm` — GroupNorm
 
 ``torch.quantization``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -354,6 +355,7 @@ Quantized version of standard NN layers.
   quantized representation of 6
 * :class:`~torch.nn.quantized.Hardswish` — Hardswish
 * :class:`~torch.nn.quantized.LayerNorm` — LayerNorm. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.GroupNorm` — GroupNorm. *Note: performance on ARM is not optimized*.
 
 ``torch.nn.quantized.dynamic``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -714,6 +716,11 @@ LayerNorm
 .. autoclass:: LayerNorm
     :members:
 
+GroupNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: GroupNorm
+    :members:
+
 
 torch.nn.quantized
 ----------------------------
@@ -800,6 +807,11 @@ Linear
 LayerNorm
 ~~~~~~~~~~~~~~~
 .. autoclass:: LayerNorm
+    :members:
+
+GroupNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: GroupNorm
     :members:
 
 torch.nn.quantized.dynamic

@@ -3,8 +3,8 @@ import torch.nn as nn
 
 class GroupNorm(nn.GroupNorm):
     r"""
-    A GroupNorm module attached with FakeQuantize modules for both output
-    activation and weight, used for quantization aware training.
+    A GroupNorm module attached with FakeQuantize modules for output
+    activation, used for quantization aware training.
 
     Similar to `torch.nn.GroupNorm`, with FakeQuantize modules initialized to
     default.
