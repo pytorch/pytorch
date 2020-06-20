@@ -2928,7 +2928,7 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: where.Scalar(Tensor condition, Tensor self, Scalar other) -> Tensor
+- func: where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
