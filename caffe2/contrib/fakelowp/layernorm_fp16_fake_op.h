@@ -132,7 +132,7 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
       T* std);
 
   template <typename T>
-  void fp16_wrap(T* tmp);
+  T ReducedAdd(const std::vector<T>& vec);
 
   const int axis_;
   const float epsilon_;

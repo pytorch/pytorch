@@ -43,7 +43,7 @@ TORCH_LIBRARY(vulkan_prepack, m) {
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
-  m.impl("conv2d_clamp_prepack", createConv2dClampPrePackOpContext);
+  m.impl("conv2d_clamp_prepack", TORCH_FN(createConv2dClampPrePackOpContext));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
