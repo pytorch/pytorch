@@ -12,6 +12,7 @@
 #include "caffe2/core/operator.h"
 // for param_search_greedy
 #include "caffe2/operators/fused_rowwise_nbitfake_conversion_ops.h"
+#include "caffe2/perfkernels/fused_nbit_rowwise_conversion.h"
 
 namespace caffe2 {
 
@@ -39,10 +40,10 @@ class FloatToFusedNBitRowwiseQuantizedOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(
         input.dim(input.dim() - 1) % NUM_ELEM_PER_BYTE,
         0,
-        "FloatToFused" + std::to_string(BIT_RATE) +
+        "FloatToFused" + caffe2::to_string(BIT_RATE) +
             "BitRowwiseQuantizedOp only works for the number of "
             "columns a multiple of " +
-            std::to_string(NUM_ELEM_PER_BYTE));
+            caffe2::to_string(NUM_ELEM_PER_BYTE));
 
     // The "fused" representation stores the scale and bias with the
     // row-wise quantized data in one tensor.
@@ -59,76 +60,93 @@ class FloatToFusedNBitRowwiseQuantizedOp final : public Operator<CPUContext> {
 
     const auto* input_data = input.template data<T>();
     auto* output_data = output->template mutable_data<std::uint8_t>();
-    const auto output_columns = output->size(output->dim() - 1);
+
+    if (!GREEDY && std::is_same<T, float>::value) {
+      // fast path
+      CAFFE_ENFORCE(
+          reinterpret_cast<void (*)(float*, const float*, std::size_t)>(
+              convert) == internal::convertfp32fp32,
+          "When T == float, convert must be convertfp32fp32");
+      FloatToFusedNBitRowwiseQuantizedSBHalf(
+          BIT_RATE,
+          reinterpret_cast<const float*>(input_data),
+          input_rows,
+          input_columns,
+          output_data);
+    } else {
+      const auto output_columns = output->size(output->dim() - 1);
 
 #ifdef _OPENMP
-    vector<float> tmp_vec(input_columns * (GREEDY ? omp_get_max_threads() : 1));
+      vector<float> tmp_vec(
+          input_columns * (GREEDY ? omp_get_max_threads() : 1));
 #else
-    vector<float> tmp_vec(input_columns);
+      vector<float> tmp_vec(input_columns);
 #endif
 
 #pragma omp parallel for if (GREEDY)
-    for (int row = 0; row < input_rows; ++row) {
-      float* tmp = tmp_vec.data();
+      for (int row = 0; row < input_rows; ++row) {
+        float* tmp = tmp_vec.data();
 #ifdef _OPENMP
-      if (GREEDY) {
-        tmp = &tmp_vec[omp_get_thread_num() * input_columns];
-      }
+        if (GREEDY) {
+          tmp = &tmp_vec[omp_get_thread_num() * input_columns];
+        }
 #endif
-      convert(tmp, input_data + row * input_columns, input_columns);
+        convert(tmp, input_data + row * input_columns, input_columns);
 
-      std::uint8_t* output_row = output_data + row * output_columns;
-      at::Half* output_row_scale = reinterpret_cast<at::Half*>(
-          output_row +
-          (input_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
-      at::Half* output_row_bias = reinterpret_cast<at::Half*>(
-          output_row +
-          (input_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
-          sizeof(at::Half));
+        std::uint8_t* output_row = output_data + row * output_columns;
+        at::Half* output_row_scale = reinterpret_cast<at::Half*>(
+            output_row +
+            (input_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
+        at::Half* output_row_bias = reinterpret_cast<at::Half*>(
+            output_row +
+            (input_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
+            sizeof(at::Half));
 
-      float Xmin = *std::min_element(tmp, tmp + input_columns);
-      float Xmax = *std::max_element(tmp, tmp + input_columns);
+        float Xmin = *std::min_element(tmp, tmp + input_columns);
+        float Xmax = *std::max_element(tmp, tmp + input_columns);
 
-      if (GREEDY) {
-        C10_LOG_EVERY_N(INFO, 100) << "Running the GREEDY engine!";
-        internal::param_search_greedy(
-            tmp, input_columns, 200, 0.16, Xmin, Xmax, BIT_RATE);
-      }
+        if (GREEDY) {
+          internal::param_search_greedy(
+              tmp, input_columns, 200, 0.16, Xmin, Xmax, BIT_RATE);
+        }
 
-      // Round Xmin to fp16 to match with dequantization that will use fp16
-      // for Xmin.
-      Xmin = static_cast<at::Half>(Xmin);
-      const float range = Xmax - Xmin;
-      // Round scale to fp16 to match with dequantization that will use fp16
-      // for scale.
-      // Set scale to 1.0f for the corner case of Xmax == Xmin .
-      // Any non-zero scale would work because during quantization
-      // (X - Xmin) / scale will be 0 for all X unless scale is 0.
-      at::Half scale = range == 0 ? 1.0f : range / ((1 << BIT_RATE) - 1);
-      if (scale == 0) {
-        // Corner case handling when Xmax == Xmin
-        // Any scale would work because X - Xmin will be 0 for all X
-        scale = 1.0f;
-      }
+        // Round Xmin to fp16 to match with dequantization that will use fp16
+        // for Xmin.
+        Xmin = static_cast<at::Half>(Xmin);
+        const float range = Xmax - Xmin;
+        // Round scale to fp16 to match with dequantization that will use fp16
+        // for scale.
+        // Set scale to 1.0f for the corner case of Xmax == Xmin .
+        // Any non-zero scale would work because during quantization
+        // (X - Xmin) / scale will be 0 for all X unless scale is 0.
+        at::Half scale = range == 0 ? 1.0f : range / ((1 << BIT_RATE) - 1);
+        float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
+        if (scale == 0 || std::isinf(inverse_scale)) {
+          // Corner case handling when Xmax == Xmin
+          // Any scale would work because X - Xmin will be 0 for all X
+          scale = 1.0f;
+          inverse_scale = 1.0f;
+        }
 
-      *output_row_scale = scale;
-      *output_row_bias = Xmin;
+        *output_row_scale = scale;
+        *output_row_bias = Xmin;
 
-      for (int col = 0; col < input_columns; ++col) {
-        float X = tmp[col];
-        std::uint8_t quantized = std::max(
-            0,
-            std::min<int>(
-                std::lrintf((X - Xmin) / scale), (1 << BIT_RATE) - 1));
-        if (col % NUM_ELEM_PER_BYTE == 0) {
-          // LSB
-          output_row[col / NUM_ELEM_PER_BYTE] = quantized;
-        } else {
-          output_row[col / NUM_ELEM_PER_BYTE] |=
-              (quantized << ((col % NUM_ELEM_PER_BYTE) * BIT_RATE));
+        for (int col = 0; col < input_columns; ++col) {
+          float X = tmp[col];
+          std::uint8_t quantized = std::max(
+              0,
+              std::min<int>(
+                  std::lrintf((X - Xmin) * inverse_scale),
+                  (1 << BIT_RATE) - 1));
+          if (col % NUM_ELEM_PER_BYTE == 0) {
+            output_row[col / NUM_ELEM_PER_BYTE] = quantized;
+          } else {
+            output_row[col / NUM_ELEM_PER_BYTE] |=
+                (quantized << ((col % NUM_ELEM_PER_BYTE) * BIT_RATE));
+          }
         }
       }
-    }
+    } // GREEDY || !std::is_same<T, float>::value
 
     return true;
   }
@@ -172,27 +190,42 @@ class FusedNBitRowwiseQuantizedToFloatOp final : public Operator<CPUContext> {
     const auto* input_data = input.template data<std::uint8_t>();
     T* output_data = output->template mutable_data<T>();
 
-    std::vector<float> tmp(output_columns);
+    if (std::is_same<T, float>::value) {
+      // fast path
+      CAFFE_ENFORCE(
+          reinterpret_cast<void (*)(float*, const float*, std::size_t)>(
+              convert) == internal::convertfp32fp32,
+          "When T == float, convert must be convertfp32fp32");
+      FusedNBitRowwiseQuantizedSBHalfToFloat(
+          BIT_RATE,
+          input_data,
+          input_rows,
+          input_columns,
+          reinterpret_cast<float*>(output_data));
+    } else {
+      std::vector<float> tmp(output_columns);
 
-    for (size_t row = 0; row < input_rows; ++row) {
-      const std::uint8_t* input_row = input_data + row * input_columns;
-      float scale = *reinterpret_cast<const at::Half*>(
-          input_row +
-          (output_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
-      float bias = *reinterpret_cast<const at::Half*>(
-          input_row +
-          (output_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
-          sizeof(at::Half));
+      for (size_t row = 0; row < input_rows; ++row) {
+        const std::uint8_t* input_row = input_data + row * input_columns;
+        float scale = *reinterpret_cast<const at::Half*>(
+            input_row +
+            (output_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
+        float bias = *reinterpret_cast<const at::Half*>(
+            input_row +
+            (output_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
+            sizeof(at::Half));
 
-      for (int col = 0; col < output_columns; ++col) {
-        std::uint8_t quantized = input_row[col / NUM_ELEM_PER_BYTE];
-        quantized >>= (col % NUM_ELEM_PER_BYTE) * BIT_RATE;
-        quantized &= (1 << BIT_RATE) - 1;
-        tmp[col] = scale * quantized + bias;
+        for (int col = 0; col < output_columns; ++col) {
+          std::uint8_t quantized = input_row[col / NUM_ELEM_PER_BYTE];
+          quantized >>= (col % NUM_ELEM_PER_BYTE) * BIT_RATE;
+          quantized &= (1 << BIT_RATE) - 1;
+          tmp[col] = scale * quantized + bias;
+        }
+
+        convert(output_data + row * output_columns, tmp.data(), output_columns);
       }
-
-      convert(output_data + row * output_columns, tmp.data(), output_columns);
     }
+
     return true;
   }
 
