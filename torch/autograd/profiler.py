@@ -849,7 +849,7 @@ def parse_cpu_trace(thread_records):
         name = record.name()
         if start_record is None and name == '__start_profile':
             start_record = record
-        elif name == '__cuda_start_event':
+        elif '__cuda_start_event' in name:
             # N.B.: Each CUDA device has its own __cuda_start_event.
             assert record.device() != -1
             # key for cuda_records is (node_id, device) in case of multiple nodes
