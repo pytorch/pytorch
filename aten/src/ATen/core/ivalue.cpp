@@ -3,6 +3,7 @@
 #include <ATen/core/Formatting.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/ThreadLocalState.h>
 #include <c10/util/StringUtil.h>
 #include <cmath>
 
@@ -629,6 +630,17 @@ getClassConverter() {
       classConverter;
   return classConverter;
 }
+
+void ivalue::Future::addCallbackWithTLSState(std::function<void(void)> callback) {
+    // Wrap cb into a function that runs with the current thread's TLS state.
+    at::ThreadLocalState tls_state;
+    std::function<void(void)> cbWithTlsState =
+        [tls_state = std::move(tls_state), callback = std::move(callback)] {
+          at::ThreadLocalStateGuard g(tls_state);
+          callback();
+        };
+    addCallback(cbWithTlsState);
+  }
 
 CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {

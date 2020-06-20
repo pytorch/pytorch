@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <ATen/ThreadLocalState.h>
 
 namespace torch {
 
@@ -134,6 +135,30 @@ class TORCH_API Future final {
 
   void addCallback(std::function<void(const Future<T>& future)> cb) {
     addCallback([this, cb = std::move(cb)]() { cb(*this); });
+  }
+
+  void addCallbackWithTLSState(
+      std::function<void(const Future<T>& future)> cb) {
+    // Wrap cb into a function that runs with the current thread's TLS state.
+    at::ThreadLocalState tls_state;
+    std::function<void(const Future<T>& future)> cbWithTlsState =
+        [tls_state = std::move(tls_state),
+         cb = std::move(cb)](const Future<T>& future) {
+          at::ThreadLocalStateGuard g(tls_state);
+          cb(future);
+        };
+    addCallback(cbWithTlsState);
+  }
+
+  void addCallbackWithTLSState(std::function<void(void)> cb) {
+    // Wrap cb into a function that runs with the current thread's TLS state.
+    at::ThreadLocalState tls_state;
+    std::function<void(void)> cbWithTlsState =
+        [tls_state = std::move(tls_state), cb = std::move(cb)] {
+          at::ThreadLocalStateGuard g(tls_state);
+          cb();
+        };
+    addCallback(cbWithTlsState);
   }
 
  private:

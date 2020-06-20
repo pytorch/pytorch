@@ -339,18 +339,29 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   /**
+  * Add a callback to the future that that runs with the thread local state of
+  * the caller of this function. This is essentially a wrapper around
+  * at::ThreadLocalStateGuard.
+  */
+  void addCallbackWithTLSState(std::function<void(void)> callback);
+
+  /**
    * Add a callback to the future, and return another Future to hold the return
    * value of the callback. This is necessary when the callback provider needs
    * to know for sure when the callback has finished.
    */
   c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback,
-      TypePtr type) {
+      TypePtr type, bool propagateTLSState = false) {
     auto fut = c10::make_intrusive<Future>(type);
+    // Pick callback function based on propagateTLSState
+    void (ivalue::Future::*addCallbackFn)(std::function<void(void)>) =
+        propagateTLSState ? &ivalue::Future::addCallbackWithTLSState
+                          : &ivalue::Future::addCallback;
     // Cannot move capture std::function in lambda, because it cannot deduce
     // the template type for std::function. Hence use std::bind to explicitly
     // specify types.
-    addCallback(std::bind(
+    (this->*addCallbackFn)(std::bind(
         [fut](std::function<IValue(void)> cb) {
           try {
             fut->markCompleted(cb());

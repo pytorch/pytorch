@@ -2048,6 +2048,52 @@ void testFutures() {
     s2->markCompleted(1);
     ASSERT_EQ(c4->value().toInt(), 7);
   }
+
+  bool cbFinished = false;
+  std::mutex cbFinishedMutex;
+  std::condition_variable cbFinishedCv;
+  // cb that verifies the profiler is enabled
+    auto profilerEnabledCb = [&cbFinished, &cbFinishedMutex, &cbFinishedCv](){
+      ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
+      {
+        std::lock_guard<std::mutex> guard(cbFinishedMutex);
+        cbFinished = true;
+      }
+      cbFinishedCv.notify_one();
+    };
+  // addCallbackWithTLSState
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    s1->addCallbackWithTLSState(profilerEnabledCb);
+    std::thread t([s1 = std::move(s1)]() {
+      s1->markCompleted();
+    });
+    t.join();
+    std::unique_lock<std::mutex> lock(cbFinishedMutex);
+    cbFinishedCv.wait(lock, [&cbFinished] {return cbFinished;});
+    torch::autograd::profiler::disableProfiler();
+  }
+  // then() with TLS State
+{
+  // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    auto s2 = s1->then([&profilerEnabledCb]() {
+      profilerEnabledCb();
+      return at::IValue(1);
+    }, IntType::get(), /* propagateTLS State */ true);
+    std::thread t([s1 = std::move(s1)]() {
+      s1->markCompleted();
+    });
+    t.join();
+    s2->wait();
+}
 }
 
 } // namespace jit
