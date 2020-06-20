@@ -1876,6 +1876,8 @@ class SimpleCustomBatch(object):
     def is_pinned(self):
         return self.inp.is_pinned() and self.tgt.is_pinned()
 
+    def __len__(self):
+        return len(self.inp)
 
 def collate_wrapper(batch):
     return SimpleCustomBatch(batch)
