@@ -2645,17 +2645,27 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
     """
     @override_qengines
     def test_quantized_linear_dynamic(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.fc = torch.nn.Linear(5, 5).float()
+        class FunctionalLinear(torch.nn.Module):
+            def __init__(self, weight, bias):
+                super(FunctionalLinear, self).__init__()
+                self.weight = weight
+                self.bias = bias
 
             def forward(self, x):
-                return self.fc(x)
+                return F.linear(x, self.weight, self.bias)
 
         x = torch.rand(5, 5)
         for tracing in [True, False]:
-            model = self.checkGraphModeOp(M(), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+            model = self.checkGraphModeOp(
+                torch.nn.Linear(5, 5), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+
+        weight = torch.rand(5, 5)
+        b = torch.rand(5)
+        for tracing, has_bias in itertools.product([True, False], [True, False]):
+            bias = b if has_bias else None
+            model = self.checkGraphModeOp(
+                FunctionalLinear(weight, bias), x,
+                "quantized::linear_dynamic", tracing=tracing, dynamic=True)
 
 class TestQuantizeJit(QuantizationTestCase):
     @override_qengines
