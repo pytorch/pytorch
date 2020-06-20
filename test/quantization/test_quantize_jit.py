@@ -74,11 +74,8 @@ from torch.testing._internal.jit_utils import get_forward_graph
 from torch.jit._recursive import wrap_cpp_module
 
 # Standard library
-import io
-import copy
 import itertools
 import unittest
-import numpy as np
 
 class TestQuantizeJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_jit
