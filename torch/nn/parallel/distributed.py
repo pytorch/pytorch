@@ -367,7 +367,11 @@ class DistributedDataParallel(Module):
             # TODO: we don't need to replicate params in here. they're always going to
             # be broadcasted using larger blocks in broadcast_coalesced, so it might be
             # better to not pollute the caches with these small blocks
+            torch.cuda.synchronize()
+            print("before replicate, rank = ", torch.distributed.get_rank(self.process_group))
             self._module_copies = replicate(self.module, self.device_ids, detach=True)
+            torch.cuda.synchronize()
+            print("after replicate, rank = ", torch.distributed.get_rank(self.process_group))
             self._module_copies[0] = self.module
 
             for module_copy in self._module_copies[1:]:

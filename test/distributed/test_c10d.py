@@ -2002,7 +2002,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # check two model parameters over 2 iterations
         for iteration in range(2):
-            torch.cuda.synchronize()
             # single cpu/gpu training
             step_model(model, input, target)
 
@@ -2010,7 +2009,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             step_model(ddp_model,
                        input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
                        target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])
-            torch.cuda.synchronize()
 
             # Update weights and run a second iteration to shake out errors
             update_parameters(model)
@@ -2022,7 +2020,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
-            torch.cuda.synchronize()
 
     def _test_gloo_backend(self, devices, device_ids, multi_device=False):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2827,7 +2824,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
             for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
-                with first_bucket_size(bucketsize):
+                with torch.cuda.device(input_dev):
                     model_msg = "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(self.rank, formats,
                                                                                              dtypes, bucketsize)
                     try:
@@ -2837,7 +2834,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                                         device_ids=replica_devices,
                                                         process_group=process_group,
                                                         bucket_cap_mb=bucketsize)
-                        # torch.cuda.synchronize()
+                        torch.cuda.synchronize()
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
@@ -2856,7 +2853,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             F.mse_loss(m(input).float(), target).backward()
                             F.mse_loss(m_ddp(input[local_batch_start: local_batch_end]).float(),
                                        target[local_batch_start: local_batch_end]).backward()
-                            # torch.cuda.synchronize()
+                            torch.cuda.synchronize()
                             for i, ((layer_name, m_child), m_ddp_child) in enumerate(zip(m.named_children(),
                                                                                          m_ddp.module.children())):
                                 named_msg = layer_name + ".weight" + " " + iter_msg
@@ -2881,6 +2878,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             # Makes sure we still get info if an error occurred somewhere other than the asserts.
                             print("Caught exception during iterations at " + named_msg, flush=True)
                             raise
+                    print("after iters ", model_msg, replica_devices, flush=True)
 
     @requires_nccl()
     @skip_if_not_multigpu
@@ -2894,7 +2892,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         local_batch_size = 8
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
-    @unittest.skipIf(True, "screw this test")
+    # @unittest.skipIf(True, "screw this test")
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_if_rocm
