@@ -768,6 +768,7 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   }
   AddArgument("max_batch_size", opts_.bound_shape_spec.max_batch_size, &op);
   AddArgument("max_seq_size", opts_.bound_shape_spec.max_seq_size, &op);
+  AddArgument("timeout", opts_.timeout, &op);
   AddArgument("nominal_batch_idx", nominal_batch_idx, &op);
 
   return op;
@@ -850,6 +851,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   auto* qshape_arg = onnxifi_net.add_arg();
   shape_arg->set_name("input_shape_info");
   qshape_arg->set_name("input_qshape_info");
+  std::sort(total_inputs_vec.begin(), total_inputs_vec.end());
   onnxifi_net.clear_external_input();
   for (const auto& i : total_inputs_vec) {
     onnxifi_net.add_external_input(i);
@@ -1229,7 +1231,8 @@ bool OnnxifiTransformer::supportOpC2(
     auto ret = lib_->onnxGetBackendCompatibility(
         backend_id, c2_model_str.size(), c2_model_str.c_str());
     if (ret != ONNXIFI_STATUS_SUCCESS) {
-      LOG(INFO) << "Don't support c2 op " << op.type() << " (" << ret << ")";
+      LOG(INFO) << "Don't support c2 op " << op.type() << " at pos " << pos
+                << " (" << ret << ")";
       return false;
     } else {
       return true;

@@ -319,14 +319,14 @@ class QConv1dPackWeightInt8 final {
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
-  m.impl("conv_prepack", QConvPackWeightInt8<2>::run);
-  m.impl("conv1d_prepack", QConv1dPackWeightInt8::run);
-  m.impl("conv2d_prepack", QConvPackWeightInt8<2>::run);
-  m.impl("conv3d_prepack", QConvPackWeightInt8<3>::run);
+  m.impl("conv_prepack", TORCH_FN(QConvPackWeightInt8<2>::run));
+  m.impl("conv1d_prepack", TORCH_FN(QConv1dPackWeightInt8::run));
+  m.impl("conv2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run));
+  m.impl("conv3d_prepack", TORCH_FN(QConvPackWeightInt8<3>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("conv2d_prepack", QConvPackWeightInt8<2>::run);
+  m.impl("conv2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run));
 }
 
 } // namespace
