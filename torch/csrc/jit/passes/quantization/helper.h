@@ -107,7 +107,7 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // ==================== filter functions for matches ==============
-// filter to check Value `vname` is a constant of value `value`
+// filter to check Value `vname` is a constant of int value `value`
 bool is_int_constant(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
