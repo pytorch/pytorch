@@ -50,14 +50,14 @@ from quantization.test_quantize import TestFunctionalModule  # noqa: F401
 from quantization.test_quantize import TestFusion  # noqa: F401
 from quantization.test_quantize import TestModelNumerics  # noqa: F401
 from quantization.test_quantize import TestQuantizeONNXExport  # noqa: F401
-from quantization.test_quantize import TestDeprecatedJitQuantized # noqa: F401
+from quantization.test_quantize import TestDeprecatedJitQuantized  # noqa: F401
 
 # 2. Graph mode quantization
 from quantization.test_quantize_jit import TestQuantizeJit  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeJitPasses  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeJitOps  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeDynamicJitPasses  # noqa: F401
-from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqa: F401
+from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqaa: F401
 
 # Tooling: numric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401

@@ -76,6 +76,7 @@ hu.assert_deadline_disabled()
 import copy
 import io
 import unittest
+import numpy as np
 
 class TestPostTrainingStatic(QuantizationTestCase):
     def test_single_layer(self):
