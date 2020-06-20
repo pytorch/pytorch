@@ -427,7 +427,7 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
 
 def hardswish(input, scale, zero_point):
     # type: (Tensor, float, int) -> Tensor
-    r"""This is the quantized version of :meth:`torch.nn.functional.hardswish`.
+    r"""This is the quantized version of :meth:`~torch.nn.functional.hardswish`.
 
     Args:
         input: quantized input
