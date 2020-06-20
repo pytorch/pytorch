@@ -59,7 +59,7 @@ class TORCH_API DistEngine {
  private:
   // Make sure this is a singleton.
   DistEngine();
-  ~DistEngine() = default;
+  ~DistEngine();
 
   DistEngine(const DistEngine&) = delete;
   DistEngine& operator=(const DistEngine&) = delete;
@@ -147,6 +147,9 @@ class TORCH_API DistEngine {
   // Ready queue used by the CPU thread in distributed engine.
   // See Note [GPU to CPU continuations]
   std::shared_ptr<torch::autograd::ReadyQueue> global_cpu_ready_queue_;
+
+  // See Note [GPU to CPU continuations]
+  std::thread global_cpu_thread_;
 
   friend class BackwardPassCleanupGuard;
 };

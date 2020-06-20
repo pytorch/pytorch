@@ -249,6 +249,12 @@ void Engine::increment_non_reentrant_thread_count() {
   non_reentrant_device_thread_condvar_.notify_one();
 }
 
+void Engine::decrement_non_reentrant_thread_count() {
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+  non_reentrant_device_thread_count_.fetch_sub(1);
+  non_reentrant_device_thread_condvar_.notify_one();
+}
+
 void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
   if (should_increment) {
     increment_non_reentrant_thread_count();
@@ -281,11 +287,9 @@ void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
 
   std::shared_ptr<GraphTask> graph_task = nullptr;
   thread_main(graph_task, /* device_thread */ true);
-  // Notify about shutdown
-  {
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
-    non_reentrant_device_thread_count_.fetch_sub(1);
-    non_reentrant_device_thread_condvar_.notify_one();
+  if (should_increment) {
+    // Decrement the count during shutdown if we incremented earlier.
+    decrement_non_reentrant_thread_count();
   }
 }
 

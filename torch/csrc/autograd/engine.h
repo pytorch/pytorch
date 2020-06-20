@@ -337,6 +337,7 @@ struct TORCH_API Engine {
   // note that it does NOT start CPU thread.
   void start_device_threads();
   void increment_non_reentrant_thread_count();
+  void decrement_non_reentrant_thread_count();
   virtual void thread_main(
       const std::shared_ptr<GraphTask>& task,
       bool device_thread);

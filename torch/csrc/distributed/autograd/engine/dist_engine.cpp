@@ -76,7 +76,13 @@ class DistAccumulateGradCaptureHook
 DistEngine::DistEngine()
     : initializedContextIds_(),
       engine_(Engine::get_default_engine()),
-      global_cpu_ready_queue_(std::make_shared<ReadyQueue>()) {
+      global_cpu_ready_queue_(std::make_shared<ReadyQueue>()),
+      global_cpu_thread_(
+          &Engine::thread_init,
+          &engine_,
+          torch::autograd::CPU_DEVICE,
+          global_cpu_ready_queue_,
+          /* increment */ false) /* We track the thread in DistEngine */ {
   // Note [GPU to CPU continuations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~
   // HACK: Initialize a single CPU thread to execute continuations from GPU
@@ -91,13 +97,13 @@ DistEngine::DistEngine()
   // fix for PyTorch 1.6 and we plan to work towards a better design as we
   // add full GPU support for the RPC framework.
   // See https://github.com/pytorch/pytorch/issues/40255 for more details.
-  std::thread t(
-      &Engine::thread_init,
-      &engine_,
-      torch::autograd::CPU_DEVICE,
-      global_cpu_ready_queue_,
-      true);
-  t.detach();
+  global_cpu_thread_.detach();
+}
+
+DistEngine::~DistEngine() {
+  // Ensure we shutdown the CPU thread.
+  global_cpu_ready_queue_->pushShutdownTask();
+  global_cpu_thread_.join();
 }
 
 DistEngine& DistEngine::getInstance() {
