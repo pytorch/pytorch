@@ -397,6 +397,20 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         qparams = myobs.calculate_qparams()
         self.assertEqual(qparams[1].item(), 0)
 
+    def test_histogram_observer_zero_inputs(self):
+        myobs = HistogramObserver(bins=3, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+        x = torch.zeros(4, requires_grad=True)
+        y = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
+        z = torch.tensor([5.0, 6.0, 7.0, 8.0])
+        myobs(x)
+        myobs(x)
+        myobs(y)
+        myobs(z)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(myobs.min_val, 2.0)
+        self.assertEqual(myobs.max_val, 8.0)
+        self.assertEqual(myobs.histogram, [2., 3., 3.])
+
 class TestFakeQuantizePerTensor(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),

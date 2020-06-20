@@ -109,6 +109,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
+  if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
+    build_args+=("-DUSE_VULKAN=ON")
+  fi
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
@@ -119,6 +122,23 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # We used to set MAX_JOBS to 4 to avoid, but this is no longer an issue.
   if [ -z "$MAX_JOBS" ]; then
     export MAX_JOBS=$(($(nproc) - 1))
+  fi
+
+  # TODO: Remove this once ROCm CI images are >= ROCm 3.5
+  # ROCm 3.5 required a backwards-incompatible change; the kernel and thunk must match.
+  # Detect kernel version and upgrade thunk if this is a ROCm 3.3 container running on a 3.5 kernel.
+  ROCM_ASD_FW_VERSION=$(/opt/rocm/bin/rocm-smi --showfwinfo -d 1 | grep ASD |  awk '{print $6}')
+  if [[ $ROCM_ASD_FW_VERSION = 553648174 && "$BUILD_ENVIRONMENT" == *rocm3.3* ]]; then
+    # upgrade thunk to 3.5
+    mkdir rocm3.5-thunk
+    pushd rocm3.5-thunk
+    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct3.5.0/hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb
+    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct-dev3.5.0/hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb
+    dpkg-deb -vx hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb .
+    dpkg-deb -vx hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb .
+    sudo cp -r opt/rocm-3.5.0/* /opt/rocm-3.3.0/
+    popd
+    rm -rf rocm3.5-thunk
   fi
 
   # ROCm CI is using Caffe2 docker images, which needs these wrapper
