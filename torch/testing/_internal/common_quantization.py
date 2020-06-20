@@ -637,6 +637,18 @@ class InnerModule(torch.nn.Module):
     def forward(self, x):
         return self.relu2(self.fc2(self.relu1(self.fc1(x))))
 
+    def fuse_modules(self):
+        fusable_layers = []
+        named_children = list(self.named_children())
+        for idx, (current_name, layer) in enumerate(named_children):
+            if isinstance(layer, torch.nn.Linear):
+                if idx >= len(named_children) - 1:
+                    break
+                if isinstance(named_children[idx + 1][1], torch.nn.ReLU):
+                    fusable_layers.append([current_name,
+                                           named_children[idx + 1][0]])
+        torch.quantization.fuse_modules(self, fusable_layers, inplace=True)
+
 class SkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
     setting qconfig of a submodule to None
@@ -648,6 +660,9 @@ class SkipQuantModel(torch.nn.Module):
 
     def forward(self, x):
         return self.fc(self.sub(x))
+
+    def fuse_modules(self):
+        self.sub.fuse_modules()
 
 class AnnotatedSkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
@@ -663,6 +678,9 @@ class AnnotatedSkipQuantModel(torch.nn.Module):
 
     def forward(self, x):
         return self.fc(self.sub(x))
+
+    def fuse_modules(self):
+        self.sub.module.fuse_modules()
 
 class QuantStubModel(torch.nn.Module):
     r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
