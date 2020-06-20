@@ -784,7 +784,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             x = torch.randn(10, 20, 3)
             ref_out = ref_model(x)
             load_out = loaded_model(x)
-            self.assertEqual(ref_out[0],load_out[0])
+            self.assertEqual(ref_out[0], load_out[0])
             self.assertEqual(ref_out[1][0], load_out[1][0])
             self.assertEqual(ref_out[1][1], load_out[1][1])
             b = io.BytesIO()
@@ -793,7 +793,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             loaded = torch.load(b)
 
             load_out = loaded(x)
-            self.assertEqual(ref_out[0],load_out[0])
+            self.assertEqual(ref_out[0], load_out[0])
             self.assertEqual(ref_out[1][0], load_out[1][0])
             self.assertEqual(ref_out[1][1], load_out[1][1])
 

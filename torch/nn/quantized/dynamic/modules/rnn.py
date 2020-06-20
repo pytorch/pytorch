@@ -295,12 +295,13 @@ class RNNBase(torch.nn.Module):
                 suffix = '_reverse' if direction == 1 else ''
                 key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
                 key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                weight_bias_dict['weight'][key_name1] = self._all_weight_values[count].param.__getstate__()[0][4][0].__getstate__()[0][0]
-                weight_bias_dict['weight'][key_name2] = self._all_weight_values[count].param.__getstate__()[0][4][1].__getstate__()[0][0]
+                packed_weight_bias = self._all_weight_values[count].param.__getstate__()[0][4]
+                weight_bias_dict['weight'][key_name1] = packed_weight_bias[0].__getstate__()[0][0]
+                weight_bias_dict['weight'][key_name2] = packed_weight_bias[1].__getstate__()[0][0]
                 key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
                 key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                weight_bias_dict['bias'][key_name1] = self._all_weight_values[count].param.__getstate__()[0][4][0].__getstate__()[0][1]
-                weight_bias_dict['bias'][key_name2] = self._all_weight_values[count].param.__getstate__()[0][4][1].__getstate__()[0][1]
+                weight_bias_dict['bias'][key_name1] = packed_weight_bias[0].__getstate__()[0][1]
+                weight_bias_dict['bias'][key_name2] = packed_weight_bias[1].__getstate__()[0][1]
                 count = count + 1
         return weight_bias_dict
 
