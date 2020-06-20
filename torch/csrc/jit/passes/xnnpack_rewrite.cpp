@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -268,6 +269,13 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph, isClampFusable);
 }
 
+void runCanonicalOptimizations(script::Module& module) {
+  auto graph = module.get_method("forward").graph();
+  // Not sure if we have models running on mobile that require loop unrolling.
+  // Perhaps language/speech models? Conservatively setting that to false.
+  runOptimization(graph, false /* no loop unrolling */);
+}
+
 } // namespace
 
 void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
@@ -318,6 +326,11 @@ script::Module optimizeForMobile(
     fusePrePackedLinearConvWithClamp(cloned_module);
     FoldPrePackingOps(cloned_module);
   }
+
+  // Run canonical optimizations post freezing
+  // since freezing inlines the graph. Otherwise we
+  // will have to explicitly call Inlining pass.
+  runCanonicalOptimizations(cloned_module);
 
   if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
     removeDropout(cloned_module);

@@ -324,9 +324,9 @@ class AnnotatedSingleLayerLinearModel(torch.nn.Module):
         return x
 
 class SingleLayerLinearDynamicModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine='fbgemm'):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
 
     def forward(self, x):
