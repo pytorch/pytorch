@@ -4326,7 +4326,7 @@ separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
-                '__rmul__', '__rtruediv__', 'sum', 'transpose', 'round', 'add', 'roll',
+                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
                 '__radd__', 'repeat', 'expand', 'mul', 'tanh', 'flip', 'fliplr', 'flipud',
                 'rot90'] + separate_complex_tests
 

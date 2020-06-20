@@ -486,27 +486,6 @@ class TestScriptPy3(JitTestCase):
                 if True:
                     x : Optional[int] = 7
 
-    def test_named_tuple_as_attribute(self):
-        """
-        Test named tuples as attributes of modules.
-        """
-        global Params
-
-        class Params(NamedTuple):
-            p1: float
-            p2: int
-
-        class MyModule(torch.nn.Module):
-            def __init__(self, params):
-                super().__init__()
-                self.params = params
-
-            def forward(self):
-                return self.params.p1
-
-        params = Params(1.0, 2)
-        self.checkModule(MyModule(params), ())
-
     def test_export_opnames_interface(self):
         global OneTwoModule
 
