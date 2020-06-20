@@ -29,6 +29,24 @@ int listIndex<at::Tensor>(Stack& stack) {
 }
 
 template <>
+int listIndex<std::string>(Stack& stack) {
+  std::string elem = pop(stack).to<std::string>();
+  c10::List<std::string> list = pop(stack).to<c10::List<std::string>>();
+
+  auto pos =
+      std::find_if(list.begin(), list.end(), [&](const std::string& b) {
+        return elem == b;
+      });
+
+  if (pos != list.end()) {
+    push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
+  } else {
+    AT_ERROR("'", elem, "' is not in list");
+  }
+  return 0;
+}
+
+template <>
 int listCount<at::Tensor>(Stack& stack) {
   at::Tensor elem = pop(stack).to<at::Tensor>();
   c10::List<at::Tensor> list = pop(stack).to<c10::List<at::Tensor>>();
@@ -37,6 +55,20 @@ int listCount<at::Tensor>(Stack& stack) {
       std::count_if(list.begin(), list.end(), [&](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
+      });
+  push(stack, count);
+
+  return 0;
+}
+
+template <>
+int listCount<std::string>(Stack& stack) {
+  std::string elem = pop(stack).to<std::string>();
+  c10::List<std::string> list = pop(stack).to<c10::List<std::string>>();
+
+  const int64_t count =
+      std::count_if(list.begin(), list.end(), [&](const std::string& b) {
+          return elem == b;
       });
   push(stack, count);
 
@@ -98,6 +130,24 @@ int listRemove<at::Tensor>(Stack& stack) {
   auto pos = std::find_if(list.begin(), list.end(), [&](const at::Tensor& b) {
     const auto cmp_result = elem.eq(b);
     return cmp_result.is_nonzero();
+  });
+
+  if (pos != list.end()) {
+    list.erase(pos);
+  } else {
+    AT_ERROR("list.remove(x): x not in list");
+  }
+
+  return 0;
+}
+
+template <>
+int listRemove<std::string>(Stack& stack) {
+  std::string elem = pop(stack).to<std::string>();
+  c10::List<std::string> list = pop(stack).to<c10::List<std::string>>();
+
+  auto pos = std::find_if(list.begin(), list.end(), [&](const std::string& b) {
+      return elem == b;
   });
 
   if (pos != list.end()) {

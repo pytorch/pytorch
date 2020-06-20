@@ -729,6 +729,12 @@ class TestList(JitTestCase):
             return i == 2
         self.checkScript(list_index, ())
 
+        def list_string_index():
+            a = ["foo", "bar"]
+            i = a.index("foo")
+            return i == 0
+        self.checkScript(list_string_index, ())
+
     def test_tensor_list_index(self):
         def tensor_list_index():
             a = [torch.tensor(4), torch.tensor(1), torch.tensor(3), torch.tensor(2)]

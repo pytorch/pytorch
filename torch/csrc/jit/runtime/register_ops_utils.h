@@ -277,6 +277,9 @@ int listMax(Stack& stack) {
 template <>
 int listRemove<at::Tensor>(Stack& stack);
 
+template <>
+int listRemove<std::string>(Stack& stack);
+
 template <typename T>
 int listIndex(Stack& stack) {
   T elem = pop(stack).to<T>();
@@ -296,6 +299,9 @@ int listIndex(Stack& stack) {
 template <>
 int listIndex<at::Tensor>(Stack& stack);
 
+template <>
+int listIndex<std::string>(Stack& stack);
+
 template <typename T>
 int listCount(Stack& stack) {
   T elem = pop(stack).to<T>();
@@ -309,6 +315,9 @@ int listCount(Stack& stack) {
 
 template <>
 int listCount<at::Tensor>(Stack& stack);
+
+template <>
+int listCount<std::string>(Stack& stack);
 
 int listExtend(Stack& stack);
 
