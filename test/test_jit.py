@@ -2713,27 +2713,6 @@ class TestScript(JitTestCase):
         with self.assertRaises(RuntimeError):
             m.foo = 6
 
-    def test_script_packedsequence(self):
-        class ExperimentalLSTM(torch.nn.Module):
-            def __init__(self, input_dim, hidden_dim):
-                super().__init__()
-
-            def forward(self, input):
-                # type: (Tensor)
-                packed = torch.nn.utils.rnn.pack_padded_sequence(
-                    input=input, lengths=torch.tensor([1, 2]), enforce_sorted=False
-                )
-                output, lengths = torch.nn.utils.rnn.pad_packed_sequence(
-                    sequence=packed, total_length=2
-                )
-                # lengths is flipped, so is output
-                return output[0]
-
-        lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
-
-        with torch.jit._disable_emit_hooks():
-            self.checkModule(lstm, [torch.ones(2, 2)])
-
     def test_class_attribute(self):
         class M(torch.jit.ScriptModule):
             FOO = 0
@@ -9087,6 +9066,55 @@ a")
         script_seq, script_lengths = scripted_pack_padded_seq(x, seq_lens)
         self.assertEqual(eager_seq, script_seq)
         self.assertEqual(eager_lengths, script_lengths)
+
+        class ExperimentalLSTM(torch.nn.Module):
+            def __init__(self, input_dim, hidden_dim):
+                super().__init__()
+
+            def forward(self, input):
+                # type: (Tensor)
+                packed = pack_padded_sequence(
+                    input=input, lengths=torch.tensor([1, 2]), enforce_sorted=False
+                )
+                output, lengths = pad_packed_sequence(
+                    sequence=packed, total_length=2
+                )
+                # lengths is flipped, so is output
+                return output[0]
+
+        lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
+
+        with torch.jit._disable_emit_hooks():
+            self.checkModule(lstm, [torch.ones(2, 2)])
+
+    def test_script_pad_sequence_pack_sequence(self):
+        from torch.nn.utils.rnn import pad_sequence, pack_sequence, pad_packed_sequence
+
+        def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0):
+            # type: (List[Tensor], bool, float) -> Tensor
+            return pad_sequence(tensor_list, batch_first, padding_value)
+
+        def pack_sequence_func(tensor_list, enforce_sorted=True):
+            # type: (List[Tensor], bool) -> Tensor
+            return pad_packed_sequence(pack_sequence(tensor_list, enforce_sorted))[0]
+
+        ones3 = torch.ones(3, 5)
+        ones4 = torch.ones(4, 5)
+        ones5 = torch.ones(5, 5)
+        tensor1 = torch.tensor([1, 2, 3])
+        tensor2 = torch.tensor([4, 5])
+        tensor3 = torch.tensor([6])
+        with torch.jit._disable_emit_hooks():
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5],))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True, 2.5))
+            self.checkScript(pack_sequence_func,
+                             ([tensor1, tensor2, tensor3],))
+            self.checkScript(pack_sequence_func,
+                             ([tensor1, tensor2, tensor3], False))
 
     def test_script_get_tracing_state(self):
         def test_if_tracing(x):
