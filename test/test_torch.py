@@ -17603,11 +17603,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             if dtype.is_floating_point or dtype.is_complex:
                 x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
                 x[torch.randn(*shape) > 0.5] = 0
-                if with_extremal:
+                if with_extremal and dtype.is_floating_point:
                     # Use extremal values
                     x[torch.randn(*shape) > 0.5] = float('nan')
                     x[torch.randn(*shape) > 0.5] = float('inf')
                     x[torch.randn(*shape) > 0.5] = float('-inf')
+                elif with_extremal and dtype.is_complex:
+                    x[torch.randn(*shape) > 0.5] = complex('nan')
+                    x[torch.randn(*shape) > 0.5] = complex('inf')
+                    x[torch.randn(*shape) > 0.5] = complex('-inf')
             else:
                 x = torch.randint(15, 100, shape, dtype=dtype, device=device)
 
@@ -17633,7 +17637,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                             self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
     def test_count_nonzero(self, device, dtype):
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
