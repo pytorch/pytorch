@@ -399,37 +399,33 @@ class ShapePropagator {
   }
 
   bool PropagateShapeOnNodeByRunningIt(Node* node, Operation op = nullptr) {
-    try {
-      if (!canPropagateShapeByRunningIt(node))
-        return false;
-
-      if (!op)
-        op = node->getOperation();
-
-      Stack stack;
-
-      for (auto input : node->inputs()) {
-        stack.push_back(representativeValue(input));
-      }
-
-      // XXX: we're not catching any exceptions from the op for now. This
-      // is to uncover any mistakes we could make when editing this code,
-      // and eventually it shouldn't matter, because this phase should be
-      // preceded by schema checking.
-      op(stack);
-
-      AT_ASSERT(stack.size() == node->outputs().size());
-      for (size_t i = 0; i < stack.size(); ++i) {
-        // some ops may have mixed tensor/primitive outputs
-        // for primitives, we don't need to change the type because it is
-        // already its most constrained form.
-        if (stack[i].isTensor())
-          node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
-      }
-      return true;
-    } catch (...) {
+    if (!canPropagateShapeByRunningIt(node))
       return false;
+
+    if (!op)
+      op = node->getOperation();
+
+    Stack stack;
+
+    for (auto input : node->inputs()) {
+      stack.push_back(representativeValue(input));
     }
+
+    // XXX: we're not catching any exceptions from the op for now. This
+    // is to uncover any mistakes we could make when editing this code,
+    // and eventually it shouldn't matter, because this phase should be
+    // preceded by schema checking.
+    op(stack);
+
+    AT_ASSERT(stack.size() == node->outputs().size());
+    for (size_t i = 0; i < stack.size(); ++i) {
+      // some ops may have mixed tensor/primitive outputs
+      // for primitives, we don't need to change the type because it is
+      // already its most constrained form.
+      if (stack[i].isTensor())
+        node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
+    }
+    return true;
   }
 
   void PropagateCatShape(Node* cat_node) {
