@@ -377,7 +377,11 @@ class _BaseDataLoaderIter(object):
 
     def __next__(self) -> Any:
         data = self._next_data()
-        self._num_yielded += 1
+        # num_yielded and the value of _IterableDataset_len_called are in units of "samples" rather than
+        # batches, so when using auto_collation, we need to increment by the length of the batch we're
+        # yielding
+        self._num_yielded += len(data) if self._auto_collation else 1
+
         if self._dataset_kind == _DatasetKind.Iterable and \
                 self._IterableDataset_len_called is not None and \
                 self._num_yielded > self._IterableDataset_len_called:
