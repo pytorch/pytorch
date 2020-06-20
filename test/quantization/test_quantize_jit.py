@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.jit
 import torch.jit.quantized
-from torch._C import parse_ir
 
 # torch.quantization
 from torch.quantization import (
