@@ -587,14 +587,13 @@ def squeeze(g, self, dim=None):
     if input_shape[squeeze_dim] > 1:
         warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". The size of " +
                       "this dimension in the given input is " + str(input_shape[squeeze_dim]) + ". The model will " +
-                      "be exported without the squeeze node. If the model is intended to be used with different " +
-                      "input shapes than the shapes passed at export time, please use opset version 11 to " +
+                      "be exported without the squeeze node. If the model is intended to be used with dynamic " +
+                      "input shapes, please use opset version 11 to " +
                       "export the model.")
         return self
 
     warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". If the model is " +
-                  "intended to be used with different input shapes than the shapes passed at export time, please " +
-                  "use opset version 11 to export the model.")
+                  "intended to be used with dynamic input shapes, please use opset version 11 to export the model.")
     return g.op("Squeeze", self, axes_i=[squeeze_dim])
 
 def prelu(g, self, weight):
