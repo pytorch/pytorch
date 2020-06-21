@@ -1010,7 +1010,7 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_dot
+    CPU: dot
     CUDA: legacy::cuda::_th_dot
 
 - func: dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)

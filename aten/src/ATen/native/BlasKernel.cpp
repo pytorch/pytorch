@@ -4,6 +4,8 @@
 #include <ATen/Config.h>
 
 #if AT_BUILD_WITH_BLAS()
+extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
+extern "C" float sdot_(int *n, float *x, int *incx, float *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
@@ -165,5 +167,74 @@ template bool gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, s
 AT_FORALL_SCALAR_TYPES_AND(BFloat16, INSTANTIATE);
 AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 #undef INSTANTIATE
+
+namespace blas_impl {
+#if AT_BUILD_WITH_BLAS()
+float dot_fast_path(int n, float* x, int incx, float* y, int incy) {
+  return sdot_(&n, x, &incx, y, &incy);
+}
+
+double dot_fast_path(int n, double* x, int incx, double* y, int incy) {
+  return ddot_(&n, x, &incx, y, &incy);
+}
+#endif
+
+template <typename scalar_t>
+scalar_t dot_naive(
+    int64_t n,
+    scalar_t* x,
+    int64_t incx,
+    scalar_t* y,
+    int64_t incy) {
+  int64_t i;
+  scalar_t sum = 0;
+  for (i = 0; i < n; i++) {
+    sum += x[i * incx] * y[i * incy];
+  }
+  return sum;
+}
+
+} // namespace blas_impl
+
+template <typename scalar_t>
+scalar_t dot_impl(
+    int64_t n,
+    scalar_t* x,
+    int64_t incx,
+    scalar_t* y,
+    int64_t incy) {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  return c10::guts::if_constexpr<std::is_floating_point<scalar_t>::value>(
+      // if
+      [&](auto _) {
+#if AT_BUILD_WITH_BLAS()
+        if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
+          return blas_impl::dot_fast_path(n, x, incx, y, incy);
+        } else {
+          return blas_impl::dot_naive(n, x, incx, y, incy);
+        }
+#else
+        { return blas_impl::dot_naive(n, x, incx, y, incy); }
+#endif
+      },
+      // else
+      [&](auto _) { return blas_impl::dot_naive(n, x, incx, y, incy); });
+}
+
+#define INSTANTIATE_DOT_IMPL(scalar_t)  \
+  template scalar_t dot_impl<scalar_t>( \
+      int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy);
+INSTANTIATE_DOT_IMPL(uint8_t);
+INSTANTIATE_DOT_IMPL(int8_t);
+INSTANTIATE_DOT_IMPL(int16_t);
+INSTANTIATE_DOT_IMPL(int);
+INSTANTIATE_DOT_IMPL(int64_t);
+INSTANTIATE_DOT_IMPL(float);
+INSTANTIATE_DOT_IMPL(double);
+#undef INSTANTIATE_DOT_IMPL
 
 }} // namespace at::native
