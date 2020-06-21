@@ -57,6 +57,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
+  m.def("_enable_record_function", [](bool enable) {
+    at::enableRecordFunction(enable);
+  });
 
   Py_RETURN_TRUE;
 }
