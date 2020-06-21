@@ -472,8 +472,8 @@ def threshold(input, threshold, value):
         raise ValueError("Input to 'value' must be specified!")
     return torch._ops.ops.quantized.threshold(input, threshold, value)
 
-def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
-    # type: (Tensor, Optional[float], bool, Optional[float], Optional[int]) -> Tensor
+def elu(input, scale, zero_point, alpha=1.):
+    # type: (Tensor, float, int, float) -> Tensor
     r"""
     Applies the quantized ELU function element-wise:
 
@@ -482,25 +482,12 @@ def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
 
     Args:
         input: quantized input
-        alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
-        inplace: Inplace modification of the input tensor
         scale, zero_point: Scale and zero point of the output tensor.
+        alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.elu' must be quantized!")
-    if (scale is not None) != (zero_point is not None):
-        raise ValueError("Either both or none of (scale, zero_point) must be specified!")
-
-    if scale is not None and zero_point is not None:
-        assert not inplace, "Cannot rescale with `inplace`"
-        output = torch._empty_affine_quantized(
-            input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype)
-        torch._C._nn.elu(input, alpha, out=output)
-        return output
-    elif inplace:
-        return torch._C._nn.elu_(input, alpha)
-    else:
-        return torch._C._nn.elu(input, alpha)
+    return torch.ops.quantized.elu(input, scale, zero_point, alpha)
 
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor

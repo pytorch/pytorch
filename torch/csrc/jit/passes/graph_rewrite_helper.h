@@ -19,6 +19,10 @@ c10::optional<IValue> getIValue(
     const std::unordered_map<std::string, Value*>& vmap);
 void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph);
 
+bool isClampFusable(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
 using MatchFilter = std::function<
     bool(const Match&, const std::unordered_map<std::string, Value*>&)>;
 

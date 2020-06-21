@@ -16,13 +16,20 @@ void Fused8BitRowwiseQuantizedToFloat(
     int input_columns,
     float* output);
 
-void FloatToFused8BitRowwiseQuantizedSBHalf(
+/**
+ * Row-wise quantization with fp16 scale and bias
+ *
+ * @param bit_rate can be 2, 4, or 8
+ */
+void FloatToFusedNBitRowwiseQuantizedSBHalf(
+    int bit_rate,
     const float* input,
     int input_rows,
     int input_columns,
     std::uint8_t* output);
 
-void Fused8BitRowwiseQuantizedSBHalfToFloat(
+void FusedNBitRowwiseQuantizedSBHalfToFloat(
+    int bit_rate,
     const std::uint8_t* input,
     int input_rows,
     int input_columns,
