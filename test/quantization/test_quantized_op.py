@@ -2916,6 +2916,7 @@ class TestQuantizedConv(unittest.TestCase):
             input_channels_per_group_range=(1, 4),
             output_channels_per_group_range=(1, 4), feature_map_range=(4, 8),
             kernel_range=(1, 4), max_groups=4,
+            can_be_transposed=True,
             qparams=[hu.qparams(dtypes=torch.quint8,
                                 zero_point_min=0,
                                 zero_point_max=0),
@@ -2927,21 +2928,28 @@ class TestQuantizedConv(unittest.TestCase):
                                 zero_point_max=0)]),
         stride=st.integers(1, 3),
         pad=st.integers(1, 2),
-        channelwise=st.booleans(),
-        qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_qconv1d_unpack(
-        self, inputs, stride, pad, channelwise, qengine
-    ):
-        if qengine not in supported_qengines:
+        o_pad=st.integers(1, 2),
+        channelwise=st.booleans())
+    @override_qengines
+    def test_qconv1d_unpack(self, inputs, stride, pad, o_pad, channelwise):
+        transposed = inputs[-1]
+        qengine = torch.backends.quantized.engine
+        if qengine != 'qnnpack' and transposed:
+            # Only QNNPACK conv_transpose is supported for now...
             return
         if qengine == 'qnnpack':
-            channelwise = False
-        with override_quantized_engine(qengine):
+            assume(channelwise == False)
+        assume(channelwise ^ transposed)  # See TODO in _test_qconv_unpack_impl
+
+        if transposed:
+            qconv_prepack = torch.ops.quantized.conv_transpose1d_prepack
+            qconv_unpack = torch.ops.quantized.conv_transpose1d_unpack
+        else:
             qconv_prepack = torch.ops.quantized.conv1d_prepack
             qconv_unpack = torch.ops.quantized.conv1d_unpack
-            self._test_qconv_unpack_impl(
-                qconv_prepack, qconv_unpack, inputs, [stride],
-                [pad], None, channelwise)
+        self._test_qconv_unpack_impl(
+            qconv_prepack, qconv_unpack, inputs, [stride],
+            [pad], [o_pad], channelwise)
 
     """Tests the correctness of quantized 1D convolution op."""
     @given(batch_size=st.integers(1, 6),

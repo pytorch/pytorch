@@ -1,4 +1,5 @@
 from collections import defaultdict
+from collections.abc import Iterable
 import numpy as np
 import torch
 
@@ -248,7 +249,8 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
 The resulting tensors is in float32 format.
 
 Args:
-    spatial_dim: Spatial Dim for feature maps.
+    spatial_dim: Spatial Dim for feature maps. If given as an iterable, randomly
+                 picks one from the pool to make it the spatial dimension
     batch_size_range: Range to generate `batch_size`.
                       Must be tuple of `(min, max)`.
     input_channels_per_group_range:
@@ -308,6 +310,9 @@ def tensor_conv(
     groups = draw(st.integers(1, max_groups))
     input_channels = input_channels_per_group * groups
     output_channels = output_channels_per_group * groups
+
+    if isinstance(spatial_dim, Iterable):
+        spatial_dim = draw(st.sampled_from(spatial_dim))
 
     feature_map_shape = []
     for i in range(spatial_dim):

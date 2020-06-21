@@ -264,6 +264,7 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   m.impl("conv3d_transpose", TORCH_FN(QConvTranspose<3>::run));
 
   // ConvTranspose is the same, however, we want to have different name.
+  m.impl("conv_transpose1d_unpack", TORCH_FN(QConv1dUnpackWeightsInt8::run));
   m.impl("conv_transpose2d_unpack", TORCH_FN(QConvUnpackWeightsInt8<2>::run));
 
   m.impl("conv_transpose2d_stride", TORCH_FN(QConvStride<2>::run));
