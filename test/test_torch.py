@@ -14421,6 +14421,23 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(val, expect)
         self.assertEqual(idx, [5, 4, 3, 2])
 
+    def test_topk_4d(self, device):
+        x = torch.ones(2, 3072, 2, 2, device=device)
+        x[:, 1, :, :] *= 2.
+        x[:, 10, :, :] *= 1.5
+        val, ind = torch.topk(x, k=2, dim=1)
+        expected_ind = torch.ones(2, 2, 2, 2, dtype=torch.long, device=device)
+        expected_ind[:, 1, :, :] = 10
+        expected_val = torch.ones(2, 2, 2, 2, device=device)
+        expected_val[:, 0, :, :] *= 2.
+        expected_val[:, 1, :, :] *= 1.5
+        print(val, ind)
+        self.assertEqual(val, expected_val, atol=0, rtol=0)
+        self.assertEqual(ind, expected_ind, atol=0, rtol=0)
+
+
+
+
     def test_is_signed(self, device):
         self.assertEqual(torch.IntTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.ByteTensor(5).to(device).is_signed(), False)
