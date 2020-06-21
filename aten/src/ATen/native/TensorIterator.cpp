@@ -297,14 +297,19 @@ void TensorIterator::allocate_outputs() {
     if (!op.tensor.defined()) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       int element_size = elementSize(op.target_dtype);
-      if ((requires_channels_last_output_ && ndim() == 4) ||
-          (requires_channels_last_3d_output_ && ndim() == 5)) {
+      auto requires_channels_last_2d_output_ =
+          ndim() == 4 && requires_channels_last_2d_output();
+      auto requires_channels_last_3d_output_ =
+          ndim() == 5 && requires_channels_last_3d_output();
+      if (requires_channels_last_2d_output_ || requires_channels_last_3d_output_) {
         auto tensor_shape = invert_perm(shape_);
         op.tensor = at::empty(tensor_shape, op.options());
-        if (requires_channels_last_output_) {
-          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+        if (requires_channels_last_2d_output_) {
+          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(
+              MemoryFormat::ChannelsLast);
         } else {
-          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast3d);
+          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(
+              MemoryFormat::ChannelsLast3d);
         }
         // As we are allocating output after permutations is done, we need to
         // make sure that operand's strides are matching element size and
@@ -822,6 +827,12 @@ void TensorIterator::compute_shape(const TensorIteratorConfig& config) {
       shape_ = DimVector(infer_size(shape_, shape));
     }
   }
+}
+
+void TensorIterator::resize_outputs(const TensorIteratorConfig& config) {
+  if (config.static_shape_.has_value()) {
+    return;
+  }
   // Outputs cannot be broadcasted. Check that the shape of the outputs matches
   // the inferred shape. There's an exception for write-only tensors to support
   // our legacy behavior that functions with `out=` arguments resize their
@@ -833,11 +844,11 @@ void TensorIterator::compute_shape(const TensorIteratorConfig& config) {
         // Preserve legacy resizing behavior of out=... arguments
         // TODO: issue warning
         tensor.resize_(shape_);
-        if (requires_channels_last_output_ && tensor.dim() == 4) {
+        if (tensor.dim() == 4 && requires_channels_last_2d_output()) {
           // Temporary stick to 4d tensor, will update with arbitrary batched later on
           tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
         }
-        else if (requires_channels_last_3d_output_ && tensor.dim() == 5) {
+        else if (tensor.dim() == 5 && requires_channels_last_3d_output()) {
           // Temporary stick to 5d tensor, will update with arbitrary batched later on
           tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast3d);
         }
@@ -871,19 +882,62 @@ void TensorIterator::compute_strides(const TensorIteratorConfig& config) {
   }
 }
 
-void TensorIterator::analyze_memory_format() {
+template <int dim, MemoryFormat memory_format>
+bool TensorIterator::requires_channels_last_nd_output() {
+  // TODO(vitalyf): Make it widely accessible function which takes list
+  // of tensors and returns suggested format
+  bool requires_channels_last_output_ = false;
+  bool all_leading_cl_ambiguous = true;
+  bool had_cl_suggested = false;
   for (auto& op : operands_) {
-    if (op.tensor.defined()) {
-      if (!requires_channels_last_output_ &&
-          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+    if (op.tensor.defined() && !op.is_output) {
+
+      auto cl_ambiguous =
+          (op.tensor.is_contiguous(MemoryFormat::Contiguous) &&
+           op.tensor.is_contiguous(memory_format)) ||
+          op.tensor.dim() < dim;
+
+      if (op.tensor.suggest_memory_format() == memory_format) {
+        had_cl_suggested = true;
+      }
+
+      if (!cl_ambiguous && all_leading_cl_ambiguous &&
+          op.tensor.suggest_memory_format() == memory_format) {
         requires_channels_last_output_ = true;
       }
-      else if (!requires_channels_last_3d_output_ &&
-          op.tensor.suggest_memory_format() == MemoryFormat::ChannelsLast3d) {
-        requires_channels_last_3d_output_ = true;
+      // Keep checking if first input is arbitrary strided (ex. NC11) or can be
+      // broadcasted to anything numel == 1
+      if (all_leading_cl_ambiguous && !cl_ambiguous) {
+        all_leading_cl_ambiguous = false;
+      }
+      if (!cl_ambiguous && !requires_channels_last_output_ &&
+          op.tensor.suggest_memory_format() == memory_format) {
+        TORCH_WARN_ONCE(
+            "Mixed memory format inputs detected while calling the operator. "
+            "The operator will output contiguous tensor even if some of the inputs are in channels_last format.");
+      }
+      if (!cl_ambiguous && requires_channels_last_output_ &&
+          op.tensor.suggest_memory_format() != memory_format) {
+        TORCH_WARN_ONCE(
+            "Mixed memory format inputs detected while calling the operator. "
+            "The operator will output channels_last tensor even if some of the inputs are not in channels_last format.");
       }
     }
   }
+  // If everything is ambiguous lean towards channels last format
+  if (!requires_channels_last_output_ && all_leading_cl_ambiguous &&
+      had_cl_suggested) {
+    requires_channels_last_output_ = true;
+  }
+  return requires_channels_last_output_;
+}
+
+bool TensorIterator::requires_channels_last_2d_output() {
+  return requires_channels_last_nd_output<4, MemoryFormat::ChannelsLast>();
+}
+
+bool TensorIterator::requires_channels_last_3d_output() {
+  return requires_channels_last_nd_output<5, MemoryFormat::ChannelsLast3d>();
 }
 
 bool TensorIterator::can_use_32bit_indexing() const {
@@ -1077,8 +1131,6 @@ void TensorIterator::build(TensorIteratorConfig& config) {
 
   // fill in operands_ based on configuration
   populate_operands(config);
-  // check input tensors memory format to use it during output allocation
-  analyze_memory_format();
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
   // Check that the outputs have no internal overlap
@@ -1088,6 +1140,8 @@ void TensorIterator::build(TensorIteratorConfig& config) {
   compute_names(config);
   // compute the broadcasted shape
   compute_shape(config);
+  // resize outputs if necessary
+  resize_outputs(config);
   // compute the result dtype and device
   compute_types(config);
   // try fast setup output tensor, if failed, fallback to normal setup

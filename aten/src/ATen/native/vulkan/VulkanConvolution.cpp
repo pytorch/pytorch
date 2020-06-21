@@ -66,14 +66,13 @@ ContextConv2D create(
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded =
       expand_param_if_needed(dilation, "dilation", 2);
-  const Tensor weight_nchw = weight.contiguous();
+  Tensor weight_nchw = weight.contiguous();
+  auto ws = weight_nchw.sizes();
   return ContextConv2D{
-      at::native::vulkan_convolution_prepack_weights(weight),
+      groups == 1 ? at::native::vulkan_convolution_prepack_weights(weight_nchw)
+                  : weight_nchw.vulkan(),
       bias.has_value() ? c10::make_optional((*bias).vulkan()) : c10::nullopt,
-      {weight_nchw.sizes()[0],
-       weight_nchw.sizes()[1],
-       weight_nchw.sizes()[2],
-       weight_nchw.sizes()[3]},
+      {{ws[0], ws[1], ws[2], ws[3]}},
       {padding_expanded[0], padding_expanded[1]},
       {stride_expanded[0], stride_expanded[1]},
       {dilation_expanded[0], dilation_expanded[1]},
