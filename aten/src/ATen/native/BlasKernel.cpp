@@ -217,20 +217,12 @@ scalar_t dot_naive(
 } // namespace blas_impl
 
 template <typename scalar_t>
-scalar_t dot_impl(
-    int64_t n,
-    scalar_t* x,
-    int64_t incx,
-    scalar_t* y,
-    int64_t incy) {
+scalar_t dot_impl_floating(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t incy)
+{
   if (n == 1) {
     incx = 1;
     incy = 1;
   }
-
-  return c10::guts::if_constexpr<std::is_floating_point<scalar_t>::value>(
-      // if
-      [&](auto _) {
 #if AT_BUILD_WITH_BLAS()
         if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
           return blas_impl::dot_fast_path(n, x, incx, y, incy);
@@ -240,9 +232,25 @@ scalar_t dot_impl(
 #else
         { return blas_impl::dot_naive(n, x, incx, y, incy); }
 #endif
-      },
-      // else
-      [&](auto _) { return blas_impl::dot_naive(n, x, incx, y, incy); });
+}
+
+template <typename scalar_t>
+scalar_t dot_impl(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t incy) {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+  return blas_impl::dot_naive(n, x, incx, y, incy);
+}
+
+template <>
+float dot_impl(int64_t n, float* x, int64_t incx, float* y, int64_t incy) {
+  return dot_impl_floating(n, x, incx, y, incy);
+}
+
+template <>
+double dot_impl(int64_t n, double* x, int64_t incx, double* y, int64_t incy) {
+  return dot_impl_floating(n, x, incx, y, incy);
 }
 
 #define INSTANTIATE_DOT_IMPL(scalar_t)  \
