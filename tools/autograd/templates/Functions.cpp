@@ -286,7 +286,7 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
-    return prod_safe_zeros_backward(grad, input_copy.contiguous().view(-1), 0).view_as(input) * input.isnan().logical_not();
+    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input) * input.isnan().logical_not();
   }
 }
 
