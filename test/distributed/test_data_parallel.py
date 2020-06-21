@@ -720,6 +720,8 @@ class TestDataParallel(TestCase):
                 try:
                     m = ConvNet(formats, dtypes).cuda(device="cuda:0")
                     m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
+                    opt = torch.optim.SGD(m.parameters(), lr=0.1)
+                    opt_dp = torch.optim.SGD(m_dp.parameters(), lr=0.1)
                     has_half = any(p.dtype is torch.half for p in m.parameters())
                     tol = 1.e-3 if has_half else 1.e-5
                 except BaseException:
@@ -742,6 +744,10 @@ class TestDataParallel(TestCase):
                                                                             m_dp_child.parameters())):
                                 named_msg = layer_name + "." + param_name + " " + iter_msg
                                 self.assertEqual(p.grad, p_dp.grad, rtol=tol, atol=tol)
+                        opt.step()
+                        opt_dp.step()
+                        opt.zero_grad()
+                        opt_dp.zero_grad()
                     except BaseException:
                         # Makes sure we still get info if an error occurred somewhere other than the asserts.
                         print("Caught exception during iterations at " + named_msg, flush=True)
