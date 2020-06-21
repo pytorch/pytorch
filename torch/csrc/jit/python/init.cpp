@@ -54,6 +54,7 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+#include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
@@ -542,6 +543,31 @@ void initJITBindings(PyObject* module) {
             return optimizeForMobile(module, optimization_blacklist);
           })
       .def(
+          "_jit_pass_vulkan_insert_prepacked_ops",
+          [](std::shared_ptr<Graph>& graph) {
+            return vulkanInsertPrePackedOps(graph);
+          })
+      .def(
+          "_jit_pass_vulkan_insert_prepacked_ops",
+          [](script::Module& module) {
+            return vulkanInsertPrePackedOps(module);
+          })
+      .def(
+          "_jit_pass_vulkan_fuse_clamp_w_prepacked_conv",
+          [](script::Module& module) {
+            return vulkanFusePrePackedConvWithClamp(module);
+          })
+      .def(
+          "_jit_pass_vulkan_fold_prepacking_ops",
+          [](script::Module& module) {
+            return vulkanFoldPrePackingOps(module);
+          })
+      .def(
+          "_jit_pass_vulkan_optimize_for_mobile",
+          [](script::Module& module) {
+            return vulkanOptimizeForMobile(module);
+          })
+      .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict) {
@@ -989,7 +1015,22 @@ void initJITBindings(PyObject* module) {
           asList.push_back(f->fut);
         }
         return std::make_shared<jit::PythonFutureWrapper>(
-            c10::collectAll(asList));
+            c10::collectAll(asList),
+            /* unwrap_func */ [futures](const py::object& /*unused*/) {
+              // Throw errors when calling wait() on the returned Future if
+              // any of the original futures would throw.
+              // NB: PythonFutureWrapper takes an unwrap_func which serves as a
+              // callback to evalute the value in the Future. RPC uses this
+              // unwrap_func to check whether the returned py::object is a
+              // RemoteException object, and re-throw the exception if it is.
+              // By extracting the c10::ivalue::Future from PythonFutureWrapper
+              // the unwrap_func on the original PythonFutureWrapper objects are
+              // discarded, and hence it will return the RemoteException as an
+              // object instead of re-throwing it.
+              for (auto& fut : futures) {
+                fut->wait();
+              }
+            });
       });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
