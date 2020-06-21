@@ -2796,9 +2796,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # Carry out some trials with small buckets and some with big buckets.
         bucketsizes = (0.000001, 25)
         # Tuples of lists.  Each list describes per-layer characteristics for one trial.
-        layer_formats = ([torch.contiguous_format] * 4,
-                         [torch.channels_last] * 2 + [torch.contiguous_format] * 2,
-                         [torch.channels_last] * 4)
+        layer_formats = ([torch.contiguous_format] * 4,)
+                         # [torch.channels_last] * 2 + [torch.contiguous_format] * 2,
+                         # [torch.channels_last] * 4)
         layer_dtypes = ([torch.float] * 4,
                         [torch.float] * 2 + [torch.half] * 2,
                         [torch.half] * 4)
@@ -2836,7 +2836,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                                         process_group=process_group,
                                                         rank_from_test=self.rank,
                                                         bucket_cap_mb=bucketsize)
-                        torch.cuda.synchronize()
+                        # torch.cuda.synchronize()
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
@@ -2855,7 +2855,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             F.mse_loss(m(input).float(), target).backward()
                             F.mse_loss(m_ddp(input[local_batch_start: local_batch_end]).float(),
                                        target[local_batch_start: local_batch_end]).backward()
-                            torch.cuda.synchronize()
+                            # torch.cuda.synchronize()
                             for i, ((layer_name, m_child), m_ddp_child) in enumerate(zip(m.named_children(),
                                                                                          m_ddp.module.children())):
                                 named_msg = layer_name + ".weight" + " " + iter_msg
