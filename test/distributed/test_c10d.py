@@ -2805,8 +2805,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         input_dev = layer_devs[0] if isinstance(layer_devs, list) else layer_devs
         target_dev = layer_devs[-1] if isinstance(layer_devs, list) else layer_devs
-        input = torch.randn(global_batch_size, 8, 8, 8).to(input_dev)
-        target = torch.randn(global_batch_size, 8, 4, 4).to(target_dev)
+        input = torch.randn((global_batch_size, 8, 8, 8), device=input_dev, dtype=torch.float)
+        target = torch.randn((global_batch_size, 8, 4, 4), device=target_dev, dtype=torch.float)
         local_batch_start = self.rank * local_batch_size
         local_batch_end = (self.rank + 1) * local_batch_size
 
