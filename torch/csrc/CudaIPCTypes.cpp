@@ -75,6 +75,7 @@ bool CudaIPCSentDataLimbo::collect() {
     }
     shared_blocks_ = std::move(kept_blocks);
   }
+  // Need to reset blocks out of the critical section here, otherwise it deadlocks.
   for (auto& sd : reset_blocks) {
     sd.reset();
   }

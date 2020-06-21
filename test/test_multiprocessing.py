@@ -38,26 +38,18 @@ class SubProcess(mp.Process):
         self.tensor.add_(3)
 
 
-def _test_cuda_ipc_deadlock_actor(queue):
-    steps = 0
-    while True:
+def _test_cuda_ipc_deadlock_actor(queue, iterations):
+    for i in range(iterations):
         if not queue.empty():
             queue.get()
-            steps += 1
-            if steps > 100:
-                return
         time.sleep(.01)
 
 
-def _test_cuda_ipc_deadlock_learner(queue):
-    steps = 0
+def _test_cuda_ipc_deadlock_learner(queue, iterations):
     net = torch.nn.LSTM(1, 1).cuda()
-    while True:
+    for i in range(iterations):
         if not queue.full():
             queue.put(copy.deepcopy(net.state_dict()))
-            steps += 1
-            if steps > 100:
-                return
         time.sleep(.01)
 
 
@@ -426,8 +418,8 @@ class TestMultiprocessing(TestCase):
         ctx = mp.get_context('spawn')
         queue = ctx.Queue(1)
         processes = dict(
-            a=ctx.Process(target=_test_cuda_ipc_deadlock_actor, args=(queue,)),
-            l=ctx.Process(target=_test_cuda_ipc_deadlock_learner, args=(queue,)))
+            a=ctx.Process(target=_test_cuda_ipc_deadlock_actor, args=(queue,100,)),
+            l=ctx.Process(target=_test_cuda_ipc_deadlock_learner, args=(queue,100,)))
 
         for p in processes.values():
             p.start()
