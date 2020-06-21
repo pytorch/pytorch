@@ -490,11 +490,15 @@ class ActivationsQATTestModel(torch.nn.Module):
         self.quant = torch.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+        self.elu = torch.nn.ELU().to(dtype=torch.float)
+        self.dequant = torch.quantization.DeQuantStub()
 
     def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.hardswish(x)
+        x = self.elu(x)
+        x = self.dequant(x)
         return x
 
 class LinearReluModel(torch.nn.Module):
