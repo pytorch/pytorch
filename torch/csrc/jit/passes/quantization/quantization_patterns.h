@@ -805,12 +805,6 @@ graph(%a_quant, %b_scalar):
 
   auto hardtanh_ = getClampOpFusionInfo("aten::hardtanh_", {"%min", "%max"});
 
-  auto elu = getInputTensorQParamOpFusionInfo(
-      "aten::elu", {"%alpha", "%scale", "%input_scale"});
-
-  auto elu_ = getInputTensorQParamOpFusionInfo(
-      "aten::elu_", {"%alpha", "%scale", "%input_scale"});
-
   auto leaky_relu =
       getInputTensorQParamOpFusionInfo("aten::leaky_relu", {"%negative_slope"});
 
@@ -974,8 +968,6 @@ graph(%a_quant, %b_scalar):
       clamp,
       hardtanh,
       hardtanh_,
-      elu,
-      elu_,
       leaky_relu,
       leaky_relu_,
       // fixed qparam ops
