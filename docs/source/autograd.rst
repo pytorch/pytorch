@@ -79,8 +79,8 @@ If ``param`` already has a non-sparse ``.grad`` attribute:
    matching the preexisting ``.grad``'s strides.
 
 The default behavior (letting ``.grad``\ s be ``None`` before the first
-``backward()``, such that their layout is created according to 1. or 2.,
-and retained over time according to 3. or 4) is recommended for best performance.
+``backward()``, such that their layout is created according to 1 or 2,
+and retained over time according to 3 or 4) is recommended for best performance.
 Calls to ``model.zero_grad()`` or ``optimizer.zero_grad()`` will not affect ``.grad``
 layouts.
 
@@ -93,7 +93,7 @@ accumulation phase, e.g.::
             param.grad = None
         loss.backward()
 
-such that they're recreated according to 1. or 2. every time,
+such that they're recreated according to 1 or 2 every time,
 is a valid alternative to ``model.zero_grad()`` or ``optimizer.zero_grad()``
 that may improve performance for some networks.
 
@@ -103,8 +103,8 @@ Manual gradient layouts
 If you need manual control over ``.grad``'s strides,
 assign ``param.grad =`` a zeroed tensor with desired strides
 before the first ``backward()``, and never reset it to ``None``.
-3. guarantees your layout is preserved as long as ``create_graph=False``.
-4. indicates your layout is *likely* preserved even if ``create_graph=True``.
+3 guarantees your layout is preserved as long as ``create_graph=False``.
+4 indicates your layout is *likely* preserved even if ``create_graph=True``.
 
 In-place operations on Tensors
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
