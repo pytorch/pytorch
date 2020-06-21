@@ -156,10 +156,13 @@ def _supported_qengines() -> List[_int]: ...  # THPModule_supportedQEngines
 def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
 
 has_openmp: _bool
-has_mkldnn: _bool
 has_mkl: _bool
+has_lapack: _bool
+has_cuda: _bool
+has_mkldnn: _bool
 has_cudnn: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool
+default_generator: Generator
 
 # Defined in torch/csrc/jit/python/script_init.cpp
 class FileCheck(object):
@@ -226,3 +229,29 @@ class _CudaDeviceProperties:
     total_memory: _int
     is_integrated: _int
     is_multi_gpu_board: _int
+
+# Defined in torch/csrc/cuda/Stream.cpp
+class _CudaStreamBase:
+    device: _device
+    cuda_stream: _int
+    priority: _int
+
+    def __new__(self, priority: _int = 0, _cdata: _int = 0) -> _CudaStreamBase: ...
+    def query(self) -> _bool: ...
+    def synchronize(self) -> None: ...
+    def priority_range(self) -> Tuple[_int, _int]: ...
+
+# Defined in torch/csrc/cuda/Event.cpp
+class _CudaEventBase:
+    device: _device
+    cuda_event: _int
+
+    def __new__(cls, enable_timing: _bool = False, blocking: _bool = False, interprocess: _bool = False) -> _CudaEventBase: ...
+    @classmethod
+    def from_ipc_handle(cls, device: _device, ipc_handle: bytes) -> _CudaEventBase: ...
+    def record(self, stream: _CudaStreamBase) -> None: ...
+    def wait(self, stream: _CudaStreamBase) -> None: ...
+    def query(self) -> _bool: ...
+    def elapsed_time(self, other: _CudaEventBase) -> _float: ...
+    def synchronize(self) -> None: ...
+    def ipc_handle(self) -> bytes: ...

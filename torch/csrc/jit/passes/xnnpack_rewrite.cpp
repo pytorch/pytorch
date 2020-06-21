@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -92,41 +93,6 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph);
 }
 
-bool isClampFusable(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  const auto& match_vmap = match.values_map;
-  TORCH_CHECK(
-      vmap.find("dummy_min_max") != vmap.end(),
-      "Expected to find dummy_min_max Value in the subgraph to be replaced.");
-  auto dummy_min_max =
-      graph_rewrite_helper::getIValue("dummy_min_max", match_vmap, vmap);
-
-  auto is_fusable = !dummy_min_max || dummy_min_max.value().isNone();
-
-  // Also check if the output_min and output_max values are actually constant.
-  // If hardtanh's min/max Value's are not actually constants, we will end up
-  // rerouting those values to prepack op. And if they are not constants
-  // we will not be able to remove prepacking ops.
-  if (vmap.find("output_min") != vmap.end()) {
-    // aten::relu pattern does not have output_min/output_max.
-    // aten::hardtanh/_ does.
-    TORCH_CHECK(
-        vmap.find("output_max") != vmap.end(),
-        "Expected to find output_max as well given "
-        "output_min exist in pattern graph.");
-    // If output_min/max are not constant, we get c10::nullopt.
-    auto output_min =
-        graph_rewrite_helper::getIValue("output_min", match_vmap, vmap);
-    auto output_max =
-        graph_rewrite_helper::getIValue("output_max", match_vmap, vmap);
-    is_fusable =
-        is_fusable && (output_min.has_value() && output_max.has_value());
-  }
-
-  return is_fusable;
-}
-
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
 
@@ -193,7 +159,7 @@ void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
   rewriter.RegisterRewritePattern(
       conv2d_prepack_run_hardtanh_inplace, conv2d_prepack_run_hardtanh_fused);
 
-  rewriter.runOnGraph(graph, isClampFusable);
+  rewriter.runOnGraph(graph, torch::jit::graph_rewrite_helper::isClampFusable);
 }
 
 void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -265,7 +231,14 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
       linear_prepack_run_relu_inplace, linear_prepack_run_relu_fused);
   rewriter.RegisterRewritePattern(
       conv2d_prepack_run_relu_inplace, conv2d_prepack_run_relu_fused);
-  rewriter.runOnGraph(graph, isClampFusable);
+  rewriter.runOnGraph(graph, torch::jit::graph_rewrite_helper::isClampFusable);
+}
+
+void runCanonicalOptimizations(script::Module& module) {
+  auto graph = module.get_method("forward").graph();
+  // Not sure if we have models running on mobile that require loop unrolling.
+  // Perhaps language/speech models? Conservatively setting that to false.
+  runOptimization(graph, false /* no loop unrolling */);
 }
 
 } // namespace
@@ -318,6 +291,11 @@ script::Module optimizeForMobile(
     fusePrePackedLinearConvWithClamp(cloned_module);
     FoldPrePackingOps(cloned_module);
   }
+
+  // Run canonical optimizations post freezing
+  // since freezing inlines the graph. Otherwise we
+  // will have to explicitly call Inlining pass.
+  runCanonicalOptimizations(cloned_module);
 
   if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
     removeDropout(cloned_module);
