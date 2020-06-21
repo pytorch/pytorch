@@ -205,11 +205,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
-    // If we use the work to do barrier, we should block here
-    if (!barrierTensors_.empty()) {
-      at::cuda::CUDAGuard gpuGuard(devices_[i]);
-      AT_CUDA_CHECK(cudaDeviceSynchronize());
-    }
   }
 
   // In case of blocking, wait for the operation to complete.
@@ -243,6 +238,15 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
           std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
     checkAndThrowException();
+  }
+
+  // Device synchronize only after we've completed timeout checks.
+  if (!barrierTensors_.empty()) {
+    // If we use the work to do barrier, we should block here
+    for (size_t i = 0; i < devices_.size(); ++i) {
+      at::cuda::CUDAGuard gpuGuard(devices_[i]);
+      AT_CUDA_CHECK(cudaDeviceSynchronize());
+    }
   }
 }
 
