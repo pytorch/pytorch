@@ -371,10 +371,10 @@ class DistributedDataParallel(Module):
             # be broadcasted using larger blocks in broadcast_coalesced, so it might be
             # better to not pollute the caches with these small blocks
             # torch.cuda.synchronize()
-            print("before replicate, rank = ", self.rank_from_test)
+            print("before replicate, rank = ", self.rank_from_test, flush=True)
             self._module_copies = replicate(self.module, self.device_ids, detach=True)
             # torch.cuda.synchronize()
-            print("after replicate, rank = ", self.rank_from_test)
+            print("after replicate, rank = ", self.rank_from_test, flush=True)
             self._module_copies[0] = self.module
 
             for module_copy in self._module_copies[1:]:

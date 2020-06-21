@@ -2822,12 +2822,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 pass
                 # dist._DEFAULT_FIRST_BUCKET_BYTES = old_DEFAULT_FIRST_BUCKET_BYTES
 
+        start_time = time.time()
+
         with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
             for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
                 # with torch.cuda.device(input_dev):
                 with first_bucket_size(bucketsizes):
-                    model_msg = "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(self.rank, formats,
-                                                                                             dtypes, bucketsize)
+                    model_msg = "rank = {} time = {} formats = {} dtypes = {} bucketsize = {} ".format(
+                        self.rank, time.time() - start_time, formats, dtypes, bucketsize)
                     try:
                         print(model_msg, replica_devices, flush=True)
                         m = ConvNet(layer_devs, formats, dtypes)
@@ -2880,7 +2882,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             # Makes sure we still get info if an error occurred somewhere other than the asserts.
                             print("Caught exception during iterations at " + named_msg, flush=True)
                             raise
-                    print("after iters ", model_msg, replica_devices, flush=True)
+                    print("after iters, time = {}".format(time.time() - start_time) + model_msg, replica_devices, flush=True)
 
     @requires_nccl()
     @skip_if_not_multigpu
