@@ -2826,7 +2826,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
             for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
-                with torch.cuda.device(input_dev):
+                # with torch.cuda.device(input_dev):
+                with first_bucket_size(bucketsize):
                     model_msg = "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(self.rank, formats,
                                                                                              dtypes, bucketsize)
                     try:
@@ -2837,7 +2838,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                                         process_group=process_group,
                                                         rank_from_test=self.rank,
                                                         bucket_cap_mb=bucketsize)
-                        torch.cuda.synchronize()
+                        # torch.cuda.synchronize()
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
@@ -2856,7 +2857,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             F.mse_loss(m(input).float(), target).backward()
                             F.mse_loss(m_ddp(input[local_batch_start: local_batch_end]).float(),
                                        target[local_batch_start: local_batch_end]).backward()
-                            torch.cuda.synchronize()
+                            # torch.cuda.synchronize()
                             for i, ((layer_name, m_child), m_ddp_child) in enumerate(zip(m.named_children(),
                                                                                          m_ddp.module.children())):
                                 named_msg = layer_name + ".weight" + " " + iter_msg
@@ -2883,7 +2884,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             raise
                     print("after iters, time = {}".format(time.time() - start_time) + model_msg,
                           replica_devices, flush=True)
-                    torch.cuda.synchronize()
+                    # torch.cuda.synchronize()
                     print("after iters and sync" + model_msg, replica_devices, flush=True)
 
     @requires_nccl()
