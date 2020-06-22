@@ -26,6 +26,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+TORCH_CUDA_API bool hasReductionNode(const Block* const block);
+
 TORCH_CUDA_API bool isReductionNode(const Node* const node);
 
 // returns whether or not a parsing function exists for the given node type.

@@ -34,22 +34,6 @@ typedef void (
 typedef bool (
     *MergeQueryFuncPtr)(const Node* const);
 
-// TODO: temporary hack, need to do this properly, at least reduction_ops should
-// be registered instead.
-bool hasReduction(const Block* block) {
-  for (auto node : block->nodes()) {
-    if (isReductionNode(node)) {
-      return true;
-    }
-    for (auto block : node->blocks()) {
-      if (hasReduction(block)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 std::vector<int> reductionAxes(TensorView* tv) {
   size_t n_dims = tv->nDims();
   std::vector<int> reduction_axes;
@@ -138,9 +122,13 @@ class IrParser {
     // TODO: proper broadcast support in integration
     int broadcast_dim = -1;
     // broadcast support hack is disabled to reduction.
-    if (hasReduction(graph_->block())) {
+    if (hasReductionNode(graph_->block())) {
       // reduction-at-end fusion, broadcast all inputs to tensor before
       // reduction
+      // TODO: Not perfectly safe! We could have intermediate output that is not
+      // part of outputs of reduction operations. But we have similar limitation
+      // for broadcast support in PW fusion. We should properly fix this after
+      // broadcast integration.
       broadcast_dim = block->outputs()[0]->node()->inputs()[0]->type()->cast<TensorType>()->dim().value();
     } else {
       // point-wise fusion, broadcast all inputs to output size.
@@ -821,6 +809,20 @@ std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
 bool IrParser::init_registry_ = true;
 
 } // namespace
+
+bool hasReductionNode(const Block* const block) {
+  for (auto node : block->nodes()) {
+    if (isReductionNode(node)) {
+      return true;
+    }
+    for (auto block : node->blocks()) {
+      if (hasReductionNode(block)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 bool isReductionNode(const Node* const node) {
   return IrParser::isReductionNode(node);

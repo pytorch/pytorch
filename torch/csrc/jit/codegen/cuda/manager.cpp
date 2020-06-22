@@ -78,7 +78,8 @@ class CudaFusionManager {
       int32_t kernel_id,
       std::shared_ptr<Graph>& graph,
       const at::ArrayRef<IValue> inputs,
-      const std::vector<at::Tensor>& outputs) {
+      const std::vector<at::Tensor>& outputs,
+      const std::vector<int64_t>& broadcasted_shape) {
     std::lock_guard<std::mutex> guard(mutex_);
     TORCH_CHECK(
         kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
@@ -88,7 +89,7 @@ class CudaFusionManager {
     if (cuda_kernel) {
       // TODO: update launch config for specific sizes;
       //       maybe we should store it in CudaKernel and compute it later
-      runKernel(*cuda_kernel, inputs, outputs);
+      runKernel(*cuda_kernel, inputs, outputs, broadcasted_shape);
     } else {
       // TODO: this should somehow be done after kernel compilation.
       //       we will want compileKernel to return a heuristic
@@ -117,7 +118,7 @@ class CudaFusionManager {
       // NVRTC compile kernel
       compileKernel(cuda_kernel.value());
 
-      runKernel(*cuda_kernel, inputs, outputs);
+      runKernel(*cuda_kernel, inputs, outputs, broadcasted_shape);
     }
   }
 
@@ -181,6 +182,12 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
     // shape inference
     ShapeTypePropagate(graph);
 
+    // TODO: temporary WAR that allows us to handle fusion with uniform output
+    // shape and consistent broadcast scheme. The difinition is loose and the
+    // implementation is risky. We'll do this properly when we integrate proper
+    // broadcast support.
+    std::vector<int64_t> broadcasted_shape;
+
     // we need to construct outputs;
     std::vector<at::Tensor> outputs;
     for (const auto* const output : graph->outputs()) {
@@ -205,9 +212,27 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
 
       auto tensor = at::empty_strided(sizes, strides, options);
       outputs.push_back(tensor);
+
+      // TODO: unsafe broadcast assumption;
+      if (broadcasted_shape.empty()) {
+        if (!hasReductionNode(graph->block())) {
+          broadcasted_shape = sizes;
+        } else if (isReductionNode(output->node())){
+          auto i_type = output->node()->inputs()[0]->type()->expect<TensorType>();
+          TORCH_CHECK(
+              i_type && i_type->sizes().isComplete(),
+              "Complete TensorType for output is expected.");
+          broadcasted_shape = extractSizes(i_type);
+        } else {
+          TORCH_INTERNAL_ASSERT(false, "intermediate tensor output for reduction fusion is nor properly supported yet.");
+        }
+      }
     }
+
+    printf("first broadcasted dimension: %zu\n", broadcasted_shape.size());
+
     CudaFusionManager::getManager().runFusionNode(
-        kernel_id, graph, inputs, outputs);
+        kernel_id, graph, inputs, outputs, broadcasted_shape);
     drop(stack, inputs.size());
     stack.insert(
         stack.end(),

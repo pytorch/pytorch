@@ -530,7 +530,8 @@ void compileKernel(CudaKernel* entry) {
 void runKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
-    const std::vector<at::Tensor>& outputs) {
+    const std::vector<at::Tensor>& outputs,
+    const std::vector<int64_t>& broadcasted_shape) {
   validateKernelArgs(*entry, inputs, outputs);
 
   const auto prior_device = at::cuda::current_device();
@@ -587,18 +588,14 @@ void runKernel(
 
   KernelArgumentHolder kernel_args;
 
+  printf("broadcasted dimension: %zu\n", broadcasted_shape.size());
+
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
-      //if (has_reduction) {
-      if (!entry->reduction_axes_.empty()) {
-        kernel_args.push(input.toTensor());
-        //kernel_args.push(input.toTensor(), outputs[0].sizes() + entry->reduction_axes_.size());
-      } else {
-        kernel_args.push(input.toTensor(), outputs[0].sizes());
-      }
+      kernel_args.push(input.toTensor(), broadcasted_shape);
     } else {
       kernel_args.push(input);
     }
