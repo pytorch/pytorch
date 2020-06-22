@@ -868,7 +868,7 @@ def fork(func, *args, **kwargs):
 
         assert mod(input) == torch.jit.script(mod).forward(input)
     """
-    return torch._C.fork(*args, **kwargs)
+    return torch._C.fork(func, *args, **kwargs)
 
 def wait(future):
     """
