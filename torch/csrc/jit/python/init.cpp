@@ -230,7 +230,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
-      .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
+      .def("_jit_pass_fold_convbn", &FoldConvBatchNorm)
       .def(
           "_freeze_module",
           [](Module& module, std::vector<std::string>& preservedAttrs) {
