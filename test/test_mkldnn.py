@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
+import itertools
 import unittest
 
 try:
@@ -106,50 +107,52 @@ class TestMkldnn(TestCase):
                                                                   dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
     def test_conv1d(self):
-        for groups in [1, 4]:
+        options = itertools.product([1, 4], [True, False], [1, 2])
+        for groups, bias, dilation in options:
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
             x = torch.randn(N, C, 224, dtype=torch.float32)
-            for bias in [True, False]:
-                conv1d = torch.nn.Conv1d(in_channels=C,
-                                         out_channels=M,
-                                         kernel_size=3,
-                                         stride=2,
-                                         padding=1,
-                                         bias=bias,
-                                         groups=groups).float()
-                mkldnn_conv1d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv1d))
-                with torch.backends.mkldnn.flags(enabled=False):
-                    y_aten = conv1d(x)
-                y_mkldnn = mkldnn_conv1d(x.to_mkldnn()).to_dense()
-                self.assertEqual(y_aten, y_mkldnn)
+            conv1d = torch.nn.Conv1d(in_channels=C,
+                                     out_channels=M,
+                                     kernel_size=3,
+                                     stride=2,
+                                     padding=1,
+                                     dilation=dilation,
+                                     bias=bias,
+                                     groups=groups).float()
+            mkldnn_conv1d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv1d))
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_aten = conv1d(x)
+            y_mkldnn = mkldnn_conv1d(x.to_mkldnn()).to_dense()
+            self.assertEqual(y_aten, y_mkldnn)
 
-                self._test_serialization(mkldnn_conv1d, (x.to_mkldnn(),))
-                self._test_tracing(mkldnn_conv1d, (x.to_mkldnn(),))
+            self._test_serialization(mkldnn_conv1d, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_conv1d, (x.to_mkldnn(),))
 
     def test_conv2d(self):
-        for groups in [1, 4]:
+        options = itertools.product([1, 4], [True, False], [1, 2])
+        for groups, bias, dilation in options:
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
             x = torch.randn(N, C, 224, 224, dtype=torch.float32)
-            for bias in [True, False]:
-                conv2d = torch.nn.Conv2d(in_channels=C,
-                                         out_channels=M,
-                                         kernel_size=3,
-                                         stride=2,
-                                         padding=1,
-                                         bias=bias,
-                                         groups=groups).float()
-                mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
-                with torch.backends.mkldnn.flags(enabled=False):
-                    y_aten = conv2d(x)
-                y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
-                self.assertEqual(y_aten, y_mkldnn)
+            conv2d = torch.nn.Conv2d(in_channels=C,
+                                     out_channels=M,
+                                     kernel_size=3,
+                                     stride=2,
+                                     padding=1,
+                                     dilation=dilation,
+                                     bias=bias,
+                                     groups=groups).float()
+            mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_aten = conv2d(x)
+            y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
+            self.assertEqual(y_aten, y_mkldnn)
 
-                self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
-                self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
+            self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -178,27 +181,28 @@ class TestMkldnn(TestCase):
                 conv2d_loaded(x.to_mkldnn()).to_dense())
 
     def test_conv3d(self):
-        for groups in [1, 4]:
+        options = itertools.product([1, 4], [True, False], [1, 2])
+        for groups, bias, dilation in options:
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
             x = torch.randn(N, C, 55, 55, 55, dtype=torch.float32)
-            for bias in [True, False]:
-                conv3d = torch.nn.Conv3d(in_channels=C,
-                                         out_channels=M,
-                                         kernel_size=3,
-                                         stride=2,
-                                         padding=1,
-                                         bias=bias,
-                                         groups=groups).float()
-                mkldnn_conv3d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv3d))
-                with torch.backends.mkldnn.flags(enabled=False):
-                    y_aten = conv3d(x)
-                y_mkldnn = mkldnn_conv3d(x.to_mkldnn()).to_dense()
-                self.assertEqual(y_aten, y_mkldnn)
+            conv3d = torch.nn.Conv3d(in_channels=C,
+                                     out_channels=M,
+                                     kernel_size=3,
+                                     stride=2,
+                                     padding=1,
+                                     dilation=dilation,
+                                     bias=bias,
+                                     groups=groups).float()
+            mkldnn_conv3d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv3d))
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_aten = conv3d(x)
+            y_mkldnn = mkldnn_conv3d(x.to_mkldnn()).to_dense()
+            self.assertEqual(y_aten, y_mkldnn)
 
-                self._test_serialization(mkldnn_conv3d, (x.to_mkldnn(),))
-                self._test_tracing(mkldnn_conv3d, (x.to_mkldnn(),))
+            self._test_serialization(mkldnn_conv3d, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_conv3d, (x.to_mkldnn(),))
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
