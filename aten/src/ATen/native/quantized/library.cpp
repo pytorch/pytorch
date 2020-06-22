@@ -25,6 +25,19 @@ TORCH_LIBRARY(quantized, m) {
   m.def("add_scalar_relu(Tensor qa, Scalar b) -> Tensor qc");
   m.def("add_scalar_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_scalar_relu_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
+  // TODO: remove after broadcasting is supported
+  m.def("add_scalar_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out) -> Tensor(a!) out");
+  m.def("add_scalar.Tensor(Tensor qa, Tensor b) -> Tensor qc");
+  m.def("add_scalar_relu.Tensor(Tensor qa, Tensor b) -> Tensor qc");
+  m.def("add_scalar_relu_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out) -> Tensor(a!) out");
+  // This is needed for graph mode quantization, when we fuse
+  // dequant - aten::batch_norm - quant into quantized::batch_norm
+  // and dimension is unknown given only the aten op call
+  // quantized::batch_norm supports both 2d and 3d batch norm right now
+  // it should also support 1d batch_norm after quantized::batch_norm1d is
+  // implemented
+  m.def("batch_norm(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
+  m.def("batch_norm_relu(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm2d(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm2d_relu(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm3d(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
@@ -63,6 +76,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv3d_padding(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> int[]");
   m.def("conv3d_dilation(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> int[]");
   m.def("conv3d_groups(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> int");
+  m.def("elu(Tensor self, float output_scale, int output_zero_point, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor");
   m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("group_norm(Tensor input, int num_groups, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("instance_norm(Tensor input, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor");
@@ -100,6 +114,11 @@ TORCH_LIBRARY(quantized, m) {
   m.def("mul_scalar_relu(Tensor qa, Scalar b)-> Tensor qc");
   m.def("mul_scalar_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_scalar_relu_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
+  // TODO: remove after broadcasting is supported
+  m.def("mul_scalar.Tensor(Tensor qa, Tensor b)-> Tensor qc");
+  m.def("mul_scalar_relu.Tensor(Tensor qa, Tensor b)-> Tensor qc");
+  m.def("mul_scalar_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
+  m.def("mul_scalar_relu_out.Tensor(Tensor qa, Tensor b, Tensor(a!) out)-> Tensor(a!) out");
   // NB: missing a space after comma here...
   m.def("max_pool2d(Tensor qx, int[] kernel_size, int[] stride, int[] padding, int[] dilation,bool ceil_mode) -> Tensor");
   m.def("relu6(Tensor qx, bool inplace=False) -> Tensor");

@@ -3,7 +3,7 @@
 #endif
 
 
-namespace std {
+namespace c10_complex_math {
 
 // Exponential functions
 
@@ -32,6 +32,12 @@ C10_HOST_DEVICE inline c10::complex<T> log10(const c10::complex<T> &x) {
 #else
   return static_cast<c10::complex<T>>(std::log10(static_cast<std::complex<T>>(x)));
 #endif
+}
+
+template<typename T>
+C10_HOST_DEVICE inline c10::complex<T> log2(const c10::complex<T> &x) {
+  const c10::complex<T> log2 = c10::complex<T>(::log(2.0), 0.0);
+  return c10_complex_math::log(x) / log2;
 }
 
 // Power functions
@@ -213,4 +219,46 @@ C10_HOST_DEVICE inline c10::complex<T> atanh(const c10::complex<T> &x) {
 #endif
 }
 
-} // namespace std
+}  // namespace c10_complex_math
+
+using c10_complex_math::exp;
+using c10_complex_math::log;
+using c10_complex_math::log10;
+using c10_complex_math::log2;
+using c10_complex_math::sqrt;
+using c10_complex_math::pow;
+using c10_complex_math::sin;
+using c10_complex_math::cos;
+using c10_complex_math::tan;
+using c10_complex_math::asin;
+using c10_complex_math::acos;
+using c10_complex_math::atan;
+using c10_complex_math::sinh;
+using c10_complex_math::cosh;
+using c10_complex_math::tanh;
+using c10_complex_math::asinh;
+using c10_complex_math::acosh;
+using c10_complex_math::atanh;
+
+namespace std {
+
+using c10_complex_math::exp;
+using c10_complex_math::log;
+using c10_complex_math::log10;
+using c10_complex_math::log2;
+using c10_complex_math::sqrt;
+using c10_complex_math::pow;
+using c10_complex_math::sin;
+using c10_complex_math::cos;
+using c10_complex_math::tan;
+using c10_complex_math::asin;
+using c10_complex_math::acos;
+using c10_complex_math::atan;
+using c10_complex_math::sinh;
+using c10_complex_math::cosh;
+using c10_complex_math::tanh;
+using c10_complex_math::asinh;
+using c10_complex_math::acosh;
+using c10_complex_math::atanh;
+
+}
