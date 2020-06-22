@@ -1,12 +1,19 @@
+from typing import Generic, TypeVar
+
 import torch
 
 
-class Future(torch._C.Future):
+T = TypeVar("T")
+GenericWithOneTypeVar = Generic[T]
+
+
+class PyFuture(torch._C.Future):
     r"""
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
     also exposes a set of APIs to add callback functions and set results.
     """
+
     def __new__(cls):
         return super(Future, cls).__new__(cls)
 
@@ -124,6 +131,7 @@ def collect_all(futures):
     """
     return torch._C._collect_all(futures)
 
+
 def wait_all(futures):
     r"""
     Waits for all provided futures to be complete, and returns
@@ -138,3 +146,21 @@ def wait_all(futures):
         :class:`~torch.futures.Future` throws.
     """
     return [fut.wait() for fut in torch._C._collect_all(futures).wait()]
+
+
+try:
+
+    class Future(PyFuture, GenericWithOneTypeVar):
+        # Combine the implementation class and the type class.
+        pass
+
+
+except TypeError as exc:
+    # TypeError: metaclass conflict: the metaclass of a derived class
+    # must be a (non-strict) subclass of the metaclasses of all its bases
+    class FutureMeta(PyFuture.__class__, GenericWithOneTypeVar.__class__):
+        pass
+
+    class Future(PyFuture, GenericWithOneTypeVar, metaclass=FutureMeta):
+        # Combine the implementation class and the type class.
+        pass
