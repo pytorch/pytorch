@@ -122,6 +122,14 @@ bool is_relu_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
+bool is_functional_linear(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_linear_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
 // TODO: add a macro to declare the filters
 bool is_conv1d_module(
     const Match& match,
@@ -136,6 +144,10 @@ bool is_conv3d_module(
     const std::unordered_map<std::string, Value*>& vmap);
 
 bool is_batchnorm2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 

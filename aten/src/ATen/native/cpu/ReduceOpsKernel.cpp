@@ -36,13 +36,13 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     return;
   }
 
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.dont_resize_outputs();
-  iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
-  iter.add_output(result);
-  iter.add_input(self);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
+    .add_output(result)
+    .add_input(self)
+    .build();
 
   auto result_dim_stride = ensure_nonempty_stride(result, dim);
   auto self_dim_stride = ensure_nonempty_stride(self, dim);

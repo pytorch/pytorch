@@ -219,40 +219,38 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
               "Index put requires the source and destination dtypes match, "
               "got ", info.src.scalar_type(), " for the destination "
               "and ", value.scalar_type(), " for the source.");
-  auto iter = TensorIterator();
-  iter.dont_resize_outputs();
-  iter.check_all_same_dtype(false);
-  iter.add_output(info.src);
-  iter.add_input(value);
+  TensorIteratorConfig config;
+  config.resize_outputs(false);
+  config.check_all_same_dtype(false);
+  config.add_output(info.src);
+  config.add_input(value);
   for (auto& index : info.indices) {
-    iter.add_input(index);
+    config.add_input(index);
   }
-  iter.build();
-  return iter;
+  return config.build();
 }
 
 static TensorIterator make_index_iterator(const AdvancedIndex& info) {
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.add_output(Tensor(), info.src.device(), info.src.scalar_type());
-  iter.add_input(info.src);
+  TensorIteratorConfig config;
+  config.check_all_same_dtype(false)
+        .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
+        .add_output(Tensor())
+        .add_input(info.src);
   for (auto& index : info.indices) {
-    iter.add_input(index);
+    config.add_input(index);
   }
-  iter.build();
-  return iter;
+  return config.build();
 }
 
 static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.add_output(result);
-  iter.add_input(info.src);
+  TensorIteratorConfig config;
+  config.check_all_same_dtype(false)
+        .add_output(result)
+        .add_input(info.src);
   for (auto& index : info.indices) {
-    iter.add_input(index);
+    config.add_input(index);
   }
-  iter.build();
-  return iter;
+  return config.build();
 }
 
 Tensor index(const Tensor & self, TensorList indices) {
@@ -440,12 +438,12 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     auto self_dim_size = self.size(dim);
     auto slice_size = selfSlice.numel();
 
-    auto iter = TensorIterator();
-    iter.check_all_same_dtype(false);
-    iter.dont_resize_outputs();
-    iter.add_output(resultSlice);
-    iter.add_input(selfSlice);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(resultSlice)
+      .add_input(selfSlice)
+      .build();
 
     auto grain_size = at::internal::GRAIN_SIZE;
     auto outer_loop = [&](int64_t start, int64_t end) {
@@ -574,12 +572,12 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar 
             "please use a mask with dtype torch.bool instead.");
   }
 
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.dont_resize_outputs();
-  iter.add_output(self);
-  iter.add_input(mask);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .add_output(self)
+    .add_input(mask)
+    .build();
 
   masked_fill_stub(iter.device_type(), iter, value);
   return self;
@@ -661,13 +659,13 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   // serial kernel
   bool use_serial_kernel = self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   if (use_serial_kernel) {
-    auto iter = TensorIterator();
-    iter.check_all_same_dtype(false);
-    iter.dont_resize_outputs();
-    iter.add_output(result_strided);
-    iter.add_input(_self);
-    iter.add_input(_mask);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(result_strided)
+      .add_input(_self)
+      .add_input(_mask)
+      .build();
 
     masked_select_serial_stub(iter.device_type(), iter);
     return result;
@@ -684,14 +682,14 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   // std::exclusive_scan(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data, 0);
   std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
 
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.dont_resize_outputs();
-  iter.add_output(result_strided);
-  iter.add_input(_self);
-  iter.add_input(_mask);
-  iter.add_input(mask_prefix_sum);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .add_output(result_strided)
+    .add_input(_self)
+    .add_input(_mask)
+    .add_input(mask_prefix_sum)
+    .build();
 
   masked_select_stub(iter.device_type(), iter);
   return result;
