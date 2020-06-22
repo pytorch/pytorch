@@ -176,7 +176,7 @@ VBuffer kernelNCHW_OCHW_repack_O4C4HWi4o4(
 }
 
 VBuffer bufferFromOptionalHostData(
-    c10::optional<float*> data,
+    c10::optional<const float*> data,
     const uint32_t size) {
   const auto sizeAligned =
       ROUND_UP(size, context().limits().minStorageBufferOffsetAlignment);
@@ -202,17 +202,15 @@ uint32_t conv2d_biasBufferSize(uint32_t oc) {
 void conv2d_depthwise(
     VulkanTensor& output,
     const VulkanTensor& input,
-    const float* weight,
-    const c10::optional<float*> bias,
-    const Conv2DParams params,
+    const VulkanTensor& weight,
+    const VBuffer& biasBuffer,
+    const Conv2DParams& params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
   TORCH_INTERNAL_ASSERT(params.G == params.C);
   auto osizes = output.sizes();
   TORCH_INTERNAL_ASSERT(osizes[2] == params.OH);
   TORCH_INTERNAL_ASSERT(osizes[3] == params.OW);
-  auto biasBuffer =
-      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC));
   struct ConstBlock {
     int32_t padding[2];
     int32_t kernelSize[2];
@@ -234,9 +232,6 @@ void conv2d_depthwise(
       output_max ? *output_max : std::numeric_limits<float>::infinity()};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
-  VulkanTensor kernel{{params.OC, params.KH, params.KW}};
-  kernel.set_data_from_host(weight);
-
   VkDescriptorSetLayout descriptorSetLayout{};
   VkDescriptorPool descriptorPool{};
   VkDescriptorSet descriptorSet{};
@@ -256,7 +251,7 @@ void conv2d_depthwise(
 
   output.image()->bindStorageImage(descriptorSet, 0);
   input.image()->bindShaderRead(descriptorSet, 1);
-  kernel.image()->bindShaderRead(descriptorSet, 2);
+  weight.image()->bindShaderRead(descriptorSet, 2);
   biasBuffer.bind(descriptorSet, 3);
   constBuffer.bind(descriptorSet, 4);
 
@@ -269,7 +264,7 @@ void conv2d_depthwise(
   auto commandBuffer = computeUnit.commandBuffer();
   output.image()->addImageMemoryBarrierToGeneral(commandBuffer);
   input.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
-  kernel.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
+  weight.image()->addImageMemoryBarrierToShaderRead(commandBuffer);
   computeUnit.dispatchCommandBuffer(
       params.OW, params.OH, params.OC_4, workGroupSize);
   computeUnit.endCommandBuffer();
@@ -277,6 +272,44 @@ void conv2d_depthwise(
 
   vkDestroyDescriptorPool(device, descriptorPool, nullptr);
   vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+}
+
+void conv2d_depthwise(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const VulkanTensor& weight,
+    const c10::optional<const float*> bias,
+    const Conv2DParams params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
+  conv2d_depthwise(
+      output,
+      input,
+      weight,
+      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      params,
+      output_min,
+      output_max);
+}
+
+void conv2d_depthwise(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const float* weight,
+    const c10::optional<const float*> bias,
+    const Conv2DParams params,
+    c10::optional<float> output_min,
+    c10::optional<float> output_max) {
+  VulkanTensor weightTensor{{params.OC, params.KH, params.KW}};
+  weightTensor.set_data_from_host(weight);
+  conv2d_depthwise(
+      output,
+      input,
+      weightTensor,
+      bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+      params,
+      output_min,
+      output_max);
 }
 
 ImageSizes conv2d_prepack_weights_image_sizes(
@@ -463,7 +496,7 @@ void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VImage& kernelImage,
-    const c10::optional<float*> bias,
+    const c10::optional<const float*> bias,
     const Conv2DParams& params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
@@ -483,10 +516,22 @@ void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VulkanTensor& weight_prepacked,
-    c10::optional<float*> bias,
+    c10::optional<const float*> bias,
     const Conv2DParams params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
+  if (params.G > 1) {
+    conv2d_depthwise(
+        output,
+        input,
+        weight_prepacked,
+        bufferFromOptionalHostData(bias, conv2d_biasBufferSize(params.OC)),
+        params,
+        output_min,
+        output_max);
+    return;
+  }
+
   conv2d(
       output,
       input,
@@ -505,6 +550,18 @@ void conv2d(
     const Conv2DParams params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {
+  if (params.G > 1) {
+    conv2d_depthwise(
+        output,
+        input,
+        weight_prepacked,
+        *(bias.buffer()),
+        params,
+        output_min,
+        output_max);
+    return;
+  }
+
   conv2d(
       output,
       input,
@@ -519,7 +576,7 @@ void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const float* weight,
-    const c10::optional<float*> bias,
+    const c10::optional<const float*> bias,
     const Conv2DParams params,
     c10::optional<float> output_min,
     c10::optional<float> output_max) {

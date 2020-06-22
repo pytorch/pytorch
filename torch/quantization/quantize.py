@@ -187,17 +187,15 @@ def _remove_qconfig(module):
         del module.qconfig
 
 def quantize(model, run_fn, run_args, mapping=None, inplace=False):
-    r"""Converts a float model to quantized model.
+    r"""Quantize the input float model with post training static quantization.
 
-    First it will prepare the model for calibration or training, then it calls
-    `run_fn` which will run the calibration step or training step,
-    after that we will call `convert` which will convert the model to a
-    quantized model.
+    First it will prepare the model for calibration, then it calls
+    `run_fn` which will run the calibration step, after that we will
+    convert the model to a quantized model.
 
     Args:
-        model: input model
-        run_fn: a function for evaluating the prepared model, can be a
-            function that simply runs the prepared model or a training loop
+        model: input float model
+        run_fn: a calibration function for calibrating the prepared model
         run_args: positional arguments for `run_fn`
         inplace: carry out model transformations in-place, the original module is mutated
         mapping: correspondence between original module types and quantized counterparts
