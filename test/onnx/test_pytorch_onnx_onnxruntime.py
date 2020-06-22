@@ -494,7 +494,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x):
                 return torch.full((3, 4), x, dtype=torch.long)
 
-        x = torch.tensor(12.)
+        x = torch.tensor(12)
         self.run_test(FullModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
