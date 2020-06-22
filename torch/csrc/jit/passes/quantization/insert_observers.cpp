@@ -472,6 +472,73 @@ class InsertObserversHelper {
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
+
+  // nn.Linear + nn.ReLU
+  const PatternInfo nn_linear_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %linear, %relu, %input):
+    %first_output = prim::CallMethod[name="forward"](%linear, %input)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_linear_module, is_relu_module});
+  // nn.Linear + F.relu
+  const PatternInfo nn_linear_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %linear, %relu, %input, %inplace):
+    %first_output = prim::CallMethod[name="forward"](%linear, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )",
+      {is_linear_module, is_functional_relu});
+  // nn.Linear + aten::relu
+  const PatternInfo nn_linear_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %linear, %relu, %input):
+    %first_output = prim::CallMethod[name="forward"](%linear, %input)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )",
+      {is_linear_module});
+  // nn.Linear + aten::relu_
+  const PatternInfo nn_linear_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %linear, %relu, %input):
+    %first_output = prim::CallMethod[name="forward"](%linear, %input)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )",
+      {is_linear_module});
+
+  // F.linear + nn.ReLU
+  const PatternInfo f_linear_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %linear, %relu, %input, %weight, %bias):
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_functional_linear, is_relu_module});
+  // F.linear + F.relu
+  const PatternInfo f_linear_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %linear, %relu, %input, %weight, %bias, %inplace):
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )",
+      {is_functional_linear, is_functional_relu});
+  // F.linear + aten::relu
+  const PatternInfo f_linear_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %linear, %relu, %input, %weight, %bias):
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )",
+      {is_functional_linear});
+  // F.linear + aten::relu_
+  const PatternInfo f_linear_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %linear, %relu, %input, %weight, %bias):
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )",
+      {is_functional_linear});
+
   const PatternInfo nn_conv1d_f_relu = PatternInfo::parse_from_str(
       R"(
 graph(%self, %input, %conv, %relu, %inplace):
@@ -746,20 +813,28 @@ graph(%self, %a, %b):
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
+          nn_linear_f_relu,      f_linear_f_relu,
+          nn_linear_nn_relu,     f_linear_nn_relu,
+          nn_linear_aten_relu,   f_linear_aten_relu,
+          nn_linear_aten_relu_,  f_linear_aten_relu_,
+
           nn_conv1d_f_relu,      nn_conv1d_nn_relu,
           nn_conv1d_aten_relu,   nn_conv1d_aten_relu_,
           nn_conv2d_f_relu,      nn_conv2d_nn_relu,
           nn_conv2d_aten_relu,   nn_conv2d_aten_relu_,
           nn_conv3d_f_relu,      nn_conv3d_nn_relu,
           nn_conv3d_aten_relu,   nn_conv3d_aten_relu_,
+
           add_nn_relu,           add_f_relu,
           inplace_add_nn_relu,   inplace_add_f_relu,
           add_aten_relu,         add_aten_relu_,
           inplace_add_aten_relu, inplace_add_aten_relu_,
+
           nn_bn2d_nn_relu,       nn_bn2d_f_relu,
           nn_bn2d_aten_relu,     nn_bn2d_aten_relu_,
           nn_bn3d_nn_relu,       nn_bn3d_f_relu,
           nn_bn3d_aten_relu,     nn_bn3d_aten_relu_,
+
           mul_nn_relu,           mul_f_relu,
           inplace_mul_nn_relu,   inplace_mul_f_relu,
           mul_aten_relu,         mul_aten_relu_,
