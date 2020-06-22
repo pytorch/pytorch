@@ -729,6 +729,26 @@ graph(%a_quant, %b_scalar):
          %r = quantized::mul_scalar_relu_out(%a_quant, %b_scalar, %a_quant)
          return (%r) )";
 
+  // quantized::elu
+  std::string elu = R"(
+graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::elu(%a_dequant, %alpha, %scale, %input_scale)
+         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+         return (%r_quant) )";
+
+  std::string quantized_elu = R"(
+graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype):
+         %r_quant = quantized::elu(%a_quant, %r_scale, %r_zero_point, %alpha, %scale, %input_scale)
+         return (%r_quant) )";
+
+  std::string elu_ = R"(
+graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype):
+         %a_dequant = aten::dequantize(%a_quant)
+         %r = aten::elu_(%a_dequant, %alpha, %scale, %input_scale)
+         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+         return (%r_quant) )";
+
   // ============= General Ops that inherit quantization paramters from input
   // tensor =============
   auto avg_pool1d = getInputTensorQParamOpFusionInfo(
@@ -805,12 +825,6 @@ graph(%a_quant, %b_scalar):
 
   auto hardtanh_ = getClampOpFusionInfo("aten::hardtanh_", {"%min", "%max"});
 
-  auto elu = getInputTensorQParamOpFusionInfo(
-      "aten::elu", {"%alpha", "%scale", "%input_scale"});
-
-  auto elu_ = getInputTensorQParamOpFusionInfo(
-      "aten::elu_", {"%alpha", "%scale", "%input_scale"});
-
   auto leaky_relu =
       getInputTensorQParamOpFusionInfo("aten::leaky_relu", {"%negative_slope"});
 
@@ -833,6 +847,9 @@ graph(%a_quant, %b_scalar):
 
   auto hardswish = getObservedQParamOpFusionInfo(
       "aten::hardswish", "quantized::hardswish", {}, {});
+
+  auto hardswish_ = getObservedQParamOpFusionInfo(
+      "aten::hardswish_", "quantized::hardswish", {}, {});
 
   auto layer_norm = getObservedQParamOpFusionInfo(
       "aten::layer_norm",
@@ -954,9 +971,12 @@ graph(%a_quant, %b_scalar):
       {"quantized::mul", mul, quantized_mul},
       {"quantized::mul", inplace_mul, quantized_mul},
       hardswish,
+      hardswish_,
       layer_norm,
       group_norm,
       instance_norm,
+      {"quantized::elu", elu, quantized_elu},
+      {"quantized::elu_", elu_, quantized_elu},
       avg_pool1d,
       avg_pool2d,
       avg_pool3d,
@@ -974,8 +994,6 @@ graph(%a_quant, %b_scalar):
       clamp,
       hardtanh,
       hardtanh_,
-      elu,
-      elu_,
       leaky_relu,
       leaky_relu_,
       // fixed qparam ops
