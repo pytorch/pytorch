@@ -376,9 +376,10 @@ class DistributedDataParallel(Module):
             # be broadcasted using larger blocks in broadcast_coalesced, so it might be
             # better to not pollute the caches with these small blocks
 
-            print("before replicate, rank = ", self.rank_from_test)
+            print("before replicate, rank = ", self.rank_from_test, flush=True)
             self._module_copies = replicate(self.module, self.device_ids, detach=True)
-            print("after replicate, rank = ", self.rank_from_test)
+            for dev in self.device_ids:
+                print("after replicate, synced with {}, rank = {}".format(dev, self.rank_from_test), flush=True)
 
             self._module_copies[0] = self.module
 
