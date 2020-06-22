@@ -28,6 +28,15 @@
     # function is idempotent, so it won't hurt anything; it's just a little
     # unnescessary"
     - run:
+        name: define PIP_UPLOAD_FOLDER
+        command: |
+          our_upload_folder=nightly/
+          # On tags upload to test instead
+          if [[ -n "${CIRCLE_TAG}" ]]; then
+            our_upload_folder=test/
+          fi
+          echo "export PIP_UPLOAD_FOLDER=${our_upload_folder}" >> ${BASH_ENV}
+    - run:
         name: Update s3 htmls
         no_output_timeout: "1h"
         command: |
@@ -41,9 +50,3 @@
           }
           retry pip install awscli==1.6
           "/home/circleci/project/builder/cron/update_s3_htmls.sh"
-
-  # Update s3 htmls for the nightlies
-  update_s3_htmls_for_nightlies:
-    environment:
-      PIP_UPLOAD_FOLDER: "nightly/"
-    <<: *update_s3_htmls
