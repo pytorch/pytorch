@@ -54,6 +54,7 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+#include <torch/csrc/jit/passes/vulkan_rewrite.h>
 #include <torch/csrc/jit/passes/xnnpack_rewrite.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
@@ -209,13 +210,16 @@ void initJITBindings(PyObject* module) {
           [](Module& module,
              const std::string& method_name,
              bool inplace,
+             bool debug,
              int quant_type_int) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
-            return InsertQuantDeQuant(module, method_name, inplace, quant_type);
+            return InsertQuantDeQuant(
+                module, method_name, inplace, debug, quant_type);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("inplace"),
+          py::arg("debug"),
           py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_insert_prepack_unpack",
@@ -534,7 +538,35 @@ void initJITBindings(PyObject* module) {
           [](script::Module& module) { return FoldPrePackingOps(module); })
       .def(
           "_jit_pass_optimize_for_mobile",
-          [](script::Module& module) { return optimizeForMobile(module); })
+          [](script::Module& module,
+             std::set<MobileOptimizerType>& optimization_blacklist) {
+            return optimizeForMobile(module, optimization_blacklist);
+          })
+      .def(
+          "_jit_pass_vulkan_insert_prepacked_ops",
+          [](std::shared_ptr<Graph>& graph) {
+            return vulkanInsertPrePackedOps(graph);
+          })
+      .def(
+          "_jit_pass_vulkan_insert_prepacked_ops",
+          [](script::Module& module) {
+            return vulkanInsertPrePackedOps(module);
+          })
+      .def(
+          "_jit_pass_vulkan_fuse_clamp_w_prepacked_conv",
+          [](script::Module& module) {
+            return vulkanFusePrePackedConvWithClamp(module);
+          })
+      .def(
+          "_jit_pass_vulkan_fold_prepacking_ops",
+          [](script::Module& module) {
+            return vulkanFoldPrePackingOps(module);
+          })
+      .def(
+          "_jit_pass_vulkan_optimize_for_mobile",
+          [](script::Module& module) {
+            return vulkanOptimizeForMobile(module);
+          })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
@@ -664,6 +696,14 @@ void initJITBindings(PyObject* module) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
           });
+
+  py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
+      .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
+      .value(
+          "INSERT_FOLD_PREPACK_OPS",
+          MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)
+      .value("REMOVE_DROPOUT", MobileOptimizerType::REMOVE_DROPOUT)
+      .export_values();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
@@ -837,11 +877,17 @@ void initJITBindings(PyObject* module) {
           [](Argument& self) -> py::object {
             return (self.N()) ? py::cast(*self.N()) : py::none();
           })
-      .def_property_readonly("default_value", [](Argument& self) -> py::object {
-        if (!self.default_value())
-          return py::none();
-        IValue v = *self.default_value();
-        return toPyObject(std::move(v));
+      .def_property_readonly(
+          "default_value",
+          [](Argument& self) -> py::object {
+            if (!self.default_value()) {
+              return py::none();
+            }
+            IValue v = *self.default_value();
+            return toPyObject(std::move(v));
+          })
+      .def("has_default_value", [](Argument& self) -> py::bool_ {
+        return self.default_value().has_value();
       });
   m.def("_jit_get_all_schemas", []() {
     const std::vector<std::shared_ptr<Operator>>& operations =
@@ -955,6 +1001,37 @@ void initJITBindings(PyObject* module) {
   m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
     return fut->wait();
   });
+
+  m.def(
+      "_collect_all",
+      [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
+          -> std::shared_ptr<jit::PythonFutureWrapper> {
+        auto typePtr =
+            futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
+        c10::List<c10::intrusive_ptr<c10::ivalue::Future>> asList(
+            c10::FutureType::create(typePtr));
+        asList.reserve(futures.size());
+        for (const auto& f : futures) {
+          asList.push_back(f->fut);
+        }
+        return std::make_shared<jit::PythonFutureWrapper>(
+            c10::collectAll(asList),
+            /* unwrap_func */ [futures](const py::object& /*unused*/) {
+              // Throw errors when calling wait() on the returned Future if
+              // any of the original futures would throw.
+              // NB: PythonFutureWrapper takes an unwrap_func which serves as a
+              // callback to evalute the value in the Future. RPC uses this
+              // unwrap_func to check whether the returned py::object is a
+              // RemoteException object, and re-throw the exception if it is.
+              // By extracting the c10::ivalue::Future from PythonFutureWrapper
+              // the unwrap_func on the original PythonFutureWrapper objects are
+              // discarded, and hence it will return the RemoteException as an
+              // object instead of re-throwing it.
+              for (auto& fut : futures) {
+                fut->wait();
+              }
+            });
+      });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);

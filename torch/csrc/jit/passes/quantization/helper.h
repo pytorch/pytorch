@@ -38,6 +38,9 @@ c10::optional<Use> getClampScalarInputUse(Value* v);
 // the quantization parameters for `v` given the list of values
 TORCH_API std::vector<Value*> getPassThroughInputs(Value* v);
 
+// Check if a value in the graph is a Scalar value
+TORCH_API bool isScalar(Value* v);
+
 // Check if value is the input of the graph
 TORCH_API bool hitGraphInput(Value* value);
 
@@ -104,7 +107,7 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // ==================== filter functions for matches ==============
-// filter to check if the alpha argument of aten::add is constant 1
+// filter to check if the %alpha argument of aten::add is constant 1
 bool aten_add_alpha_is_one(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
@@ -116,6 +119,14 @@ bool is_functional_relu(
 
 // filter to check if the module is torch.nn.ReLU
 bool is_relu_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_functional_linear(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_linear_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
@@ -133,6 +144,10 @@ bool is_conv3d_module(
     const std::unordered_map<std::string, Value*>& vmap);
 
 bool is_batchnorm2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 

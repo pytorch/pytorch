@@ -42,7 +42,8 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
 def reduce_add(inputs, destination=None):
     """Sums tensors from multiple GPUs.
 
-    All inputs should have matching shapes.
+    All inputs should have matching shapes, dtype, and layout. The output tensor
+    will be of the same shape, dtype, and layout.
 
     Arguments:
         inputs (Iterable[Tensor]): an iterable of tensors to add.
@@ -51,34 +52,34 @@ def reduce_add(inputs, destination=None):
 
     Returns:
         A tensor containing an elementwise sum of all inputs, placed on the
-        ``destination`` device.
+        :attr:`destination` device.
     """
-    # TODO: try to find an input on another gpu, copy it,
-    # and accumulate into the copy
-    if destination is None:
-        destination = torch.cuda.current_device()
+    destination = torch.cuda._utils._get_device_index(destination, optional=True)
     input_size = inputs[0].size()
-    nccl_root = None
+    root_index = None  # index of input tensor that already is on the correct device
     for i, inp in enumerate(inputs):
         assert inp.is_cuda, "reduce_add expects all inputs to be on GPUs"
         if inp.get_device() == destination:
-            nccl_root = i
+            root_index = i
         if inp.size() != input_size:
             got = 'x'.join(str(x) for x in inp.size())
             expected = 'x'.join(str(x) for x in input_size)
             raise ValueError("input {} has invalid size: got {}, but expected "
                              "{}".format(i, got, expected))
-    if nccl_root is None:
+    if root_index is None:
         raise RuntimeError("reduce_add expects destination to be on the same GPU with one of the tensors")
-    result = inp.new(device=destination).resize_as_(inp).zero_()
 
-    if nccl.is_available(inputs) and inputs[0].get_device() == destination:
-        outputs = [result] + [t.new(t.size()) for t in inputs[1:]]
-        nccl.reduce(inputs, outputs, root=nccl_root)
-        return result
-    for inp in inputs:
-        input_correct_gpu = inp.cuda(result.get_device())
-        result.add_(input_correct_gpu)
+    if len(inputs) == 1:
+        return inputs[0]
+
+    if nccl.is_available(inputs):
+        result = torch.empty_like(inputs[root_index])
+        nccl.reduce(inputs, output=result, root=root_index)
+    else:
+        nonroot = [t for i, t in enumerate(inputs) if i != root_index]
+        result = inputs[root_index] + nonroot[0].cuda(destination, non_blocking=True)  # make a new tensor w/o clone
+        for other in nonroot[1:]:
+            result.add_(other.cuda(destination, non_blocking=True))
     return result
 
 
@@ -107,7 +108,7 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     # process sparse ones first since they may have different sizes on different gpus
     for tensor_at_gpus in zip(*inputs):
         if all(t.is_sparse for t in tensor_at_gpus):
-            result = reduce_add(tensor_at_gpus, destination)
+            result = reduce_add(tensor_at_gpus, destination)  # this will be sparse too
             output.append(result)
             ref_order.append(tensor_at_gpus[0])
         else:
@@ -117,7 +118,7 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     itrs = [_take_tensors(tensors, buffer_size) for tensors in dense_tensors]
     # now the dense ones, which have consistent sizes
     for chunks in zip(*itrs):
-        flat_tensors = [_flatten_dense_tensors(chunk) for chunk in chunks]
+        flat_tensors = [_flatten_dense_tensors(chunk) for chunk in chunks]  # (num_gpus,)
         flat_result = reduce_add(flat_tensors, destination)
         for t in _unflatten_dense_tensors(flat_result, chunks[0]):
             # The unflattened tensors do not share storage, and we don't expose
