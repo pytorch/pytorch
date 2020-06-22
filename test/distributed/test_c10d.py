@@ -2833,12 +2833,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     try:
                         print(model_msg, replica_devices, flush=True)
                         m = ConvNet(layer_devs, formats, dtypes)
-                        m_ddp = DistributedDataParallel(copy.deepcopy(m),
-                                                        device_ids=replica_devices,
-                                                        process_group=process_group,
-                                                        rank_from_test=self.rank,
-                                                        bucket_cap_mb=bucketsize)
-                        # torch.cuda.synchronize()
+                        m_ddp = copy.deepcopy(m)
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
@@ -2847,7 +2842,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                             for dev in replica_devices:
                                 torch.cuda.synchronize(dev)
                                 print("after opts, rank = {}, synced with dev {}, time = {}".format(
-                                      self.rank, dev, time.time() - start_time))
+                                      self.rank, dev, time.time() - start_time), flush=True)
+                        m_ddp = DistributedDataParallel(m_ddp,
+                                                        device_ids=replica_devices,
+                                                        process_group=process_group,
+                                                        rank_from_test=self.rank,
+                                                        bucket_cap_mb=bucketsize)
+                        # torch.cuda.synchronize()
                     except BaseException:
                         # Prints case-specific debugging info to narrow down failing case.
                         print("Caught exception during model creation for " + model_msg, flush=True)
