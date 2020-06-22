@@ -2877,6 +2877,27 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, y))
 
+    def test_cast_to_bool(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.cat((input.to(other), other), 0)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.zeros([2, 3, 4], dtype=torch.bool)
+        model = MyModule()
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_ones_bool(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input):
+                true = torch.ones(input.shape, dtype=torch.bool)
+                return input.to(true) & true
+
+        x = torch.randn(2, 3, 4)
+        model = MyModule()
+        self.run_test(model, x)
+
     def test_log(self):
         class Log(torch.nn.Module):
             def forward(self, input):
