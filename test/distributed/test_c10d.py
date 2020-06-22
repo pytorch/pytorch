@@ -1528,9 +1528,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Run a few collectives so that we have called each process group
         for _ in range(num_process_groups + 1):
-            tensor = torch.full([100, 100], self.rank)
+            tensor = torch.full([100, 100], float(self.rank))
             pg.broadcast(tensor, root=0).wait()
-            self.assertEqual(torch.full([100, 100], 0), tensor)
+            self.assertEqual(torch.full([100, 100], 0.), tensor)
 
     def test_round_robin_create_destroy(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1551,7 +1551,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             for _ in range(3):
                 tensor = torch.ones([10, 10])
                 pg.allreduce(tensor).wait()
-                self.assertEqual(torch.full([10, 10], self.world_size), tensor)
+                self.assertEqual(torch.full([10, 10], float(self.world_size)), tensor)
             del pg
 
 
