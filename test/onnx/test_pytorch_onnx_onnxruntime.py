@@ -2802,6 +2802,18 @@ class TestONNXRuntime(unittest.TestCase):
         model = CumSum()
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_cumsum_with_cast(self):
+        class CumSum(torch.nn.Module):
+            def forward(self, input):
+                return torch.cumsum(input, dim=0, dtype=torch.float32)
+
+        model = CumSum()
+        x = torch.tensor([2, 3, 4], dtype=torch.int32)
+        self.run_test(model, x)
+        x = torch.tensor([False, True, True])
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
         class Meshgrid(torch.nn.Module):
