@@ -373,7 +373,7 @@ class DistributedDataParallel(Module):
             # torch.cuda.synchronize()
             print("before replicate, rank = ", self.rank_from_test, flush=True)
             self._module_copies = replicate(self.module, self.device_ids, detach=True)
-            # torch.cuda.synchronize()
+            torch.cuda.synchronize(next(self.module.parameters()).device)
             print("after replicate, rank = ", self.rank_from_test, flush=True)
             self._module_copies[0] = self.module
 
