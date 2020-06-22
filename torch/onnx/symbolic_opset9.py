@@ -1982,15 +1982,18 @@ def flatten(g, input, start_dim, end_dim):
         return _unimplemented("flatten",
                               "input size not accessible "
                               "(consider using reshape op instead of flatten op to export to ONNX)")
-    input_dims = input.type().sizes()
-    output_dims = []
-    for i in range(0, dim):
-        if start_dim < i and end_dim >= i:
-            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
-        else:
-            output_dims.append(input_dims[i])
-    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
-    p = _reshape_from_tensor(g, input, shape)
+    input_size = g.op("Shape", input)
+    slice1 = sym_help._slice_helper(g, input_size, axes=[0], starts=[0], ends=[start_dim])
+    slice2 = sym_help._slice_helper(g, input_size, axes=[0],  starts=[start_dim], ends=[end_dim+1])
+    slice2 = g.op("ReduceProd", slice2)
+    slices = [slice1, slice2]
+    if end_dim < dim-1:
+        slice3 = sym_help._slice_helper(g, input_size, axes=[0], starts=[end_dim+1], ends=[dim])
+        slices = [slice1, slice2, slice3]
+
+    final_shape = g.op("Concat", *slices, axis_i=0)
+    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
+    p = _reshape_from_tensor(g, input, final_shape)
     return p
 
 
