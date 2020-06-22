@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <fmt/format.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
@@ -9,6 +10,7 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
@@ -19,11 +21,37 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
-#include <fmt/format.h>
-
 namespace torch {
 namespace distributed {
 namespace rpc {
+namespace {
+void processRemoteProfiledEvents(
+    autograd::RpcWithProfilingResp& rpcWithProfilingResp) {
+  // Check if the profiler is enabled
+  auto enabled = torch::autograd::profiler::profilerEnabled();
+  TORCH_CHECK(
+      enabled,
+      "Profiler was expected to be enabled. This can happen in callback "
+      " continutations that run in different threads, and the TLS of the "
+      " profiler was not propagated.");
+  std::vector<torch::autograd::profiler::Event> events =
+      rpcWithProfilingResp.getProfiledEvents();
+  const auto& profilingId = rpcWithProfilingResp.getProfilingId();
+  auto& remoteProfilerManager = RemoteProfilerManager::getInstance();
+  auto key = remoteProfilerManager.retrieveRPCProfilingKey(profilingId);
+  remoteProfilerManager.eraseKey(profilingId);
+  auto keyPrefixStr = key + rpc::REMOTE_PROFILING_KEY_PREFIX;
+  std::for_each(
+      events.begin(),
+      events.end(),
+      [&keyPrefixStr](torch::autograd::profiler::Event& event) {
+        std::string name = keyPrefixStr + std::string(event.name());
+        event.setName(at::StringView(name));
+      });
+  // Add event list to the thread local profiler.
+  torch::autograd::profiler::addEventList(std::move(events));
+}
+} // namespace
 
 const std::string kRPCErrorPrefix = std::string("RPCErr");
 
@@ -162,20 +190,10 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       RpcCommandBase& rpc = *rpcPtr;
       auto& rpcWithProfilingResp =
           static_cast<autograd::RpcWithProfilingResp&>(rpc);
-      // read and reconstruct events
-      // Check if the profiler is enabled
-      auto enabled = torch::autograd::profiler::profilerEnabled();
-      TORCH_CHECK(
-          enabled,
-          "Profiler was expected to be enabled. This can happen in callback "
-          " continutations that run in different threads, and the TLS of the "
-          " profiler was not propagated.");
-      std::vector<torch::autograd::profiler::Event> events =
-          rpcWithProfilingResp.getProfiledEvents();
+      // Process remotely profiled events.
+      processRemoteProfiledEvents(rpcWithProfilingResp);
+
       wrappedMsgType = rpcWithProfilingResp.wrappedMessageType();
-
-      torch::autograd::profiler::addEventList(std::move(events));
-
       auto wrappedRPC = std::move(rpcWithProfilingResp).moveWrappedRpc();
       return wrappedRPC;
     }
