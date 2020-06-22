@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/engine.h>
 
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -227,9 +228,9 @@ Engine::~Engine() {
     // Because CRT terminates DLL threads before calling
     // global object destructors
 #if !defined(_WIN32) || !defined(C10_BUILD_SHARED_LIBS)
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {
-      non_reentrant_device_thread_finish_.wait(lk);
+      non_reentrant_device_thread_condvar_.wait(lk);
     }
 #endif
   }
@@ -237,12 +238,22 @@ Engine::~Engine() {
 }
 
 void Engine::release_workers() {
-  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
   non_reentrant_device_thread_count_.store(0);
-  non_reentrant_device_thread_finish_.notify_one();
+  non_reentrant_device_thread_condvar_.notify_one();
 }
 
-auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue) -> void {
+void Engine::increment_non_reentrant_thread_count() {
+  std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+  non_reentrant_device_thread_count_.fetch_add(1);
+  non_reentrant_device_thread_condvar_.notify_one();
+}
+
+void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
+  if (should_increment) {
+    increment_non_reentrant_thread_count();
+  }
+
   at::init_num_threads();
   // thread_init should only be called by device threads other than CPU_DEVICE
   TORCH_INTERNAL_ASSERT(device != CPU_DEVICE);
@@ -274,26 +285,23 @@ auto Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
   thread_main(graph_task, /* reentrant_thread */ false);
   // Notify about shutdown
   {
-    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_finish_mutex_);
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     non_reentrant_device_thread_count_.fetch_sub(1);
-    non_reentrant_device_thread_finish_.notify_one();
+    non_reentrant_device_thread_condvar_.notify_one();
   }
 }
 
-// The guard that sets and restores current_graph_task.
-struct GraphTaskGuard {
-  GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
-    last_graph_task_ = std::move(current_graph_task);
-    current_graph_task = std::move(graph_task);
-  }
-  ~GraphTaskGuard() { restore_current_graph_task(); }
+GraphTaskGuard::GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
+  last_graph_task_ = std::move(current_graph_task);
+  current_graph_task = std::move(graph_task);
+}
+GraphTaskGuard::~GraphTaskGuard() {
+  restore_current_graph_task();
+}
 
-  void restore_current_graph_task() {
-    current_graph_task = std::move(last_graph_task_);
-  }
-
-  std::shared_ptr<GraphTask> last_graph_task_;
-};
+void GraphTaskGuard::restore_current_graph_task() {
+  current_graph_task = std::move(last_graph_task_);
+}
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
 // case:
@@ -630,6 +638,8 @@ void validate_outputs(
       ss << metadata.device() << " but got " << grad_device;
       AT_ERROR(format_error(ss.str()));
     }
+    // We should not build graph for Tensors that are not differentiable
+    TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
   }
 }
 
@@ -1013,7 +1023,7 @@ auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device
 
 auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, int device_index) -> std::shared_ptr<ReadyQueue> {
   if (device_index == CPU_DEVICE) {
-    // return the cpu ready queue passed in 
+    // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
@@ -1043,17 +1053,23 @@ auto Engine::start_device_threads() -> void {
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
-  non_reentrant_device_thread_count_.store(num_devices);
   for (int i = 0; i < num_devices; ++i) {
-    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i]);
+    std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
     t.detach();
+  }
+  // Wait for the threads to start
+  {
+    std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
+    while(non_reentrant_device_thread_count_.load() != num_devices) {
+      non_reentrant_device_thread_condvar_.wait(lk);
+    }
   }
 }
 
 void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
-  // threads but not enough workers to get to the the new task that will be
+  // threads but not enough workers to get to the new task that will be
   // added
   bool create_thread = (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size());
   thread_pool_shared_->graphtasks_queue_.push(graph_task);

@@ -59,12 +59,9 @@ int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
   return storage->device().index();
 }
 
-THCStorage* THCStorage_new(
-    THCState* state,
-    caffe2::TypeMeta data_type) {
+THCStorage* THCStorage_new(THCState* state) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
                            c10::StorageImpl::use_byte_size_t(),
-                           data_type,
                            0,
                            c10::cuda::CUDACachingAllocator::get(),
                            true)

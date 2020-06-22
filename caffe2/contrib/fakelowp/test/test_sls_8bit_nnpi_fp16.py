@@ -11,7 +11,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 workspace.GlobalInit(
     [
@@ -25,7 +25,7 @@ GLOW_MATMUL_ATOL = 1e-5
 GLOW_MATMUL_RTOL = 1e-3
 
 
-class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
+class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
     def Skip_test_SLS_NonQuantized_fp16(self):
         N = 20000
         DIM = 64
@@ -186,6 +186,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
             print_test_debug_info(
                 "slws_fused_8bit_rowwise",
                 {
+                    "seed": seed,
                     "indices": indices,
                     "data": data,
                     "lengths": lengths,
@@ -218,7 +219,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
         indices = np.asarray(indices).astype(np.int64)
 
         weights = np.random.uniform(
-            low=0, 
+            low=0,
             high=max_weight,
             size=[len(indices)]
         ).astype(np.float32)

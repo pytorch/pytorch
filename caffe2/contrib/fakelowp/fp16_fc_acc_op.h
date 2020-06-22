@@ -26,7 +26,6 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
-#include "common/logging/logging.h"
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
