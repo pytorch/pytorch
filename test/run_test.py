@@ -48,6 +48,7 @@ TESTS = [
     'test_optim',
     'test_mobile_optimizer',
     'test_xnnpack_integration',
+    'test_vulkan',
     'test_quantization',
     'test_sparse',
     'test_serialization',
@@ -77,6 +78,7 @@ TESTS = [
     'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
     'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
     'distributed/rpc/tensorpipe/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
@@ -98,6 +100,7 @@ WINDOWS_BLACKLIST = [
     'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
     'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
     'distributed/rpc/tensorpipe/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/test_rpc_spawn',
@@ -115,6 +118,7 @@ ROCM_BLACKLIST = [
     'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
     'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
     'distributed/rpc/tensorpipe/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_optimizer_spawn',
@@ -126,6 +130,7 @@ ROCM_BLACKLIST = [
     'test_jit_fuser_legacy',
     'test_tensorexpr',
     'test_type_hints',
+    'test_openmp',
 ]
 
 RUN_PARALLEL_BLACKLIST = [
@@ -160,6 +165,7 @@ SLOW_TESTS = [
     'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
     'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
     'distributed/rpc/tensorpipe/test_rpc_spawn',
+    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_rpc_spawn',
     'distributed/test_ddp_under_dist_autograd',
