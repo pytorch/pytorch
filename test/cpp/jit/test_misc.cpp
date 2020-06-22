@@ -2049,17 +2049,9 @@ void testFutures() {
     ASSERT_EQ(c4->value().toInt(), 7);
   }
 
-  bool cbFinished = false;
-  std::mutex cbFinishedMutex;
-  std::condition_variable cbFinishedCv;
   // cb that verifies the profiler is enabled
-    auto profilerEnabledCb = [&cbFinished, &cbFinishedMutex, &cbFinishedCv](){
+    auto profilerEnabledCb = [](){
       ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
-      {
-        std::lock_guard<std::mutex> guard(cbFinishedMutex);
-        cbFinished = true;
-      }
-      cbFinishedCv.notify_one();
     };
   // addCallbackWithTLSState
   {
@@ -2072,9 +2064,9 @@ void testFutures() {
     std::thread t([s1 = std::move(s1)]() {
       s1->markCompleted();
     });
+    // Since we join here, we can ensure that all callbacks corresponding to
+    // markCompleted() have finished.
     t.join();
-    std::unique_lock<std::mutex> lock(cbFinishedMutex);
-    cbFinishedCv.wait(lock, [&cbFinished] {return cbFinished;});
     torch::autograd::profiler::disableProfiler();
   }
   // then() with TLS State
@@ -2093,6 +2085,7 @@ void testFutures() {
     });
     t.join();
     s2->wait();
+    torch::autograd::profiler::disableProfiler();
 }
 }
 
