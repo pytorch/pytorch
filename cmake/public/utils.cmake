@@ -250,7 +250,7 @@ function(torch_compile_options libname)
         )
     else()
       target_compile_options(${libname} PUBLIC
-        #    -std=c++14
+        $<$<COMPILE_LANGUAGE:CXX>:-std=c++14>
         -Wall
         -Wextra
         -Wno-unused-parameter
