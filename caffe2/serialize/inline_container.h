@@ -171,14 +171,11 @@ class CAFFE2_API PyTorchStreamReader final {
 
 class CAFFE2_API PyTorchStreamWriter final {
  public:
+  explicit PyTorchStreamWriter(std::string archive_name);
   explicit PyTorchStreamWriter(
-      std::string archive_name,
-      const bool _write_version_at_setup=true);
-  explicit PyTorchStreamWriter(
-      const std::function<size_t(const void*, size_t)>& writer_func,
-      const bool _write_version_at_setup=true);
+      const std::function<size_t(const void*, size_t)>& writer_func);
 
-  void writeVersion(const uint64_t version);
+  void setMinVersion(const uint64_t version);
 
   void writeRecord(
       const std::string& name,
@@ -207,11 +204,9 @@ class CAFFE2_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
+  uint64_t version_ = kProducedFileFormatVersion;
   bool finalized_ = false;
   bool err_seen_ = false;
-  // If true, writes the version during setup, otherwise the user must
-  //   explicitly write the version number using writeVersion
-  const bool write_version_at_setup_;
   friend size_t ostream_write_func(
       void* pOpaque,
       uint64_t file_ofs,
