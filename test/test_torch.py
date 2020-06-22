@@ -5119,6 +5119,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     self.assertEqual(output3, output1)
                     self.assertEqual(output3, output2)
 
+        def test_empty_meta(self):
+            x = torch.empty_meta(2 ** 20, 2 ** 20)
+            y = torch.empty_meta(2 ** 20)
+            z = x + y
+            self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
+
         def test_tensor_grad_warnings(self):
             dummy = torch.empty(1)
 
