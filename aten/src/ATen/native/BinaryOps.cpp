@@ -7,6 +7,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 
+#include <torch/library.h>
+
 namespace at {
 namespace native {
 
@@ -790,6 +792,38 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
 // It is undocumented and should not be used outside of tests.
 Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
   return self - (other * alpha);
+}
+
+// TODO: Deduplicate this with the TensorIterator logic.  This would
+// also fix the TODOs below.
+Tensor binary_op_meta(const Tensor& self, const Tensor& other) {
+  // TODO: Doesn't do type promotion correctly
+  // TODO: Doesn't do strides correctly
+  int64_t dim = std::max(self.dim(), other.dim());
+  std::vector<int64_t> sizes(dim);
+  for (int64_t i = 0; i < dim; i++) {
+    int64_t j = -1 - i;
+    if (i >= self.dim() || self.size(j) == 1) {
+      sizes[dim + j] = other.size(j);
+    } else if (i >= other.dim() || self.size(i) == 1) {
+      sizes[dim + j] = self.size(j);
+    } else {
+      TORCH_CHECK(
+        self.size(j) == other.size(j),
+        "Expected self.size(", j, ") == other.size(", j, "), but got ", self.size(j), " != ", other.size(j)
+      );
+      sizes[dim + j] = self.size(j);
+    }
+  }
+  return at::empty_meta(sizes, self.options());
+}
+
+Tensor binary_op_with_scalar_meta(const Tensor& self, const Tensor& other, Scalar x) {
+  return binary_op_meta(self, other);
+}
+
+TORCH_LIBRARY_IMPL(aten, Meta, m) {
+  m.impl("add.Tensor", binary_op_with_scalar_meta);
 }
 
 
