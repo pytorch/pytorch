@@ -595,6 +595,7 @@ void runKernel(
       //if (has_reduction) {
       if (!entry->reduction_axes_.empty()) {
         kernel_args.push(input.toTensor());
+        //kernel_args.push(input.toTensor(), outputs[0].sizes() + entry->reduction_axes_.size());
       } else {
         kernel_args.push(input.toTensor(), outputs[0].sizes());
       }

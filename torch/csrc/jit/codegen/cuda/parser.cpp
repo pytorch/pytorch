@@ -37,11 +37,8 @@ typedef bool (
 // TODO: temporary hack, need to do this properly, at least reduction_ops should
 // be registered instead.
 bool hasReduction(const Block* block) {
-  static OperatorSet reduction_ops {
-      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)",
-  };
   for (auto node : block->nodes()) {
-    if (node->isMemberOf(reduction_ops)) {
+    if (isReductionNode(node)) {
       return true;
     }
     for (auto block : node->blocks()) {
