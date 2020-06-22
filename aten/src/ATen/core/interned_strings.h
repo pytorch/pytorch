@@ -109,6 +109,7 @@ namespace c10 {
   _(aten, _ncf_unsqueeze)            \
   _(aten, warn)                      \
   _(aten, sorted)                    \
+  _(aten, check_tensor)              \
   _(aten, floordiv)                  \
   _(aten, __range_length)            \
   _(aten, __derive_index)            \

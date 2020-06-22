@@ -754,6 +754,11 @@ struct CodeImpl {
   void emitCreateObject(Node* node) {
     insertInstruction(CREATE_OBJECT, emitType(node->output()->type()));
   }
+
+  void emitCheckTensor(Node* node) {
+    insertInstruction(CHECK_TENSOR, emitType(node->input()->type()));
+  }
+
   void emitIsinstance(Node* node) {
     emitLoadInputs(node->inputs());
     std::vector<TypePtr> types = node->tys(attr::types);
@@ -808,6 +813,8 @@ struct CodeImpl {
         break;
       case prim::Param:
         break;
+      case aten::check_tensor:
+
       case prim::CallFunction:
         emitCall(
             node->inputs().at(0)->type()->expect<FunctionType>()->function(),
@@ -1331,6 +1338,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             dictConstruct(stack, type, inst.N);
             ++af.pc;
           } break;
+          case CHECK_TENSOR: {
+            auto type = af.types[inst.X]->expect<TensorType>();
+
+            ++af.pc;
+          }
           case CREATE_OBJECT: {
             auto type = af.types[inst.X]->expect<ClassType>();
             createObject(stack, type);
