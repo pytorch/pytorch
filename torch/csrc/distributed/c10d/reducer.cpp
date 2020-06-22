@@ -392,13 +392,15 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   // Run finalizer function and kick off reduction for local_used_maps once the
   // final bucket was marked ready.
   if (next_bucket_ == buckets_.size()) {
-    // H2D from local_used_maps_ to local_used_maps_dev_
-    for (size_t i = 0; i < local_used_maps_.size(); i++) {
-      // We do async H2D to avoid the blocking overhead. The async copy and
-      // allreduce respect the current stream, so will be sequenced correctly.
-      local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
+    if (!unused_parameters_.empty()) {
+      // H2D from local_used_maps_ to local_used_maps_dev_
+      for (size_t i = 0; i < local_used_maps_.size(); i++) {
+        // We do async H2D to avoid the blocking overhead. The async copy and
+        // allreduce respect the current stream, so will be sequenced correctly.
+        local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
+      }
+      local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
     }
-    local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
 
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::unique_lock<std::mutex> lock(this->mutex_);
@@ -688,7 +690,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       // local_used_maps_reduced_ is true.
       bool global_unused =
           local_used_maps_[replica_index][variable_index].item<int>() == 0;
-      if (global_unused && !local_used_maps_reduced_) {
+      if (global_unused && !local_used_maps_reduced_ &&
+          !unused_parameters_.empty()) {
         // Wait for local_used_maps reduction to complete.
         local_used_work_->wait();
         // D2H from local_used_maps_dev_ to local_used_maps_
@@ -753,7 +756,7 @@ void Reducer::finalize_backward() {
   // complete before kicking off next one. Otherwise the previous one may
   // interfere, write to the device-side memory and clobber the content of
   // local_unused_maps_dev_.
-  if (!local_used_maps_reduced_) {
+  if (!local_used_maps_reduced_ && !unused_parameters_.empty()) {
     local_used_work_->wait();
   }
   local_used_maps_reduced_ = false;
