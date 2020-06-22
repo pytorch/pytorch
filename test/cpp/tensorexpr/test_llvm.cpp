@@ -161,35 +161,73 @@ void testLLVMByteToDoubleCastTest() {
 
 void testLLVMLetTest01() {
   KernelScope kernel_scope;
+
+  Buffer a(BufHandle("A", {1}, kFloat));
+  std::vector<float> v = {1, 0};
+  std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
-  ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
-  ExprHandle result = Let::make(x, ExprHandle(3.f), body);
-  LLVMExprEval cg(result, {});
-  ASSERT_EQ(cg.value<float>(), 2.f + (3.f * 3.f + 4.f));
+  auto block = Block::make(
+      {{x.node(), new FloatImm(3.f)}},
+      {
+          Store::make(
+              a,
+              {IntImm::make(0)},
+              ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f)),
+              IntImm::make(1)),
+      });
+
+  LLVMCodeGen cg(block, {a});
+  ASSERT_EQ(cg.value<int>(args), 0);
+  ASSERT_EQ(v[0], 2.f + 3.f * 3.f + 4.f);
 }
 
 void testLLVMLetTest02() {
   KernelScope kernel_scope;
+
+  Buffer a(BufHandle("A", {1}, kFloat));
+  std::vector<float> v = {1, 0};
+  std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
-  ExprHandle body =
-      ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
-  ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
-  ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
-  LLVMExprEval cg(e2, {});
-  ASSERT_EQ(cg.value<float>(), 2.f + (3.f * 3.f + 4.f * 6.f));
+  auto block = Block::make(
+      {{x.node(), new FloatImm(3.f)}, {y.node(), new FloatImm(6.f)}},
+      {
+          Store::make(
+              a,
+              {IntImm::make(0)},
+              ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f)),
+              IntImm::make(1)),
+      });
+
+  LLVMCodeGen cg(block, {a});
+  ASSERT_EQ(cg.value<int>(args), 0);
+  ASSERT_EQ(v[0], 2.f + 3.f * 3.f + 6.f * 4.f);
 }
 
 void testLLVMLetTestMultitype() {
   KernelScope kernel_scope;
+
+  Buffer a(BufHandle("A", {1}, kDouble));
+  std::vector<double> v = {1, 0};
+  std::vector<void*> args({v.data()});
   VarHandle x("x", kByte);
   VarHandle y("y", kHalf);
-  ExprHandle body = ExprHandle((double)2.f) +
-      (x * ExprHandle(3) + ExprHandle((int64_t)4) * y);
-  ExprHandle e1 = Let::make(x, ExprHandle((uint8_t)3), body);
-  ExprHandle e2 = Let::make(y, ExprHandle((at::Half)6.f), e1);
-  LLVMExprEval cg(e2, {});
-  ASSERT_EQ(cg.value<double>(), 2.f + (3 * 3 + 4 * 6.f));
+  auto block = Block::make(
+      {{x.node(), new ByteImm(3)}, {y.node(), new HalfImm(6.f)}},
+      {
+          Store::make(
+              a,
+              {IntImm::make(0)},
+              Cast::make(
+                  kDouble,
+                  ExprHandle(2.f) +
+                      (x * ExprHandle(3.f) + y * ExprHandle(4.f))),
+              IntImm::make(1)),
+      });
+
+  LLVMCodeGen cg(block, {a});
+  ASSERT_EQ(cg.value<int>(args), 0);
+  ASSERT_EQ(v[0], 2.f + 3 * 3.f + 6.f * 4.f);
 }
 
 void testLLVMBufferTest() {

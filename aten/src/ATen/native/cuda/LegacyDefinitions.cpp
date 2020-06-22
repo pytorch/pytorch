@@ -59,16 +59,6 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & 
   }
 }
 
-Tensor & gather_out_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  result.resize_(index.sizes());
-  return legacy::cuda::_th_gather_out(result, self, dim, index);
-}
-
-Tensor gather_cuda(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  Tensor result = at::empty({0}, self.options());
-  return gather_out_cuda(result, self, dim, index, sparse_grad);
-}
-
 Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, Scalar other) {
   return legacy::cuda::_th_fmod_out(result, self, other);
 }

@@ -28,6 +28,7 @@ extern "C" {
       const void* w,                             \
       uint8_t* c,                                \
       size_t c_stride,                           \
+      size_t output_channel_index,               \
       const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
 DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_3x3c8__neon)
@@ -54,6 +55,7 @@ DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_4x4c2__sse2)
       const float* b,                            \
       float* c,                                  \
       size_t c_stride,                           \
+      size_t output_channel_index,               \
       const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
 
 DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_UKERNEL_FUNCTION(pytorch_q8gemm_dq_ukernel_4x8__neon)

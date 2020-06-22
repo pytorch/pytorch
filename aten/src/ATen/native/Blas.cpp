@@ -13,7 +13,7 @@ constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
 
 Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
   auto r_stride = result.stride(0);
-  AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
     bool is_fast = false;

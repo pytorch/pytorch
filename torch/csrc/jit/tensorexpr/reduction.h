@@ -26,14 +26,12 @@ class ReduceOp : public ExprNode<ReduceOp> {
  public:
   ReduceOp(
       const Buf* accum,
-      const Expr* init,
       ExprHandle body,
       ReduceInteraction c,
       const std::vector<const Expr*>& output_args,
       const std::vector<const Var*>& reduce_args)
       : ExprNodeBase(body.dtype()),
         accumulator_(accum),
-        initializer_(init),
         body_(body),
         interaction_(c),
         output_args_(output_args),
@@ -42,12 +40,6 @@ class ReduceOp : public ExprNode<ReduceOp> {
   // return the accumulation load expression.
   const Buf* accumulator() const {
     return accumulator_;
-  }
-
-  // return a Statement which stores the initializer into the accumulation
-  // buffer.
-  const Expr* initializer() const {
-    return initializer_;
   }
 
   // return the body expression which obtains the value to be reduced.
@@ -83,7 +75,6 @@ class ReduceOp : public ExprNode<ReduceOp> {
 
  private:
   const Buf* accumulator_;
-  const Expr* initializer_;
   ExprHandle body_;
   ReduceInteraction interaction_;
   std::vector<const Expr*> output_args_;
@@ -107,18 +98,16 @@ class Reducer {
     interaction_ = interaction;
   }
 
+  const Expr* initializer() const {
+    return init_;
+  }
+
   ReduceOp* operator()(
       Buf* result_buf,
       ExprHandle body,
       std::vector<const Expr*> output,
       std::vector<const Var*> inner) const {
-    return new ReduceOp(
-        result_buf,
-        new Cast(body.dtype(), init_),
-        body,
-        interaction_,
-        output,
-        inner);
+    return new ReduceOp(result_buf, body, interaction_, output, inner);
   }
 
   // Polymorphic handling of Body functions with a variety of parameters.
@@ -235,6 +224,17 @@ class Minimum : public Reducer {
       : Reducer(initializer, [](ExprHandle a, ExprHandle b) {
           return Min::make(a, b, true);
         }) {}
+};
+
+class ReductionExpander : public IRMutator {
+ public:
+  Stmt* expand(Stmt* s) {
+    return s->accept_mutator(this);
+  }
+
+  const Expr* mutate(const ReduceOp* v) override {
+    return v->complete().node();
+  }
 };
 
 } // namespace tensorexpr

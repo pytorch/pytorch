@@ -91,17 +91,8 @@ variable_list Gather::apply(variable_list&& inputs) {
         "and return a vector.");
   }
 
-  std::vector<at::Tensor> tensors;
-  tensors.reserve(inputs.size());
-  for (auto& variable : inputs) {
-    if (unsqueeze_scalars) {
-      tensors.push_back(variable.view(1));
-    } else {
-      tensors.push_back(std::move(variable));
-    }
-  }
-
   std::shared_ptr<Node> grad_fn;
+  // compute this before moving variables from `inputs`
   if (compute_requires_grad(inputs)) {
     std::vector<at::Device> source_devices;
     std::vector<int64_t> input_sizes;
@@ -116,6 +107,16 @@ variable_list Gather::apply(variable_list&& inputs) {
         /*streams=*/c10::nullopt,
         /*unsqueeze_scalars=*/unsqueeze_scalars);
     grad_fn->set_next_edges(collect_next_edges(inputs));
+  }
+
+  std::vector<at::Tensor> tensors;
+  tensors.reserve(inputs.size());
+  for (auto& variable : inputs) {
+    if (unsqueeze_scalars) {
+      tensors.push_back(variable.view(1));
+    } else {
+      tensors.push_back(std::move(variable));
+    }
   }
 
   // This is special logic for torch::cuda::gather!

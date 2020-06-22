@@ -17,14 +17,15 @@ Functional higher level API
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. warning::
-    This API is experimental.
+    This API is experimental. Even though the function signatures are very unlikely to change, major
+    improvements to performances are planned before we consider this stable.
 
 This section contains the higher level API for the autograd that builds on the basic API above
 and allows you to compute jacobians, hessians, etc.
 
 This API works with user-provided functions that take only Tensors as input and return
 only Tensors.
-If your function takes other arguments that are not Tensors or Tensors for which you don't require gradients,
+If your function takes other arguments that are not Tensors or Tensors that don't have requires_grad set,
 you can use a lambda to capture them.
 For example, for a function ``f`` that takes three inputs, a Tensor for which we want the jacobian, another
 tensor that should be considered constant and a boolean flag as ``f(input, constant, flag=flag)``

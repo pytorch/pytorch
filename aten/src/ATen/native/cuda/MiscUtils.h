@@ -81,7 +81,6 @@ static inline Storage pin_memory(int64_t size) {
   int64_t adjusted_size = size * sizeof(T);
   return Storage(
       Storage::use_byte_size_t(),
-      caffe2::TypeMeta::Make<uint8_t>(),
       adjusted_size,
       allocator,
       /*resizable=*/false);
