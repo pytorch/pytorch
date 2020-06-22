@@ -210,7 +210,7 @@ bool OwnerRRef::hasValue() const {
   return future_->completed();
 }
 
-std::shared_ptr<FutureIValue> OwnerRRef::getFuture() {
+std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
   return future_;
 }
 
