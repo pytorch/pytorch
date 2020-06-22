@@ -2,7 +2,7 @@ import concurrent.futures
 import contextlib
 import json
 import sys
-from threading import Thread, Lock
+from threading import Lock
 import time
 import unittest
 from collections import namedtuple
@@ -1068,72 +1068,64 @@ class RpcTest(RpcAgentTestFixture):
         # prefixied when there are multiple RPCs being created/in flight at the
         # same time.
         dst_ranks = [rank for rank in range(0, self.world_size) if rank != self.rank]
-        lock = Lock()
-        thread_errors = []
 
         def rpc_with_profiling(dst_worker):
-            try:
-                with torch.autograd.profiler.profile() as prof:
-                    fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
-                    fut.wait()
+            with torch.autograd.profiler.profile() as prof:
+                fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
+                fut.wait()
 
-                events = prof.function_events
-                remote_event_names = {
-                    event.name: event for event in events if event.is_remote
+            events = prof.function_events
+            remote_event_names = {
+                event.name: event for event in events if event.is_remote
+            }
+            rpc_profiling_key = _build_rpc_profiling_key(
+                RPCExecMode.ASYNC,
+                udf_with_torch_ops.__qualname__,
+                worker_name(self.rank),
+                dst_worker,
+            )
+
+            remote_event_name_set = set(EXPECTED_REMOTE_EVENTS)
+            for name, event in remote_event_names.items():
+                # Ensure that we have the expected key as part of the remote
+                # event.
+                self.assertTrue(name.startswith(rpc_profiling_key))
+                self.assertTrue(event.is_remote)
+                self.assertTrue(event.node_id == rpc.get_worker_info(dst_worker).id)
+                # Ensure that the remote event name also contains the operator.
+                operator_name_substr = name[len(rpc_profiling_key) :]
+                # Note: we don't assert that every remote event needs to be
+                # in the above set, the set is just a representative set of
+                # what we expect to see. The profiler can change and add more
+                # events, but we should always expect to see this representative
+                # set.
+                matching_event = {
+                    remote_event_name
+                    for remote_event_name in remote_event_name_set
+                    if remote_event_name in operator_name_substr
                 }
-                rpc_profiling_key = _build_rpc_profiling_key(
-                    RPCExecMode.ASYNC,
-                    udf_with_torch_ops.__qualname__,
-                    worker_name(self.rank),
-                    dst_worker,
-                )
+                remote_event_name_set -= matching_event
 
-                remote_event_name_set = set(EXPECTED_REMOTE_EVENTS)
-                for name, event in remote_event_names.items():
-                    # Ensure that we have the expected key as part of the remote
-                    # event.
-                    self.assertTrue(name.startswith(rpc_profiling_key))
-                    self.assertTrue(event.is_remote)
-                    self.assertTrue(event.node_id == rpc.get_worker_info(dst_worker).id)
-                    # Ensure that the remote event name also contains the operator.
-                    operator_name_substr = name[len(rpc_profiling_key) :]
-                    # Note: we don't assert that every remote event needs to be
-                    # in the above set, the set is just a representative set of
-                    # what we expect to see. The profiler can change and add more
-                    # events, but we should always expect to see this representative
-                    # set.
-                    matching_event = {
-                        remote_event_name
-                        for remote_event_name in remote_event_name_set
-                        if remote_event_name in operator_name_substr
-                    }
-                    remote_event_name_set -= matching_event
-
-                # The set should be empty, otherwise its contained elements did
-                # not show up in the remote profiler output.
-                self.assertTrue(
-                    remote_event_name_set == set(),
-                    f"Expected {remote_event_name_set} to be included in remote profiler output.",
-                )
-
-            except BaseException as e:
-                with lock:
-                    thread_errors.append(e)
+            # The set should be empty, otherwise its contained elements did
+            # not show up in the remote profiler output.
+            self.assertTrue(
+                remote_event_name_set == set(),
+                f"Expected {remote_event_name_set} to be included in remote profiler output.",
+            )
 
         for dst in dst_ranks:
             dst_worker = worker_name(dst)
             num_parallel_rpcs = 2
-            threads = [
-                Thread(target=rpc_with_profiling, args=(dst_worker,))
-                for _ in range(num_parallel_rpcs)
-            ]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
-
-            if thread_errors:
-                raise thread_errors[0]
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=num_parallel_rpcs
+            ) as executor:
+                futs = [
+                    executor.submit(rpc_with_profiling, dst_worker)
+                    for _ in range(num_parallel_rpcs)
+                ]
+                # Wait for workers to finish test
+                for fut in futs:
+                    fut.result()
 
     @dist_init
     def test_profiler_remote_events_profiled(self):
