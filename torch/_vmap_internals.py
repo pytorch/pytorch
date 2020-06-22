@@ -39,6 +39,9 @@ def _validate_inputs_and_get_batch_size(args, fn_name):
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(batched_outputs, vmap_level, batch_size):
+    # NOTE [Ignored _remove_batch_dim, _add_batch_dim]
+    # There is something wrong with our type bindings for functions that begin
+    # with '_', see #40397.
     if isinstance(batched_outputs, Tensor):
         return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, 0)  # type: ignore
     return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, 0)  # type: ignore
@@ -80,6 +83,7 @@ def vmap(func, in_dims=0, out_dims=0):
         global VMAP_LEVEL
         VMAP_LEVEL += 1
         try:
+            # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
             batched_inputs = [torch._add_batch_dim(arg, 0, VMAP_LEVEL) for arg in args]  # type: ignore
             batched_outputs = func(*batched_inputs)
             _validate_outputs(batched_outputs, func.__name__)

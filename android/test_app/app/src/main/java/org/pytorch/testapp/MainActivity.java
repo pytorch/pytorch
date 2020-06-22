@@ -1,5 +1,6 @@
 package org.pytorch.testapp;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -10,8 +11,12 @@ import androidx.annotation.Nullable;
 import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
 import androidx.appcompat.app.AppCompatActivity;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.FloatBuffer;
-import java.util.Arrays;
 import org.pytorch.IValue;
 import org.pytorch.Module;
 import org.pytorch.PyTorchAndroid;
@@ -49,9 +54,37 @@ public class MainActivity extends AppCompatActivity {
         }
       };
 
+public static String assetFilePath(Context context, String assetName) {
+  File file = new File(context.getFilesDir(), assetName);
+  if (file.exists() && file.length() > 0) {
+    return file.getAbsolutePath();
+  }
+
+  try (InputStream is = context.getAssets().open(assetName)) {
+    try (OutputStream os = new FileOutputStream(file)) {
+      byte[] buffer = new byte[4 * 1024];
+      int read;
+      while ((read = is.read(buffer)) != -1) {
+        os.write(buffer, 0, read);
+      }
+      os.flush();
+    }
+    return file.getAbsolutePath();
+  } catch (IOException e) {
+    Log.e(TAG, "Error process asset " + assetName + " to file path");
+  }
+  return null;
+}
+
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
+    if (BuildConfig.NATIVE_BUILD) {
+      final String modelFileAbsoluteFilePath =
+          new File(assetFilePath(this, BuildConfig.MODULE_ASSET_NAME)).getAbsolutePath();
+      LibtorchNativeClient.loadAndForwardModel(modelFileAbsoluteFilePath);
+      return;
+    }
     setContentView(R.layout.activity_main);
     mTextView = findViewById(R.id.text);
     startBackgroundThread();

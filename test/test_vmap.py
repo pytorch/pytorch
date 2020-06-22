@@ -76,10 +76,12 @@ class TestVmap(TestCase):
         x = torch.randn(2, 3)
         y = torch.randn(5, 3)
         output = vmap(lambda x: vmap(lambda y: x * y)(y))(x)
+        self.assertEqual(output.shape, (2, 5, 3))
         self.assertEqual(output, x.view(2, 1, 3) * y)
 
         z = torch.randn(7, 3)
         output = vmap(lambda x: vmap(lambda y: vmap(lambda z: x * y * z)(z))(y))(x)
+        self.assertEqual(output.shape, (2, 5, 7, 3))
         self.assertEqual(output, x.view(2, 1, 1, 3) * y.view(5, 1, 3) * z)
 
     def test_noop_in_inner_vmap(self):
