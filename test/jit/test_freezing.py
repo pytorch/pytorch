@@ -34,10 +34,9 @@ class TestFreezing(JitTestCase):
 
 
         m = torch.jit.script(M())
-        m.eval()
         input = torch.randn(2, 2)
-        output_s = m.forward(input)
-        m._c = torch._C._freeze_module(m._c)
+        output_s = m(input)
+        mf = torch.jit.freeze(m)
 
         # Check if frozen module looks as below:
         # module m {
@@ -46,18 +45,18 @@ class TestFreezing(JitTestCase):
         #   }
         #   ...
         # }
-        self.assertFalse(m._c.hasattr('a'))
-        self.assertFalse(m._c.hasattr('b'))
-        self.assertFalse(m._c.hasattr('c'))
-        self.assertFalse(m._c.hasattr('d'))
-        self.assertFalse(m._c.hasattr('e'))
-        self.assertFalse(m._c.hasattr('f'))
-        self.assertFalse(m._c.hasattr('g'))
-        self.assertFalse(m._c.hasattr('h'))
-        self.assertFalse(m._c.hasattr('t'))
-        self.assertFalse(m._c.hasattr('ts'))
-        self.assertFalse(m._c.hasattr('tt'))
-        output_f = m.forward(input)
+        self.assertFalse(mf.hasattr('a'))
+        self.assertFalse(mf.hasattr('b'))
+        self.assertFalse(mf.hasattr('c'))
+        self.assertFalse(mf.hasattr('d'))
+        self.assertFalse(mf.hasattr('e'))
+        self.assertFalse(mf.hasattr('f'))
+        self.assertFalse(mf.hasattr('g'))
+        self.assertFalse(mf.hasattr('h'))
+        self.assertFalse(mf.hasattr('t'))
+        self.assertFalse(mf.hasattr('ts'))
+        self.assertFalse(mf.hasattr('tt'))
+        output_f = mf(input)
         self.assertEqual(output_s, output_f)
 
     def test_freeze_module_with_submodule(self):
@@ -984,14 +983,13 @@ class TestFreezing(JitTestCase):
                 return self.a
 
         m = torch.jit.script(Module())
-        m.eval()
-        fm = torch._C._freeze_module(m._c, ["modify_a"])
+        fm = torch.jit.freeze(m, ["modify_a"])
         # Both attribute "a" and method "modify_a" are preserved
         self.assertTrue(fm.hasattr("a"))
         self.assertFalse(fm.hasattr("b"))
         input = torch.randn(2, 2)
-        expected = m.forward(input)
-        out = fm.forward(input)
+        expected = m(input)
+        out = fm(input)
         self.assertEqual(out, expected)
 
     def test_freeze_module_with_user_preserved_method2(self):

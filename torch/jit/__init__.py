@@ -1494,11 +1494,11 @@ def freeze(obj, names : [str] = []):
     """
     if not isinstance(obj, ScriptModule):
         raise RuntimeError("TorchScript freeze expect a ScriptModule as input. "
-                "Please use torch.jit.script to script your 'nn.Module'.")
+                           "Please use torch.jit.script to script your 'nn.Module'.")
 
     obj.eval()
     out = torch._C._freeze_module(obj._c, names)
-    setattr(type(out), "__call__",  out.forward)
+    setattr(type(out), "__call__", out.forward)
     return out
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
