@@ -113,6 +113,7 @@ def get_ignored_functions():
         torch.mkldnn_convolution,
         torch.mkldnn_convolution_backward_weights,
         torch.mkldnn_max_pool2d,
+        torch.mkldnn_max_pool3d,
         torch.ones,
         torch.promote_types,
         torch.rand,
