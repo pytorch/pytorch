@@ -506,7 +506,7 @@ class TestSaveLoad(JitTestCase):
         # Verifies historic integer type inference is float64
         results = v4_module(2)
         for result in results:
-            self.assertEqual(result.dtype, torch.float64)
+            self.assertTrue(result.is_floating_point())
 
         with self.assertRaisesRegex(RuntimeError, ".+is currently unsupported.+"):
             current_module(2)
