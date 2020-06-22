@@ -331,13 +331,11 @@ struct TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(Expr* e);
   virtual Statement* mutate(Val* v);
 
-  /*
-   * We always want to dispatch through a Val, so we can capture and dispatch
-   * correctly members of nodes like Split->TensorDomain If we don't call the
-   * below function or manually cast to use mutate(Val* v) we can't intercept
-   * and mutate by capturing mutate(Val* v), which is what we do when we want to
-   * replace all instances of a value.
-   */
+  // We always want to dispatch through a Val, so we can capture and dispatch
+  // correctly members of nodes like Split->TensorDomain If we don't call the
+  // below function or manually cast to use mutate(Val* v) we can't intercept
+  // and mutate by capturing mutate(Val* v), which is what we do when we want to
+  // replace all instances of a value.
   Statement* mutateAsVal(Val* v) {
     return mutate(v);
   }
@@ -352,7 +350,8 @@ struct TORCH_CUDA_API OptOutMutator {
 
   std::unordered_map<Val*, Val*> mutations;
 
-  //****Functions below defined in mutator.cpp*****///
+  //****Functions below defined in mutator.cpp*****
+
   // Vals
   virtual Statement* mutate(IterDomain*);
   virtual Statement* mutate(TensorDomain*);
