@@ -1427,6 +1427,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case CHECK_TENSOR: {
             auto type = af.types[inst.X]->expect<TensorType>();
+            checkTensor(stack, type);
             ++af.pc;
             break;
           }
