@@ -3547,17 +3547,24 @@ struct to_ir {
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
       if(sv->kind() == "module") {
-        // TODO Special case for Sequential only, make sure not other modules
         auto s_tuple_val = sv->asTupleValue(val_range, method);
 
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
-        auto tupleSliceValue = emitTupleSlice(
-            val_range,
-            s_tuple_val->asValue(val_range, method),
-            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0)))),
-            NamedValue(val_range, "end", emitExpr(Expr(slice.end().get()))));
-        return std::make_shared<SimpleValue>(tupleSliceValue);
-
+        if (slice.end().present()) {
+          auto tupleSliceValue = emitTupleSlice(
+              val_range,
+              s_tuple_val->asValue(val_range, method),
+              NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0)))),
+              NamedValue(val_range, "end", emitExpr(Expr(slice.end().get()))));
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        } else {
+          auto tupleSliceValue = emitTupleSlice(
+              val_range,
+              s_tuple_val->asValue(val_range, method),
+              NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0)))),
+              c10::nullopt);
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        }
       } else {
         return std::make_shared<SimpleValue>(emitBasicSlice(
             range, sv->asValue(val_range, method), subscript_exprs));

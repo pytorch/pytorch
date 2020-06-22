@@ -10462,8 +10462,10 @@ a")
                 self.layers = nn.Sequential(*self.layers)
 
             def forward(self, input):
-                x = layers[0].forward(input)
-                for layer in layers[1:3]:
+                x = self.layers[0].forward(input)
+                for layer in self.layers[1:3]:
+                    x = layer.forward(x)
+                for layer in self.layers[2:]:
                     x = layer.forward(x)
                 return x
 
