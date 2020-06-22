@@ -230,13 +230,11 @@ class IrParser {
     }
 
     if (has_reduction) {
-      std::cout << *cuda_kernel_->fusion_ << std::endl;
       // Run through outputs, grab all inputs of outputs
       // squeeze with computeAt to set overall structure.
       for (auto output : cuda_kernel_->fusion_->outputs()) {
         if (output->getValType() != ValType::TensorView)
           continue;
-        std::cout << "checkout output" << std::endl;
         TensorView* out_tv = static_cast<TensorView*>(output);
 
         // fcd_reduction could be queried later via
@@ -257,13 +255,6 @@ class IrParser {
           intermediate = out_tv->rFactor({-2});
         }
         for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
-          std::cout << inp->as<TensorView>() << std::endl;
-          if (inp->getOrigin() == nullptr) {
-            std::cout << "is input!" << std::endl;
-          } else {
-            std::cout << "not direct input!" << std::endl;
-            std::cout << inp->getOrigin() << std::endl;
-          }
           // scheduling of inputs shouldn't change with different fcd_reduction
           if (inp->getValType().value() == ValType::TensorView) {
             static_cast<TensorView*>(inp)->computeAt(intermediate, -1);
@@ -271,7 +262,6 @@ class IrParser {
         }
         // scheduling of inputs shouldn't change with different fcd_reduction
         intermediate->computeAt(out_tv, -2);
-        std::cout << "finished output!" << std::endl;
         if (fcd_reduction) {
           out_tv->axis(0)->parallelize(ParallelType::BIDx);
         } else {
@@ -283,8 +273,6 @@ class IrParser {
       for (auto val : cuda_kernel_->fusion_->vals()) {
         if (val->getValType().value() != ValType::TensorView)
           continue;
-        std::cout << "check intermediates" << std::endl;
-        std::cout << val->as<TensorView>() << std::endl;
         TensorView* tv = static_cast<TensorView*>(val);
         if (fcd_reduction) {
           tv->axis(-1)->parallelize(ParallelType::TIDx);
@@ -292,7 +280,6 @@ class IrParser {
           tv->axis(-1)->parallelize(ParallelType::TIDy);
         }
       }
-      std::cout << "finished scheduling!" << std::endl;
     } else {
       // Run through outputs, grab all inputs of outputs
       // squeeze with computeAt to set overall structure.
