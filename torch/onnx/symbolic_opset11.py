@@ -670,7 +670,7 @@ def flatten(g, input, start_dim, end_dim):
     slices = [slice1, slice2]
     if end_dim < dim-1:
         slice3 = sym_help._slice_helper(g, input_size, axes=[0], starts=[end_dim+1], ends=[dim])
-        slices.extend(slice3)
+        slices = [slice1, slice2, slice3]
 
     final_shape = g.op("Concat", *slices, axis_i=0)
     from torch.onnx.symbolic_opset9 import _reshape_from_tensor
