@@ -836,20 +836,13 @@ def _prepare_onnx_paddings(dim, pad):
     return paddings
 
 def _convert_padding_node(padding):
-    if sym_help._is_value(padding):
-        if padding.node().kind() == 'onnx::Constant':
-            tval = padding.node()['value']
-            padding = [int(v) for v in tval]
-        elif padding.node().kind() == 'prim::ListConstruct':
-            all_constant = True
-            for v in padding.node().inputs():
-                if v.node().kind() != 'onnx::Constant':
-                    all_constant = False
-                    break
-            if all_constant:
-                padding = [int(v.node()['value']) for v in padding.node().inputs()]
-            else:
-                return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The sizes of the padding must be constant')
+    padding = sym_help._maybe_get_const(padding, 'is')
+    if sym_help._is_value(padding) and sym_help._is_packed_list(padding):
+        input_list = sym_help._unpack_list(padding)
+        input_is_constant = [v.node().kind() == 'onnx::Constant' for v in input_list]
+        if not all(input_is_constant):
+            return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The sizes of the padding must be constant')
+        padding = [int(v.node()['value']) for v in padding.node().inputs()]
     return padding
 
 def constant_pad_nd(g, input, padding, value):
