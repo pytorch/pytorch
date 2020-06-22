@@ -219,10 +219,7 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
-SugaredValuePtr ModuleValue::asTupleValue(
-    const SourceRange& loc,
-    Function& m) {
-
+SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
   auto dict = getSugaredDict(loc, m);
   auto mods = dict->getModules();
   return mods;

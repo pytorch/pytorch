@@ -67,9 +67,7 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
-  virtual SugaredValuePtr asTupleValue(
-      const SourceRange& loc,
-      Function& m) {
+  virtual SugaredValuePtr asTupleValue(const SourceRange& loc, Function& m) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuplevalue";
   }
 

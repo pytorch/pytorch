@@ -3556,7 +3556,7 @@ struct to_ir {
             s_tuple_val->asValue(val_range, method),
             NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0)))),
             NamedValue(val_range, "end", emitExpr(Expr(slice.end().get()))));
-          return std::make_shared<SimpleValue>(tupleSliceValue);
+        return std::make_shared<SimpleValue>(tupleSliceValue);
 
       } else {
         return std::make_shared<SimpleValue>(emitBasicSlice(
