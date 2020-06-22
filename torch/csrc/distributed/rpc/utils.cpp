@@ -1,10 +1,13 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
@@ -99,6 +102,9 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       return autograd::CleanupAutogradContextReq::fromMessage(request);
     }
+    case MessageType::RUN_WITH_PROFILING_REQ: {
+      return autograd::RpcWithProfilingReq::fromMessage(request);
+    }
     default: {
       TORCH_INTERNAL_ASSERT(
           false, "Request type ", request.type(), " not supported.");
@@ -149,6 +155,29 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
     }
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP: {
       return autograd::CleanupAutogradContextResp::fromMessage(response);
+    }
+    case MessageType::RUN_WITH_PROFILING_RESP: {
+      std::unique_ptr<RpcCommandBase> rpcPtr =
+          autograd::RpcWithProfilingResp::fromMessage(response);
+      RpcCommandBase& rpc = *rpcPtr;
+      auto& rpcWithProfilingResp =
+          static_cast<autograd::RpcWithProfilingResp&>(rpc);
+      // read and reconstruct events
+      // Check if the profiler is enabled
+      auto enabled = torch::autograd::profiler::profilerEnabled();
+      TORCH_CHECK(
+          enabled,
+          "Profiler was expected to be enabled. This can happen in callback "
+          " continutations that run in different threads, and the TLS of the "
+          " profiler was not propagated.");
+      std::vector<torch::autograd::profiler::Event> events =
+          rpcWithProfilingResp.getProfiledEvents();
+      wrappedMsgType = rpcWithProfilingResp.wrappedMessageType();
+
+      torch::autograd::profiler::addEventList(std::move(events));
+
+      auto wrappedRPC = std::move(rpcWithProfilingResp).moveWrappedRpc();
+      return wrappedRPC;
     }
     default: {
       TORCH_INTERNAL_ASSERT(
@@ -561,6 +590,58 @@ Message tensorpipeDeserialize(
       *buffers.id);
 }
 
+void writeWrappedPayload(
+    std::vector<char>& originalPayload,
+    std::vector<char>& additionalPayload) {
+  originalPayload.insert(
+      originalPayload.end(),
+      additionalPayload.begin(),
+      additionalPayload.end());
+
+  // Add size of the additional pyaload
+  int64_t indexToWrite = originalPayload.size();
+  originalPayload.resize(originalPayload.size() + sizeof(int64_t));
+  const int64_t additionalPayloadSize = additionalPayload.size();
+  torch::utils::THP_encodeInt64Buffer(
+      reinterpret_cast<uint8_t*>(originalPayload.data()) + indexToWrite,
+      &additionalPayloadSize,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
+      1);
+}
+
+std::vector<at::IValue> readWrappedPayload(
+    std::vector<char>& payload,
+    const rpc::Message& message) {
+  // Read the additional payload remove it from the payload.
+  int64_t additionalPayloadSize;
+  size_t indexToRead = payload.size() - sizeof(int64_t);
+  TORCH_INTERNAL_ASSERT(indexToRead >= 0);
+  torch::utils::THP_decodeInt64Buffer(
+      &additionalPayloadSize,
+      reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
+      1);
+  payload.resize(indexToRead);
+
+  TORCH_INTERNAL_ASSERT(
+      payload.size() > additionalPayloadSize,
+      "Wrong payload sizes: payload.size() is ",
+      payload.size(),
+      " but additional payload size is ",
+      additionalPayloadSize);
+  auto wrappedPayloadBegin =
+      static_cast<const char*>(message.payload().data()) + payload.size() -
+      additionalPayloadSize;
+  std::vector<torch::Tensor> tensorTable;
+  IValue tuple = jit::unpickle(
+      wrappedPayloadBegin,
+      additionalPayloadSize,
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &tensorTable);
+  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  payload.resize(payload.size() - additionalPayloadSize);
+  return tupleElements;
+}
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

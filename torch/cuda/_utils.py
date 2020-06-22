@@ -1,9 +1,10 @@
 import torch
 import torch._six
-from typing import Union
+from typing import Optional, Union
+from torch.types import Device
 
 
-def _get_device_index(device: Union[str, torch.device, int, None], optional=False) -> int:
+def _get_device_index(device: Union[Device, int], optional=False) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
 
@@ -19,6 +20,7 @@ def _get_device_index(device: Union[str, torch.device, int, None], optional=Fals
     """
     if isinstance(device, torch._six.string_classes):
         device = torch.device(device)
+    device_idx: Optional[int]
     if isinstance(device, torch.device):
         dev_type = device.type
         if device.type != 'cuda':
