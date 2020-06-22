@@ -100,6 +100,7 @@ def get_ignored_functions():
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
         torch.empty,
+        torch.empty_meta,
         torch.empty_strided,
         torch.eye,
         torch.from_file,

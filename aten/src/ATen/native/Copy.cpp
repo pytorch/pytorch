@@ -139,7 +139,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     .set_check_mem_overlap(true)
     .add_output(self)
     .add_input(src)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .check_all_same_dtype(false)
     .check_all_same_device(false)
     .build();
