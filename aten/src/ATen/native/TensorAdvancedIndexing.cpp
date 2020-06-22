@@ -598,6 +598,8 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar so
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
+                    "scatter_(): Expected dtype int64 for index.");
   scatter_add_stub(self.device().type(), self, dim, index, src);
   return self;
 }
