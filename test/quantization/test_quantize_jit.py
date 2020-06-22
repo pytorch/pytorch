@@ -79,12 +79,15 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_jit
     """
     def test_foldbn_trivial(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         # Test trivial case
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(TestModule, self).__init__()
-                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.conv = conv_module[dim](1, 20, 5, 1)
+                self.bn = bn_module[dim](num_features=20)
                 self.bn.eps = 0.0023
 
             def forward(self, x):
@@ -92,24 +95,20 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 x = self.bn(x)
                 return x
 
+        options = itertools.product([True, False], [2, 3])
+        data = {2 : torch.rand(1, 1, 6, 6), 3 : torch.rand(1, 1, 6, 6, 6)}
         # Check that the transformation doesn't change numerics
-        for tracing_mode in [True, False]:
-            eager = TestModule()
-            eager.eval()
-            if tracing_mode:
-                x = torch.rand(1, 1, 6, 6)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
-
+        for tracing, dim in options:
+            eager = TestModule(dim).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x).eval()
             # Check that in the original script module's forward we have two
             # CallMethod nodes. One of them should be for conv.forward and the other
             # for bn.forward.
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                 .run(str(get_forward(scripted_or_traced._c).graph))
 
-            # Run FoldConvBatchnorm2d pass.
+            # Run FoldConvBatchnorm pass.
             scripted_or_traced = fuse_conv_bn_jit(scripted_or_traced)
 
             # Check that after the pass one of the CallMethods is gone (supposedly,
@@ -118,16 +117,18 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 .run(str(get_forward_graph(scripted_or_traced._c)))
 
             # Check that the transformation doesn't change numerics
-            x = torch.rand(1, 1, 6, 6)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_trivial_nobias(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         # Test trivial case
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(TestModule, self).__init__()
-                self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.conv = conv_module[dim](1, 20, 5, 1, bias=False)
+                self.bn = bn_module[dim](num_features=20)
                 # to make sure new bias is not zero
                 self.bn.eps = 0.0027
                 self.bn.bias = torch.nn.Parameter(torch.rand([20]))
@@ -137,23 +138,19 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 x = self.bn(x)
                 return x
 
-        for tracing_mode in [True, False]:
-            eager = TestModule()
-            eager.eval()
-            if tracing_mode:
-                x = torch.rand(1, 1, 6, 6)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
-
+        options = itertools.product([True, False], [2, 3])
+        data = {2 : torch.rand(1, 1, 6, 6), 3 : torch.rand(1, 1, 6, 6, 6)}
+        for tracing, dim in options:
+            eager = TestModule(dim).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x).eval()
             # Check that in the original script module's forward we have two
             # CallMethod nodes. One of them should be for conv.forward and the other
             # for bn.forward.
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced._c)))
 
-            # Run FoldConvBatchnorm2d pass.
+            # Run FoldConvBatchnorm pass.
             scripted_or_traced = fuse_conv_bn_jit(scripted_or_traced)
 
             # Check that after the pass one of the CallMethods is gone (supposedly,
@@ -162,16 +159,18 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 .run(str(get_forward_graph(scripted_or_traced._c)))
 
             # Check that the transformation doesn't change numerics
-            x = torch.rand(1, 1, 6, 6)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_in_submodule(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(SubModule, self).__init__()
-                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.conv = conv_module[dim](1, 20, 5, 1)
+                self.bn = bn_module[dim](num_features=20)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -179,24 +178,20 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 return x
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super(TestModule, self).__init__()
-                self.sub = SubModule()
+                self.sub = SubModule(dim)
 
             def forward(self, x):
                 x = self.sub(x)
                 return x
 
-        for tracing_mode in [True, False]:
-            eager = TestModule()
-            eager.eval()
-            if tracing_mode:
-                x = torch.rand(1, 1, 10, 10)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
-
+        options = itertools.product([True, False], [2, 3])
+        data = {2 : torch.rand(1, 1, 10, 10), 3 : torch.rand(1, 1, 10, 10, 10)}
+        for tracing, dim in options:
+            eager = TestModule(dim).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x).eval()
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced.sub._c)))
 
@@ -205,72 +200,23 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced.sub._c)))
 
-            x = torch.rand(1, 1, 10, 10)
-            self.assertEqual(eager(x), scripted_or_traced(x))
-
-    def test_foldbn_in_customConv2D(self):
-        # Make sure a custom Conv2D class is not folded
-        # as we do not know it does.
-        class CustomConv2D(torch.nn.Module):
-            def __init__(self, a, b, c, d):
-                super(CustomConv2D, self).__init__()
-
-            def forward(self, x):
-                return F.relu(x)
-
-        class SubModule(torch.nn.Module):
-            def __init__(self):
-                super(SubModule, self).__init__()
-                self.conv = CustomConv2D(1, 20, 5, 1)
-                self.bn = torch.nn.BatchNorm2d(num_features=20)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                return x
-
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super(TestModule, self).__init__()
-                self.sub = SubModule()
-
-            def forward(self, x):
-                x = self.sub(x)
-                return x
-
-        for tracing_mode in [True, False]:
-            eager = TestModule()
-            eager.eval()
-            if tracing_mode:
-                x = torch.rand(1, 20, 10, 10)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
-
-            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-                .run(str(get_forward_graph(scripted_or_traced.sub._c)))
-
-            scripted_or_traced = fuse_conv_bn_jit(scripted_or_traced)
-
-            FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-                .run(str(get_forward_graph(scripted_or_traced.sub._c)))
-
-            x = torch.rand(1, 20, 10, 10)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_shared_classtype(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
         class TestModule(torch.nn.Module):
-            def __init__(self, bias=False):
+            def __init__(self, dim, bias=False):
                 super(TestModule, self).__init__()
-                self.conv1 = torch.nn.Conv2d(5, 5, 3, bias=bias)
-                self.bn1 = torch.nn.BatchNorm2d(num_features=5)
+                self.conv1 = conv_module[dim](5, 5, 3, bias=bias)
+                self.bn1 = bn_module[dim](num_features=5)
                 self.bn1.running_mean.fill_(-0.2)
                 self.bn1.bias = torch.nn.Parameter(torch.rand([5]))
                 # to make sure new bias is not zero
                 self.bn1.eps = 0.0023
-                self.conv2 = torch.nn.Conv2d(5, 5, 3, bias=bias)
-                self.bn2 = torch.nn.BatchNorm2d(num_features=5)
+                self.conv2 = conv_module[dim](5, 5, 3, bias=bias)
+                self.bn2 = bn_module[dim](num_features=5)
                 self.bn2.eps = 0.0029
                 self.relu = torch.nn.ReLU()
 
@@ -283,33 +229,32 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 x = self.relu(x)
                 return x
 
-        for tracing_mode in [True, False]:
-            for bias in [True, False]:
-                eager = TestModule(bias).eval()
-                if tracing_mode:
-                    x = torch.rand(1, 5, 6, 6)
-                    scripted_or_traced = torch.jit.trace(eager, x).copy()
-                else:
-                    scripted_or_traced = torch.jit.script(eager).copy()
-                torch._C._jit_pass_dedup_module_uses(scripted_or_traced ._c)
-                folded = fuse_conv_bn_jit(scripted_or_traced)
-                x = torch.rand(1, 5, 6, 6)
-                self.assertEqual(eager(x), scripted_or_traced(x))
+        options = itertools.product([True, False], [2, 2], [True, False])
+        data = {2 : torch.rand(1, 5, 6, 6), 3 : torch.rand(1, 5, 6, 6, 6)}
+        for tracing, dim, bias in options:
+            eager = TestModule(dim, bias).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x).copy()
+            torch._C._jit_pass_dedup_module_uses(scripted_or_traced ._c)
+            folded = fuse_conv_bn_jit(scripted_or_traced)
+            self.assertEqual(eager(x), scripted_or_traced(x))
 
     def test_foldbn_complex_cases(self):
-        # This test case attempt to try combinations of conv2d with bias/nobias
+        # This test case attempt to try combinations of conv2d/conv3d with bias/nobias
         # as well as BatchNorm with affine/no-affine along with varying the
         # number of layers.
         # this only works when default dtype is double
         torch.set_default_dtype(torch.double)
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+        conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
 
         class SubModule(torch.nn.Module):
-            def __init__(self, num_blocks, enable_bias, enable_affine):
+            def __init__(self, dim, num_blocks, enable_bias, enable_affine):
                 super(SubModule, self).__init__()
                 layers = []
                 for i in range(num_blocks):
-                    layers.append(torch.nn.Conv2d(20, 20, 5, 1, bias=enable_bias))
-                    bn_obj = torch.nn.BatchNorm2d(num_features=20, affine=enable_affine)
+                    layers.append(conv_module[dim](20, 20, 5, 1, bias=enable_bias))
+                    bn_obj = bn_module[dim](num_features=20, affine=enable_affine)
                     if enable_affine:
                         bn_obj.weight = torch.nn.Parameter(torch.rand_like(bn_obj.weight))
                         bn_obj.bias = torch.nn.Parameter(torch.rand_like(bn_obj.bias))
@@ -322,25 +267,20 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 return self.layers(x)
 
         class TestModule(torch.nn.Module):
-            def __init__(self, num_blocks, enable_bias, enable_affine):
+            def __init__(self, dim, num_blocks, enable_bias, enable_affine):
                 super(TestModule, self).__init__()
-                self.sub = SubModule(num_blocks, enable_bias, enable_affine)
+                self.sub = SubModule(dim, num_blocks, enable_bias, enable_affine)
 
             def forward(self, x):
                 x = self.sub(x)
                 return x
 
-        bias_affine_options = itertools.product([True, False], [True, False], [True, False], [1, 2])
-        for (tracing_mode, enable_bias, enable_bn_affine, num_layers) in bias_affine_options:
-            eager = TestModule(num_layers, enable_bias, enable_bn_affine)
-            eager.eval()
-
-            if tracing_mode:
-                x = torch.rand(1, 20, 10, 10)
-                scripted_or_traced = torch.jit.trace(eager, x)
-            else:
-                scripted_or_traced = torch.jit.script(eager)
-            scripted_or_traced.eval()
+        options = itertools.product([True, False], [2, 3], [True, False], [True, False], [1, 2])
+        data = {2 : torch.rand(1, 20, 10, 10), 3 : torch.rand(1, 20, 10, 10, 10)}
+        for tracing, dim, enable_bias, enable_bn_affine, num_layers in options:
+            eager = TestModule(dim, num_layers, enable_bias, enable_bn_affine).eval()
+            x = data[dim]
+            scripted_or_traced = get_script_module(eager, tracing, x).eval()
 
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", num_layers * 2, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced.sub.layers._c)))
@@ -350,8 +290,8 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             FileCheck().check_count("prim::CallMethod[name=\"forward\"]", num_layers, exactly=True) \
                 .run(str(get_forward_graph(scripted_or_traced.sub.layers._c)))
 
-            x = torch.rand(1, 20, 10, 10)
             self.assertEqual(eager(x), scripted_or_traced(x))
+
         torch.set_default_dtype(torch.float)
 
     def test_fuse_linear(self):
