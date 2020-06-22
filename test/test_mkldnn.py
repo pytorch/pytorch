@@ -251,25 +251,6 @@ class TestMkldnn(TestCase):
 
                 self.assertEqual(y1, y2.to_dense())
 
-    def test_max_pool3d(self):
-        N = torch.randint(3, 10, (1,)).item()
-        C = torch.randint(3, 10, (1,)).item()
-
-        for stride in [1, 2, 3]:
-            for D, H, W in [(64, 64, 64), (35, 39, 35), (16, 19, 20), [7, 8, 9]]:
-                x = torch.randn(N, C, D, H, W, dtype=torch.float32) * 10
-
-                for ceil_mode in [False, True]:
-                    max_pool3d = torch.nn.MaxPool3d(
-                        kernel_size=3 if not ceil_mode else 7,
-                        stride=stride,
-                        padding=1,
-                        ceil_mode=ceil_mode)
-
-                    self.assertEqual(
-                        max_pool3d(x),
-                        max_pool3d(x.to_mkldnn()).to_dense())
-
     def test_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
@@ -306,22 +287,6 @@ class TestMkldnn(TestCase):
                 count_include_pad=count_include_pad)
 
             self.assertEqual(y1, y2.to_dense())
-
-    def test_avg_pool3d(self):
-        N = torch.randint(3, 10, (1,)).item()
-        C = torch.randint(3, 10, (1,)).item()
-        x = torch.randn(N, C, 64, 64, 64, dtype=torch.float32) * 10
-
-        for count_include_pad in [True, False]:
-            avg_pool3d = torch.nn.AvgPool3d(
-                kernel_size=3,
-                stride=2,
-                padding=1,
-                count_include_pad=count_include_pad)
-
-            self.assertEqual(
-                avg_pool3d(x),
-                avg_pool3d(x.to_mkldnn()).to_dense())
 
     def test_adaptive_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
