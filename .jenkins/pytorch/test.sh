@@ -41,6 +41,23 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
+
+  # TODO: Remove this once ROCm CI images are >= ROCm 3.5
+  # ROCm 3.5 required a backwards-incompatible change; the kernel and thunk must match.
+  # Detect kernel version and upgrade thunk if this is a ROCm 3.3 container running on a 3.5 kernel.
+  ROCM_ASD_FW_VERSION=$(/opt/rocm/bin/rocm-smi --showfwinfo -d 1 | grep ASD |  awk '{print $6}')
+  if [[ $ROCM_ASD_FW_VERSION = 553648174 && "$BUILD_ENVIRONMENT" == *rocm3.3* ]]; then
+    # upgrade thunk to 3.5
+    mkdir rocm3.5-thunk
+    pushd rocm3.5-thunk
+    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct3.5.0/hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb
+    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct-dev3.5.0/hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb
+    dpkg-deb -vx hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb .
+    dpkg-deb -vx hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb .
+    sudo cp -r opt/rocm-3.5.0/* /opt/rocm-3.3.0/
+    popd
+    rm -rf rocm3.5-thunk
+  fi
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -142,7 +159,7 @@ test_python_ge_config_legacy() {
   assert_git_not_dirty
 }
 
-test_python_all_except_nn() {
+test_python_all_except_nn_and_cpp_extensions() {
   time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
@@ -171,6 +188,21 @@ test_aten() {
     assert_git_not_dirty
   fi
 }
+
+# pytorch extensions require including torch/extension.h which includes all.h
+# which includes utils.h which includes Parallel.h.
+# So you can call for instance parallel_for() from your extension,
+# but the compilation will fail because of Parallel.h has only declarations
+# and definitions are conditionally included Parallel.h(see last lines of Parallel.h).
+# I tried to solve it #39612 and #39881 by including Config.h into Parallel.h
+# But if Pytorch is built with TBB it provides Config.h
+# that has AT_PARALLEL_NATIVE_TBB=1(see #3961 or #39881) and it means that if you include
+# torch/extension.h which transitively includes Parallel.h
+# which transitively includes tbb.h which is not available!
+if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
+  sudo mkdir -p /usr/include/tbb
+  sudo cp -r $PWD/third_party/tbb/include/tbb/* /usr/include/tbb
+fi
 
 test_torchvision() {
   # Check out torch/vision at Jun 11 2020 commit
@@ -269,10 +301,10 @@ test_bazel() {
 
   get_bazel
 
-  tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+  tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
 
-test_cpp_extension() {
+test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
   time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
@@ -298,9 +330,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_python_nn
+  test_cpp_extensions
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   test_torchvision
-  test_python_all_except_nn
+  test_python_all_except_nn_and_cpp_extensions
   test_aten
   test_libtorch
   test_custom_script_ops
@@ -310,11 +343,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
   # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure 
   # cpp extension can be built correctly under this old env 
-  test_cpp_extension
+  test_cpp_extensions
 else
   test_torchvision
   test_python_nn
-  test_python_all_except_nn
+  test_python_all_except_nn_and_cpp_extensions
+  test_cpp_extensions
   test_aten
   test_libtorch
   test_custom_script_ops
