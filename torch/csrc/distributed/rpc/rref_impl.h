@@ -338,8 +338,8 @@ class TORCH_API OwnerRRef final : public RRef {
       const RRefId& rrefId,
       TypePtr type,
       c10::optional<IValue> value)
-      : RRef(ownerId, rrefId, std::move(type)) {
-    future_ = std::make_shared<FutureIValue>();
+      : RRef(ownerId, rrefId, type) {
+    future_ = std::make_shared<JitFuture>(type);
     if (value.has_value()) {
       future_->markCompleted(value.value());
     }
@@ -369,12 +369,12 @@ class TORCH_API OwnerRRef final : public RRef {
   // Has a value or error been set?
   bool hasValue() const;
   // Gets a future that is satisfied when the value or error is set.
-  std::shared_ptr<FutureIValue> getFuture();
+  std::shared_ptr<JitFuture> getFuture();
 
  private:
   friend class RRefContext;
 
-  std::shared_ptr<FutureIValue> future_;
+  std::shared_ptr<JitFuture> future_;
 };
 
 } // namespace rpc
