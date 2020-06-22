@@ -1392,7 +1392,7 @@ TORCH_API std::vector<Value*> inlineCallTo(
 TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
 
 struct OperatorSet {
-  TORCH_API OperatorSet(std::initializer_list<const char*> sig_literals);
+  OperatorSet(std::initializer_list<const char*> sig_literals);
 
  private:
   friend struct Node;

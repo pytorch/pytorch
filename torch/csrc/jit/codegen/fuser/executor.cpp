@@ -324,7 +324,6 @@ void launchFusion(
 }
 
 bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
-  printf("start\n");
   // Short-circuits if fusion isn't enabled
   if (!canFuseOnCPU() && !canFuseOnGPU())
     return false;
@@ -346,7 +345,6 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
     return false;
   }
 
-  printf("1\n");
   // Determines device to dispatch to.
   at::Device device = inputs.at(0).device();
   // If there's a device mismatch in the inputs or if one of the input is a
@@ -365,20 +363,17 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   if (device.is_cpu() && !canFuseOnCPU())
     return false;
 
-  printf("2\n");
   // Validates sizes and expands inputs as needed
   auto maybe_map_size = canRunKernel(spec, inputs);
 
   // Tries to run fallback if map size can't be computed
   if (!maybe_map_size)
     return false;
-  printf("3\n");
   if (spec.hasRandom()) {
     bool hasBroadcast = shouldExpandArgs(spec, inputs, *maybe_map_size);
     if (hasBroadcast)
       return false;
   }
-  printf("3\n");
   expandArgs(spec, inputs, *maybe_map_size, /*dry_run=*/false);
 
   // Retrieves the kernel, compiling (and caching) if necessary
@@ -405,7 +400,6 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
       stack.end(),
       std::make_move_iterator(outputs.begin()),
       std::make_move_iterator(outputs.end()));
-  printf("4\n");
 
   return true;
 }

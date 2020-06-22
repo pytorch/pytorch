@@ -25,10 +25,8 @@ int64_t registerFusion(const Node* fusion_group) {
 
 void runFusion(const int64_t key, Stack& stack) {
   const auto result = fuser::runFusion(key, stack);
-  if (!result) {
-    printf("fusion failed, running through fallback\n");
+  if (!result)
     fuser::runFallback(key, stack);
-  }
 }
 
 bool canFuseOnCPU() {
