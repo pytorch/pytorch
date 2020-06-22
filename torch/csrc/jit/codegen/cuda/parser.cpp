@@ -36,7 +36,7 @@ typedef bool (*MergeQueryFuncPtr)(const Node* const);
 std::vector<int> reductionAxes(TensorView* tv) {
   size_t n_dims = tv->nDims();
   std::vector<int> reduction_axes;
-  for (int i = 0; i < n_dims; i++) {
+  for (size_t i = 0; i < n_dims; i++) {
     if (tv->axis(i)->isReduction()) {
       reduction_axes.emplace_back(i);
     }
@@ -88,7 +88,6 @@ class IrParser {
   };
 
  private:
-  static const int nthreads = 128;
   static const int unroll_factor = 4;
 
  public:
@@ -196,7 +195,7 @@ class IrParser {
         // TODO: does this work for multiple outputs?
 
         // query if fastest changing dimension (FCD) is a reduction
-        fcd_reduction = out->axis(out->nDims() - 1)->isReduction();
+        fcd_reduction = out->axis((int)out->nDims() - 1)->isReduction();
 
         // TODO: could really use evaluation here. Launch configuration is
         //       imposed by transformation and the information should be
@@ -220,7 +219,7 @@ class IrParser {
         while (out->nDims() > 1)
           out->merge(0, 1);
         // Split into 128 which will be bockDim.x
-        out->split(0, nthreads);
+        out->split(0, PW_THREAD_X);
         // Split by another 4 which will be our unroll factor
         auto ur_factor = disable_unroll ? 1 : unroll_factor;
         if (!disable_unroll) {
@@ -245,15 +244,16 @@ class IrParser {
         // launch configuratoin.
         TensorView* intermediate;
         if (fcd_reduction) {
-          out_tv->split(-1, nthreads);
+          out_tv->split(-1, FCD_REDUCTION_THREAD_X);
           // necessary to avoid dynamic allocation on intermediates;
           intermediate = out_tv->rFactor({-2});
         } else {
           // TODO: we don't need a full warp here, this should be determined by
           //       element data type
-          out_tv->split(0, 32);
-          out_tv->split(-1, nthreads / 32);
-          // necessary to avoid dynamic allocation on intermediates;
+          out_tv->split(0, NON_FCD_REDUCTION_THREAD_X);
+          out_tv->split(
+              -1, NON_FCD_REDUCTION_THREAD_Y); // necessary to avoid dynamic
+                                               // allocation on intermediates;
           intermediate = out_tv->rFactor({-2});
         }
         for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {

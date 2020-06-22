@@ -178,7 +178,7 @@ class NaiveShapeTypePropagator {
         "requires complete shape on input");
     std::vector<int64_t> output_size;
     std::vector<int64_t> input_size = *op->sizes().concrete_sizes();
-    for (int i = 0; i < input_size.size(); i++) {
+    for (size_t i = 0; i < input_size.size(); i++) {
       if (std::find(dims.begin(), dims.end(), i) == dims.end()) {
         output_size.emplace_back(input_size[i]);
       } else if (keepdim) {

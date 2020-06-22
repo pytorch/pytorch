@@ -444,7 +444,7 @@ class TestCudaFuser(JitTestCase):
         for oo, jit_oo in zip(o, jit_o):
             self.assertEqual(oo.dtype, jit_oo.dtype)
             # numerical issues here due to our scheduling.
-            #self.assertEqual(oo, jit_oo)
+            # can't use `self.assertEqual(oo, jit_oo)`
             self.assertTrue(self._compare("comparing output failed", oo, jit_oo, 1e-4))
         self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GROUP)
 

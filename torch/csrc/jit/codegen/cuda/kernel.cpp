@@ -6,6 +6,7 @@
 #include <c10/util/ArrayRef.h>
 
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -551,16 +552,16 @@ void runKernel(
     // Translated to `fcd_reduction`
     if (entry->reduction_axes_.back() ==
         outputs[0].dim() + entry->reduction_axes_.size() - 1) {
-      thread_x = 128;
+      thread_x = FCD_REDUCTION_THREAD_X;
       thread_y = 1;
     } else {
-      thread_x = 32;
-      thread_y = 4;
+      thread_x = NON_FCD_REDUCTION_THREAD_X;
+      thread_y = NON_FCD_REDUCTION_THREAD_Y;
     }
   } else {
     // TODO: we can't randomly clap down this until we got striding.
-    blocks = ceilDiv(numel, 128 * entry->unroll_factor_);
-    thread_x = 128;
+    blocks = ceilDiv(numel, PW_THREAD_X * entry->unroll_factor_);
+    thread_x = PW_THREAD_X;
     thread_y = 1;
   }
   const auto nBlocks = blocks;

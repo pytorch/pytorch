@@ -26,6 +26,11 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+#define PW_THREAD_X 128
+#define FCD_REDUCTION_THREAD_X 128
+#define NON_FCD_REDUCTION_THREAD_X 32
+#define NON_FCD_REDUCTION_THREAD_Y 32
+
 TORCH_CUDA_API bool hasReductionNode(const Block* const block);
 
 TORCH_CUDA_API bool isReductionNode(const Node* const node);
