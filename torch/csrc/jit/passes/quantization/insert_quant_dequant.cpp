@@ -1024,6 +1024,16 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
           propagateQParams(output, *inputs, /* is_scalar */ false, qparams_opt);
         }
       }
+    } else if (isPropagateQuantNode(n)) {
+      // Print warning for add_scalar/mul_scalar when debug is enabled
+      // since the quantization parameter for these ops depends on
+      // input and it's too complicated to encode the equations in
+      // the IR:
+      // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/quantized/cpu/qadd.cpp#L64-L74
+      if (debug_ && isScalar(n->input(1))) {
+        TORCH_WARN_ONCE(
+            "debug option for add_scalar and mul_scalar is not supported");
+      }
     } else {
       // For ops that are quantized by propagating dequantize ops,
       // e.g. flatten we need to
@@ -1187,6 +1197,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
+  // TODO: add filter to the clamp patterns and remove this pass
   ReplicateClampScalarArgs(graph);
   propagateQuantizationOps(graph->block());
   RemoveRedundantDequantize(graph);
