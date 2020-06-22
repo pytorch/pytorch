@@ -1015,6 +1015,7 @@ void initJitScriptBindings(PyObject* module) {
             return std::make_tuple(pp.str(), consts);
           })
       .def("apply", &Module::apply)
+      .def("__copy__", &Module::copy)
       .def(
           "__deepcopy__",
           [](const Module& self, const py::dict& memo) {
