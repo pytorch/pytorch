@@ -114,11 +114,12 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
-const std::shared_ptr<FutureIValue> PyRRef::getFuture() const {
+c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
   // Marking hasValue to false, as this Future is only used for signaling
   // profiler to update profiling result and the profiler does not retrieve
   // any value from it.
-  return toFutureIValue(rref_->getOwnerCreationFuture(), false /* hasValue */);
+  return wrapFutureMessageInJitFuture(
+      rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
 bool PyRRef::isOwner() const {
@@ -194,21 +195,20 @@ std::string PyRRef::str() const {
   }
 }
 
-py::object PyRRef::createRRefProxy(PyRRef& self, const RRefProxyType& type)
-    const {
+py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   pybind11::gil_scoped_acquire ag;
   auto& functions = pythonRpcHandler.getRRefProxyFunctions();
   auto& ctor = functions.rrefProxyCtor_;
   switch (type) {
     case RRefProxyType::RPC_SYNC: {
-      return ctor(self, functions.rpcSync_);
+      return ctor(*this, functions.rpcSync_);
     }
     case RRefProxyType::RPC_ASYNC: {
-      return ctor(self, functions.rpcAsync_);
+      return ctor(*this, functions.rpcAsync_);
     }
     case RRefProxyType::REMOTE: {
-      return ctor(self, functions.remote_);
+      return ctor(*this, functions.remote_);
     }
     default: {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized RRefProxy type ", type);

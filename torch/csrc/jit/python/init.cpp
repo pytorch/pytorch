@@ -823,18 +823,11 @@ void initJITBindings(PyObject* module) {
   });
   m.def("_is_tracing", []() { return jit::tracer::isTracing(); });
 
-  py::class_<PythonFutureWrapper>(m, "Future")
+  py::class_<PythonFutureWrapper, std::shared_ptr<PythonFutureWrapper>>(
+      m, "Future")
       .def(
           "wait",
-          [](PythonFutureWrapper& fut) {
-            auto res = fut.wait();
-            {
-              // acquiring GIL as toPyObject creates new py::object
-              // without grabbing the GIL.
-              pybind11::gil_scoped_acquire ag;
-              return toPyObject(std::move(res));
-            }
-          },
+          &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>());
 
   m.def("fork", [](py::args args) {
@@ -882,16 +875,18 @@ void initJITBindings(PyObject* module) {
       // stuff the ivalue output in the Future
       retval->markCompleted(output_ivalue);
 
-      return PythonFutureWrapper(retval);
+      return std::make_shared<PythonFutureWrapper>(retval);
     } else {
       auto result = toTypeInferredIValue(f(*args_tup));
       auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
       retval->markCompleted(std::move(result));
-      return PythonFutureWrapper(retval);
+      return std::make_shared<PythonFutureWrapper>(retval);
     }
   });
 
-  m.def("wait", [](PythonFutureWrapper& fut) { return fut.wait(); });
+  m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
+    return fut->wait();
+  });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);

@@ -96,6 +96,16 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*negative_ind.*'  # negative axis is not supported yet
                      '|test_argmax_.*select_last_index.*'  # unsupported case
                      '|test_argmin_.*select_last_index_.*'  # unsupported case
+                     '|test_celu.*'  # unsupported case
+                     '|test_gathernd.*'  # unsupported case
+                     '|test_greater_equal.*'  # unsupported case
+                     '|test_inverse.*'  # unsupported case
+                     '|test_less_equal.*'  # unsupported case
+                     '|test_max_.*'  # unsupported case
+                     '|test_min_.*'  # unsupported case
+                     '|test_mean_square_distance_.*'  # unsupported case
+                     '|test_softmax_cross_entropy.*'  # unsupported case
+                     '|test_unfoldtodepth.*'  # unsupported case
                      '|test_.*gradient.*'  # no support for gradient op in c2-onnx
                      ')')
 

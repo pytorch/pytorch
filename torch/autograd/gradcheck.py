@@ -323,7 +323,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                 i = i.to_dense()
             if not gi.eq(0).all():
                 return fail_test('backward not multiplied by grad_output')
-            if gi.type() != i.type():
+            if gi.dtype != i.dtype or gi.device != i.device or gi.is_sparse != i.is_sparse:
                 return fail_test("grad is incorrect type")
             if gi.size() != i.size():
                 return fail_test('grad is incorrect size')

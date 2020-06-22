@@ -1725,19 +1725,19 @@ class RpcTest(RpcAgentTestFixture):
             rref = rpc.remote(worker_name(1), torch.add, args=(1, 1))
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+            self.assertIsInstance(fut, torch._C.Future)
 
             # UDF
             rref = rpc.remote(worker_name(1), foo_add, args=())
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+            self.assertIsInstance(fut, torch._C.Future)
 
             # Script
             rref = rpc.remote(worker_name(1), my_script_func, args=(torch.tensor(1), ))
             rref.to_here()
             fut = rref._get_future()
-            self.assertIsInstance(fut, torch.distributed.rpc.Future)
+            self.assertIsInstance(fut, torch._C.Future)
 
 
     @dist_init
