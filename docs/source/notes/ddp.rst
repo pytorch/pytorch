@@ -1,4 +1,4 @@
-. _ddp:
+.. _ddp:
 
 Distributed Data Parallel
 =========================
