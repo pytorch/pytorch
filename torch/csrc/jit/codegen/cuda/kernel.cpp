@@ -549,7 +549,6 @@ void runKernel(
     // TODO: MAJOR HACK! Expr evaluation makes launch configuration much easier
     blocks = numel;
     // Translated to `fcd_reduction`
-    //if (entry->reduction_axes_.back() == outputs[0].dim()-1) {
     if (entry->reduction_axes_.back() == outputs[0].dim()+entry->reduction_axes_.size()-1) {
       thread_x = 128;
       thread_y = 1;
@@ -557,38 +556,17 @@ void runKernel(
       thread_x = 32;
       thread_y = 4;
     }
-    // for (auto& input : inputs) {
-    //   // TODO: MAJOR HACK! This assumes all inputs are of the same shape, hence
-    //   //       we decide the launch config on the shape of first tensor input
-    //   if (input.isTensor()) {
-    //     size_t inp_numel = input.toTensor().numel();
-    //     // check if we are doing fastest channel dimension reduction;
-    //     if (entry->reduction_axes_.back() == outputs[0].dim()-1) {
-    //       thread_x = 128;
-    //       thread_y = 1;
-    //     } else {
-    //       thread_x = 32;
-    //       thread_y = 4;
-    //     }
-    //     blocks = 
-    //     break;
-    //   } else {
-    //     continue;
-    //   }
-    // }
   } else {
+    // TODO: we can't randomly clap down this until we got striding.
     blocks = ceilDiv(numel, 128 * entry->unroll_factor_);
     thread_x = 128;
     thread_y = 1;
   }
-  // TODO: we can't randomly clap down this until we got striding.
   const auto nBlocks = blocks;
   const auto nThreadx = thread_x;
   const auto nThready = thread_y;
 
   KernelArgumentHolder kernel_args;
-
-  printf("broadcasted dimension: %zu\n", broadcasted_shape.size());
 
   // Naive I/O setup, I'm ignoring all the potential transformation (i.e. I/O
   // allocated here from the subgraph could be, and very likely are, different

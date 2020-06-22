@@ -37,14 +37,11 @@ typedef bool (
 std::vector<int> reductionAxes(TensorView* tv) {
   size_t n_dims = tv->nDims();
   std::vector<int> reduction_axes;
-  printf("reduction axes: ");
   for (int i = 0; i < n_dims; i++) {
     if (tv->axis(i)->isReduction()) {
-      printf("%d, ", i);
       reduction_axes.emplace_back(i);
     }
   }
-  printf("\n");
   return reduction_axes;
 }
 
@@ -59,7 +56,6 @@ size_t coalescReduction(TensorView* tv) {
     if (new_pos == reduction_axes[i]) {
       break;
     } else {
-      printf("permute: %d to %zu\n", reduction_axes[i], new_pos);
       coalesc_permute[reduction_axes[i]] = new_pos;
     }
   }
@@ -135,7 +131,6 @@ class IrParser {
       broadcast_dim =
           block->outputs()[0]->type()->cast<TensorType>()->dim().value();
     }
-    printf("broadcasted dim to :%d\n", broadcast_dim);
 
     // register all inputs;
     // shape propagation during parsing is effctively done in parsing rules, as
@@ -169,7 +164,6 @@ class IrParser {
       }
     }
 
-    printf("process node finished\n");
 
     // mark output;
     for (auto jit_output : block->outputs()) {
@@ -407,9 +401,7 @@ class IrParser {
             auto alpha = value_map[node->inputs()[2]->unique()];
 
             if (alpha->isOneInt()) {
-              printf("input 0 value dimension, %zu, %zu\n", node->input(0)->unique(), lhs->as<TensorView>()->nDims());
               auto out = binaryOp(op_mapping[node->kind()].first, lhs, rhs);
-              printf("output value dimension, %zu, %zu\n", node->output()->unique(), out->as<TensorView>()->nDims());
               value_map.emplace(node->output()->unique(), out);
             } else {
               auto out = op_mapping[node->kind()].second(lhs, rhs, alpha);
@@ -670,7 +662,6 @@ class IrParser {
             TORCH_INTERNAL_ASSERT(dims.has_value(), "requires static reduce axes");
             auto keepdim = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(keepdim.has_value() && !keepdim.value(), "Keep dim in reduction is not a const false");
-            printf("sum output value dimension, %zu, %zu\n", node->input(0)->unique(), self->as<TensorView>()->nDims());
             auto out = sum(self->as<TensorView>(), dims->vec());
             value_map.emplace(node->output()->unique(), out);
           },

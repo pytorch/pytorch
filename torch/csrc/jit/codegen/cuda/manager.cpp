@@ -224,12 +224,13 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
               "Complete TensorType for output is expected.");
           broadcasted_shape = extractSizes(i_type);
         } else {
-          TORCH_INTERNAL_ASSERT(false, "intermediate tensor output for reduction fusion is nor properly supported yet.");
+          // TODO: this assert is not fool proof. We could have ignored
+          // pre-reduction tensor marked as output after we first encountered
+          // reduction output tensor.
+          TORCH_INTERNAL_ASSERT(false, "pre-reduction tensor output for reduction fusion is nor properly supported yet.");
         }
       }
     }
-
-    printf("first broadcasted dimension: %zu\n", broadcasted_shape.size());
 
     CudaFusionManager::getManager().runFusionNode(
         kernel_id, graph, inputs, outputs, broadcasted_shape);

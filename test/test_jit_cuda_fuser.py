@@ -15,15 +15,6 @@ from test_jit import JitTestCase, RUN_CUDA
 import itertools
 import numpy as np
 
-try:
-    from typing_extensions import Final
-except:
-    # If you don't have `typing_extensions` installed, you can use a
-    # polyfill from `torch.jit`.
-    from torch.jit import Final
-
-from typing import List, Tuple, Dict
-
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_profiling_executor(True)
     torch._C._jit_set_profiling_mode(True)
@@ -433,7 +424,6 @@ class TestCudaFuser(JitTestCase):
     def _reduction_helper(self, sizes, reduction_axis, dtype, device):
         class MyReduction(torch.nn.Module):
             __constants__ = ['reduction_axis']
-            #reduction_axis : Final[List[int]]
 
             def __init__(self):
                 super(MyReduction, self).__init__()
@@ -453,6 +443,7 @@ class TestCudaFuser(JitTestCase):
         o = t(x, y)
         for oo, jit_oo in zip(o, jit_o):
             self.assertEqual(oo.dtype, jit_oo.dtype)
+            # numerical issues here due to our scheduling.
             #self.assertEqual(oo, jit_oo)
             self.assertTrue(self._compare("comparing output failed", oo, jit_oo, 1e-4))
         self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GROUP)
