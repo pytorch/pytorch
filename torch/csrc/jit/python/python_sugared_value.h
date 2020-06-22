@@ -126,7 +126,7 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
   const std::string name_;
 };
 
-struct SugaredModuleDict;
+struct SugaredDict;
 
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
@@ -172,7 +172,11 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
         ->call(loc, caller, inputs, attributes, n_binders);
   }
 
-  std::shared_ptr<SugaredModuleDict> getSugaredModuleDict(
+  std::shared_ptr<SugaredDict> getSugaredDict(
+      const SourceRange& loc,
+      Function& m);
+
+  std::shared_ptr<SugaredDict> getSugaredNamedBufferDict(
       const SourceRange& loc,
       Function& m);
 
@@ -207,8 +211,8 @@ void recurseThroughNestedModules(
     const std::string& field);
 
 // Used to support named_modules()
-struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
-  explicit SugaredModuleDict(
+struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
+  explicit SugaredDict(
       std::shared_ptr<ModuleValue> self,
       std::shared_ptr<SugaredTupleValue> keys,
       std::shared_ptr<SugaredTupleValue> modules) {

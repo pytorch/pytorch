@@ -7,7 +7,6 @@ namespace jit {
 
 void testModuleClone() {
   auto cu = std::make_shared<CompilationUnit>();
-  auto parent = ClassType::create("parent", cu, true);
   // creating child module
   auto child = ClassType::create("child", cu, true);
   auto attr_name = "attr";
@@ -21,6 +20,7 @@ void testModuleClone() {
 
   // attach two child module instance to parent that shares
   // ClassType
+  auto parent = ClassType::create("parent", cu, true);
   Module p(cu, parent);
   p.register_attribute("c1", c1.type(), c1._ivalue(), false);
   p.register_attribute("c2", c2.type(), c2._ivalue(), false);

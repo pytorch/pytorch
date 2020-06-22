@@ -1,5 +1,4 @@
 from typing import Dict, Tuple
-import unittest
 
 import torch
 import time
@@ -7,6 +6,7 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc.internal import _build_rpc_profiling_key, RPCExecMode
 from torch import Tensor
+from torch.distributed.rpc import RRef
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -25,10 +25,21 @@ def rpc_return_rref(dst):
     return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
 
 @torch.jit.script
-def rref_local_value(rref):
-    # type: (RRef[Tensor]) -> Tensor
+def rref_local_value(rref: RRef[Tensor]) -> Tensor:
     return rref.local_value()
 
+@torch.jit.script
+def list_create():
+    # type: () -> List[int]
+    global_list = [1, 2, 3]
+    return global_list
+
+@torch.jit.script
+def rref_list_mutate(rref):
+    # type: (RRef[List[int]]) -> None
+    rref.local_value().append(4)
+    rref.to_here().append(5)
+    rref.to_here(5.0).append(6)
 
 def return_value(value):
     # type: (int) -> int
@@ -96,6 +107,15 @@ class RRefAPITest:
             worker_name(dst_rank), script_check_rref_confirmed, args=(rref,)
         )
         self.assertEqual(ret_rref.to_here(), True)
+
+    @dist_init
+    def test_rref_list_mutate(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        list_rref = rpc.remote(dst, list_create)
+
+        rpc.rpc_sync(dst, rref_list_mutate, args=(list_rref,))
+        self.assertEqual(list_rref.to_here(), [1, 2, 3, 4, 5, 6])
+
 
 
 @torch.jit.script
@@ -813,6 +833,26 @@ def save_rref(rref_var, fname):
     torch.save(rref_var, fname)
 
 
+@torch.jit.script
+def script_add(x, y):
+    # type: (Tensor, Tensor) -> Tensor
+    return x + y
+
+
+@rpc.functions.async_execution
+@torch.jit.script
+def async_add(to, x, y):
+    # type: (str, Tensor, Tensor) -> Future[Tensor]
+    return rpc.rpc_async(to, script_add, (x, y))
+
+
+@rpc.functions.async_execution
+@torch.jit.script
+def async_wrong_type():
+    # type: () -> Tensor
+    return torch.zeros(2)
+
+
 class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, FutureTypingTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
@@ -936,6 +976,39 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         self.assertEqual(future.wait(), torch.ones(2) * 2)
 
     @dist_init
+    def test_callback_simple(self):
+
+        def callback(fut):
+            return fut.wait() + 1
+
+        future = rpc.rpc_async(
+            worker_name((self.rank + 1) % self.world_size),
+            script_fork_wait_udf,
+            args=(torch.ones(2),)
+        ).then(callback)
+        self.assertEqual(future.wait(), torch.ones(2) * 2 + 1)
+
+    @dist_init
+    def test_callback_chain(self):
+        n = self.rank + 1
+        dst = worker_name(n % self.world_size)
+
+        def callback(fut):
+            return fut.wait() + 1
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            one_arg,
+            args=(torch.ones(n, n),)
+        )
+
+        num_cbs = 20
+        for _ in range(num_cbs):
+            fut = fut.then(callback)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) + 1 + num_cbs)
+
+    @dist_init
     def test_async_script_throw(self):
         future = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),
@@ -944,7 +1017,23 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
             future.wait()
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
+    @dist_init
+    def test_callback_with_exception(self):
+
+        def callback(fut):
+            with self.assertRaisesRegex(Exception, ".*Expected error.*"):
+                fut.wait()
+            raise RuntimeError("Another expected error")
+
+        future = rpc.rpc_async(
+            worker_name((self.rank + 1) % self.world_size),
+            script_fork_wait_throw,
+            args=(torch.ones(2),)
+        ).then(callback)
+
+        with self.assertRaisesRegex(RuntimeError, "Another expected error"):
+            future.wait()
+
     @dist_init
     def test_call_rpc_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
@@ -967,7 +1056,6 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
             function_event = get_function_event(events, prof_key)
             self.assertTrue(torch.jit._qualified_name(one_arg) in function_event.name)
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     def test_record_function_jit_end_callbacks_with_fork(self):
         # Ensures that we can call rf._call_end_callbacks_on_future on a jit
         # future in python eager mode with torch.jit.fork
@@ -985,7 +1073,6 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         # profiling event cpu time
         self.assertGreaterEqual(sleep_event.cpu_time * 1e-6, sleep_interval)
 
-    @unittest.skip("RPC profiling tests are flaky, see https://github.com/pytorch/pytorch/issues/37557")
     def test_call_fork_in_jit_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function with torch.jit.fork
@@ -996,3 +1083,90 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         events = prof.function_events
         function_event = get_function_event(events, "foo")
         self.assertEqual(function_event.name, "foo")
+
+    @dist_init
+    def test_async_function_simple(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        ret = rpc.rpc_sync(
+            dst1,
+            async_add,
+            args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
+        )
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_async_function_wrong_return_type(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected Future but got Tensor"
+        ):
+            rpc.rpc_sync(
+                worker_name((self.rank + 1) % self.world_size),
+                async_wrong_type
+            )
+
+    @dist_init
+    def test_async_function_wrong_decorator_order(self):
+        # @torch.jit.script complains about undefined value rpc. Error is shown
+        # below. The reason for not checking error string is to avoid making
+        # JIT error handling code depend on RPC tests, as we don't have any
+        # restrictions on the error message here.
+        #
+        # RuntimeError:
+        # undefined value rpc:
+        # def async_wrong_decorator_order(to, x, y):
+        #    # type: (str, Tensor, Tensor) -> Future[Tensor]
+        #    return rpc.rpc_async(to, script_add, (x, y))
+        #           ~~~ <--- HERE
+        with self.assertRaises(RuntimeError):
+            @torch.jit.script
+            @rpc.functions.async_execution
+            def async_wrong_decorator_order(to, x, y):
+                # type: (str, Tensor, Tensor) -> Future[Tensor]
+                return rpc.rpc_async(to, script_add, (x, y))
+
+    @dist_init
+    def test_async_function_remote(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        rref = rpc.remote(
+            dst1,
+            async_add,
+            args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
+        )
+        self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_async_function_remote_multi(self):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+
+        num = 20
+        rrefs = []
+        for i in range(num):
+            rrefs.append(
+                rpc.remote(
+                    dst1,
+                    async_add,
+                    args=(dst2, torch.ones(2, 2), torch.ones(2, 2) * i)
+                )
+            )
+
+        for i in range(num):
+            self.assertEqual(rrefs[i].to_here(), torch.ones(2, 2) + i)
+
+    @dist_init
+    def test_async_function_wrong_return_type_remote(self):
+        rref = rpc.remote(
+            worker_name((self.rank + 1) % self.world_size),
+            async_wrong_type
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected Future but got Tensor"
+        ):
+            rref.to_here()

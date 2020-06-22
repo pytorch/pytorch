@@ -8,12 +8,12 @@ from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from hypothesis import given, note, strategies as st, settings
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
 
-class Int8OpsTest(unittest.TestCase):
+class Int8OpsTest(serial.SerializedTestCase):
     def _get_scale_zp(self, tensor):
         tensor_max = np.max(tensor)
         tensor_min = min(0, np.min(tensor))
@@ -82,16 +82,11 @@ class Int8OpsTest(unittest.TestCase):
         m=st.integers(1, 1024),
         k=st.integers(1, 1024),
         rand_seed=st.integers(0, 65534),
-        quantize_bias=st.sampled_from([True]),
+        quantize_bias=st.sampled_from([False]),
     )
     def test_int8_fc(
         self, n, m, k, rand_seed, quantize_bias
     ):  # Int8FCFakeAcc32NNPI only supports quantize_bias=True
-        n = 1
-        m = 3
-        k = 1
-        rand_seed = 0
-        quantize_bias = True
         print(
             "n={}, m={}, k={}, rand_seed={}, quantize_bias={}".format(
                 n, m, k, rand_seed, quantize_bias
@@ -161,7 +156,7 @@ class Int8OpsTest(unittest.TestCase):
         Y_glow = workspace.FetchBlob("Y")
 
         diff = Y_fbgemm - Y_glow
-        if np.count_nonzero(diff) > 10:
+        if np.count_nonzero(diff) * 10 > diff.size:
             print_test_debug_info(
                 "int8_fc",
                 {

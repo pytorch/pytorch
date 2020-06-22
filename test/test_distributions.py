@@ -765,10 +765,12 @@ class TestDistributions(TestCase):
             expected = torch.tensor(expected)
             d = dist(**params)
             actual = d.enumerate_support(expand=False)
-            self.assertEqual(actual, expected)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(actual, expected)
             actual = d.enumerate_support(expand=True)
             expected_with_expand = expected.expand((-1,) + d.batch_shape + d.event_shape)
-            self.assertEqual(actual, expected_with_expand)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(actual, expected_with_expand)
 
     def test_repr(self):
         for Dist, params in EXAMPLES:
@@ -864,11 +866,9 @@ class TestDistributions(TestCase):
                     self.assertEqual(expanded.batch_shape, expanded_shape)
                     try:
                         self.assertEqual(expanded.mean,
-                                         d.mean.expand(expanded_shape + d.event_shape),
-                                         allow_inf=True)
+                                         d.mean.expand(expanded_shape + d.event_shape))
                         self.assertEqual(expanded.variance,
-                                         d.variance.expand(expanded_shape + d.event_shape),
-                                         allow_inf=True)
+                                         d.variance.expand(expanded_shape + d.event_shape))
                     except NotImplementedError:
                         pass
 
@@ -913,9 +913,9 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Bernoulli(r).rsample)
 
         # check entropy computation
-        self.assertEqual(Bernoulli(p).entropy(), torch.tensor([0.6108, 0.5004, 0.6730]), atol=1e-4)
+        self.assertEqual(Bernoulli(p).entropy(), torch.tensor([0.6108, 0.5004, 0.6730]), atol=1e-4, rtol=0)
         self.assertEqual(Bernoulli(torch.tensor([0.0])).entropy(), torch.tensor([0.0]))
-        self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), atol=1e-4)
+        self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), atol=1e-4, rtol=0)
 
     def test_bernoulli_enumerate_support(self):
         examples = [
@@ -938,7 +938,7 @@ class TestDistributions(TestCase):
         s = 0.3
         self.assertEqual(Geometric(p).sample((8,)).size(), (8, 3))
         self.assertEqual(Geometric(1).sample(), 0)
-        self.assertEqual(Geometric(1).log_prob(torch.tensor(1.)), -inf, allow_inf=True)
+        self.assertEqual(Geometric(1).log_prob(torch.tensor(1.)), -inf)
         self.assertEqual(Geometric(1).log_prob(torch.tensor(0.)), 0)
         self.assertFalse(Geometric(p).sample().requires_grad)
         self.assertEqual(Geometric(r).sample((8,)).size(), (8,))
@@ -962,8 +962,8 @@ class TestDistributions(TestCase):
         self._check_log_prob(Geometric(logits=p.log() - (-p).log1p()), ref_log_prob)
 
         # check entropy computation
-        self.assertEqual(Geometric(p).entropy(), scipy.stats.geom(p.detach().numpy(), loc=-1).entropy(), atol=1e-3)
-        self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), atol=1e-3)
+        self.assertEqual(Geometric(p).entropy(), scipy.stats.geom(p.detach().numpy(), loc=-1).entropy(), atol=1e-3, rtol=0)
+        self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_sample(self):
@@ -1038,11 +1038,11 @@ class TestDistributions(TestCase):
         bin0 = Binomial(total_count, 0)
         self.assertEqual(bin0.sample(), 0)
         self.assertAlmostEqual(bin0.log_prob(torch.tensor([0.]))[0], 0, places=3)
-        self.assertEqual(float(bin0.log_prob(torch.tensor([1.])).exp()), 0, allow_inf=True)
+        self.assertEqual(float(bin0.log_prob(torch.tensor([1.])).exp()), 0)
         bin1 = Binomial(total_count, 1)
         self.assertEqual(bin1.sample(), total_count)
         self.assertAlmostEqual(bin1.log_prob(torch.tensor([float(total_count)]))[0], 0, places=3)
-        self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0, allow_inf=True)
+        self.assertEqual(float(bin1.log_prob(torch.tensor([float(total_count - 1)])).exp()), 0)
         zero_counts = torch.zeros(torch.Size((2, 2)))
         bin2 = Binomial(zero_counts, 1)
         self.assertEqual(bin2.sample(), zero_counts)
@@ -1052,12 +1052,13 @@ class TestDistributions(TestCase):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         total_count = torch.tensor([[4, 7], [3, 8]])
         bin0 = Binomial(total_count, torch.tensor(1.))
-        self.assertEqual(bin0.sample(), total_count)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(bin0.sample(), total_count)
         bin1 = Binomial(total_count, torch.tensor(0.5))
         samples = bin1.sample(torch.Size((100000,)))
         self.assertTrue((samples <= total_count.type_as(samples)).all())
-        self.assertEqual(samples.mean(dim=0), bin1.mean, atol=0.02)
-        self.assertEqual(samples.var(dim=0), bin1.variance, atol=0.02)
+        self.assertEqual(samples.mean(dim=0), bin1.mean, atol=0.02, rtol=0)
+        self.assertEqual(samples.var(dim=0), bin1.variance, atol=0.02, rtol=0)
 
     def test_negative_binomial(self):
         p = torch.arange(0.05, 1, 0.1).requires_grad_()
@@ -1130,8 +1131,9 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
 
         # sample check for extreme value of probs
-        self.assertEqual(Multinomial(total_count, s).sample(),
-                         torch.tensor([[total_count, 0], [0, total_count]]))
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(Multinomial(total_count, s).sample(),
+                                   torch.tensor([[total_count, 0], [0, total_count]]))
 
         # check entropy computation
         self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)
@@ -1174,7 +1176,7 @@ class TestDistributions(TestCase):
         self._check_log_prob(Categorical(logits=p.log()), ref_log_prob)
 
         # check entropy computation
-        self.assertEqual(Categorical(p).entropy(), torch.tensor([1.0114, 1.0297]), atol=1e-4)
+        self.assertEqual(Categorical(p).entropy(), torch.tensor([1.0114, 1.0297]), atol=1e-4, rtol=0)
         self.assertEqual(Categorical(s).entropy(), torch.tensor([0.0, 0.0]))
 
     def test_categorical_enumerate_support(self):
@@ -1371,8 +1373,8 @@ class TestDistributions(TestCase):
         uniform = Uniform(low_1d, high_1d)
         above_high = torch.tensor([4.0])
         below_low = torch.tensor([-1.0])
-        self.assertEqual(uniform.log_prob(above_high).item(), -inf, allow_inf=True)
-        self.assertEqual(uniform.log_prob(below_low).item(), -inf, allow_inf=True)
+        self.assertEqual(uniform.log_prob(above_high).item(), -inf)
+        self.assertEqual(uniform.log_prob(below_low).item(), -inf)
 
         # check cdf computation when value outside range
         self.assertEqual(uniform.cdf(below_low).item(), 0)
@@ -1416,7 +1418,7 @@ class TestDistributions(TestCase):
         loc_1d = torch.zeros(1, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
         self.assertTrue(is_all_nan(Cauchy(loc_1d, scale_1d).mean))
-        self.assertEqual(Cauchy(loc_1d, scale_1d).variance, inf, allow_inf=True)
+        self.assertEqual(Cauchy(loc_1d, scale_1d).variance, inf)
         self.assertEqual(Cauchy(loc, scale).sample().size(), (5, 5))
         self.assertEqual(Cauchy(loc, scale).sample((7,)).size(), (7, 5, 5))
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample().size(), (1,))
@@ -1442,7 +1444,7 @@ class TestDistributions(TestCase):
         scale = torch.ones(5, 5, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
         self.assertTrue(is_all_nan(HalfCauchy(scale_1d).mean))
-        self.assertEqual(HalfCauchy(scale_1d).variance, inf, allow_inf=True)
+        self.assertEqual(HalfCauchy(scale_1d).variance, inf)
         self.assertEqual(HalfCauchy(scale).sample().size(), (5, 5))
         self.assertEqual(HalfCauchy(scale).sample((7,)).size(), (7, 5, 5))
         self.assertEqual(HalfCauchy(scale_1d).sample().size(), (1,))
@@ -1476,7 +1478,7 @@ class TestDistributions(TestCase):
         set_rng_seed(1)
         self.assertEqual(HalfNormal(std_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[0.0, 0.0], [0.0, 0.0]]]),
-                         atol=1e-4)
+                         atol=1e-4, rtol=0)
 
         self._gradcheck_log_prob(HalfNormal, (std,))
         self._gradcheck_log_prob(HalfNormal, (1.0,))
@@ -1523,7 +1525,7 @@ class TestDistributions(TestCase):
         set_rng_seed(1)
         self.assertEqual(LogNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[math.exp(1), 1.0], [math.exp(1), 1.0]]]),
-                         atol=1e-4)
+                         atol=1e-4, rtol=0)
 
         self._gradcheck_log_prob(LogNormal, (mean, std))
         self._gradcheck_log_prob(LogNormal, (mean, 1.0))
@@ -1575,7 +1577,7 @@ class TestDistributions(TestCase):
                          torch.tensor([math.exp(1) / (1. + 1. + math.exp(1)),
                                        1. / (1. + 1. + math.exp(1)),
                                        1. / (1. + 1. + math.exp(1))]),
-                         atol=1e-4)
+                         atol=1e-4, rtol=0)
 
         self._gradcheck_log_prob(LogisticNormal, (mean, std))
         self._gradcheck_log_prob(LogisticNormal, (mean, 1.0))
@@ -1725,7 +1727,7 @@ class TestDistributions(TestCase):
         set_rng_seed(1)
         self.assertEqual(Normal(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
-                         atol=1e-4)
+                         atol=1e-4, rtol=0)
 
         self._gradcheck_log_prob(Normal, (loc, scale))
         self._gradcheck_log_prob(Normal, (loc, 1.0))
@@ -1874,9 +1876,9 @@ class TestDistributions(TestCase):
         d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.01)
+        self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
         empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, atol=0.02)
+        self.assertEqual(d.variance, empirical_var, atol=0.02, rtol=0)
 
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
@@ -2014,9 +2016,9 @@ class TestDistributions(TestCase):
         d = MultivariateNormal(mean, scale_tril=scale_tril)
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.01)
+        self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
         empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, atol=0.05)
+        self.assertEqual(d.variance, empirical_var, atol=0.05, rtol=0)
 
     def test_exponential(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
@@ -2071,7 +2073,7 @@ class TestDistributions(TestCase):
         set_rng_seed(0)
         self.assertEqual(Laplace(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
-                         atol=1e-4)
+                         atol=1e-4, rtol=0)
 
         self._gradcheck_log_prob(Laplace, (loc, scale))
         self._gradcheck_log_prob(Laplace, (loc, 1.0))
@@ -2172,8 +2174,8 @@ class TestDistributions(TestCase):
         alpha = torch.randn(2, 3).abs().requires_grad_()
         scale_1d = torch.randn(1).abs().requires_grad_()
         alpha_1d = torch.randn(1).abs().requires_grad_()
-        self.assertEqual(Pareto(scale_1d, 0.5).mean, inf, allow_inf=True)
-        self.assertEqual(Pareto(scale_1d, 0.5).variance, inf, allow_inf=True)
+        self.assertEqual(Pareto(scale_1d, 0.5).mean, inf)
+        self.assertEqual(Pareto(scale_1d, 0.5).variance, inf)
         self.assertEqual(Pareto(scale, alpha).sample().size(), (2, 3))
         self.assertEqual(Pareto(scale, alpha).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample((1,)).size(), (1, 1))
@@ -2290,7 +2292,7 @@ class TestDistributions(TestCase):
         df_1d = torch.randn(1).exp().requires_grad_()
         self.assertTrue(is_all_nan(StudentT(1).mean))
         self.assertTrue(is_all_nan(StudentT(1).variance))
-        self.assertEqual(StudentT(2).variance, inf, allow_inf=True)
+        self.assertEqual(StudentT(2).variance, inf)
         self.assertEqual(StudentT(df).sample().size(), (2, 3))
         self.assertEqual(StudentT(df).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(StudentT(df_1d).sample((1,)).size(), (1, 1))
@@ -2375,7 +2377,7 @@ class TestDistributions(TestCase):
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
             expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0)
-            self.assertAlmostEqual(float(actual_log_prob), float(expected_log_prob), places=3, allow_inf=True)
+            self.assertAlmostEqual(float(actual_log_prob), float(expected_log_prob), places=3)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_sample(self):
@@ -2404,8 +2406,8 @@ class TestDistributions(TestCase):
             # assert support is concentrated around 0 and 1
             frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
             frac_ones = float((beta_samples > 0.9).sum()) / num_samples
-            self.assertEqual(frac_zeros, 0.5, 0.05)
-            self.assertEqual(frac_ones, 0.5, 0.05)
+            self.assertEqual(frac_zeros, 0.5, atol=0.05, rtol=0)
+            self.assertEqual(frac_ones, 0.5, atol=0.05, rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_beta_underflow_gpu(self):
@@ -2419,8 +2421,8 @@ class TestDistributions(TestCase):
         frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
         frac_ones = float((beta_samples > 0.9).sum()) / num_samples
         # TODO: increase precision once imbalance on GPU is fixed.
-        self.assertEqual(frac_zeros, 0.5, 0.12)
-        self.assertEqual(frac_ones, 0.5, 0.12)
+        self.assertEqual(frac_zeros, 0.5, atol=0.12, rtol=0)
+        self.assertEqual(frac_ones, 0.5, atol=0.12, rtol=0)
 
     def test_continuous_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
@@ -2447,11 +2449,11 @@ class TestDistributions(TestCase):
         self._check_log_prob(ContinuousBernoulli(logits=p.log() - (-p).log1p()), ref_log_prob)
 
         # check entropy computation
-        self.assertEqual(ContinuousBernoulli(p).entropy(), torch.tensor([-0.02938, -0.07641, -0.00682]), atol=1e-4)
+        self.assertEqual(ContinuousBernoulli(p).entropy(), torch.tensor([-0.02938, -0.07641, -0.00682]), atol=1e-4, rtol=0)
         # entropy below corresponds to the clamped value of prob when using float 64
         # the value for float32 should be -1.76898
-        self.assertEqual(ContinuousBernoulli(torch.tensor([0.0])).entropy(), torch.tensor([-2.58473]), atol=1e-5)
-        self.assertEqual(ContinuousBernoulli(s).entropy(), torch.tensor(-0.02938), atol=1e-4)
+        self.assertEqual(ContinuousBernoulli(torch.tensor([0.0])).entropy(), torch.tensor([-2.58473]), atol=1e-5, rtol=0)
+        self.assertEqual(ContinuousBernoulli(s).entropy(), torch.tensor(-0.02938), atol=1e-4, rtol=0)
 
     def test_continuous_bernoulli_3d(self):
         p = torch.full((2, 3, 5), 0.5).requires_grad_()
@@ -2538,7 +2540,7 @@ class TestDistributions(TestCase):
                 except NotImplementedError:
                     continue
                 cdfs_derivative = grad(cdfs.sum(), [samples])[0]  # this should not be wrapped in torch.abs()
-                self.assertEqual(cdfs_derivative, pdfs, message='\n'.join([
+                self.assertEqual(cdfs_derivative, pdfs, msg='\n'.join([
                     '{} example {}/{}, d(cdf)/dx != pdf(x)'.format(Dist.__name__, i + 1, len(params)),
                     'x = {}'.format(samples),
                     'cdf = {}'.format(cdfs),
@@ -2642,13 +2644,13 @@ class TestDistributions(TestCase):
         for dist, expected_size in valid_examples:
             actual_size = dist.sample().size()
             self.assertEqual(actual_size, expected_size,
-                             '{} actual size: {} != expected size: {}'.format(dist, actual_size, expected_size))
+                             msg='{} actual size: {} != expected size: {}'.format(dist, actual_size, expected_size))
 
             sample_shape = torch.Size((2,))
             expected_size = sample_shape + expected_size
             actual_size = dist.sample(sample_shape).size()
             self.assertEqual(actual_size, expected_size,
-                             '{} actual size: {} != expected size: {}'.format(dist, actual_size, expected_size))
+                             msg='{} actual size: {} != expected size: {}'.format(dist, actual_size, expected_size))
 
     def test_invalid_parameter_broadcasting(self):
         # invalid broadcasting cases; should throw error
@@ -2866,7 +2868,7 @@ class TestRsample(TestCase):
             num = 1.0 - 2.0 * alpha - 4.0 * alpha**2
             den = (1.0 + alpha)**2 * (1.0 + 2.0 * alpha)**3
             expected_grad = num / den
-            self.assertEqual(actual_grad, expected_grad, atol=0.002, message='\n'.join([
+            self.assertEqual(actual_grad, expected_grad, atol=0.002, rtol=0, msg='\n'.join([
                 "alpha = alpha_c + %.2g" % shift,
                 "expected_grad: %.5g" % expected_grad,
                 "actual_grad: %.5g" % actual_grad,
@@ -2894,7 +2896,7 @@ class TestRsample(TestCase):
             v = torch.stack([grad([x[:, i].sum()], [alpha], retain_graph=True)[0][:, 0]
                              for i in range(3)], dim=-1)
             # Compute ramaining properties by finite difference.
-            self.assertEqual(compute_v(x, alpha), v, message='Bug in compute_v() helper')
+            self.assertEqual(compute_v(x, alpha), v, msg='Bug in compute_v() helper')
             # dx is an arbitrary orthonormal basis tangent to the simplex.
             dx = torch.tensor([[2., -1., -1.], [0., 1., -1.]])
             dx /= dx.norm(2, -1, True)
@@ -2932,7 +2934,7 @@ class TestDistributionShapes(TestCase):
                     expected_shape = dist.batch_shape if dist.batch_shape else torch.Size()
                     message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
                         Dist.__name__, i + 1, len(params), expected_shape, actual_shape)
-                    self.assertEqual(actual_shape, expected_shape, message=message)
+                    self.assertEqual(actual_shape, expected_shape, msg=message)
                 except NotImplementedError:
                     continue
 
@@ -3656,7 +3658,7 @@ class TestKL(TestCase):
             if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
                 actual = kl_divergence(p, q)
                 expected = _kl_expfamily_expfamily(p, q)
-                self.assertEqual(actual, expected, message='\n'.join([
+                self.assertEqual(actual, expected, msg='\n'.join([
                     'Incorrect KL({}, {}).'.format(type(p).__name__, type(q).__name__),
                     'Expected (using Bregman Divergence) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
@@ -3682,7 +3684,7 @@ class TestKL(TestCase):
                 except NotImplementedError:
                     continue
                 expected_shape = dist.batch_shape if dist.batch_shape else torch.Size()
-                self.assertEqual(kl.shape, expected_shape, message='\n'.join([
+                self.assertEqual(kl.shape, expected_shape, msg='\n'.join([
                     '{} example {}/{}'.format(Dist.__name__, i + 1, len(params)),
                     'Expected {}'.format(expected_shape),
                     'Actual {}'.format(kl.shape),
@@ -3701,7 +3703,7 @@ class TestKL(TestCase):
                 expected = -dist.log_prob(x).mean(0)
                 ignore = (expected == inf) | (expected == -inf)
                 expected[ignore] = actual[ignore]
-                self.assertEqual(actual, expected, atol=0.2, message='\n'.join([
+                self.assertEqual(actual, expected, atol=0.2, rtol=0, msg='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
                     'Expected (monte carlo) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
@@ -3722,7 +3724,7 @@ class TestKL(TestCase):
                     expected = ExponentialFamily.entropy(dist)
                 except NotImplementedError:
                     continue
-                self.assertEqual(actual, expected, message='\n'.join([
+                self.assertEqual(actual, expected, msg='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
                     'Expected (Bregman Divergence) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
@@ -3786,13 +3788,15 @@ class TestNumericalStability(TestCase):
         self.assertEqual(log_pdf,
                          expected_value,
                          atol=atol,
-                         message='Incorrect value for tensor type: {}. Expected = {}, Actual = {}'
+                         rtol=0,
+                         msg='Incorrect value for tensor type: {}. Expected = {}, Actual = {}'
                          .format(type(x), expected_value, log_pdf))
         if expected_gradient is not None:
             self.assertEqual(p.grad,
                              expected_gradient,
                              atol=atol,
-                             message='Incorrect gradient for tensor type: {}. Expected = {}, Actual = {}'
+                             rtol=0,
+                             msg='Incorrect gradient for tensor type: {}. Expected = {}, Actual = {}'
                              .format(type(x), expected_gradient, p.grad))
 
     def test_bernoulli_gradient(self):
@@ -3865,7 +3869,7 @@ class TestNumericalStability(TestCase):
             log_pdf_prob_1 = categorical.log_prob(torch.tensor([0, 1], dtype=dtype))
             self.assertEqual(log_pdf_prob_1.item(), 0)
             log_pdf_prob_0 = categorical.log_prob(torch.tensor([1, 0], dtype=dtype))
-            self.assertEqual(log_pdf_prob_0.item(), -inf, allow_inf=True)
+            self.assertEqual(log_pdf_prob_0.item(), -inf)
 
     def test_multinomial_log_prob(self):
         for dtype in ([torch.float, torch.double]):
@@ -3882,7 +3886,7 @@ class TestNumericalStability(TestCase):
             log_pdf_prob_1 = multinomial.log_prob(torch.tensor([0, 10], dtype=dtype))
             self.assertEqual(log_pdf_prob_1.item(), 0)
             log_pdf_prob_0 = multinomial.log_prob(torch.tensor([10, 0], dtype=dtype))
-            self.assertEqual(log_pdf_prob_0.item(), -inf, allow_inf=True)
+            self.assertEqual(log_pdf_prob_0.item(), -inf)
 
     def test_continuous_bernoulli_gradient(self):
 
@@ -4142,9 +4146,9 @@ class TestAgainstScipy(TestCase):
                 # Cauchy, HalfCauchy distributions' mean is nan, skipping check
                 continue
             elif isinstance(pytorch_dist, (LowRankMultivariateNormal, MultivariateNormal)):
-                self.assertEqual(pytorch_dist.mean, scipy_dist.mean, allow_inf=True, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.mean, scipy_dist.mean, msg=pytorch_dist)
             else:
-                self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), msg=pytorch_dist)
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
@@ -4153,14 +4157,14 @@ class TestAgainstScipy(TestCase):
                 # VonMises variance is circular and scipy doesn't produce a correct result
                 continue
             elif isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
-                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
-                self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), msg=pytorch_dist)
+                self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, msg=pytorch_dist)
             elif isinstance(pytorch_dist, (LowRankMultivariateNormal, MultivariateNormal)):
-                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov), message=pytorch_dist)
-                self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov) ** 0.5, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov), msg=pytorch_dist)
+                self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov) ** 0.5, msg=pytorch_dist)
             else:
-                self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
-                self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.variance, scipy_dist.var(), msg=pytorch_dist)
+                self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, msg=pytorch_dist)
 
     def test_cdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
@@ -4169,7 +4173,7 @@ class TestAgainstScipy(TestCase):
                 cdf = pytorch_dist.cdf(samples)
             except NotImplementedError:
                 continue
-            self.assertEqual(cdf, scipy_dist.cdf(samples), message=pytorch_dist)
+            self.assertEqual(cdf, scipy_dist.cdf(samples), msg=pytorch_dist)
 
     def test_icdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
@@ -4178,7 +4182,7 @@ class TestAgainstScipy(TestCase):
                 icdf = pytorch_dist.icdf(samples)
             except NotImplementedError:
                 continue
-            self.assertEqual(icdf, scipy_dist.ppf(samples), message=pytorch_dist)
+            self.assertEqual(icdf, scipy_dist.ppf(samples), msg=pytorch_dist)
 
 
 class TestTransforms(TestCase):
@@ -4302,7 +4306,7 @@ class TestTransforms(TestCase):
             y2 = transform(x2)  # should be implemented at least by caching
             if transform.bijective:
                 # verify function inverse
-                self.assertEqual(x2, x, message='\n'.join([
+                self.assertEqual(x2, x, msg='\n'.join([
                     '{} t.inv(t(-)) error'.format(transform),
                     'x = {}'.format(x),
                     'y = t(x) = {}'.format(y),
@@ -4310,7 +4314,7 @@ class TestTransforms(TestCase):
                 ]))
             else:
                 # verify weaker function pseudo-inverse
-                self.assertEqual(y2, y, message='\n'.join([
+                self.assertEqual(y2, y, msg='\n'.join([
                     '{} t(t.inv(t(-))) error'.format(transform),
                     'x = {}'.format(x),
                     'y = t(x) = {}'.format(y),
@@ -4329,7 +4333,7 @@ class TestTransforms(TestCase):
                 continue
             if transform.bijective:
                 # verify function inverse
-                self.assertEqual(x2, x, message='\n'.join([
+                self.assertEqual(x2, x, msg='\n'.join([
                     '{} t.inv(t(-)) error'.format(transform),
                     'x = {}'.format(x),
                     'y = t(x) = {}'.format(y),
@@ -4337,7 +4341,7 @@ class TestTransforms(TestCase):
                 ]))
             else:
                 # verify weaker function pseudo-inverse
-                self.assertEqual(y2, y, message='\n'.join([
+                self.assertEqual(y2, y, msg='\n'.join([
                     '{} t(t.inv(t(-))) error'.format(transform),
                     'x = {}'.format(x),
                     'y = t(x) = {}'.format(y),
@@ -4356,7 +4360,7 @@ class TestTransforms(TestCase):
             except NotImplementedError:
                 continue
             expected = torch.abs(grad([y.sum()], [x])[0]).log()
-            self.assertEqual(actual, expected, message='\n'.join([
+            self.assertEqual(actual, expected, msg='\n'.join([
                 'Bad {}.log_abs_det_jacobian() disagrees with ()'.format(transform),
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
@@ -4373,7 +4377,7 @@ class TestTransforms(TestCase):
             except NotImplementedError:
                 continue
             expected = -torch.abs(grad([x.sum()], [y])[0]).log()
-            self.assertEqual(actual, expected, message='\n'.join([
+            self.assertEqual(actual, expected, msg='\n'.join([
                 '{}.log_abs_det_jacobian() disagrees with .inv()'.format(transform),
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
@@ -4641,7 +4645,7 @@ class TestConstraintRegistry(TestCase):
                 "biject_to(...)(x) = {}".format(y),
             ]))
             x2 = t.inv(y)
-            self.assertEqual(x, x2, message="Error in biject_to({}) inverse".format(constraint))
+            self.assertEqual(x, x2, msg="Error in biject_to({}) inverse".format(constraint))
 
             j = t.log_abs_det_jacobian(x, y)
             self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
@@ -4663,7 +4667,7 @@ class TestConstraintRegistry(TestCase):
                 "biject_to(...)(x) = {}".format(y),
             ]))
             x2 = t.inv(y)
-            self.assertEqual(x, x2, message="Error in biject_to({}) inverse".format(constraint))
+            self.assertEqual(x, x2, msg="Error in biject_to({}) inverse".format(constraint))
 
             j = t.log_abs_det_jacobian(x, y)
             self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
@@ -4676,7 +4680,7 @@ class TestConstraintRegistry(TestCase):
             self.assertTrue(constraint.check(y).all(), "Failed to transform_to({})".format(constraint))
             x2 = t.inv(y)
             y2 = t(x2)
-            self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
+            self.assertEqual(y, y2, msg="Error in transform_to({}) pseudoinverse".format(constraint))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_transform_to_cuda(self):
@@ -4688,7 +4692,7 @@ class TestConstraintRegistry(TestCase):
             self.assertTrue(constraint.check(y).all(), "Failed to transform_to({})".format(constraint))
             x2 = t.inv(y)
             y2 = t(x2)
-            self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
+            self.assertEqual(y, y2, msg="Error in transform_to({}) pseudoinverse".format(constraint))
 
 
 class TestValidation(TestCase):
@@ -4836,7 +4840,7 @@ class TestJit(TestCase):
             expected = f(sample, *values)
             actual = traced_f(sample, *values)
             self.assertEqual(expected, actual,
-                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+                             msg='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_enumerate_support(self):
         for Dist, keys, values, sample in self._examples():
@@ -4860,7 +4864,7 @@ class TestJit(TestCase):
             expected = f(*values)
             actual = traced_f(*values)
             self.assertEqual(expected, actual,
-                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+                             msg='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_mean(self):
         for Dist, keys, values, sample in self._examples():
@@ -4881,8 +4885,8 @@ class TestJit(TestCase):
             actual = traced_f(*values)
             expected[expected == float('inf')] = 0.
             actual[actual == float('inf')] = 0.
-            self.assertEqual(expected, actual, allow_inf=True,
-                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+            self.assertEqual(expected, actual,
+                             msg='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_variance(self):
         for Dist, keys, values, sample in self._examples():
@@ -4905,8 +4909,8 @@ class TestJit(TestCase):
             actual = traced_f(*values)
             expected[expected == float('inf')] = 0.
             actual[actual == float('inf')] = 0.
-            self.assertEqual(expected, actual, allow_inf=True,
-                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+            self.assertEqual(expected, actual,
+                             msg='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_entropy(self):
         for Dist, keys, values, sample in self._examples():
@@ -4929,8 +4933,8 @@ class TestJit(TestCase):
             values, sample = self._perturb(Dist, keys, values, sample)
             expected = f(*values)
             actual = traced_f(*values)
-            self.assertEqual(expected, actual, allow_inf=True,
-                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+            self.assertEqual(expected, actual,
+                             msg='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_cdf(self):
         for Dist, keys, values, sample in self._examples():
@@ -4950,8 +4954,8 @@ class TestJit(TestCase):
             values, sample = self._perturb(Dist, keys, values, sample)
             expected = f(sample, *values)
             actual = traced_f(sample, *values)
-            self.assertEqual(expected, actual, allow_inf=True,
-                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+            self.assertEqual(expected, actual,
+                             msg='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
 
 if __name__ == '__main__' and torch._C.has_lapack:

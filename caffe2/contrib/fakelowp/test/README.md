@@ -8,7 +8,10 @@ mkdir build && cd build
 cmake -G Ninja -DGLOW_BUILD_ONNXIFI_DYNLIB=ON ..
 ninja all
 ```
-Note that here you probably want to add other flags like `-DGLOW_WITH_NNPI=1` to enable specific backend if you have the flow set up.
+Note that here you probably want to add other flags like `-DGLOW_WITH_NNPI=1` to enable specific backend if you have the flow set up. Also, make sure you have the LD_LIBRARY_PATH set correctly pointing to libomp.so path when compiling with -DGLOW_WITH_NNPI=1.
+```
+export LD_LIBRARY_PATH=/usr/lib/llvm-8/lib
+```
 Once built successfully, you will get an dynamic library at `build/lib/Onnxifi/libonnxifi.so`. We will use it later.
 
 ## Build and Install PyTorch
@@ -26,7 +29,7 @@ Once you installed Python 3.7, here I give a virtualenv flow:
 ```
 sudo pip3.7 install virtualenv
 python3.7 -m venv venv3
-source venv3/bin/active
+source venv3/bin/activate
 cd pytorch
 pip install -r requirements.txt
 pip install pytest hypothesis protobuf
