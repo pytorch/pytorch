@@ -243,11 +243,19 @@
 
 - func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: real(Tensor self) -> Tensor
+- func: view_as_real(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function
 
-- func: imag(Tensor self) -> Tensor
+- func: view_as_complex(Tensor(a) self) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function
+
+- func: real(Tensor(a) self) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function
+
+- func: imag(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function
 
