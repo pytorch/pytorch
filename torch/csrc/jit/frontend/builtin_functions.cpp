@@ -142,7 +142,7 @@ def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
   return torch.full(size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 )SCRIPT";
 
-// NOTE: the out variant of full works the same, but must be overriden
+// NOTE: the out variant of full works the same, but must be overridden
 //   since the other variant of full is overridden
 auto full_out = R"SCRIPT(
 def full_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
