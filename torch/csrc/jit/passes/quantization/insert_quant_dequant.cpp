@@ -456,8 +456,8 @@ class SubGraphCloneHelper {
 
 class InsertQuantDeQuantHelper {
  public:
-  InsertQuantDeQuantHelper(QuantType quant_type, bool debug) :
-      quant_type_(quant_type), debug_(debug) {}
+  InsertQuantDeQuantHelper(QuantType quant_type, bool debug)
+      : quant_type_(quant_type), debug_(debug) {}
 
   void run(Module& module, const std::string& method_name);
 
