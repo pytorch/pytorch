@@ -46,12 +46,26 @@
 namespace torch {
 namespace jit {
 
-// The PythonFutureWrapper for ivalue::Future
-struct PythonFutureWrapper {
-  explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
-      : fut(std::move(fut)) {}
+py::object toPyObject(IValue ivalue);
 
-  IValue wait() {
+// The PythonFutureWrapper for ivalue::Future
+//
+// VISIBILITY_HIDDEN is for silencing compiling error,
+// "error: 'torch::jit::PythonFutureWrapper' declared with greater visibility
+// than the type of its field 'torch::jit::PythonFutureWrapper::unwrap_func'
+// [-Werror=attributes]"
+struct VISIBILITY_HIDDEN PythonFutureWrapper {
+  using UnwrapFunc = std::function<void(py::object)>;
+
+  explicit PythonFutureWrapper(
+      c10::intrusive_ptr<c10::ivalue::Future> fut,
+      c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
+      : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
+
+  PythonFutureWrapper(const PythonFutureWrapper&) = delete;
+  PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
+
+  py::object wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
@@ -60,10 +74,22 @@ struct PythonFutureWrapper {
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    return fut->value();
+    {
+      // acquiring GIL as toPyObject creates new py::object
+      // without grabbing the GIL.
+      py::gil_scoped_acquire acquire;
+      py::object py_obj = toPyObject(fut->value());
+      if (unwrap_func) {
+        (*unwrap_func)(py_obj);
+      }
+      return py_obj;
+    }
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> fut;
+  // unwrap_func works like a callback for the value returned by
+  // PythonFutureWrapper::wait().
+  c10::optional<UnwrapFunc> unwrap_func;
 };
 
 // error reporting: when reporting user-caused errors, these functions should
@@ -612,7 +638,7 @@ inline IValue toIValue(
           py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
     }
     case TypeKind::FutureType: {
-      return obj.cast<PythonFutureWrapper>().fut;
+      return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
     }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
@@ -801,7 +827,7 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isCapsule()) {
     return py::cast(ivalue.toCapsule());
   } else if (ivalue.isFuture()) {
-    return py::cast(PythonFutureWrapper(ivalue.toFuture()));
+    return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     return py::cast(torch::distributed::rpc::PyRRef(
