@@ -179,7 +179,7 @@ at::Tensor vulkan_convolution(
       voutput,
       vinput,
       weight.data_ptr<float>(),
-      bias.defined() ? c10::make_optional<float*>(bias.data_ptr<float>())
+      bias.defined() ? c10::make_optional<const float*>(bias.data_ptr<float>())
                      : c10::nullopt,
       params);
   return new_with_vtensor_vulkan(std::move(voutput), input.options());
@@ -242,7 +242,8 @@ at::Tensor vulkan_convolution_prepacked(
         voutput,
         vinput,
         vweight,
-        hasBias ? c10::make_optional((*bias).data_ptr<float>()) : c10::nullopt,
+        hasBias ? c10::make_optional<const float*>((*bias).data_ptr<float>())
+                : c10::nullopt,
         params,
         output_min,
         output_max);

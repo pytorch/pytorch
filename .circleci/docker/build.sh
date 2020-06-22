@@ -139,7 +139,7 @@ case "$image" in
     PROTOBUF=yes
     ANDROID=yes
     ANDROID_NDK_VERSION=r19c
-    GRADLE_VERSION=6.5
+    GRADLE_VERSION=4.10.3
     CMAKE_VERSION=3.7.0
     NINJA_VERSION=1.9.0
     ;;

@@ -34,7 +34,7 @@ inline std::vector<int64_t> computeStrideForViewAsComplex(IntArrayRef oldstride)
   TORCH_CHECK(res[dim-1] == 1, "Tensor must have a last dimension with stride 1");
   res.pop_back();
 
-  for(size_t i = 0; i < res.size(); i++) {
+  for (auto i = decltype(res.size()){0}; i < res.size(); i++) {
     TORCH_CHECK(res[i] % 2 == 0, "Tensor must have a stride divisible by 2 for all but last dimension");
     res[i] = res[i] / 2;
   }
@@ -46,17 +46,17 @@ inline std::vector<int64_t> computeStrideForViewAsComplex(IntArrayRef oldstride)
 Tensor view_as_complex(const Tensor& self) {
   TORCH_CHECK(
     self.scalar_type() == kFloat || self.scalar_type() == kDouble,
-    "view_as_complex is only supported for float and double tensors");
+    "view_as_complex is only supported for float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
 
   auto new_sizes = self.sizes().vec();
   TORCH_CHECK(new_sizes[self.dim()-1] == 2, "Tensor must have a last dimension of size 2");
   new_sizes.pop_back();
 
-  auto new_strides = computeStrideForViewAsComplex(self.strides());
+  const auto new_strides = computeStrideForViewAsComplex(self.strides());
   const auto complex_type = c10::toComplexType(self.scalar_type());
 
   TORCH_CHECK(self.storage_offset() % 2 == 0, "Tensor must have a storage_offset divisible by 2");
-  auto new_storage_offset = self.storage_offset() / 2;
+  const auto new_storage_offset = self.storage_offset() / 2;
 
   return at::empty({0}, self.options().dtype(complex_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
 }
