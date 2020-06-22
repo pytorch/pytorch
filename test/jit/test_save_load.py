@@ -503,7 +503,7 @@ class TestSaveLoad(JitTestCase):
         current_module = self._save_load_module(MyModule)
         self._verify_count("aten::full", current_module, 2)
 
-        # Verifies historic integer type inference is float64
+        # Verifies historic integer type inference is float
         results = v4_module(2)
         for result in results:
             self.assertTrue(result.is_floating_point())
