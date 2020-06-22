@@ -3,10 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import unittest
-
 import numpy as np
-
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
@@ -27,16 +24,17 @@ GLOW_LOWERED_BATCHNORM = False
 
 # Test the lowered LayerNorm op
 class LayerNorm(serial.SerializedTestCase):
-    @unittest.skip("broken test")
-    @given(seed=st.integers(0, 65535),
-           size=st.integers(2, 8),
-           input_channels=st.integers(1, 4),
-           batch_size=st.integers(2, 8),
-           epsilon=st.floats(min_value=1e-5, max_value=1e-2))
-    @settings(max_examples=100)
-    def test_layernorm(self, seed, size, input_channels, batch_size, epsilon):
+
+    @given(seed=st.integers(0, 65535))
+    @settings(max_examples=10)
+    def test_layernorm(self, seed):
         np.random.seed(seed)
         # Reset the workspace
+        size = 4
+        input_channels = 4
+        batch_size = 1
+        axis = 1
+        epsilon = 1e-4
         workspace.ResetWorkspace()
 
         dims = np.array(([batch_size, input_channels, size, size]))
@@ -53,8 +51,9 @@ class LayerNorm(serial.SerializedTestCase):
                 "LayerNorm",
                 ["X", "gamma", "beta"],
                 ["Y", "mean", "rstd"],
-                # axis=-1,
-                epsilon=epsilon
+                axis=1,
+                epsilon=epsilon,
+                elementwise_affine=True
             )
         )
 
@@ -64,11 +63,12 @@ class LayerNorm(serial.SerializedTestCase):
         pred_net_ref.external_output.extend(["Y", "mean", "rstd"])
         pred_net_ref.op.add().CopyFrom(
             core.CreateOperator(
-                "LayerNormFakeFP16",
+                "LayerNormFakeFP16NNPI",
                 ["X", "gamma", "beta"],
                 ["Y", "mean", "rstd"],
-                # axis=-1,
-                epsilon=epsilon
+                axis=1,
+                epsilon=epsilon,
+                elementwise_affine=True
             )
         )
 
@@ -93,8 +93,6 @@ class LayerNorm(serial.SerializedTestCase):
 
         workspace.RunNet(pred_net_ref.name)
         Y_c2 = workspace.FetchBlob("Y")
-        mean_c2 = workspace.FetchBlob("mean")
-        std_c2 = workspace.FetchBlob("rstd")
 
         workspace.RunNet(pred_net_onnxified.name)
         Y_glow = workspace.FetchBlob("Y")
@@ -109,11 +107,10 @@ class LayerNorm(serial.SerializedTestCase):
                     "input_channels": input_channels,
                     "batch_size": batch_size,
                     "epsilon": epsilon,
+                    "axis": axis,
                     "X": X,
                     "Y_glow": Y_glow,
                     "Y_c2": Y_c2,
-                    "mean_c2": mean_c2,
-                    "std_c2": std_c2,
                     "diff_Y": diff_Y,
                 }
             )

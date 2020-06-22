@@ -277,7 +277,7 @@ TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDims) {
 
   ASSERT_EQ(
       physical_view.getPhysicalDims({0, 1, -1, -2}),
-      std::vector<int64_t>({3, 4, 4, 3}));
+      VmapDimVector({3, 4, 4, 3}));
 
   ASSERT_THROW(physical_view.getPhysicalDims({2, 0}), c10::Error);
   ASSERT_THROW(physical_view.getPhysicalDims({0, -3}), c10::Error);
@@ -324,13 +324,6 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
     ASSERT_TRUE(batched != nullptr);
     ASSERT_TRUE(batched->value().is_same(physical));
     checkBatchDimsEqual(batched->bdims(), {{2, 0}});
-  }
-  {
-    // Failure case: incompatible batch sizes
-    VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2 | 8 | 16);
-    ASSERT_THROW(physical_view.newLogicalFromPhysical(ones({2, 2, 4, 7})), c10::Error);
-    ASSERT_THROW(physical_view.newLogicalFromPhysical(ones({2, 3})), c10::Error);
-    ASSERT_THROW(physical_view.newLogicalFromPhysical(ones({2, 1, 1})), c10::Error);
   }
 }
 
@@ -380,5 +373,348 @@ TEST(VmapTest, TestBatchedTensorSum) {
   }
 }
 
+static void checkBroadcastingVmapTransform(TensorList inputs, TensorList expected_outputs) {
+  auto outputs = BroadcastingVmapTransform::logicalToPhysical(inputs);
+  ASSERT_EQ(outputs.size(), expected_outputs.size());
+  for (int64_t idx = 0; idx < outputs.size(); idx++) {
+    const auto& output = outputs[idx].tensor();
+    ASSERT_EQ(output.data_ptr(), expected_outputs[idx].data_ptr());
+    ASSERT_TRUE(at::allclose(output, expected_outputs[idx]));
+  }
+}
+
+TEST(VmapTest, TestBroadcastingVmapTransformBatchedBatched) {
+  {
+    // Check that batch dims get moved to the front
+    int64_t B0 = 5, B1 = 7;
+    Tensor x = at::randn({2, B0, 3, B1});
+    Tensor y = at::randn({B1, 2, 3, B0});
+    Tensor batched_x = makeBatched(x, {{0, 1}, {1, 3}});
+    Tensor batched_y = makeBatched(y, {{0, 3}, {1, 0}});
+
+    checkBroadcastingVmapTransform(
+        {batched_x, batched_y},
+        {x.permute({1, 3, 0, 2}), y.permute({3, 0, 1, 2})});
+  }
+  {
+    // Check that batch dims become aligned (i.e. extra 1 dims get added)
+    int64_t B0 = 5, B1 = 7, B2 = 9;
+    Tensor x = at::randn({B0, B2, 2, 3});
+    Tensor y = at::randn({B0, B1, 2, 3});
+    Tensor batched_x = makeBatched(x, {{0, 0}, {2, 1}});
+    Tensor batched_y = makeBatched(y, {{0, 0}, {1, 1}});
+
+    checkBroadcastingVmapTransform(
+        {batched_x, batched_y},
+        {x.unsqueeze(1), y.unsqueeze(2)});
+  }
+  {
+    // Check that the "example" gets padded with extra dims of size 1.
+    int64_t B0 = 5;
+    Tensor x = at::randn({B0, 3});
+    Tensor y = at::randn({B0, 2, 3});
+    Tensor batched_x = makeBatched(x, {{0, 0}});
+    Tensor batched_y = makeBatched(y, {{0, 0}});
+
+    checkBroadcastingVmapTransform(
+        {batched_x, batched_y},
+        {x.unsqueeze(1), y});
+  }
+  {
+    // Check batch dims get moved to front, batch dims get aligned,
+    // and the example gets padded correctly.
+    int64_t B0 = 5, B1 = 7, B2 = 11, B3 = 13;
+    Tensor x = at::randn({2, B0, 3, B2});
+    Tensor y = at::randn({B3, 3, B1});
+    Tensor batched_x = makeBatched(x, {{0, 1}, {2, 3}});
+    Tensor batched_y = makeBatched(y, {{1, 2}, {3, 0}});
+
+    checkBroadcastingVmapTransform(
+        {batched_x, batched_y},
+        {
+          x.permute({1, 3, 0, 2}).view({B0, 1, B2, 1, 2, 3}),
+          y.permute({2, 0, 1}).view({1, B1, 1, B3, 1, 3}),
+        });
+  }
+  {
+    // Edge case: BatchedTensor "scalar" handling
+    int64_t B0 = 5, B2 = 11;
+    Tensor x = at::randn({B0});
+    Tensor y = at::randn({B0, B2});
+    Tensor batched_x = makeBatched(x, {{0, 0}});
+    Tensor batched_y = makeBatched(y, {{0, 0}, {1, 1}});
+
+    checkBroadcastingVmapTransform({batched_x, batched_y}, {x.view({B0, 1}), y});
+    checkBroadcastingVmapTransform({batched_y, batched_x}, {y, x.view({B0, 1})});
+  }
+  {
+    // Edge case: Only one tensor is a "batchedtensor scalar"
+    int64_t B0 = 5, B2 = 11;
+    Tensor x = at::randn({B0});
+    Tensor y = at::randn({B0, B2, 2});
+    Tensor batched_x = makeBatched(x, {{0, 0}});
+    Tensor batched_y = makeBatched(y, {{0, 0}, {1, 1}});
+
+    checkBroadcastingVmapTransform({batched_x, batched_y}, {x.view({B0, 1, 1}), y});
+    checkBroadcastingVmapTransform({batched_y, batched_x}, {y, x.view({B0, 1, 1})});
+  }
+}
+
+TEST(VmapTest, TestBroadcastingVmapTransformBatchedUnbatched) {
+  {
+    // Check same example size
+    int64_t B0 = 5, B1 = 7;
+    Tensor x = at::randn({2, B0, 3, B1});
+    Tensor y = at::randn({2, 3});
+    Tensor batched_x = makeBatched(x, {{0, 1}, {1, 3}});
+
+    checkBroadcastingVmapTransform(
+        {batched_x, y},
+        {x.permute({1, 3, 0, 2}), y.view({1, 1, 2, 3})});
+    checkBroadcastingVmapTransform(
+        {y, batched_x},
+        {y.view({1, 1, 2, 3}), x.permute({1, 3, 0, 2})});
+  }
+  {
+    // BatchedTensor has higher example dim than non-batched-tensor
+    int64_t B0 = 5, B1 = 7;
+    Tensor x = at::randn({B0, B1, 2, 3});
+    Tensor y = at::randn({3});
+    Tensor batched_x = makeBatched(x, {{0, 0}, {1, 1}});
+
+    checkBroadcastingVmapTransform(
+        {batched_x, y}, {x, y.view({1, 1, 1, 3})});
+    checkBroadcastingVmapTransform(
+        {y, batched_x}, {y.view({1, 1, 1, 3}), x});
+  }
+  {
+    // BatchedTensor has lower example dim than non-batched-tensor
+    int64_t B0 = 5, B1 = 7;
+    Tensor x = at::randn({B0, B1, 3});
+    Tensor y = at::randn({2, 3});
+    Tensor batched_x = makeBatched(x, {{0, 0}, {1, 1}});
+
+    checkBroadcastingVmapTransform(
+        {batched_x, y}, {x.view({B0, B1, 1, 3}), y.view({1, 1, 2, 3})});
+    checkBroadcastingVmapTransform(
+        {y, batched_x}, {y.view({1, 1, 2, 3}), x.view({B0, B1, 1, 3})});
+  }
+  {
+    // Scalar handling
+    int64_t B0 = 5, B1 = 7;
+    Tensor x = at::randn({B0, B1});
+    Tensor y = at::randn({});
+    Tensor batched_x = makeBatched(x, {{0, 0}, {1, 1}});
+
+    checkBroadcastingVmapTransform({batched_x, y}, {x, y.view({1, 1})});
+    checkBroadcastingVmapTransform({y, batched_x}, {y.view({1, 1}), x});
+  }
+}
+
+TEST(VmapTest, TestBroadcastingVmapTransformMaxLevels) {
+  {
+    // inputs have all 64 levels
+    auto x = randn(std::vector<int64_t>(kVmapNumLevels, 1));
+    auto y = randn(std::vector<int64_t>(kVmapNumLevels, 1));
+    auto batched_x = makeBatched(x, maxBatchDimsAtFront());
+    auto batched_y = makeBatched(y, maxBatchDimsAtFront());
+
+    checkBroadcastingVmapTransform({batched_x, batched_y}, {x, y});
+  }
+  {
+    // inputs don't have all 64 levels, but results do.
+    int64_t split = 19;
+    auto x = randn(std::vector<int64_t>(split, 1));
+    auto y = randn(std::vector<int64_t>(kVmapNumLevels - split, 1));
+
+    auto tmp = maxBatchDimsAtFront();
+    BatchDims x_bdims(tmp.begin(), tmp.begin() + split);
+
+    // Construct y_bdims.
+    int64_t dim = 0;
+    auto y_bdims_vector = fmap(
+        ArrayRef<BatchDim>(tmp.begin() + split, tmp.end()),
+        [&](const BatchDim& bdim) -> BatchDim {
+          return { bdim.level(), dim++ };
+        });
+    BatchDims y_bdims(y_bdims_vector.begin(), y_bdims_vector.end());
+
+    auto batched_x = makeBatched(x, x_bdims);
+    auto batched_y = makeBatched(y, y_bdims);
+
+    auto expected_size = std::vector<int64_t>(kVmapNumLevels, 1);
+    checkBroadcastingVmapTransform(
+        {batched_x, batched_y},
+        {x.view(expected_size), y.view(expected_size)});
+  }
+}
+
+// Basic test for BatchedTensor::mul.
+TEST(VmapTest, TestBatchedTensorMul) {
+  {
+    // batched * batched
+    Tensor x = at::randn({2, 3});
+    Tensor y = at::randn({2, 3});
+
+    Tensor Bx = addBatchDim(x, /*lvl*/1, /*dim*/0);
+    Tensor By = addBatchDim(y, /*lvl*/1, /*dim*/0);
+    Tensor Bout = Bx * By;
+
+    const auto& out = maybeGetBatched(Bout)->value();
+    std::vector<int64_t> expected_size = {2, 3};
+    ASSERT_EQ(out.sizes(), expected_size);
+    ASSERT_TRUE(at::allclose(out, x * y));
+  }
+  {
+    // batched * unbatched
+    Tensor x = at::randn({2, 3});
+    Tensor y = at::randn({3});
+
+    Tensor Bx = addBatchDim(x, /*lvl*/1, /*dim*/0);
+    Tensor Bout = Bx * y;
+    const auto& out = maybeGetBatched(Bout)->value();
+    std::vector<int64_t> expected_size = {2, 3};
+    ASSERT_EQ(out.sizes(), expected_size);
+    ASSERT_TRUE(at::allclose(out, x * y));
+  }
+  {
+    // batched (level 1) * batched (level 2)
+    Tensor x = at::randn({2, 3});
+    Tensor y = at::randn({5, 3});
+
+    Tensor Bx = addBatchDim(x, /*lvl*/1, /*dim*/0);
+    Tensor By = addBatchDim(y, /*lvl*/2, /*dim*/0);
+    Tensor Bout = Bx * By;
+
+    // We get a doubly wrapped BatchTensor...
+    const auto& out = maybeGetBatched(Bout)->value();
+    std::vector<int64_t> expected_size = {2, 5, 3};
+    ASSERT_EQ(out.sizes(), expected_size);
+    ASSERT_TRUE(at::allclose(out, x.unsqueeze(1) * y));
+  }
+  {
+    // batched (level 2, 3, 4) * batched (level 3, 1, 2)
+    Tensor x = at::randn({3, 5, 7});
+    Tensor y = at::randn({5, 2, 3});
+
+    // Each BatchDim is constructed in {dim, level} format.
+    Tensor Bx = makeBatched(x, {{2, 0}, {3, 1}, {4, 2}});
+    Tensor By = makeBatched(y, {{1, 1}, {2, 2}, {3, 0}});
+    Tensor Bout = Bx * By;
+
+    const auto& out = maybeGetBatched(Bout)->value();
+
+    // The batching rule aligns dimensions in the order of their `level`.
+    // It just happened that we chose sizes to be in the same order as the level.
+    std::vector<int64_t> expected_size = {2, 3, 5, 7};
+    ASSERT_EQ(out.sizes(), expected_size);
+    ASSERT_TRUE(at::allclose(out, x * y.permute({1, 2, 0}).unsqueeze(3)));
+  }
+}
+
+// test for BatchedTensor::size(int).
+TEST(VmapTest, TestBatchedTensorSize) {
+  {
+    // Single batch dim at front
+    Tensor x = at::randn({3, 5, 7});
+    Tensor Bx = makeBatched(x, {{0, 0}});
+
+    ASSERT_EQ(Bx.size(0), 5);
+    ASSERT_EQ(Bx.size(1), 7);
+    ASSERT_EQ(Bx.size(-1), 7);
+    ASSERT_EQ(Bx.size(-2), 5);
+    ASSERT_THROW(Bx.size(2), c10::Error);
+    ASSERT_THROW(Bx.size(-3), c10::Error);
+  }
+  {
+    // multiple batch dims not at front
+    Tensor x = at::randn({2, 3, 5, 7, 11});
+    Tensor Bx = makeBatched(x, {{0, 3}, {1, 1}});
+
+    ASSERT_EQ(Bx.size(0), 2);
+    ASSERT_EQ(Bx.size(1), 5);
+    ASSERT_EQ(Bx.size(2), 11);
+    ASSERT_EQ(Bx.size(-1), 11);
+    ASSERT_EQ(Bx.size(-2), 5);
+    ASSERT_EQ(Bx.size(-3), 2);
+    ASSERT_THROW(Bx.size(3), c10::Error);
+    ASSERT_THROW(Bx.size(-4), c10::Error);
+  }
+}
+
+TEST(VmapTest, TestVmapPhysicalViewGetPhysicalShape) {
+  {
+    VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 1 | 4);
+    ASSERT_EQ(physical_view.getPhysicalShape({}), VmapDimVector({2, 3}));
+    ASSERT_EQ(physical_view.getPhysicalShape({7}), VmapDimVector({2, 3, 7}));
+    ASSERT_EQ(physical_view.getPhysicalShape({7, 11, 13}), VmapDimVector({2, 3, 7, 11, 13}));
+    ASSERT_EQ(physical_view.getPhysicalShape({7, 11, 13, 17}), VmapDimVector({2, 3, 7, 11, 13, 17}));
+  }
+  {
+    VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2);
+    ASSERT_EQ(physical_view.getPhysicalShape({}), VmapDimVector({2}));
+    ASSERT_EQ(physical_view.getPhysicalShape({7}), VmapDimVector({2, 7}));
+  }
+}
+
+// Basic test for BatchedTensor::expand
+TEST(VmapTest, TestBatchedTensorExpand) {
+  {
+    // Expand size is too small
+    auto tensor = at::randn({2, 3, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    ASSERT_THROW(batched.expand({5}), c10::Error);
+  }
+  {
+    // Expand size has same dimensionality as the logical dim
+    auto tensor = at::randn({2, 1, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto batched_out = batched.expand({3, 5});
+    const auto& out = maybeGetBatched(batched_out)->value();
+
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.expand({2, 3, 5})));
+  }
+  {
+    // Expand size has same dimensionality as the logical dim, incorrect expand size
+    auto tensor = at::randn({2, 1, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    ASSERT_THROW(batched.expand({1, 25}), c10::Error);
+  }
+  {
+    // Expand size has greater dimensionality as the logical dim
+    auto tensor = at::randn({2, 3, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto batched_out = batched.expand({7, 3, 5});
+    const auto& out = maybeGetBatched(batched_out)->value();
+
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.view({2, 1, 3, 5}).expand({2, 7, 3, 5})));
+  }
+  {
+    // Expand size has greater dimensionality as the logical dim, incorrect expand size
+    auto tensor = at::randn({2, 3, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    ASSERT_THROW(batched.expand({7, 9, 5}), c10::Error);
+  }
+  {
+    // logical dim is 0, expand size has same dimensionality as logical dim
+    auto tensor = at::randn({2, 3});
+    auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
+    auto batched_out = batched.expand({});
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor));
+  }
+  {
+    // logical dim is 0, expand size has greater dimensionality than logical dim
+    auto tensor = at::randn({2, 3});
+    auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
+    auto batched_out = batched.expand({5, 7});
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.view({2, 3, 1, 1}).expand({2, 3, 5, 7})));
+  }
+}
 
 }

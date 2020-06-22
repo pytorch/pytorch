@@ -6,6 +6,7 @@ import numpy as np
 import unittest
 
 import torch
+from torch import _VF
 import torch.jit
 import torch.nn.functional as F
 from torch.nn.modules.utils import _single, _pair
@@ -305,34 +306,23 @@ class TestQuantizedOps(TestCase):
            alpha=st.floats(0.01, 10.0, allow_nan=False, allow_infinity=False))
     def test_qelu(self, X, alpha):
         X, (scale, zero_point, torch_type) = X
+        output_scale = 0.5
+        output_zero_point = 1
 
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
-        op = torch.nn.quantized.functional.elu
 
         # calculate ELU(dqX) and quantize
         dqX = qX.dequantize()
         dqY_hat = dqX.clone()
-        dqY_hat[dqX < 0] = alpha * (torch.exp(dqY_hat[dqX < 0]) - 1.)
-        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=scale, zero_point=zero_point,
+        dqY_hat = torch.nn.functional.elu(dqX, alpha)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale, zero_point=output_zero_point,
                                            dtype=torch_type)
 
-        # test regular
-        qY = op(qX, alpha=alpha)
+        qY = torch.nn.quantized.functional.elu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
                          msg="F.elu failed ({} vs {})".format(qY, qY_hat))
-
-        # test inplace
-        qXcopy = qX.clone()
-        op(qXcopy, alpha=alpha, inplace=True)
-        self.assertEqual(qXcopy, qY_hat,
-                         msg="F.elu_ failed ({} vs {})".format(qXcopy, qY_hat))
-
-        # test explicit scale and zp
-        qYout = op(qX, alpha=alpha, scale=scale, zero_point=zero_point)
-        self.assertEqual(qYout, qY_hat,
-                         msg="F.elu.out failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
@@ -342,14 +332,17 @@ class TestQuantizedOps(TestCase):
         torch_types = (torch.qint8, torch.quint8)
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
-        channels_last = (True, False)
-        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last]
+        channels_last_list = (True, False)
+        affine_list = (True, False)
+        combined = [side_lens, torch_types, y_scales, y_zero_points,
+                    channels_last_list, affine_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                side_len, torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                side_len, torch_type, Y_scale, Y_zero_point, channels_last, \
+                    affine = test_case
                 shapes = [side_len] * 4
 
                 # In the FP kernel, mean and variance are calculated in floating point.
@@ -390,8 +383,12 @@ class TestQuantizedOps(TestCase):
 
                 # Initialize the weights non-randomly for reproducibility, to avoid
                 # flaky tests
-                weight = torch.ones(*qX.size()[1:], dtype=torch.float) * 0.5
-                bias = torch.ones(*qX.size()[1:], dtype=torch.float) * 1
+                if affine:
+                    weight = torch.ones(*qX.size()[1:], dtype=torch.float) * 0.5
+                    bias = torch.ones(*qX.size()[1:], dtype=torch.float) * 1
+                else:
+                    weight = None
+                    bias = None
                 epsilon = 1e-5
 
                 qY = torch.ops.quantized.layer_norm(
@@ -1680,15 +1677,17 @@ class TestQuantizedOps(TestCase):
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
         channels_last_list = [True, False]
+        affine_list = [True, False]
         combined = [batches_list, num_groups_list, channels_per_groups, elements_per_channels,
-                    torch_types, y_scales, y_zero_points, channels_last_list]
+                    torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
                 batches, num_groups, channels_per_group, elements_per_channel, \
-                    torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                    torch_type, Y_scale, Y_zero_point, channels_last, \
+                    affine = test_case
                 num_channels = num_groups * channels_per_group
                 # minimum rank for for channels_last
                 shapes = (batches, num_channels, elements_per_channel, 1)
@@ -1714,11 +1713,15 @@ class TestQuantizedOps(TestCase):
                     _get_random_tensor_and_q_params(shapes, 1.0, torch_type)
 
                 # Initialize the weights non-randomly for reproducibility
-                weight = torch.ones(num_channels).float() * 0.5
-                bias = torch.ones(num_channels).float()
-                for i in range(num_channels):
-                    weight[i] *= i
-                    bias[i] *= i
+                if affine:
+                    weight = torch.ones(num_channels).float() * 0.5
+                    bias = torch.ones(num_channels).float()
+                    for i in range(num_channels):
+                        weight[i] *= i
+                        bias[i] *= i
+                else:
+                    weight = None
+                    bias = None
 
                 eps = 0.001
 
@@ -1766,13 +1769,14 @@ class TestQuantizedOps(TestCase):
         y_scales = (0.1, 4.23)
         y_zero_points = (0, 1)
         channels_last_list = (True, False)
-        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last_list]
+        affine_list = (True, False)
+        combined = [side_lens, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
         test_cases = itertools.product(*combined)
 
         with override_quantized_engine("fbgemm"):
             for test_case in test_cases:
 
-                side_len, torch_type, Y_scale, Y_zero_point, channels_last = test_case
+                side_len, torch_type, Y_scale, Y_zero_point, channels_last, affine = test_case
                 shapes = [side_len] * 4
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
@@ -1796,11 +1800,15 @@ class TestQuantizedOps(TestCase):
                     _get_random_tensor_and_q_params(shapes, 1.0, torch_type)
 
                 num_channels = shapes[1]
-                weight = torch.rand(num_channels).float() * 0.5
-                bias = torch.rand(num_channels).float()
-                for i in range(num_channels):
-                    weight[i] *= i
-                    bias[i] *= i
+                if affine:
+                    weight = torch.rand(num_channels).float() * 0.5
+                    bias = torch.rand(num_channels).float()
+                    for i in range(num_channels):
+                        weight[i] *= i
+                        bias[i] *= i
+                else:
+                    weight = None
+                    bias = None
                 eps = 0.001
 
                 qX = torch.quantize_per_tensor(X, X_scale, X_zero_point, torch_type)
@@ -2011,8 +2019,10 @@ class TestQuantizedOps(TestCase):
         result = torch.ops.quantized.linear(qX, w_packed, 1.0, 0)
         self.assertEqual(result.shape, (0, 2))
 
+
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
+    @override_qengines
     @given(
         batch_size=st.integers(1, 4),
         input_channels=st.integers(16, 32),
@@ -2022,7 +2032,6 @@ class TestDynamicQuantizedLinear(TestCase):
         use_multi_dim_input=st.booleans(),
         use_channelwise=st.booleans(),
         reduce_range=st.booleans())
-    @override_qengines
     def test_qlinear(self, batch_size, input_channels, output_channels,
                      use_bias, use_relu, use_multi_dim_input, use_channelwise, reduce_range):
         if torch.backends.quantized.engine == 'qnnpack':
@@ -2127,6 +2136,231 @@ class TestDynamicQuantizedLinear(TestCase):
             Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          msg="torch.ops.quantized.linear_dynamic results are off")
+
+class TestDynamicQuantizedRNNOp(TestCase):
+    """Tests the correctness of the dynamic quantized lstm/gru."""
+
+    def _get_rnn_inputs(self, seq_len, num_batches, input_size, hidden_size, num_directions):
+        # For Input (seq_len, batch, input_size)
+        X = torch.randn(seq_len, num_batches, input_size)
+        s, z = _calculate_dynamic_qparams(X, torch.quint8, reduce_range=True)
+        Xq = torch.quantize_per_tensor(X, s, z, torch.quint8)
+
+        # For H and C: (num_layers(1) * num_directions, batch, hidden_size)
+
+        if num_directions == 1:
+            H = torch.randn(num_directions, num_batches, hidden_size)
+            C = torch.randn(num_directions, num_batches, hidden_size)
+        else:
+            H = torch.zeros(num_directions, num_batches, hidden_size)
+            C = torch.zeros(num_directions, num_batches, hidden_size)
+
+        s, z = _calculate_dynamic_qparams(H, torch.quint8, reduce_range=True)
+        Hq = torch.quantize_per_tensor(H, s, z, torch.quint8)
+        s, z = _calculate_dynamic_qparams(C, torch.quint8, reduce_range=True)
+        Cq = torch.quantize_per_tensor(C, s, z, torch.quint8)
+        return Xq, Hq, Cq
+
+    def _get_rnn_weights_and_bias(self, input_size, hidden_size, num_directions, per_channel_quant, rnn_type):
+        hidden_mult_map = {'LSTM': 4, 'LSTMCell': 4, 'GRU': 3, 'GRUCell': 3, 'RNNTanh': 2, 'RNNReLU': 2}
+        hidden_mult = hidden_mult_map[rnn_type]
+        weights1 = torch.randn(hidden_mult * hidden_size, input_size)
+        weights2 = torch.randn(hidden_mult * hidden_size, hidden_size)
+        scale1 = 0.1 * torch.ones([weights1.size()[0]])
+        scale2 = 0.3 * torch.ones([weights2.size()[0]])
+        zero_point1 = torch.zeros(scale1.size()).to(int)
+        zero_point2 = torch.zeros(scale2.size()).to(int)
+        b1 = torch.zeros(hidden_mult * hidden_size)
+        if per_channel_quant:
+            Wq1 = torch.quantize_per_channel(weights1, scale1, zero_point1, 0, torch.qint8)
+            Wq2 = torch.quantize_per_channel(weights2, scale2, zero_point2, 0, torch.qint8)
+
+        else:
+            Wq1 = torch.quantize_per_tensor(weights1, float(scale1[0]), int(zero_point1[0]), torch.qint8)
+            Wq2 = torch.quantize_per_tensor(weights2, float(scale2[0]), int(zero_point2[0]), torch.qint8)
+        return Wq1, Wq2, b1, b1
+
+    @given(
+        num_batches=st.integers(1, 4),
+        input_size=st.integers(16, 32),
+        hidden_size=st.integers(4, 8),
+        num_directions=st.integers(1, 2),
+        per_channel_quant=st.booleans())
+    @override_qengines
+    def test_qlstmGRU(self, num_batches, input_size, hidden_size,
+                      num_directions, per_channel_quant):
+        # We test only for seq length of 1 and num layers of 1 as dynamic quantization occurs multiple times
+        # within the LSTM op and we do not model the quantization between multiple calls of the linear op within the
+        # lstm op
+        seq_len = 1
+
+        for rnn_type in ['LSTM', 'GRU']:
+            for dtype in [torch.qint8, torch.float16]:
+                # Fp16 quantization is not supported for qnnpack
+                if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
+                    continue
+
+                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, num_directions)
+                Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size,
+                                                                  hidden_size,
+                                                                  num_directions,
+                                                                  per_channel_quant,
+                                                                  rnn_type)
+                if dtype == torch.qint8:
+                    packed_ih = torch.ops.quantized.linear_prepack(Wq1, b1)
+                    packed_hh = torch.ops.quantized.linear_prepack(Wq2, b2)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_dynamic(packed_ih, packed_hh, b1, b2, True)
+                    W_ref1 = Wq1.dequantize()
+                    W_ref2 = Wq2.dequantize()
+
+                else:
+                    packed_ih = torch.ops.quantized.linear_prepack_fp16(Wq1.dequantize(), b1)
+                    packed_hh = torch.ops.quantized.linear_prepack_fp16(Wq2.dequantize(), b2)
+                    cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(packed_ih, packed_hh)
+                    W_ref1 = Wq1.dequantize().to(torch.float16).to(torch.float32)
+                    W_ref2 = Wq2.dequantize().to(torch.float16).to(torch.float32)
+
+                if rnn_type == 'LSTM':
+                    if num_directions > 1:
+                        result_ref = _VF.lstm(Xq.dequantize(),
+                                              (Hq.dequantize(), Cq.dequantize()),
+                                              [W_ref1, W_ref2, b1, b2, W_ref1, W_ref2, b1, b2],
+                                              True,
+                                              1,
+                                              0,
+                                              False,
+                                              num_directions > 1,
+                                              False)
+
+                        result_dynamic = torch.quantized_lstm(Xq.dequantize(),
+                                                              (Hq.dequantize(), Cq.dequantize()),
+                                                              ([cell_params, cell_params]),
+                                                              True,
+                                                              1,
+                                                              0,
+                                                              False,
+                                                              True,
+                                                              False,
+                                                              dtype=torch.qint8,
+                                                              use_dynamic=True)
+                    else:
+                        result_ref = _VF.lstm(Xq.dequantize(),
+                                              (Hq.dequantize(), Cq.dequantize()),
+                                              [W_ref1, W_ref2, b1, b2],
+                                              True,
+                                              1,
+                                              0,
+                                              False,
+                                              num_directions > 1,
+                                              False)
+
+                        result_dynamic = torch.quantized_lstm(Xq.dequantize(),
+                                                              (Hq.dequantize(), Cq.dequantize()),
+                                                              ([cell_params]),
+                                                              True,
+                                                              1,
+                                                              0,
+                                                              False,
+                                                              num_directions > 1,
+                                                              False,
+                                                              dtype=torch.qint8,
+                                                              use_dynamic=True)
+
+                if rnn_type == 'GRU':
+                    if num_directions > 1:
+                        result_ref = _VF.gru(Xq.dequantize(),
+                                             Hq.dequantize(),
+                                             [W_ref1, W_ref2, b1, b2, W_ref1, W_ref2, b1, b2],
+                                             True,
+                                             1,
+                                             0,
+                                             False,
+                                             True,
+                                             False)
+
+                        result_dynamic = torch.quantized_gru(Xq.dequantize(),
+                                                             Hq.dequantize(),
+                                                             ([cell_params, cell_params]),
+                                                             True,
+                                                             1,
+                                                             0,
+                                                             False,
+                                                             True,
+                                                             False)
+                    else:
+                        result_ref = _VF.gru(Xq.dequantize(),
+                                             Hq.dequantize(),
+                                             [W_ref1, W_ref2, b1, b2],
+                                             True,
+                                             1,
+                                             0,
+                                             False,
+                                             False,
+                                             False)
+
+                        result_dynamic = torch.quantized_gru(Xq.dequantize(),
+                                                             Hq.dequantize(),
+                                                             ([cell_params]),
+                                                             True,
+                                                             1,
+                                                             0,
+                                                             False,
+                                                             False,
+                                                             False)
+
+
+                self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_lstm results are off")
+
+    @given(
+        num_batches=st.integers(1, 4),
+        input_size=st.integers(16, 32),
+        hidden_size=st.integers(4, 8),
+        per_channel_quant=st.booleans())
+    @override_qengines
+    def test_qrnncell(self, num_batches, input_size, hidden_size, per_channel_quant):
+        # We test only for seq length of 1 and num layers of 1 as dynamic quantization occurs multiple times
+        # within the LSTM op and we do not model the quantization between multiple calls of the linear op within the
+        # lstm op
+        seq_len = 1
+
+        for rnn_type in ['LSTMCell', 'GRUCell', 'RNNTanh', 'RNNReLU']:
+            for dtype in [torch.qint8, torch.float16]:
+                # Fp16 quantization is not supported for qnnpack
+                if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
+                    continue
+
+                Xq, Hq, Cq = self._get_rnn_inputs(seq_len, num_batches, input_size, hidden_size, 1)
+                Wq1, Wq2, b1, b2 = self._get_rnn_weights_and_bias(input_size, hidden_size, 1, per_channel_quant, rnn_type)
+                if dtype == torch.qint8:
+                    packed_ih = torch.ops.quantized.linear_prepack(Wq1, b1)
+                    packed_hh = torch.ops.quantized.linear_prepack(Wq2, b2)
+                    W_ref1 = Wq1.dequantize()
+                    W_ref2 = Wq2.dequantize()
+                else:
+                    packed_ih = torch.ops.quantized.linear_prepack_fp16(Wq1.dequantize(), b1)
+                    packed_hh = torch.ops.quantized.linear_prepack_fp16(Wq2.dequantize(), b2)
+                    W_ref1 = Wq1.dequantize().to(torch.float16).to(torch.float32)
+                    W_ref2 = Wq2.dequantize().to(torch.float16).to(torch.float32)
+
+                state = {'LSTMCell': (Hq.dequantize()[0], Cq.dequantize()[0]),
+                         'GRUCell': Hq.dequantize()[0],
+                         'RNNTanh': Hq.dequantize()[0],
+                         'RNNReLU': Hq.dequantize()[0]}
+                fn_dict = {'LSTMCell': torch._VF.lstm_cell,
+                           'GRUCell': torch._VF.gru_cell,
+                           'RNNTanh': torch._VF.rnn_tanh_cell,
+                           'RNNReLU': torch._VF.rnn_relu_cell}
+                qfn_dict = {'LSTMCell': torch.ops.quantized.quantized_lstm_cell_dynamic,
+                            'GRUCell': torch.ops.quantized.quantized_gru_cell_dynamic,
+                            'RNNTanh': torch.ops.quantized.quantized_rnn_tanh_cell_dynamic,
+                            'RNNReLU': torch.ops.quantized.quantized_rnn_relu_cell_dynamic}
+                W_ref_dict = {torch.float16: (Wq1.dequantize().to(torch.float16).to(torch.float32),
+                                              Wq2.dequantize().to(torch.float16).to(torch.float32)),
+                              torch.qint8: (Wq1.dequantize(), Wq2.dequantize())}
+
+                result_ref = fn_dict[rnn_type](Xq.dequantize()[0], state[rnn_type], W_ref1, W_ref2, b1, b2)
+                result_dynamic = qfn_dict[rnn_type](Xq.dequantize()[0], state[rnn_type], packed_ih, packed_hh, b1, b2)
+                self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_rnncell results are off")
 
     @skipIfNoFBGEMM
     @given(

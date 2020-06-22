@@ -846,6 +846,23 @@ void initJitScriptBindings(PyObject* module) {
     }
   }
 
+  struct DeepCopyMemoTable {
+    std::shared_ptr<IValue::HashAliasedIValueMap> map;
+  };
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
+
+  object_class.def(
+      "__deepcopy__", [](const Object& self, const py::dict& memo) {
+        if (!memo.contains(py::str("__torch_script_memo_table"))) {
+          memo["__torch_script_memo_table"] = DeepCopyMemoTable{
+              std::make_shared<IValue::HashAliasedIValueMap>()};
+        }
+        auto& ivalue_memo =
+            *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;
+        return Object(IValue(self._ivalue()).deepcopy(ivalue_memo).toObject());
+      });
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
@@ -1008,8 +1025,7 @@ void initJitScriptBindings(PyObject* module) {
            std::shared_ptr<mobile::CompilationUnit>>())
       .def(
           "find_method",
-          [](mobile::Module& m,
-             const std::string& method_name) {
+          [](mobile::Module& m, const std::string& method_name) {
             auto method = m.find_method(method_name);
             return method != nullptr;
           },
@@ -1063,7 +1079,11 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& src,
              ResolutionCallback rcb) {
             cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
-          });
+          })
+      .def(
+          "get_interface",
+          [](const std::shared_ptr<CompilationUnit>& self,
+             const std::string& name) { return self->get_interface(name); });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
