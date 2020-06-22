@@ -252,7 +252,6 @@ class TestONNXOpset(TestCase):
 
         ops = [{"op_name" : "Constant"},
                {"op_name" : "ConstantOfShape"},
-               {"op_name" : "Cast"},
                {"op_name" : "Add"}]
         ops = {9 : ops, 10 : ops}
         x = torch.tensor(12.)
