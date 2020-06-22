@@ -375,12 +375,11 @@ class DistributedDataParallel(Module):
             # TODO: we don't need to replicate params in here. they're always going to
             # be broadcasted using larger blocks in broadcast_coalesced, so it might be
             # better to not pollute the caches with these small blocks
-
             print("before replicate, rank = ", self.rank_from_test, flush=True)
             self._module_copies = replicate(self.module, self.device_ids, detach=True)
             for dev in self.device_ids:
+                torch.cuda.synchronize(dev)
                 print("after replicate, synced with {}, rank = {}".format(dev, self.rank_from_test), flush=True)
-
             self._module_copies[0] = self.module
 
             for module_copy in self._module_copies[1:]:
@@ -442,12 +441,16 @@ class DistributedDataParallel(Module):
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they
         # are used in the forward pass in the order they are defined.
+        print("before reducer", flush=True)
         self.reducer = dist.Reducer(
             parameters,
             list(reversed(bucket_indices)),
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap)
+        for dev in self.device_ids:
+            torch.cuda.synchronize(dev)
+            print("after Reducer, synced with {}, rank = {}".format(dev, self.rank_from_test), flush=True)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
