@@ -674,6 +674,35 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 msg="InstanceNorm module API failed, qY_ref\n{} vs qY\n{}"
                 .format(qY_ref, qY))
 
+    def test_elu(self):
+        """Tests the correctness of the ELU module.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+        alpha = 1.5
+
+        dims = (1, 4, 8)
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = torch.nn.ELU(alpha).float()
+
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = nnq.ELU(y_scale, y_zero_point, alpha)
+        qY = quant_mod(qX)
+
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         msg="ELU module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
+
 class TestDynamicQuantizedModule(QuantizationTestCase):
     @given(
         batch_size=st.integers(1, 5),
@@ -774,56 +803,29 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         """
         # Check that module matches the numerics of the op and ensure that module can be
         # instantiated for all engines and dtypes
-        def check_serialization(ref_model, loaded_model):
-            model_dict = ref_model.state_dict()
-            b = io.BytesIO()
-            torch.save(model_dict, b)
-            b.seek(0)
-            loaded_dict = torch.load(b)
-            loaded_model.load_state_dict(loaded_dict)
-            x = torch.randn(10, 20, 3)
-            ref_out = ref_model(x)
-            load_out = loaded_model(x)
-            self.assertEqual(ref_out[0], load_out[0])
-            self.assertEqual(ref_out[1][0], load_out[1][0])
-            self.assertEqual(ref_out[1][1], load_out[1][1])
-            b = io.BytesIO()
-            torch.save(ref_model, b)
-            b.seek(0)
-            loaded = torch.load(b)
-
-            load_out = loaded(x)
-            self.assertEqual(ref_out[0], load_out[0])
-            self.assertEqual(ref_out[1][0], load_out[1][0])
-            self.assertEqual(ref_out[1][1], load_out[1][1])
-
-        def check_weight_bias_api(ref_model):
-            weight = ref_model.get_weight()
-            bias = ref_model.get_bias()
-            num_directions = 2 if ref_model.bidirectional else 1
-
-            for layer in range(ref_model.num_layers):
-                for direction in range(num_directions):
-                    suffix = '_reverse' if direction == 1 else ''
-                    key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                    key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                    assert key_name1 in weight
-                    assert key_name2 in weight
-                    key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                    key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                    assert key_name1 in bias
-                    assert key_name2 in bias
-
+        seq_len = 4
+        batch = 2
+        input_size = 3
+        hidden_size = 7
+        num_layers = 2
+        bias = True
+        weight_keys = []
+        bias_keys = []
+        num_directions = 2 if bidirectional else 1
+        for layer in range(num_layers):
+            for direction in range(num_directions):
+                suffix = '_reverse' if direction == 1 else ''
+                key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                weight_keys.append(key_name1)
+                weight_keys.append(key_name2)
+                key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                bias_keys.append(key_name1)
+                bias_keys.append(key_name2)
 
         if not (dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack"):
             # fp16 dynamic quant is not supported for qnnpack
-            seq_len = 4
-            batch = 2
-            input_size = 3
-            hidden_size = 7
-            num_layers = 2
-            bias = True
-
             x = torch.randn(seq_len, batch, input_size)
             h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
             c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
@@ -861,9 +863,9 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             self.assertEqual(result[0], y)
             self.assertEqual(result[1], h)
             self.assertEqual(result[2], c)
-
-            check_weight_bias_api(cell_dq)
-            check_serialization(cell_dq, ref_dq)
+            x = torch.randn(10, 20, 3)
+            self.check_eager_serialization(cell_dq, ref_dq, x)
+            self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
 
     @given(
         dtype=st.sampled_from([torch.qint8, torch.float16]),
@@ -874,44 +876,6 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         """
         # Check that module matches the numerics of the op and ensure that module can be
         # instantiated for all engines and dtypes
-
-        def check_serialization(ref_model, loaded_model):
-            model_dict = ref_model.state_dict()
-            b = io.BytesIO()
-            torch.save(model_dict, b)
-            b.seek(0)
-            loaded_dict = torch.load(b)
-            loaded_model.load_state_dict(loaded_dict)
-
-            x = torch.randn(20, 3)
-            Z_ref = ref_model(x)
-            Z_q = loaded_model(x)
-            self.assertEqual(Z_ref[0], Z_q[0])
-            self.assertEqual(Z_ref[1][0], Z_q[1][0])
-            self.assertEqual(Z_ref[1][1], Z_q[1][1])
-            b = io.BytesIO()
-            torch.save(ref_model, b)
-            b.seek(0)
-            loaded = torch.load(b)
-
-            Z_q = loaded(x)
-            self.assertEqual(Z_ref[0], Z_q[0])
-            if isinstance(Z_ref[1], tuple):
-                self.assertEqual(Z_ref[1][0], Z_q[1][0])
-                self.assertEqual(Z_ref[1][1], Z_q[1][1])
-            else:
-                self.assertEqual(Z_ref[1], Z_q[1])
-
-
-        def check_weight_bias_api(ref_model):
-            weight = ref_model.get_weight()
-            bias = ref_model.get_bias()
-            key_names = ['weight_ih', 'weight_hh']
-            self.assertEqual(key_names ^ weight.keys(), set())
-            key_names = ['bias_ih', 'bias_hh']
-            self.assertEqual(key_names ^ bias.keys(), set())
-
-
         batch = 7
         input_size = 3
         hidden_size = 7
@@ -950,5 +914,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 result_module = cell_dq(x, state[rnn_type])
                 self.assertEqual(result[0], result_module[0], msg="RNNCell module API failed")
                 self.assertEqual(result[1], result_module[1], msg="RNNCell module API failed")
-                check_weight_bias_api(cell_dq)
-                check_serialization(cell_dq, cell_dict[rnn_type](**kwargs))
+                weight_keys = ['weight_ih', 'weight_hh']
+                bias_keys = ['bias_ih', 'bias_hh']
+                self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), x)
+                self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)

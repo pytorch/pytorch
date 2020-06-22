@@ -295,6 +295,8 @@ class RNNBase(torch.nn.Module):
                 suffix = '_reverse' if direction == 1 else ''
                 key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
                 key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                # packed weights are part of torchbind class, CellParamsSerializationType
+                # Within the packed weight class, the weight and bias are accessible as Tensors
                 packed_weight_bias = self._all_weight_values[count].param.__getstate__()[0][4]
                 weight_bias_dict['weight'][key_name1] = packed_weight_bias[0].__getstate__()[0][0]
                 weight_bias_dict['weight'][key_name2] = packed_weight_bias[1].__getstate__()[0][0]
