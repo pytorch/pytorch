@@ -106,7 +106,12 @@ class Hardswish(torch.nn.Hardswish):
         return Hardswish(float(scale), int(zero_point))
 
 class ELU(torch.nn.ELU):
-    r"""This is the quantized equivalent of :class:`torch.nn.ELU`.
+    r"""This is the quantized equivalent of :class:`~torch.nn.ELU`.
+
+    Args:
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+        alpha: the alpha constant
     """
     def __init__(self, scale, zero_point, alpha=1.):
         super(ELU, self).__init__(alpha)
