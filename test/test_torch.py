@@ -14618,17 +14618,17 @@ class TestTorchDeviceType(TestCase):
             x.is_contiguous(memory_format=torch.channels_last_3d), x_rep.is_contiguous(memory_format=torch.channels_last_3d))
 
     def test_memory_format_operators(self, device):
-        def chunk_op(x, y):
+        def _chunk_op(x, y):
             x1, x2 = x.chunk(2, dim=1)
             return x1 + x2
 
-        def unsqueeze_op_add(x, y):
+        def _unsqueeze_op_add(x, y):
             return x[0].unsqueeze(0) + 3
 
-        def unsqueeze_op_clone(x, y):
+        def _unsqueeze_op_clone(x, y):
             return x[0].unsqueeze(0).clone()
 
-        def test_helper(x, y, bias, memory_format):
+        def _test_helper(x, y, bias, memory_format):
             return_contig_fns = [
                 lambda x, y: y + x,
                 lambda x, y: y * x,
@@ -14704,9 +14704,9 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.neg_(),
                 lambda x, y: x.pow(3),
                 lambda x, y: x.pow_(3),
-                # lambda x, y: x.pow(0.0), # Need to make resize_as_ memory format aware
-                # lambda x, y: x.pow(1.0), # Need to make resize_as_ memory format aware
-                # lambda x, y: x.reciprocal(), # Not migrated for CUDA
+                lambda x, y: x.pow(0.0),
+                lambda x, y: x.pow(1.0),
+                lambda x, y: x.reciprocal(),
                 lambda x, y: x.remainder(2),
                 lambda x, y: x.round(),
                 lambda x, y: x.round_(),
@@ -14726,9 +14726,9 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.tanh(),
                 lambda x, y: x.trunc(),
                 lambda x, y: x.trunc_(),
-                chunk_op,
-                unsqueeze_op_add,
-                # unsqueeze_op_clone,
+                _chunk_op,
+                _unsqueeze_op_add,
+                _unsqueeze_op_clone,
             ]
             for fn in fns:
                 x_c = x.contiguous()
@@ -14760,12 +14760,12 @@ class TestTorchDeviceType(TestCase):
                     result.is_contiguous(memory_format=torch.contiguous_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), torch.contiguous_format))
 
-        test_helper(
+        _test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
             abs(torch.randn((4, 3, 8, 8), device=device)) + 1,
             torch.randn((1, 3, 1, 1), device=device).contiguous(memory_format=torch.channels_last),
             torch.channels_last)
-        test_helper(
+        _test_helper(
             torch.randn((4, 3, 8, 8, 8), device=device).contiguous(memory_format=torch.channels_last_3d),
             abs(torch.randn((4, 3, 8, 8, 8), device=device)) + 1,
             torch.randn((1, 3, 1, 1, 1), device=device).contiguous(memory_format=torch.channels_last_3d),
