@@ -113,13 +113,12 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
 
 
 class UnaryOpTest(serial.SerializedTestCase):
-    @given(seed=st.integers(0, 65534))
-    def _test_unary_op(self, opname, seed):
-        np.random.seed(seed)
+    def _test_unary_op(self, opname):
         workspace.ResetWorkspace()
         n = 1
-        m = 10000
-        X = np.linspace(-20, 20, num=m, dtype=np.float32)
+        m = 10001
+        X = np.linspace(-25, 25, num=m, dtype=np.float32)
+        assert 0.0 in X
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
         pred_net.external_input.append("X")
@@ -147,7 +146,6 @@ class UnaryOpTest(serial.SerializedTestCase):
                                                 debug=True,
                                                 adjust_batch=False,
                                                 use_onnx=False)
-        print(pred_net_onnxified)
         num_onnxified_ops = sum(
             1 if o.type == "Onnxifi" else 0 for o in pred_net_onnxified.op)
         np.testing.assert_equal(num_onnxified_ops, 1)
@@ -165,12 +163,13 @@ class UnaryOpTest(serial.SerializedTestCase):
         if not np.allclose(Y_c2, Y_glow):
             diff = np.abs(Y_c2 - Y_glow)
             np.save('/tmp/' + opname + 'diff', diff)
-            print_test_debug_info(opname,
-                {"X": X,
+            np.save('/tmp/' + opname + 'result', Y_c2)
+            print_test_debug_info(opname, {
+                "X": X,
                 "Y_c2": Y_c2,
                 "Y_glow": Y_glow,
-                "diff": diff,
-                "maxdiff": np.max(diff)})
+                "diff": diff
+            })
             assert(0)
 
     def test_sigmoid(self):
@@ -178,6 +177,9 @@ class UnaryOpTest(serial.SerializedTestCase):
 
     def test_tanh(self):
         self._test_unary_op("Tanh")
+
+    def _test_swish(self):
+        self._test_unary_op("Swish")
 
 
 class ReluTest(serial.SerializedTestCase):
