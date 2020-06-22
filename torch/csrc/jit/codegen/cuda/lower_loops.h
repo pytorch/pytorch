@@ -20,10 +20,6 @@ struct UnrollPass : public OptOutDispatch {
   // keep track if we're within an unrolled loop
   bool within_unroll = false;
 
-  // Track the last computeAt TensorView and axis
-  const TensorView* active_view;
-  unsigned int active_view_axis;
-
   // Custom dispatch for Expr, want to find out of it's a TV op
   void handle(Expr*) final;
 
@@ -46,23 +42,18 @@ struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   std::vector<Expr*> lowered_exprs;
   Fusion* fusion_;
 
-  // Track the last computeAt TensorView and axis
-  const TensorView* active_view;
-  unsigned int active_view_axis;
-
   // Keep all for loops conveniently to make unrolling easier
   std::vector<ForLoop*> for_loops;
+  // computeAT scope is determined by the iterat domain, and the tensor view it
+  // belongs to (the final TensorView when following the computeAt path)
+  std::vector<std::pair<IterDomain*, TensorView*>> compute_at_scope;
 
   // Get Register allocation statement for tensorview
   void pushAlloc(TensorView*);
 
-  // Clear out the last recorded computeAtView
-  void clearActiveView();
-  // Set active views from computeAtView
-  void setActiveView(const TensorView* const);
-
   // Open a new inner most for loop
-  void openFor(IterDomain*);
+  void openFor(std::pair<IterDomain*, TensorView*>);
+  void popFor();
 
   // Wrap pushBack in lower_utils if active_scope is null we want it to go
   // straight to lower_exprs
@@ -71,19 +62,24 @@ struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Update for loop structure based on this TensorView
   void updateLoopNest(TensorView*);
 
+  // Update for loop structure based on this TensorView
+  void initReduction(TensorView* tv, Val* init_val);
+
   // Check if a TV op, generate for loop nest around it
   void handle(Expr*) final;
 
   // Generate the loop nest structure and place it in lowered_exprs
-  void generate();
+  void generate(const std::vector<Expr*>& exprs);
 
   LoopNestGenerator(Fusion* _fusion) : fusion_(_fusion) {}
 
  public:
-  static std::vector<Expr*> getLoopNest(Fusion* fusion) {
+  static std::vector<Expr*> getLoopNest(
+      Fusion* fusion,
+      std::vector<Expr*> exprs) {
     FusionGuard fg(fusion);
     LoopNestGenerator lng(fusion);
-    lng.generate();
+    lng.generate(exprs);
     return lng.lowered_exprs;
   }
 };

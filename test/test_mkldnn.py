@@ -11,6 +11,7 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
+import torch.nn.functional as F
 import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
@@ -107,54 +108,51 @@ class TestMkldnn(TestCase):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
                                                                   dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
+    def test_conv1d(self):
+        for groups in [1, 4]:
+            N = torch.randint(3, 10, (1,)).item()
+            C = torch.randint(1, 3, (1,)).item() * groups
+            M = torch.randint(1, 3, (1,)).item() * groups
+            x = torch.randn(N, C, 224, dtype=torch.float32)
+            for bias in [True, False]:
+                conv1d = torch.nn.Conv1d(in_channels=C,
+                                         out_channels=M,
+                                         kernel_size=3,
+                                         stride=2,
+                                         padding=1,
+                                         bias=bias,
+                                         groups=groups).float()
+                mkldnn_conv1d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv1d))
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_aten = conv1d(x)
+                y_mkldnn = mkldnn_conv1d(x.to_mkldnn()).to_dense()
+                self.assertEqual(y_aten, y_mkldnn)
+
+                self._test_serialization(mkldnn_conv1d, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv1d, (x.to_mkldnn(),))
+
     def test_conv2d(self):
         for groups in [1, 4]:
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
             x = torch.randn(N, C, 224, 224, dtype=torch.float32)
-            for train in [True, False]:
-                for bias in [True, False]:
-                    conv2d = torch.nn.Conv2d(in_channels=C,
-                                             out_channels=M,
-                                             kernel_size=3,
-                                             stride=2,
-                                             padding=1,
-                                             bias=bias,
-                                             groups=groups).float()
-                x1 = x.clone()
-                x2 = x.clone().to_mkldnn()
-                if train:
-                    x1.requires_grad_()
-                    x2.requires_grad_()
-                    mkldnn_conv2d = copy.deepcopy(conv2d)
-                else:
-                    mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
-
+            for bias in [True, False]:
+                conv2d = torch.nn.Conv2d(in_channels=C,
+                                         out_channels=M,
+                                         kernel_size=3,
+                                         stride=2,
+                                         padding=1,
+                                         bias=bias,
+                                         groups=groups).float()
+                mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
                 with torch.backends.mkldnn.flags(enabled=False):
-                    y_aten = conv2d(x1)
-                    if train:
-                        loss1 = y_aten.sum()
-                        loss1.backward()
-
-                y_mkldnn = mkldnn_conv2d(x2).to_dense()
-
-                if train:
-                    loss2 = y_mkldnn.sum()
-                    loss2.backward()
-
+                    y_aten = conv2d(x)
+                y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
                 self.assertEqual(y_aten, y_mkldnn)
-                if train:
-                    self.assertEqual(x1.grad, x2.grad.to_dense())
-                    self.assertEqual(conv2d.weight.grad,
-                                     mkldnn_conv2d.weight.grad,
-                                     atol=1e-4,
-                                     rtol=1e-4)
-                    if bias:
-                        self.assertEqual(conv2d.bias.grad, mkldnn_conv2d.bias.grad)
-                else:
-                    self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
-                    self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
+
+                self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -255,6 +253,29 @@ class TestMkldnn(TestCase):
                     self.assertEqual(y1, y2)
                     self.assertEqual(x1.grad, x2.grad.to_dense())
 
+    def test_max_pool2d_stride_none(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+
+        for H, W in [(64, 64), (35, 39), (16, 19), [7, 8]]:
+            x = torch.randn(N, C, H, W, dtype=torch.float32) * 10
+            for ceil_mode in [False, True]:
+                y1 = F.max_pool2d(
+                    x,
+                    kernel_size=3 if not ceil_mode else 7,
+                    stride=None,
+                    padding=1,
+                    ceil_mode=ceil_mode)
+
+                y2 = F.max_pool2d(
+                    x.to_mkldnn(),
+                    kernel_size=3 if not ceil_mode else 7,
+                    stride=None,
+                    padding=1,
+                    ceil_mode=ceil_mode)
+
+                self.assertEqual(y1, y2.to_dense())
+
     def test_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
@@ -279,6 +300,27 @@ class TestMkldnn(TestCase):
 
             self.assertEqual(y1, y2)
             self.assertEqual(x1.grad, x2.grad.to_dense())
+
+    def test_avg_pool2d_stride_none(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 10, (1,)).item()
+        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
+
+        for count_include_pad in [True, False]:
+            y1 = F.avg_pool2d(
+                x,
+                kernel_size=3,
+                stride=None,
+                padding=1,
+                count_include_pad=count_include_pad)
+            y2 = F.avg_pool2d(
+                x.to_mkldnn(),
+                kernel_size=3,
+                stride=None,
+                padding=1,
+                count_include_pad=count_include_pad)
+
+            self.assertEqual(y1, y2.to_dense())
 
     def test_adaptive_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()

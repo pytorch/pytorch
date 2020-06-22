@@ -8,7 +8,6 @@
 #include <functional>
 #include <vector>
 
-using namespace torch::test;
 
 void check_exact_values(
     const std::vector<torch::Tensor>& parameters,

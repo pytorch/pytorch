@@ -21,7 +21,12 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
+    # Internal, profiler-specific ops
+    ('profiler::_call_end_callbacks_on_jit_fut*', datetime.date(9999, 1, 1)),
+    ('profiler::_record_function_enter', datetime.date(9999, 1, 1)),
     ('aten::append*', datetime.date(2020, 4, 15)),
+    ('aten::_min', datetime.date(2020, 9, 9)),
+    ('aten::_max', datetime.date(2020, 9, 9)),
     ('aten::real*', datetime.date(2020, 4, 15)),
     ('aten::imag*', datetime.date(2020, 4, 15)),
     ('aten::quantize_per_tensor', datetime.date(2020, 4, 15)),
@@ -80,8 +85,28 @@ white_list = [
     ('quantized::linear_dynamic', datetime.date(2020, 6, 1)),
     ('quantized::linear_relu', datetime.date(2020, 6, 1)),
     ('quantized::linear', datetime.date(2020, 6, 1)),
+    ('aten::quantized_layer_norm', datetime.date(2020, 6, 30)),
+    ('aten::quantized_group_norm', datetime.date(2020, 6, 30)),
+    ('aten::quantized_instance_norm', datetime.date(2020, 6, 30)),
     ('_aten::*', datetime.date(2020, 6, 1)),
     ('_prim::*', datetime.date(2020, 6, 1)),
+    ('aten::eq', datetime.date(2020, 6, 30)),
+    ('aten::nq', datetime.date(2020, 6, 30)),
+    ('aten::lt', datetime.date(2020, 6, 30)),
+    ('aten::gt', datetime.date(2020, 6, 30)),
+    ('aten::le', datetime.date(2020, 6, 30)),
+    ('aten::ge', datetime.date(2020, 6, 30)),
+    ('aten::pow', datetime.date(2020, 6, 30)),
+    ('prim::min', datetime.date(2020, 6, 30)),
+    ('prim::max', datetime.date(2020, 6, 30)),
+    ('aten::to_here', datetime.date(2020, 6, 30)),
+    ('aten::to_here(RRef(t) self, double timeout*)', datetime.date(2020, 6, 30)),
+    ('aten::local_value', datetime.date(2020, 6, 30)),
+    ('aten::log', datetime.date(2020, 6, 30)),
+    ('aten::__and__', datetime.date(2020, 6, 30)),
+    ('aten::__or__', datetime.date(2020, 6, 30)),
+    ('aten::__xor__', datetime.date(2020, 6, 30)),
+    ('aten::split', datetime.date(2020, 6, 30)),
 ]
 
 
@@ -138,6 +163,7 @@ def dont_parse(schema_line):
 
 def check_bc(new_schema_dict):
     existing_schemas = torch._C._jit_get_all_schemas()
+    existing_schemas += torch._C._jit_get_custom_class_schemas()
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:

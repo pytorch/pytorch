@@ -127,11 +127,7 @@ warpHeap(K k, V v, K& keyHeapHead, K* keyHeap, V* valueHeap) {
   int index = __popcll(getLaneMaskLt() & vote);
   int total = __popcll(vote);
 #else
-#if CUDA_VERSION >= 9000
   unsigned int vote = __ballot_sync(__activemask(), wantInsert);
-#else
-  unsigned int vote = __ballot(wantInsert);
-#endif
 
   if (!vote) {
     // Everything the warp has is smaller than our heap

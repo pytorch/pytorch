@@ -322,8 +322,8 @@ template<class... Types> struct map_types_to_values<typelist<Types...>> final {
 };
 }
 
-template<class TypeList, class Func> auto map_types_to_values(Func&& func)
--> decltype(detail::map_types_to_values<TypeList>::call(std::forward<Func>(func))) {
+template<class TypeList, class Func>
+decltype(auto) map_types_to_values(Func&& func) {
   return detail::map_types_to_values<TypeList>::call(std::forward<Func>(func));
 }
 

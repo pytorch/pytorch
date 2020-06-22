@@ -69,9 +69,9 @@ class CAFFE2_API Tensor final {
    */
   explicit Tensor(at::Device device)
       : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-            Storage::create_legacy(device, TypeMeta()),
-            c10::computeDispatchKey(at::device(device).layout(at::kStrided)))) {
-  }
+            Storage::create_legacy(device),
+            c10::computeDispatchKey(at::device(device).layout(at::kStrided)),
+            TypeMeta())) {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -153,7 +153,7 @@ class CAFFE2_API Tensor final {
         storage_initialized(),
         "Cloning a tensor that has no content and has size > 0");
     // set_storage already sets data_type_ of TensorImpl
-    x.impl_->set_storage(storage());
+    x.impl_->set_storage_and_dtype(storage(), impl_->dtype());
     x.impl_->set_storage_offset(impl_->storage_offset());
     x.impl_->set_sizes_and_strides(sizes(), strides());
     return x;
@@ -463,7 +463,7 @@ class CAFFE2_API Tensor final {
    */
   template <typename T>
   inline bool IsType() const {
-    return impl_->storage().IsType<T>();
+    return impl_->dtype().Match<T>();
   }
 
   /**

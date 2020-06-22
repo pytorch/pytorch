@@ -297,17 +297,6 @@ that case, code generation of the device guard can be disabled by adding
 in which case this field would go away. If you have an opinion on the
 matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 
-### `supports_named_tensor`
-
-```
-supports_named_tensor: True
-```
-
-By default, (`supports_named_tensor: False`) ATen code generation will generate a check
-that all tensor inputs to the function are unnamed. This is used to incrementally
-implement named tensors; if a function supports named tensors, then it'll have
-`supports_named_tensor: True`; otherwise, passing it a named tensor will error out.
-
 ### `matches_jit_signature`
 
 ```
