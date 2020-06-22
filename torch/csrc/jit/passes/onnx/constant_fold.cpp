@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <c10/util/Optional.h>
-#include <onnx/onnx_pb.h>
 #include <algorithm>
 
 namespace torch {
@@ -15,20 +14,33 @@ using namespace ::c10::onnx;
 
 namespace {
 
+enum OnnxType : int {
+  ONNX_FLOAT = 1,
+  ONNX_UINT8,
+  ONNX_INT8,
+  ONNX_UINT16,
+  ONNX_INT16,
+  ONNX_INT32,
+  ONNX_INT64,
+  ONNX_FLOAT16 = 10,
+  ONNX_DOUBLE,
+  ONNX_UINT32,
+};
+
 std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
     // ScalarType type.
-    {::ONNX_NAMESPACE::TensorProto_DataType_FLOAT, at::kFloat},
-    {::ONNX_NAMESPACE::TensorProto_DataType_UINT8, at::kByte},
-    {::ONNX_NAMESPACE::TensorProto_DataType_INT8, at::kChar},
-    {::ONNX_NAMESPACE::TensorProto_DataType_UINT16, at::kInt},
-    {::ONNX_NAMESPACE::TensorProto_DataType_INT16, at::kShort},
-    {::ONNX_NAMESPACE::TensorProto_DataType_INT32, at::kInt},
-    {::ONNX_NAMESPACE::TensorProto_DataType_INT64, at::kLong},
-    {::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16, at::kFloat},
-    {::ONNX_NAMESPACE::TensorProto_DataType_DOUBLE, at::kDouble},
-    {::ONNX_NAMESPACE::TensorProto_DataType_UINT32, at::kLong},
+    {ONNX_FLOAT, at::kFloat},
+    {ONNX_UINT8, at::kByte},
+    {ONNX_INT8, at::kChar},
+    {ONNX_UINT16, at::kInt},
+    {ONNX_INT16, at::kShort},
+    {ONNX_INT32, at::kInt},
+    {ONNX_INT64, at::kLong},
+    {ONNX_FLOAT16, at::kFloat},
+    {ONNX_DOUBLE, at::kDouble},
+    {ONNX_UINT32, at::kLong},
 };
 
 void handleNegativeStartEndIndex(
