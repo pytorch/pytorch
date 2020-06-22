@@ -13,7 +13,6 @@
 #include <aten/src/ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#include <thrust/tuple.h>
 #include <thrust/pair.h>
 #else
 #include <cmath>
@@ -39,6 +38,16 @@
 #endif
 
 namespace at { namespace native {
+
+namespace detail {
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
+#else
+template <typename T1, typename T2> using pair = std::pair<T1, T2>;
+#endif
+
+} // namespace detail
 
 template <typename scalar_t, typename index_t, typename combine_t>
 struct WelfordData {
@@ -95,11 +104,7 @@ struct WelfordOps {
     auto ret = (divisor > 0) ?
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    thrust::tuple<scalar_t, scalar_t> results((scalar_t) ret, (scalar_t) mean);
-#else
-    std::tuple<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
-#endif
+    detail::pair<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
     return results;
   }
 
@@ -312,12 +317,6 @@ struct NormTwoOps {
 
 namespace detail {
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
-#else
-template <typename T1, typename T2> using pair = std::pair<T1, T2>;
-#endif
-
 template <typename scalar_t>
 struct LessOrNan {
   C10_DEVICE bool operator () (scalar_t a, scalar_t b) const {
@@ -333,13 +332,13 @@ struct GreaterOrNan {
 };
 
 template <typename comp_t>
-struct ArgReductionOps {
+struct MinMaxReductionOps {
   using scalar_t = typename binary_function_traits<comp_t>::arg1_t;
   using index_t = int64_t;
   using arg_t = detail::pair<scalar_t, index_t>;
 
-  static C10_DEVICE index_t project(arg_t arg) {
-    return arg.second;
+  static C10_DEVICE arg_t project(arg_t arg) {
+    return arg;
   }
 
   static C10_DEVICE arg_t reduce(arg_t arg, scalar_t val, int64_t idx) {
@@ -362,6 +361,17 @@ struct ArgReductionOps {
 #endif
 };
 
+template <typename comp_t>
+struct ArgReductionOps : public MinMaxReductionOps<comp_t> {
+  using typename MinMaxReductionOps<comp_t>::scalar_t;
+  using typename MinMaxReductionOps<comp_t>::index_t;
+  using typename MinMaxReductionOps<comp_t>::arg_t;
+
+  static C10_DEVICE index_t project(arg_t arg) {
+    return arg.second;
+  }
+};
+
 } // namespace detail
 
 template <typename scalar_t>
@@ -372,6 +382,16 @@ struct ArgMaxOps :
 template <typename scalar_t>
 struct ArgMinOps :
   public detail::ArgReductionOps<detail::LessOrNan<scalar_t>> {
+};
+
+template <typename scalar_t>
+struct MinOps :
+  public detail::MinMaxReductionOps<detail::LessOrNan<scalar_t>> {
+};
+
+template <typename scalar_t>
+struct MaxOps :
+  public detail::MinMaxReductionOps<detail::GreaterOrNan<scalar_t>> {
 };
 
 }} // namespace at::native

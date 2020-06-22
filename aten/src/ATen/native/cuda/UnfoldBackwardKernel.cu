@@ -3,7 +3,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/cuda/zmath.cuh>
 
 #include <vector>
 
@@ -162,24 +161,20 @@ void unfold_backward_cuda_kernel(
 
   auto is_step_ge_size = (step >= size);
 
-  TensorIterator iter;
-  if (is_step_ge_size) {
-    iter = _make_unfold_backward_iter_over_grad_in(
+  TensorIterator iter =
+    is_step_ge_size ?
+    _make_unfold_backward_iter_over_grad_in(
+      grad_out, grad_in, dim, size, step
+    ) :
+    _make_unfold_backward_iter_over_grad_out(
       grad_out, grad_in, dim, size, step
     );
-  }
-  else {
-    iter = _make_unfold_backward_iter_over_grad_out(
-      grad_out, grad_in, dim, size, step
-    );
-  }
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(),
     "unfold_backward_cuda", [&] {
-      using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
-      _unfold_backward_internal_kernel<thrust_t>(
+      _unfold_backward_internal_kernel<scalar_t>(
         iter,
         size,
         step,

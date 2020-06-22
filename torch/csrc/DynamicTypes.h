@@ -27,7 +27,9 @@ void registerStoragePyTypeObject(
 void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType);
 void registerLayoutObject(THPLayout *thp_layout, at::Layout layout);
 
-PyObject* createPyObject(const at::Storage& storage);
+PyObject* createPyObject(
+    const at::Storage& storage,
+    const caffe2::TypeMeta& data_type);
 at::Storage createStorage(PyObject* obj);
 bool isStorage(PyObject* obj);
 

@@ -11,13 +11,14 @@ from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, skipIfRocm
+from torch.testing._internal.jit_utils import JitTestCase, _inline_everything, \
+    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU
 
 from textwrap import dedent
 from itertools import product, permutations
 
-from test_jit import JitTestCase, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
-    backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
-    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
+from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
+    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
 from te_utils import CudaCodeGenExecuted
 
@@ -500,6 +501,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
+    @torch.jit._disable_emit_hooks_decorator
     @_inline_everything
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):
@@ -885,7 +887,8 @@ class TestFuser(JitTestCase):
         script_f = torch.jit.script(fn_test_rand2)
         warmup_forward(script_f, x, y)
         out = script_f(x, y)
-        self.assertEqual(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skip("rand_like is not supported yet")

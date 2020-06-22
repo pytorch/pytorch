@@ -80,17 +80,6 @@ void IRVisitor::visit(const Cast* v) {
   v->src_value()->accept(this);
 }
 void IRVisitor::visit(const Var* v) {}
-void IRVisitor::visit(const Let* v) {
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-}
-
-void IRVisitor::visit(const LetStmt* v) {
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-}
 
 void IRVisitor::visit(const Ramp* v) {
   v->base()->accept(this);
@@ -127,6 +116,10 @@ void IRVisitor::visit(const AtomicAdd* v) {
 }
 
 void IRVisitor::visit(const Block* v) {
+  for (const auto& pair : v->varBindings()) {
+    pair.first->accept(this);
+    pair.second->accept(this);
+  }
   for (Stmt* s : *v) {
     s->accept(this);
   }
@@ -213,7 +206,6 @@ void IRVisitor::visit(const RoundOff* v) {
 
 void IRVisitor::visit(const ReduceOp* v) {
   v->accumulator()->accept(this);
-  v->initializer()->accept(this);
   v->body().node()->accept(this);
 
   for (auto* e : v->output_args()) {
