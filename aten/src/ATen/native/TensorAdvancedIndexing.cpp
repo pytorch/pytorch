@@ -220,7 +220,7 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
               "got ", info.src.scalar_type(), " for the destination "
               "and ", value.scalar_type(), " for the source.");
   TensorIteratorConfig config;
-  config.dont_resize_outputs();
+  config.resize_outputs(false);
   config.check_all_same_dtype(false);
   config.add_output(info.src);
   config.add_input(value);
@@ -440,7 +440,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .dont_resize_outputs()
+      .resize_outputs(false)
       .add_output(resultSlice)
       .add_input(selfSlice)
       .build();
@@ -574,7 +574,7 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar 
 
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .add_output(self)
     .add_input(mask)
     .build();
@@ -661,7 +661,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .dont_resize_outputs()
+      .resize_outputs(false)
       .add_output(result_strided)
       .add_input(_self)
       .add_input(_mask)
@@ -684,7 +684,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
 
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .add_output(result_strided)
     .add_input(_self)
     .add_input(_mask)
