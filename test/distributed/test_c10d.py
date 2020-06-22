@@ -2843,6 +2843,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
                         tol = 1.e-3 if has_half else 1.e-5
+                        if replica_devices:
+                            for dev in replica_devices:
+                                torch.cuda.synchronize(dev)
+                                print("after opts, rank = {}, synced with dev {}, time = {}".format(
+                                      self.rank, dev, time.time() - start_time))
                     except BaseException:
                         # Prints case-specific debugging info to narrow down failing case.
                         print("Caught exception during model creation for " + model_msg, flush=True)
