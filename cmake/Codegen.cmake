@@ -119,7 +119,7 @@ if(INTERN_BUILD_ATEN_OPS)
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
       configure_file(${IMPL} ${NEW_IMPL} COPYONLY)
-      set(cpu_kernel_cpp ${cpu_kernel_cpp} ${NEW_IMPL}) # Create list of copies
+      set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
       if(MSVC)
         set(EXTRA_FLAGS "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
