@@ -31,8 +31,7 @@ typedef Expr* CgOp;
 
 typedef void (
     *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue>&);
-typedef bool (
-    *MergeQueryFuncPtr)(const Node* const);
+typedef bool (*MergeQueryFuncPtr)(const Node* const);
 
 std::vector<int> reductionAxes(TensorView* tv) {
   size_t n_dims = tv->nDims();
@@ -68,9 +67,11 @@ class IrParser {
   class RegistrationEntry {
    public:
     RegistrationEntry(ParseFuncPtr parse_f, MergeQueryFuncPtr merge_f = nullptr)
-     : parse_f_(parse_f), merge_f_(merge_f) {}
+        : parse_f_(parse_f), merge_f_(merge_f) {}
 
-    void parse(const Node* const node, std::unordered_map<size_t, CgValue>& values) {
+    void parse(
+        const Node* const node,
+        std::unordered_map<size_t, CgValue>& values) {
       parse_f_(node, values);
     }
 
@@ -125,7 +126,13 @@ class IrParser {
       // part of outputs of reduction operations. But we have similar limitation
       // for broadcast support in PW fusion. We should properly fix this after
       // broadcast integration.
-      broadcast_dim = block->outputs()[0]->node()->inputs()[0]->type()->cast<TensorType>()->dim().value();
+      broadcast_dim = block->outputs()[0]
+                          ->node()
+                          ->inputs()[0]
+                          ->type()
+                          ->cast<TensorType>()
+                          ->dim()
+                          .value();
     } else {
       // point-wise fusion, broadcast all inputs to output size.
       broadcast_dim =
@@ -152,7 +159,7 @@ class IrParser {
     // with eager mode
     bool disable_unroll = false;
     bool has_reduction = false;
-    bool fcd_reduction= false;
+    bool fcd_reduction = false;
     // compose nodes in topo order;
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);
@@ -163,7 +170,6 @@ class IrParser {
         has_reduction = true;
       }
     }
-
 
     // mark output;
     for (auto jit_output : block->outputs()) {
@@ -190,7 +196,7 @@ class IrParser {
         // TODO: does this work for multiple outputs?
 
         // query if fastest changing dimension (FCD) is a reduction
-        fcd_reduction = out->axis(out->nDims()-1)->isReduction();
+        fcd_reduction = out->axis(out->nDims() - 1)->isReduction();
 
         // TODO: could really use evaluation here. Launch configuration is
         //       imposed by transformation and the information should be
@@ -201,7 +207,7 @@ class IrParser {
         size_t num_reduction_axes = coalescReduction(out);
 
         // Merge all iteration dimensions
-        while (out->nDims() > num_reduction_axes+1) {
+        while (out->nDims() > num_reduction_axes + 1) {
           out->merge(0, 1);
         }
         // Merge all reduction dimensions
@@ -234,7 +240,7 @@ class IrParser {
         std::cout << "checkout output" << std::endl;
         TensorView* out_tv = static_cast<TensorView*>(output);
 
-        // fcd_reduction could be queried later via 
+        // fcd_reduction could be queried later via
         // cuda_kernel_->reduction_axes_, which would ensure we have proper
         // launch configuratoin.
         TensorView* intermediate;
@@ -246,7 +252,7 @@ class IrParser {
           // TODO: we don't need a full warp here, this should be determined by
           //       element data type
           out_tv->split(0, 32);
-          out_tv->split(-1, nthreads/32);
+          out_tv->split(-1, nthreads / 32);
           // necessary to avoid dynamic allocation on intermediates;
           intermediate = out_tv->rFactor({-2});
         }
@@ -359,9 +365,13 @@ class IrParser {
       MergeQueryFuncPtr merge_query_fn = nullptr,
       bool is_reduction = false) {
     jit_operator_registry_[Symbol::fromQualString(op->schema().name())]
-        .emplace_back(std::piecewise_construct, std::forward_as_tuple(op), std::forward_as_tuple(parse_fn, merge_query_fn));
+        .emplace_back(
+            std::piecewise_construct,
+            std::forward_as_tuple(op),
+            std::forward_as_tuple(parse_fn, merge_query_fn));
     if (is_reduction) {
-      jit_reduction_op_registry_.emplace(Symbol::fromQualString(op->schema().name()));
+      jit_reduction_op_registry_.emplace(
+          Symbol::fromQualString(op->schema().name()));
     }
   }
 
@@ -659,16 +669,19 @@ class IrParser {
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto self = value_map[node->input(0)->unique()];
             auto dims = constant_as<c10::List<int64_t>>(node->input(1));
-            TORCH_INTERNAL_ASSERT(dims.has_value(), "requires static reduce axes");
+            TORCH_INTERNAL_ASSERT(
+                dims.has_value(), "requires static reduce axes");
             auto keepdim = constant_as<bool>(node->input(2));
-            TORCH_INTERNAL_ASSERT(keepdim.has_value() && !keepdim.value(), "Keep dim in reduction is not a const false");
+            TORCH_INTERNAL_ASSERT(
+                keepdim.has_value() && !keepdim.value(),
+                "Keep dim in reduction is not a const false");
             auto out = sum(self->as<TensorView>(), dims->vec());
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* const node) -> bool {
             // we don't support cast of output types yet;
             if (!node->inputs()[3]->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
               return false;
             }
             // we don't support dynamic reduction axes;
@@ -677,7 +690,7 @@ class IrParser {
             }
             // we don't support keepdim yet;
             if (node->inputs()[2]->node()->kind() != prim::Constant ||
-              *constant_as<bool>(node->input(2))) {
+                *constant_as<bool>(node->input(2))) {
               return false;
             }
             return true;
@@ -691,7 +704,12 @@ class IrParser {
       // partition doesn't take constant node explicitly, but it does and copy
       // constant into subgraph. So we need to register constants in codegen IR;
       for (auto output : node->outputs()) {
-        TORCH_CHECK(registerScalar(output), "registration of output failed at index ", output->offset(), " for node ", *node);
+        TORCH_CHECK(
+            registerScalar(output),
+            "registration of output failed at index ",
+            output->offset(),
+            " for node ",
+            *node);
       }
     } else {
       auto iter = IrParser::jit_operator_registry_.find(node->kind());
@@ -766,7 +784,9 @@ class IrParser {
       // TODO: make this a static function in Tensor class;
       // create tensor;
       if (broadcast_dim >= 0) {
-        TORCH_INTERNAL_ASSERT(broadcast_dim >= *tensor_type->dim(), "attempt to broadcast a tensor to shrinked dimension is invalid");
+        TORCH_INTERNAL_ASSERT(
+            broadcast_dim >= *tensor_type->dim(),
+            "attempt to broadcast a tensor to shrinked dimension is invalid");
         tensor_type = tensor_type->withDim(broadcast_dim);
       }
       // TODO: make this a static function in Tensor class;
@@ -794,7 +814,8 @@ class IrParser {
 
 std::unordered_map<
     Symbol,
-    std::vector<std::pair<std::shared_ptr<Operator>, IrParser::RegistrationEntry>>>
+    std::vector<
+        std::pair<std::shared_ptr<Operator>, IrParser::RegistrationEntry>>>
     IrParser::jit_operator_registry_;
 std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
 bool IrParser::init_registry_ = true;

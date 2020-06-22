@@ -333,14 +333,14 @@ class TestCudaFuser(JitTestCase):
         where_jit = torch.jit.script(where)
         self._run_helper(where_jit, where, x, y, cond)
 
-        def lerp(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+        def lerp(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = torch.rand_like(x)
             o = o * torch.lerp(x, y, z)
             return o
         lerp_jit = torch.jit.script(lerp)
         self._run_helper(lerp_jit, lerp, x, y, z)
 
-        def lerp_scale(x : torch.Tensor, y : torch.Tensor, z: float):
+        def lerp_scale(x: torch.Tensor, y: torch.Tensor, z: float):
             o = torch.rand_like(x)
             o = o * torch.lerp(x, y, z)
             return o
@@ -355,21 +355,21 @@ class TestCudaFuser(JitTestCase):
         y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
         z = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
 
-        def addcmul(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor, value : float):
+        def addcmul(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, value: float):
             o = torch.add(x, 0.5)
             o = torch.addcmul(o, y, z, value=value)
             return o
         addcmul_jit = torch.jit.script(addcmul)
         self._run_helper(addcmul_jit, addcmul, x, y, z, 2.0)
 
-        def addcmul_no_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+        def addcmul_no_alpha(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = torch.add(x, 0.5)
             o = torch.addcmul(o, y, z)
             return o
         addcmul_no_alpha_jit = torch.jit.script(addcmul_no_alpha)
         self._run_helper(addcmul_no_alpha_jit, addcmul_no_alpha, x, y, z)
 
-        def addcmul_const_alpha(x : torch.Tensor, y : torch.Tensor, z : torch.Tensor):
+        def addcmul_const_alpha(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = torch.add(x, 0.5)
             o = torch.addcmul(o, y, z, value=0.75)
             return o
@@ -411,7 +411,7 @@ class TestCudaFuser(JitTestCase):
     def _compare(self, desc, inp1, inp2, error):
         a = inp1.clone().detach().cpu().numpy()
         b = inp2.clone().detach().cpu().numpy()
-        close = np.allclose(a,b, error, error)
+        close = np.allclose(a, b, error, error)
         if not close:
             print(desc, close)
             z = a - b
@@ -471,7 +471,8 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn(sizes, dtype=dtype, device=device)
         y = torch.randn(sizes, dtype=dtype, device=device)
         z = torch.randn(sizes, dtype=dtype, device=device)
-        def t(x: torch.Tensor, y: torch.Tensor, z : torch.Tensor):
+
+        def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = torch.add(x, y)
             o = torch.sum(o, dim=[0])
             o = torch.add(o, z)
@@ -495,7 +496,8 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn([7, 4, 8], dtype=dtype, device=device)
         y = torch.randn([4, 8], dtype=dtype, device=device)
         z = torch.randn([1, 4, 8], dtype=dtype, device=device)
-        def t(x: torch.Tensor, y: torch.Tensor, z : torch.Tensor):
+
+        def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = torch.add(x, y)
             o = torch.add(o, z)
             o = torch.sum(o, dim=[0])
@@ -508,6 +510,7 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(oo.dtype, jit_oo.dtype)
             self.assertEqual(oo, jit_oo)
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GROUP)
+
 
 class TestPassManagerCudaFuser(JitTestCase):
 
@@ -557,6 +560,7 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
+
 
 if __name__ == '__main__':
     run_tests()

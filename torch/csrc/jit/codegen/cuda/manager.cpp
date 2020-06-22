@@ -217,8 +217,9 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
       if (broadcasted_shape.empty()) {
         if (!hasReductionNode(graph->block())) {
           broadcasted_shape = sizes;
-        } else if (isReductionNode(output->node())){
-          auto i_type = output->node()->inputs()[0]->type()->expect<TensorType>();
+        } else if (isReductionNode(output->node())) {
+          auto i_type =
+              output->node()->inputs()[0]->type()->expect<TensorType>();
           TORCH_CHECK(
               i_type && i_type->sizes().isComplete(),
               "Complete TensorType for output is expected.");
@@ -227,7 +228,9 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
           // TODO: this assert is not fool proof. We could have ignored
           // pre-reduction tensor marked as output after we first encountered
           // reduction output tensor.
-          TORCH_INTERNAL_ASSERT(false, "pre-reduction tensor output for reduction fusion is nor properly supported yet.");
+          TORCH_INTERNAL_ASSERT(
+              false,
+              "pre-reduction tensor output for reduction fusion is nor properly supported yet.");
         }
       }
     }

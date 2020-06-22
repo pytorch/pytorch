@@ -429,7 +429,9 @@ TensorView* reductionOp(
   return out;
 }
 
-TORCH_CUDA_API TensorView* sum(TensorView* v1, const std::vector<int64_t>& axes) {
+TORCH_CUDA_API TensorView* sum(
+    TensorView* v1,
+    const std::vector<int64_t>& axes) {
   Val* init;
   switch (v1->getDataType().value()) {
     case (DataType::Float):
