@@ -4,11 +4,11 @@
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/frontend/versioned_symbols.h>
 
 #include <algorithm>
 
@@ -698,7 +698,8 @@ struct PythonPrintImpl {
   }
 
   void checkVersion(const Node* const node) {
-    min_version_ = std::max(min_version_, get_min_version_for_kind(node->kind()));
+    min_version_ =
+        std::max(min_version_, get_min_version_for_kind(node->kind()));
   }
 
   void printNode(Node* node, bool print_const) {
