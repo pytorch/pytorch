@@ -11,10 +11,11 @@ class _InstanceNorm(_NormBase):
         eps: float = 1e-5,
         momentum: float = 0.1,
         affine: bool = False,
-        track_running_stats: bool = False
+        track_running_stats: bool = False,
+        use_scale: bool = True
     ) -> None:
         super(_InstanceNorm, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, track_running_stats, use_scale)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
@@ -110,6 +111,10 @@ class InstanceNorm1d(_InstanceNorm):
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+        use_scale: a boolean value that when set to ``True`` and affine set to ``True``,
+            this module has learnable scale and bias parameters.
+            If affine set to ``True`` and use_scale set to ``False``,
+            this module has a fixed scale of 1. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, L)`
@@ -191,6 +196,10 @@ class InstanceNorm2d(_InstanceNorm):
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+        use_scale: a boolean value that when set to ``True`` and affine set to ``True``,
+            this module has learnable scale and bias parameters.
+            If affine set to ``True`` and use_scale set to ``False``,
+            this module has a fixed scale of 1. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -265,6 +274,10 @@ class InstanceNorm3d(_InstanceNorm):
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
             statistics in both training and eval modes. Default: ``False``
+        use_scale: a boolean value that when set to ``True`` and affine set to ``True``,
+            this module has learnable scale and bias parameters.
+            If affine set to ``True`` and use_scale set to ``False``,
+            this module has a fixed scale of 1. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`

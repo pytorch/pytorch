@@ -14,7 +14,8 @@ void InstanceNormImpl<D, Derived>::pretty_print(std::ostream& stream) const {
          << "eps=" << this->options.eps() << ", "
          << "momentum=" << this->options.momentum() << ", "
          << "affine=" << this->options.affine() << ", "
-         << "track_running_stats=" << this->options.track_running_stats() << ")";
+         << "track_running_stats=" << this->options.track_running_stats() << ", "
+         << "use_scale=" << this->options.use_scale() << ")";
 }
 
 void InstanceNorm1dImpl::_check_input_dim(const Tensor& input) {

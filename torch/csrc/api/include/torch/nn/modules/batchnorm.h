@@ -25,8 +25,12 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
 
   void reset() override {
     if (options.affine()) {
-      weight = this->register_parameter("weight", torch::empty({options.num_features()}));
       bias = this->register_parameter("bias", torch::empty({options.num_features()}));
+      if (options.use_scale()) {
+        weight = this->register_parameter("weight", torch::empty({options.num_features()}));
+      } else {
+        weight = this->register_parameter("weight", Tensor(), /*requires_grad=*/false);
+      }
     } else {
       weight = this->register_parameter("weight", Tensor(), /*requires_grad=*/false);
       bias = this->register_parameter("bias", Tensor(), /*requires_grad=*/false);
@@ -54,8 +58,10 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
   void reset_parameters() {
     reset_running_stats();
     if (options.affine()) {
-      torch::nn::init::ones_(weight);
       torch::nn::init::zeros_(bias);
+      if (options.use_scale()) {
+            torch::nn::init::ones_(weight);
+      }
     }
   }
 
@@ -63,7 +69,7 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
   DerivedOptions options;
 
   /// The learned weight.
-  /// Only defined if the `affine` option was `true` upon construction.
+  /// Only defined if the `affine` and `use_scale` option was `true` upon construction.
   Tensor weight;
 
   /// The learned bias.

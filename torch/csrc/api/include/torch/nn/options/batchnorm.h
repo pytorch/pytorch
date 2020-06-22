@@ -32,6 +32,10 @@ struct TORCH_API BatchNormOptions {
   /// module.
   /// Changing this parameter after construction __has no effect__.
   TORCH_ARG(bool, track_running_stats) = true;
+
+  /// Whether to learn the scale.
+  /// Changing this parameter after construction __has no effect__.
+  TORCH_ARG(bool, use_scale) = true;
 };
 
 /// Options for the `BatchNorm1d` module.

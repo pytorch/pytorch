@@ -28,6 +28,9 @@ struct TORCH_API InstanceNormOptions {
   /// Whether to store and update batch statistics (mean and variance) in the
   /// module.
   TORCH_ARG(bool, track_running_stats) = false;
+
+  /// Whether to learn a scale if affine if true.
+  TORCH_ARG(bool, use_scale) = true;
 };
 
 /// Options for the `InstanceNorm1d` module.
