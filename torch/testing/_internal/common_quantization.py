@@ -7,6 +7,7 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
+import copy
 import io
 import functools
 import torch
@@ -282,8 +283,12 @@ class QuantizationTestCase(TestCase):
                 # make sure it runs
                 outputs[d] = models[d](inputs)
             else:
+                # module under test can contain in-place ops, and we depend on
+                # input data staying constant for comparisons
+                data_copy = copy.deepcopy(data)
                 models[d] = quantize_jit(
-                    model, qconfig_dict, test_only_eval_fn, [data], inplace=False, debug=d)
+                    model, qconfig_dict, test_only_eval_fn, [data_copy], inplace=False,
+                    debug=d)
                 # make sure it runs
                 outputs[d] = models[d](*inputs)
 
@@ -473,10 +478,14 @@ class ActivationsTestModel(torch.nn.Module):
         self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         self.quant = torch.quantization.QuantStub()
         self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+        self.elu = torch.nn.ELU().to(dtype=torch.float)
+        self.dequant = torch.quantization.DeQuantStub()
 
     def forward(self, x):
         x = self.quant(x)
         x = self.hardswish(x)
+        x = self.elu(x)
+        x = self.dequant(x)
         return x
 
 class ActivationsQATTestModel(torch.nn.Module):
@@ -486,11 +495,15 @@ class ActivationsQATTestModel(torch.nn.Module):
         self.quant = torch.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+        self.elu = torch.nn.ELU().to(dtype=torch.float)
+        self.dequant = torch.quantization.DeQuantStub()
 
     def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
         x = self.hardswish(x)
+        x = self.elu(x)
+        x = self.dequant(x)
         return x
 
 class LinearReluModel(torch.nn.Module):

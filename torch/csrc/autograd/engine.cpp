@@ -286,7 +286,7 @@ void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_qu
   init_local_ready_queue(ready_queue);
 
   std::shared_ptr<GraphTask> graph_task = nullptr;
-  thread_main(graph_task, /* device_thread */ true);
+  thread_main(graph_task);
   if (should_increment) {
     // Decrement the count during shutdown if we incremented earlier.
     decrement_non_reentrant_thread_count();
@@ -332,22 +332,20 @@ void GraphTaskGuard::restore_current_graph_task() {
 //         synchronously until the graph_task of that owning thread is
 //         completed and exit the thread_main to continue executing the
 //         result of caller's code.
-// For 3), the reentrant backward (with device_thread=false) that invokes
+// For 3), the reentrant backward that invokes
 //         thread_main, either from 1) or 2), will not spin and will exit as
 //         long as graph_task is completed and notify the owning thread as
 //         needed.
-auto Engine::thread_main(
-    const std::shared_ptr<GraphTask>& graph_task,
-    bool device_thread) -> void {
-  // Either device_thread should be true or we should pass in a non-null
-  // graph_task.
-  TORCH_INTERNAL_ASSERT(device_thread == (graph_task == nullptr));
+auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
+  // When graph_task is nullptr, this is a long running thread that processes
+  // tasks (ex: device threads). When graph_task is non-null, this function
+  // is expected to exit once that graph_task complete.
 
   // local_ready_queue should already been initialized when we get into thread_main
   TORCH_INTERNAL_ASSERT(local_ready_queue != nullptr);
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
-  while (device_thread || graph_task->outstanding_tasks_ > 0) {
+  while (graph_task == nullptr || graph_task->outstanding_tasks_ > 0) {
     // local_graph_task represents the graph_task we retrieve from the queue.
     // The outer graph_task represents the overall graph_task we need to execute
     // for reentrant execution.
@@ -436,7 +434,7 @@ void Engine::reentrant_thread_init() {
     // set the local_ready_queue to the ready queue on the graph_task->owner_ device
     local_ready_queue = ready_queue_by_index(graph_task->cpu_ready_queue_, graph_task->owner_);
     total_depth = graph_task->reentrant_depth_;
-    thread_main(graph_task, /* device_thread */ false);
+    thread_main(graph_task);
   }
 }
 
@@ -909,7 +907,7 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     // The owning thread start to drive the engine execution with the GraphTask
     // that has already been pushed to the current CPU thread's ready_queue
     lock.unlock();
-    thread_main(graph_task, false);
+    thread_main(graph_task);
     TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
     // reset the worker_device after the completion of the graph_task, this is so
     // that the initial state of the engine remains the same across every backward()
@@ -935,7 +933,7 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       // complete!
       ++current_depth;
       lock.unlock();
-      thread_main(graph_task, /* device_thread*/ false);
+      thread_main(graph_task);
       --current_depth;
       --total_depth;
 

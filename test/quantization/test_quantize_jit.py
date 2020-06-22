@@ -2177,11 +2177,41 @@ class TestQuantizeJitOps(QuantizationTestCase):
                            .run(m.graph)
 
     def test_hardswish(self):
-        data = [(torch.rand((1, 2, 5, 5), dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
-        hardswish = torch.nn.Hardswish()
-        for tracing in [True, False]:
-            m = self.checkGraphModeOp(hardswish, data, "quantized::hardswish", tracing)
+        class FunctionalHardswish(torch.nn.Module):
+            def __init__(self, inplace):
+                super(FunctionalHardswish, self).__init__()
+                self.inplace = inplace
+
+            def forward(self, input):
+                return torch.nn.functional.hardswish(input, inplace=self.inplace)
+
+        modules = [torch.nn.Hardswish(), FunctionalHardswish(True),
+                   FunctionalHardswish(False)]
+
+        for test_case in itertools.product([True, False], modules):
+            tracing, m = test_case
+            m = self.checkGraphModeOp(
+                m, self.img_data, "quantized::hardswish", tracing)
             FileCheck().check_not("aten::hardswish") \
+                       .check_not("aten::hardswish_") \
+                       .run(m.graph)
+
+    def test_elu(self):
+        class FunctionalELU(torch.nn.Module):
+            def __init__(self, inplace=False):
+                super(FunctionalELU, self).__init__()
+                self.inplace = inplace
+
+            def forward(self, input):
+                return torch.nn.functional.elu(input, inplace=self.inplace)
+
+        modules = [torch.nn.ELU, FunctionalELU]
+        for test_case in itertools.product([True, False], [True, False], modules):
+            tracing, inplace, mod_class = test_case
+            m = mod_class(inplace=inplace)
+            m = self.checkGraphModeOp(m, self.img_data, "quantized::elu", tracing)
+            FileCheck().check_not("aten::elu") \
+                       .check_not("aten::elu_") \
                        .run(m.graph)
 
     def test_layer_norm(self):
@@ -2349,7 +2379,6 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
-                self.elu = torch.nn.ELU()
                 self.leaky_relu = torch.nn.LeakyReLU()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
                 self.sigmoid = torch.nn.Sigmoid()
@@ -2379,9 +2408,6 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 x = F.upsample_nearest(x, (32, 32))  # interpolate node
                 x = F.interpolate(x, 4, mode='linear')  # common node
                 x = F.upsample_bilinear(x, (32, 32))  # common node
-                x = self.elu(x)
-                x = F.elu(x)
-                x.elu_()
                 x = self.leaky_relu(x)
                 x = F.leaky_relu(x)
                 x.leaky_relu_()
@@ -2424,7 +2450,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
         # mapping from number of quant for the op to the number of these ops
         # for example, for `3` in the key means for this type of op
         # we'll have 3 quantize_per_tensor
-        num_op_by_num_quant = {1: 35, 2: 2, 3: 3}
+        num_op_by_num_quant = {1: 32, 2: 2, 3: 3}
         num_quantize_per_tensor = 1  # for output
         for num_quant, num_op in num_op_by_num_quant.items():
             num_quantize_per_tensor += num_op * num_quant
