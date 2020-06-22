@@ -389,12 +389,12 @@ class QLinearInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("linear", QLinearInt8<false>::run);
-  m.impl("linear_relu", QLinearInt8<true>::run);
+  m.impl("linear", TORCH_FN(QLinearInt8<false>::run));
+  m.impl("linear_relu", TORCH_FN(QLinearInt8<true>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("linear", QLinearInt8<false>::run);
+  m.impl("linear", TORCH_FN(QLinearInt8<false>::run));
 }
 
 } // namespace

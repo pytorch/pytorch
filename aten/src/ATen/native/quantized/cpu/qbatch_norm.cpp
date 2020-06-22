@@ -69,8 +69,8 @@ Tensor q_batch_norm2d_impl(
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
 
-  const float* weight_data = weight.template data<float>();
-  const float* bias_data = bias.template data<float>();
+  const float* weight_data = weight.template data_ptr<float>();
+  const float* bias_data = bias.template data_ptr<float>();
 
   TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
   TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
@@ -80,8 +80,8 @@ Tensor q_batch_norm2d_impl(
   float* alpha_data = alpha.data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  const float* mean_data = mean.template data<float>();
-  const float* var_data = var.template data<float>();
+  const float* mean_data = mean.template data_ptr<float>();
+  const float* var_data = var.template data_ptr<float>();
 
   auto oSizes = qx.sizes();
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast);
@@ -165,8 +165,8 @@ Tensor q_batch_norm3d_impl(
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
 
-  const float* weight_data = weight.template data<float>();
-  const float* bias_data = bias.template data<float>();
+  const float* weight_data = weight.template data_ptr<float>();
+  const float* bias_data = bias.template data_ptr<float>();
 
   TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
   TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
@@ -176,8 +176,8 @@ Tensor q_batch_norm3d_impl(
   float* alpha_data = alpha.data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  const float* mean_data = mean.template data<float>();
-  const float* var_data = var.template data<float>();
+  const float* mean_data = mean.template data_ptr<float>();
+  const float* var_data = var.template data_ptr<float>();
 
   auto oSizes = qx.sizes();
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast3d);
@@ -230,6 +230,30 @@ Tensor q_batch_norm3d_impl(
   return qy;
 }
 
+template <bool ReluFused>
+Tensor q_batch_norm_impl(
+    Tensor qx,
+    c10::optional<Tensor> mb_weight,
+    c10::optional<Tensor> mb_bias,
+    Tensor mean,
+    Tensor var,
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+  Tensor qy;
+  int64_t dim = qx.dim();
+  if (dim == 4) {
+    qy = q_batch_norm2d_impl<ReluFused>(
+        qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
+  } else if (dim == 5) {
+    qy = q_batch_norm3d_impl<ReluFused>(
+        qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
+  } else {
+    TORCH_CHECK(false, "quantized::batch_norm only support 4d or 5d inputs.");
+  }
+  return qy;
+}
+
 } // namespace
 
 Tensor quantized_batch_norm(
@@ -252,10 +276,12 @@ Tensor quantized_batch_norm(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("batch_norm2d",      q_batch_norm2d_impl<false>);
-  m.impl("batch_norm2d_relu", q_batch_norm2d_impl<true>);
-  m.impl("batch_norm3d",      q_batch_norm3d_impl<false>);
-  m.impl("batch_norm3d_relu", q_batch_norm3d_impl<true>);
+  m.impl("batch_norm",        TORCH_FN(q_batch_norm_impl<false>));
+  m.impl("batch_norm_relu",   TORCH_FN(q_batch_norm_impl<true>));
+  m.impl("batch_norm2d",      TORCH_FN(q_batch_norm2d_impl<false>));
+  m.impl("batch_norm2d_relu", TORCH_FN(q_batch_norm2d_impl<true>));
+  m.impl("batch_norm3d",      TORCH_FN(q_batch_norm3d_impl<false>));
+  m.impl("batch_norm3d_relu", TORCH_FN(q_batch_norm3d_impl<true>));
 }
 
 } // namespace native
