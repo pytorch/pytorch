@@ -437,6 +437,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         def checkQuantized(model):
             self.checkNoPrepModules(model.hardswish)
             self.assertEqual(type(model.hardswish), nnq.Hardswish)
+            self.assertEqual(type(model.elu), nnq.ELU)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
 
@@ -784,6 +785,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
 
                 self.assertEqual(type(model.fc1), torch.nn.qat.modules.Linear)
                 self.assertEqual(type(model.hardswish), torch.nn.qat.modules.Hardswish)
+                self.assertEqual(type(model.elu), torch.nn.qat.modules.ELU)
 
                 self.checkObservers(model)
                 test_only_train_fn(model, self.train_data)
@@ -792,6 +794,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 def checkQuantized(model):
                     self.assertEqual(type(model.fc1), nnq.Linear)
                     self.assertEqual(type(model.hardswish), nnq.Hardswish)
+                    self.assertEqual(type(model.elu), nnq.ELU)
                     test_only_eval_fn(model, self.calib_data)
                     self.checkScriptable(model, self.calib_data)
 
@@ -937,8 +940,6 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model.load_state_dict(quant_state_dict)
                 out = model(x)
                 self.assertEqual(ref, out)
-
-
 
 
 class TestFunctionalModule(QuantizationTestCase):
