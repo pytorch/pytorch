@@ -335,20 +335,20 @@ void RequestCallbackImpl::processRpc(
 
         // Our response is satisfied when the rpc.remote() request
         // finishes executing on the owner.
-        whenValueSet->addCallback([responseFuture, messageId, rref](
-                                      const FutureIValue& whenValueSet) {
-          if (whenValueSet.hasError()) {
-            responseFuture->setError(*whenValueSet.error());
-            return;
-          }
-          try {
-            Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
-            m.setId(messageId);
-            responseFuture->markCompleted(std::move(m));
-          } catch (const std::exception& e) {
-            responseFuture->setError(e.what());
-          }
-        });
+        whenValueSet->addCallback(
+            [responseFuture, messageId, rref, whenValueSet]() {
+              if (whenValueSet->hasError()) {
+                responseFuture->setError(whenValueSet->error()->what());
+                return;
+              }
+              try {
+                Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
+                m.setId(messageId);
+                responseFuture->markCompleted(std::move(m));
+              } catch (const std::exception& e) {
+                responseFuture->setError(e.what());
+              }
+            });
       });
 
       return;
@@ -377,10 +377,12 @@ void RequestCallbackImpl::processRpc(
 
         // Our response is satisfied when the the rpc.remote() request
         // finishes executing on the owner.
-        whenValueSet->addCallback([responseFuture, messageId, rref](
-                                      const FutureIValue& whenValueSet) {
-          if (whenValueSet.hasError()) {
-            responseFuture->setError(*whenValueSet.error());
+        whenValueSet->addCallback([responseFuture,
+                                   messageId,
+                                   rref,
+                                   whenValueSet] {
+          if (whenValueSet->hasError()) {
+            responseFuture->setError(whenValueSet->error()->what());
             return;
           }
           try {
