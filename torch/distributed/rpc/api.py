@@ -4,12 +4,13 @@ import functools
 import logging
 import numbers
 import threading
+from typing import Generic, TypeVar
 
 import torch
 import torch.distributed as dist
-from torch.jit import Future  # noqa F401
 
 from . import (
+    PyRRef,
     RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
@@ -210,7 +211,9 @@ def shutdown(graceful=True):
     RPC processes to reach this method.
 
     .. warning::
-        Warning, ``future.wait()`` should not be called after ``shutdown()``.
+        For :class:`~torch.futures.Future` objects returned by
+        :meth:`~torch.distributed.rpc.rpc_async`, ``future.wait()`` should not
+        be called after ``shutdown()``.
 
     Arguments:
         graceful (bool): Whether to do a graceful shutdown or not. If True,
@@ -221,12 +224,12 @@ def shutdown(graceful=True):
                          complete.
 
     Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
+        >>> export MASTER_ADDR=localhost
+        >>> export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
@@ -350,6 +353,25 @@ def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_optio
             )
 
 
+T = TypeVar("T")
+GenericWithOneTypeVar = Generic[T]
+
+
+try:
+    class RRef(PyRRef, GenericWithOneTypeVar):
+        # Combine the implementation class and the type class.
+        pass
+except TypeError as exc:
+    # TypeError: metaclass conflict: the metaclass of a derived class
+    # must be a (non-strict) subclass of the metaclasses of all its bases
+    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):
+        pass
+
+    class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta):
+        # Combine the implementation class and the type class.
+        pass
+
+
 @_require_initialized
 def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
@@ -416,12 +438,12 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         raised as they have not yet been handled.
 
     Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
+        >>> export MASTER_ADDR=localhost
+        >>> export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
@@ -630,7 +652,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                                    indicates an infinite timeout, i.e. a timeout
                                    error will never be raised. If not provided,
                                    the default value set during initialization
-                                   or with `_set_rpc_timeout` is used.
+                                   or with ``_set_rpc_timeout`` is used.
 
     Returns:
         Returns the result of running ``func`` with ``args`` and ``kwargs``.
@@ -642,12 +664,12 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         arguments or return values of ``func``.
 
     Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
+        >>> export MASTER_ADDR=localhost
+        >>> export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 
@@ -691,8 +713,8 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
-    method is thread-safe. This method will immediately return a Future that can
-    be awaited on.
+    method is thread-safe. This method will immediately return a
+    :class:`~torch.futures.Future` that can be awaited on.
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
@@ -709,13 +731,14 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
                                    indicates an infinite timeout, i.e. a timeout
                                    error will never be raised. If not provided,
                                    the default value set during initialization
-                                   or with `_set_rpc_timeout` is used.
+                                   or with ``_set_rpc_timeout`` is used.
 
 
     Returns:
-        Returns a Future object that can be waited
+        Returns a :class:`~torch.futures.Future` object that can be waited
         on. When completed, the return value of ``func`` on ``args`` and
-        ``kwargs`` can be retrieved from the Future object.
+        ``kwargs`` can be retrieved from the :class:`~torch.futures.Future`
+        object.
 
     .. warning ::
         Using GPU tensors as arguments or return values of ``func`` is not
@@ -727,16 +750,16 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         The ``rpc_async`` API does not copy storages of argument tensors until
         sending them over the wire, which could be done by a different thread
         depending on the RPC backend type. The caller should make sure that the
-        contents of those tensors stay intact until the returned Future
-        completes.
+        contents of those tensors stay intact until the returned
+        :class:`~torch.futures.Future` completes.
 
     Example::
-        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        Make sure that ``MASTER_ADDR`` and ``MASTER_PORT`` are set properly
         on both workers. Refer to :meth:`~torch.distributed.init_process_group`
         API for more details. For example,
 
-        >>> export MASTER_ADDRESS=localhost
-        >>> export MASTER_port=5678
+        >>> export MASTER_ADDR=localhost
+        >>> export MASTER_PORT=5678
 
         Then run the following code in two different processes:
 

@@ -360,9 +360,6 @@ class DistributedDataParallel(Module):
                 "Please consider using one DDP instance per device or per "
                 "module replica by explicitly setting device_ids or "
                 "CUDA_VISIBLE_DEVICES. "
-                "NB: There is a known issue in nn.parallel.replicate that "
-                "prevents a single DDP instance to operate on multiple model "
-                "replicas."
             )
 
             # only create replicas for single-device CUDA modules
