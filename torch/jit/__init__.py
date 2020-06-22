@@ -1461,6 +1461,45 @@ def script_method(fn):
     return ScriptMethodStub(_rcb, ast, fn)
 
 
+def freeze(obj, names : [str] = []):
+    r"""
+    Freezing a :class:`ScriptModule` will clone this module and inline
+    submodules, parameters, and attributes into the cloned module and returns
+    it.
+
+    Example (Freezing a simple module with a Parameter):
+
+    .. testcode::
+
+    import torch
+
+    class MyModule(torch.nn.Module):
+    def __init__(self, N, M):
+        super(MyModule, self).__init__()
+        self.weight = torch.nn.Parameter(torch.rand(N, M))
+
+        self.linear = torch.nn.Linear(N, M)
+
+        def forward(self, input):
+        output = self.weight.mv(input)
+        output = self.linear(output)
+        return output
+
+    scripted_module = torch.jit.script(MyModule(2, 3))
+    frozen_module = torch.jit.freeze(scripted_module)
+
+    # See the compiled graph as Python code
+    print(frozen_module.code)
+
+    """
+    if not isinstance(obj, ScriptModule):
+        raise RuntimeError("TorchScript freeze expect a ScriptModule as input. "
+                "Please use torch.jit.script to script your 'nn.Module'.")
+
+    obj.eval()
+    out = torch._C._freeze_module(obj._c, names)
+    setattr(type(out), "__call__",  out.forward)
+    return out
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
 # module with versions that get/set properties inside of Module.
