@@ -603,8 +603,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
-      [this, &clientPipe, messageId, futureResponseMessage](
-          const tensorpipe::Error& error) mutable {
+      [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
               !rpcAgentRunning_.load()) {
@@ -616,7 +615,11 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                          << clientPipe.pipe_->getRemoteName() << ": "
                          << error.what();
           }
-          markFutureWithError(std::move(futureResponseMessage), error.what());
+          auto pendingFutIt =
+              clientPipe.pendingResponseMessage_.find(messageId);
+          if (pendingFutIt != clientPipe.pendingResponseMessage_.end()) {
+            markFutureWithError(pendingFutIt->second, error.what());
+          }
           return;
         }
 
