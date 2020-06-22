@@ -3623,10 +3623,6 @@ def setup_rnn_tests():
                 ('lstm', 'lstm', {}),
                 ('gru', 'gru', {})
         ):
-            # This is a hack to skip elman_rnn bidirectional tests for now
-            # TODO: Revert this once elman_rnn bidirectional issue is fixed
-            if base == 'elman' and bidirectional[1] == 'bidirectional':
-                continue
             make_test(name, base, layer, bidirectional, initial_state,
                       variable_length, dropout,
                       **extra_kwargs)
@@ -3637,10 +3633,8 @@ def setup_rnn_tests():
 
     # make sure no one accidentally disables all the tests without
     # noticing
-    # assert test_count == 192, test_count
-    # TODO: Revert this once elman_rnn bidirectional issue is fixed
-    if test_count != 144:
-        raise ValueError('Expected 144 tests but found {}'.format(test_count))
+    if test_count != 192:
+        raise ValueError('Expected 192 tests but found {}'.format(test_count))
 
 
 setup_rnn_tests()
