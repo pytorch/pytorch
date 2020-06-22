@@ -27,6 +27,13 @@ ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
 
+# (optional) Install protobuf for ONNX
+ARG PROTOBUF
+ADD ./common/install_protobuf.sh install_protobuf.sh
+RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
+RUN rm install_protobuf.sh
+ENV INSTALLED_PROTOBUF ${PROTOBUF}
+
 # (optional) Install database packages like LMDB and LevelDB
 ARG DB
 ADD ./common/install_db.sh install_db.sh
@@ -42,7 +49,7 @@ RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
 # Install rocm
-ARG ROCM
+ARG ROCM_VERSION
 ADD ./common/install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh

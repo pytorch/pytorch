@@ -195,12 +195,12 @@ Tensor fromDLPack(const DLManagedTensor* src) {
         deleter,
         at::device(device).dtype(stype));
   }
-
   return at::from_blob(
       src->dl_tensor.data,
       IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
       IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
-      at::device(device).dtype(stype));
+      at::device(device).dtype(stype),
+      { device });
 }
 } // namespace at

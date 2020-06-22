@@ -62,7 +62,6 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 // LpNorm
 REGISTER_CPU_OPERATOR(LpNorm, LpNormOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LpNormGradient, LpNormGradientOp<float, CPUContext>);
@@ -170,6 +169,5 @@ class GetLpNormGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(LpNorm, GetLpNormGradient);
-} // namespace
 
 } // namespace caffe2

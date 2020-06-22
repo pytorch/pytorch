@@ -222,6 +222,7 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kSinh:
     case kCosh:
     case kTanh:
+    case kSigmoid:
     case kExp:
     case kExpm1:
     case kFabs:

@@ -85,17 +85,17 @@ class SerializationMixin(object):
         return b
 
     def _test_serialization_assert(self, b, c):
-        self.assertEqual(b, c, 0)
+        self.assertEqual(b, c, atol=0, rtol=0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
         self.assertTrue(isinstance(c[4], torch.FloatStorage))
         c[0].fill_(10)
-        self.assertEqual(c[0], c[2], 0)
-        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+        self.assertEqual(c[0], c[2], atol=0, rtol=0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
         c[1].fill_(20)
-        self.assertEqual(c[1], c[3], 0)
+        self.assertEqual(c[1], c[3], atol=0, rtol=0)
         # I have to do it in this roundabout fashion, because there's no
         # way to slice storages
         for i in range(4):
@@ -288,17 +288,17 @@ class SerializationMixin(object):
         b += [a[0].reshape(-1)[1:4].clone().storage()]
         path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
         c = torch.load(path)
-        self.assertEqual(b, c, 0)
+        self.assertEqual(b, c, atol=0, rtol=0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
         self.assertTrue(isinstance(c[4], torch.FloatStorage))
         c[0].fill_(10)
-        self.assertEqual(c[0], c[2], 0)
-        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
+        self.assertEqual(c[0], c[2], atol=0, rtol=0)
+        self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), atol=0, rtol=0)
         c[1].fill_(20)
-        self.assertEqual(c[1], c[3], 0)
+        self.assertEqual(c[1], c[3], atol=0, rtol=0)
 
         # test some old tensor serialization mechanism
         class OldTensorBase(object):
@@ -472,6 +472,7 @@ class SerializationMixin(object):
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
 
+
     def test_serialization_storage_slice(self):
         # Generated using:
         #
@@ -541,6 +542,18 @@ class serialization_method(object):
 
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
+
+class TestBothSerialization(TestCase, SerializationMixin):
+    def test_serialization_new_format_old_format_compat(self):
+        x = [torch.ones(200, 200) for i in range(30)]
+        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=True)
+        x_new_load = torch.load("big_tensor.zip")
+        self.assertEqual(x, x_new_load)
+
+        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=False)
+        x_old_load = torch.load("big_tensor.zip")
+        self.assertEqual(x_old_load, x_new_load)
+        os.remove("big_tensor.zip")
 
 
 class TestOldSerialization(TestCase, SerializationMixin):

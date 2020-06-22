@@ -182,7 +182,7 @@ fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
 }
 
 // FIXME: code duplication with ConvDNNLowPOp::QuantizeBias_
-static void QuantizeConvBias(
+void QuantizeConvBias(
     const Blob& blob,
     int M,
     const TensorQuantizationParams& in_qparams,
