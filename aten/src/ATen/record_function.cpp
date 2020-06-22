@@ -22,6 +22,8 @@ RecordFunctionHandle next_unique_record_function_handle() {
 // must be sorted in increasing handles order
 thread_local RecordFunctionCallbacks sorted_tls_callbacks_;
 
+std::atomic<int64_t> defaultNodeId(-1);
+
 class CallbackManager {
  public:
   CallbackHandle addThreadLocalCallback(RecordFunctionCallback cb) {
@@ -326,6 +328,15 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   thread_id_ = currentThreadId();
 
   manager().runStartCallbacks(*this);
+}
+
+/* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {
+  TORCH_CHECK(newDefaultNodeId >= 0, "setDefaultNodeId expects an id >= 0.");
+  defaultNodeId = newDefaultNodeId;
+}
+
+/* static */ int64_t RecordFunction::getDefaultNodeId() {
+  return defaultNodeId;
 }
 
 RecordFunction::~RecordFunction() {

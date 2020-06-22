@@ -1,12 +1,7 @@
 #include "layernorm_fp16_fake_op.h"
+#include "caffe2/contrib/fakelowp/common.h"
 
 namespace caffe2 {
-
-template <>
-template <typename T>
-void LayerNormFakeFp16Op<CPUContext>::fp16_wrap(T* tmp) {
-  fbgemm::RoundToFloat16(tmp, tmp, 1, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-}
 
 template <>
 template <typename T>
@@ -37,9 +32,7 @@ void LayerNormFakeFp16Op<CPUContext>::calcY(
         fp16_wrap(&tmp);
         T normalized = tmp * normFactor;
         fp16_wrap(&normalized);
-        tmp = normalized * gamma_arr[j];
-        fp16_wrap(&tmp);
-        tmp = tmp + beta_arr[j];
+        tmp = normalized * gamma_arr[j] + beta_arr[j];
         fp16_wrap(&tmp);
         Y_arr.col(i)[j] = tmp;
       }
@@ -61,6 +54,35 @@ void LayerNormFakeFp16Op<CPUContext>::calcY(
 
 template <>
 template <typename T>
+T LayerNormFakeFp16Op<CPUContext>::ReducedAdd(const std::vector<T>& vec) {
+  constexpr int VEC_SIZE = 32;
+  std::vector<T> v(VEC_SIZE, T(0));
+  for (int i = 0; i < VEC_SIZE; ++i) { // 32
+    v[i] = vec[i];
+  }
+  for (int i = 0; i < VEC_SIZE / 2; ++i) { // 16
+    v[i] = v[2 * i] + v[2 * i + 1];
+    fp16_wrap(&v[i]);
+  }
+  for (int i = 0; i < VEC_SIZE / 4; ++i) { // 8
+    v[i] = v[2 * i] + v[2 * i + 1];
+    fp16_wrap(&v[i]);
+  }
+  for (int i = 0; i < VEC_SIZE / 8; ++i) { // 4
+    v[i] = v[2 * i] + v[2 * i + 1];
+    fp16_wrap(&v[i]);
+  }
+  for (int i = 0; i < VEC_SIZE / 16; ++i) { // 2
+    v[i] = v[2 * i] + v[2 * i + 1];
+    fp16_wrap(&v[i]);
+  }
+  v[0] = v[0] + v[1];
+  fp16_wrap(&v[0]);
+  return v[0];
+}
+
+template <>
+template <typename T>
 void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
     const int M,
     const int N,
@@ -73,32 +95,48 @@ void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
   T sqr[M];
   T var[M];
   T inv_N_val = T(1) / N;
+  fp16_wrap(&inv_N_val);
   T tmp = T(0);
 
+  const int VEC_SIZE = 32;
+  std::vector<T> avgVec(VEC_SIZE, T(0));
+  std::vector<T> sqrVec(VEC_SIZE, T(0));
+  int numVecs = N / VEC_SIZE;
+  int tailSize = N - (numVecs * VEC_SIZE);
   for (int i = 0; i < M; ++i) {
-    mean[i] = T(0);
-    sqr[i] = T(0);
-    var[i] = T(0);
-    for (int j = 0; j < N; ++j) {
-      tmp = T(X_arr.col(i)[j] * inv_N_val);
-      fp16_wrap(&tmp);
-      mean[i] += tmp;
-      fp16_wrap(&mean[i]);
-      tmp *= X_arr.col(i)[j];
-      fp16_wrap(&tmp);
-      sqr[i] += tmp;
-      fp16_wrap(&sqr[i]);
+    std::fill(avgVec.begin(), avgVec.end(), T(0));
+    std::fill(sqrVec.begin(), sqrVec.end(), T(0));
+    for (int j = 0; j < numVecs; ++j) {
+      for (int k = 0; k < VEC_SIZE; ++k) {
+        avgVec[k] = X_arr.col(i)[VEC_SIZE * j + k] * inv_N_val + avgVec[k];
+        fp16_wrap(&avgVec[k]);
+        tmp = X_arr.col(i)[VEC_SIZE * j + k] * inv_N_val;
+        fp16_wrap(&tmp);
+        sqrVec[k] = tmp * X_arr.col(i)[VEC_SIZE * j + k] + sqrVec[k];
+        fp16_wrap(&sqrVec[k]);
+      }
     }
-    tmp = mean[i] * mean[i];
-    fp16_wrap(&tmp);
-    var[i] = sqr[i] - tmp;
+    for (int k = 0; k < tailSize; ++k) {
+      avgVec[k] = X_arr.col(i)[VEC_SIZE * numVecs + k] * inv_N_val + avgVec[k];
+      fp16_wrap(&avgVec[k]);
+      tmp = X_arr.col(i)[VEC_SIZE * numVecs + k] * inv_N_val;
+      fp16_wrap(&tmp);
+      sqrVec[k] = tmp * X_arr.col(i)[VEC_SIZE * numVecs + k] + sqrVec[k];
+      fp16_wrap(&sqrVec[k]);
+    }
+    mean[i] = ReducedAdd(avgVec);
+    sqr[i] = ReducedAdd(sqrVec);
+    // compute variance and std deviation
+    var[i] = -mean[i] * mean[i] + sqr[i];
     fp16_wrap(&var[i]);
-    std[i] = std::sqrt(var[i] + eps);
+    tmp = var[i] + eps;
+    fp16_wrap(&tmp);
+    std[i] = std::sqrt(tmp);
     fp16_wrap(&std[i]);
   }
 }
 
-REGISTER_CPU_OPERATOR(LayerNormFakeFP16, LayerNormFakeFp16Op<CPUContext>);
-OPERATOR_SCHEMA(LayerNormFakeFP16).NumInputs({1, 3}).NumOutputs(3);
+REGISTER_CPU_OPERATOR(LayerNormFakeFP16NNPI, LayerNormFakeFp16Op<CPUContext>);
+OPERATOR_SCHEMA(LayerNormFakeFP16NNPI).NumInputs({1, 3}).NumOutputs(3);
 
 } // namespace caffe2
