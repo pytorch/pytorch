@@ -19,7 +19,6 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
-    "-DAT_PARALLEL_NATIVE=1",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -545,6 +544,9 @@ template_rule(
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
         "@USE_BLAS@": "1",
+        "@AT_PARALLEL_OPENMP@": "0",
+        "@AT_PARALLEL_NATIVE@": "1",
+        "@AT_PARALLEL_NATIVE_TBB@": "0",
     },
 )
 
@@ -1216,9 +1218,9 @@ filegroup(
         "caffe2/perfkernels/adagrad.cc",
         "caffe2/perfkernels/embedding_lookup.cc",
         "caffe2/perfkernels/embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_conversion.cc",
         "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.cc",
         "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup_idx.cc",
+        "caffe2/perfkernels/fused_nbit_rowwise_conversion.cc",
         "caffe2/perfkernels/lstm_unit_cpu_common.cc",
         "caffe2/perfkernels/math_cpu_base.cc",
         "caffe2/perfkernels/typed_axpy.cc",
