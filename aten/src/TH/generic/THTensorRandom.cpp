@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <type_traits>
 #include <ATen/Utils.h>
+#include <ATen/core/DistributionsHelper.h>
 #include <TH/THGenerator.hpp>
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -113,7 +114,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THLongTensor_free(smaller);
   THLongTensor_free(larger);
 }
-void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, at::Generator _generator)
+void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTensor *J, int n_sample, c10::optional<at::Generator> _generator)
 {
   THArgCheck(q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",

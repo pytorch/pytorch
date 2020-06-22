@@ -7,7 +7,7 @@ namespace jit {
 
 #define TENSOREXPR_GTEST(name) \
   TEST(TensorExprTest, name) { \
-    test##name();       \
+    test##name();              \
   }
 TH_FORALL_TENSOREXPR_TESTS(TENSOREXPR_GTEST)
 #undef TENSOREXPR_GTEST

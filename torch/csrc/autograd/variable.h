@@ -40,6 +40,13 @@ using Variable = at::Tensor;
 
 namespace torch { namespace autograd {
 
+/// Check if this type is supported by the autograd engine.
+/// If you change this, update the doc at the top of the torch/autograd/__init__.py file
+/// and "test_set_requires_grad_only_for_continuous_types" in test/test_autograd.py
+static inline bool isDifferentiableType(at::ScalarType t) {
+    return isFloatingType(t) || isComplexType(t);
+}
+
 struct Node;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -213,8 +220,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   /// variables.
   void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
     TORCH_CHECK(
-      !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())),
-      "Only Tensors of floating point dtype can require gradients");
+      !requires_grad || isDifferentiableType(at::typeMetaToScalarType(self_impl->dtype())),
+      "Only Tensors of floating point and complex dtype can require gradients");
     requires_grad_ = requires_grad;
   }
 
@@ -329,6 +336,10 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// creation_meta=CreationMeta::NO_GRAD_MODE for all differentiable views created
 /// in no_grad mode.
 ///
+/// See Note [View + Inplace update for base tensor]
+/// and Note [View + Inplace update for view tensor] for the details how autograd
+/// handles inplace update with view ops.
+///
 /// Non-Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// In certain cases, although function outputs share storage with inputs, they
@@ -384,13 +395,27 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version;
 
+  /// By default we use as_strided to recover views which is more efficient.
+  /// view_fn is only saved when as_strided is not supported.
+  /// If view_fn has value, we use it to recover views in backward.
+  c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn_;
+
   CreationMeta creation_meta;
 
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
+  bool has_view_fn() const {
+    return view_fn_.has_value();
+  }
+
+  std::function<at::Tensor(const at::Tensor&)> view_fn() const {
+    TORCH_CHECK(has_view_fn(), "view_fn is not set.");
+    return view_fn_.value();
+  }
+
+  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn,
                          CreationMeta creation_meta=CreationMeta::DEFAULT);
   ~DifferentiableViewMeta();
 };
@@ -420,16 +445,17 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 inline Variable make_variable_differentiable_view(
     Variable base,
     at::Tensor data,
-    CreationMeta creation_meta) {
+    CreationMeta creation_meta,
+    c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_func = c10::nullopt) {
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/true);
     data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-      data_impl_copy.get(), std::move(base),
+      data_impl_copy.get(), std::move(base), std::move(view_func),
       creation_meta));
     return Variable(data_impl_copy);
-    }
+  }
   return Variable();
 }
 

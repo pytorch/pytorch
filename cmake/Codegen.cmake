@@ -3,6 +3,7 @@
 # - Configures caffe2/core/macros.h
 # - Creates an ATen target for its generated C++ files and adds it
 #   as a dependency
+# - Reads build lists defined in build_variables.bzl
 
 ################################################################################
 # Helper functions
@@ -121,11 +122,22 @@ if(INTERN_BUILD_ATEN_OPS)
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
       if(MSVC)
-        set(MACRO_FLAG "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
+        set(EXTRA_FLAGS "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
       else(MSVC)
-        set(MACRO_FLAG "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
+        set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
-      set_source_files_properties(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${MACRO_FLAG}")
+      # Disable certain warnings for GCC-9.X
+      if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+        if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))
+          # See https://github.com/pytorch/pytorch/issues/38855
+          set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-uninitialized")
+        endif()
+        if("${NAME}" STREQUAL "native/quantized/cpu/kernels/QuantizedOpKernels.cpp")
+          # See https://github.com/pytorch/pytorch/issues/38854
+          set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-deprecated-copy")
+        endif()
+      endif()
+      set_source_files_properties(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${EXTRA_FLAGS}")
     endforeach()
   endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
@@ -144,6 +156,14 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   set(CUSTOM_BUILD_FLAGS)
+  if(INTERN_BUILD_MOBILE)
+    if(USE_VULKAN)
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU Vulkan)
+    else()
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
+    endif()
+  endif()
+
   if(SELECTED_OP_LIST)
     if(NOT USE_STATIC_DISPATCH AND NOT OP_DEPENDENCY)
       message(FATAL_ERROR "Must provide op dependency graph .yaml file for custom build with dynamic dispatch!")
@@ -157,9 +177,12 @@ if(INTERN_BUILD_ATEN_OPS)
     )
     separate_arguments(OP_REGISTRATION_WHITELIST)
     message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
-    set(CUSTOM_BUILD_FLAGS
+    list(APPEND CUSTOM_BUILD_FLAGS
       --force_schema_registration
       --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
+  endif()
+  if(USE_VULKAN)
+    set(GEN_VULKAN_FLAGS --vulkan)
   endif()
 
   set(GEN_COMMAND
@@ -169,6 +192,7 @@ if(INTERN_BUILD_ATEN_OPS)
       ${GEN_ROCM_FLAG}
       ${cwrap_files}
       ${CUSTOM_BUILD_FLAGS}
+      ${GEN_VULKAN_FLAGS}
   )
 
   execute_process(
@@ -204,3 +228,23 @@ if(INTERN_BUILD_ATEN_OPS)
   add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
   add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
 endif()
+
+function(append_filelist name outputvar)
+  set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
+  # configure_file adds its input to the list of CMAKE_RERUN dependencies
+  configure_file(
+      ${CMAKE_SOURCE_DIR}/tools/build_variables.bzl
+      ${CMAKE_BINARY_DIR}/caffe2/build_variables.bzl)
+  execute_process(
+    COMMAND "${PYTHON_EXECUTABLE}" -c
+            "exec(open('tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
+    WORKING_DIRECTORY "${_rootdir}"
+    RESULT_VARIABLE _retval
+    OUTPUT_VARIABLE _tempvar)
+  if(NOT _retval EQUAL 0)
+    message(FATAL_ERROR "Failed to fetch filelist ${name} from build_variables.bzl")
+  endif()
+  string(REPLACE "\n" "" _tempvar "${_tempvar}")
+  list(APPEND ${outputvar} ${_tempvar})
+  set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
+endfunction()

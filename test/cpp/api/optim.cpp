@@ -174,18 +174,15 @@ TEST(OptimTest, OptimizerAccessors) {
   optimizer_.state();
 }
 
-#define OLD_INTERFACE_WARNING_CHECK(func) \
-{ \
-  std::stringstream buffer;\
-  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());\
-  func;\
-  ASSERT_EQ(\
-    torch::test::count_substr_occurrences(\
-      buffer.str(),\
-      "will be removed"\
-    ),\
-  1);\
-}
+#define OLD_INTERFACE_WARNING_CHECK(func)       \
+  {                                             \
+    torch::test::WarningCapture warnings;       \
+    func;                                       \
+    ASSERT_EQ(                                  \
+        torch::test::count_substr_occurrences(  \
+            warnings.str(), "will be removed"), \
+        1);                                     \
+  }
 
 struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions> {
   MyOptimizerOptions(double lr = 1.0) : lr_(lr) {};
@@ -284,6 +281,31 @@ TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
       expected_parameters::Adam_with_weight_decay_and_amsgrad());
+}
+
+TEST(OptimTest, XORConvergence_AdamW) {
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(AdamWOptions(0.1)));
+}
+
+TEST(OptimTest, XORConvergence_AdamWWithAmsgrad) {
+  ASSERT_TRUE(test_optimizer_xor<AdamW>(
+      AdamWOptions(0.1).amsgrad(true)));
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamW) {
+  check_exact_values<AdamW>(AdamWOptions(1.0), expected_parameters::AdamW());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamWWithoutWeightDecay) {
+  check_exact_values<AdamW>(
+      AdamWOptions(1.0).weight_decay(0),
+      expected_parameters::AdamW_without_weight_decay());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamWWithAMSGrad) {
+  check_exact_values<AdamW>(
+      AdamWOptions(1.0).amsgrad(true),
+      expected_parameters::AdamW_with_amsgrad());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_Adagrad) {

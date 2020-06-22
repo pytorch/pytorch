@@ -76,7 +76,7 @@ private:
  * table for various kernels provided for this operator.  For example, if we
  * consider the operator add(Tensor, Tensor), the dispatch table for this
  * operator may contain implementations for various dynamic tensor types, such
- * as CPUTensorId, CUDATensorId, etc.
+ * as CPU, CUDA, etc.
  */
 class DispatchTable final {
  public:
@@ -106,6 +106,9 @@ class DispatchTable final {
     }
     kernels_.setKernel(dispatchKey, std::move(kernel));
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
+    if (kernel.isFallthrough()) {
+      dispatchKeyExtractor_.setOperatorHasFallthroughForBackend(dispatchKey, true);
+    }
   }
 
   /**
@@ -116,6 +119,7 @@ class DispatchTable final {
   void removeKernelIfExists(DispatchKey dispatchKey) {
     kernels_.removeKernelIfExists(dispatchKey);
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, false);
+    dispatchKeyExtractor_.setOperatorHasFallthroughForBackend(dispatchKey, false); // may be no op
   }
 
   /**
@@ -222,6 +226,10 @@ class DispatchTable final {
     }
   }
 
+  c10::optional<KernelFunction::InternalBoxedKernelFunction*> manuallyBoxedKernel() const {
+    return manuallyBoxedKernel_;
+  }
+
 private:
 
   impl::KernelFunctionTable kernels_;
@@ -229,7 +237,7 @@ private:
   DispatchKeyExtractor dispatchKeyExtractor_;
   OperatorName operatorName_;
 
-  // This manuallyBoxedKernel_ member is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
+  // This manuallyBoxedKernel_ member is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
   // unboxing wrapper for aten operators. We still need those for some operators because not all work
   // with the templated unboxing logic yet.
   // TODO Delete manuallyBoxedKernel_ once all operators work with the templated boxing logic

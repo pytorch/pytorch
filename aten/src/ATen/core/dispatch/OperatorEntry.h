@@ -2,6 +2,7 @@
 
 #include <ATen/core/dispatch/DispatchTable.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <list>
 
@@ -30,7 +31,6 @@ public:
     std::string debug;
   };
 
-  explicit OperatorEntry(FunctionSchema&& schema);
   explicit OperatorEntry(OperatorName&& operator_name);
 
   OperatorEntry(const OperatorEntry&) = delete;
@@ -39,8 +39,12 @@ public:
   OperatorEntry& operator=(OperatorEntry&&) noexcept = delete;
 
   const FunctionSchema& schema() const {
-    TORCH_INTERNAL_ASSERT(schema_.has_value());
+    TORCH_INTERNAL_ASSERT(schema_.has_value(), "Tried to access the schema for ", name_, " which doesn't have a schema registered yet");
     return *schema_;
+  }
+  const std::string& debug() const {
+    TORCH_INTERNAL_ASSERT(debug_.has_value());
+    return *debug_;
   }
   bool hasSchema() const {
     return schema_.has_value();
@@ -65,7 +69,7 @@ public:
   // attempt to register a schema when one is already present or vice
   // versa that is an error.  (Refcounting for the registrations is
   // handled in the OperatorHandle in Dispatcher)
-  void registerSchema(FunctionSchema&&);
+  void registerSchema(FunctionSchema&&, std::string&& debug);
   void deregisterSchema();
 
   const OperatorName& operator_name() const {
@@ -79,7 +83,7 @@ public:
   void prepareForDeregistration();
 
   // Postcondition: caller is responsible for disposing of the kernel
-  std::list<KernelEntry>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  std::list<KernelEntry>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
   void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelEntry>::iterator kernel);
 
   void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
@@ -90,7 +94,7 @@ public:
   std::string dumpState() const;
   void checkInvariants() const;
 
-  // This function is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
+  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
   // unboxing wrapper for aten operators. We still need those for some operators because not all work
   // with the templated unboxing logic yet.
   // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic
@@ -98,10 +102,26 @@ public:
     dispatchTable_.setManuallyBoxedKernel_(func);
   }
 
+  // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
+  template<class FuncType>
+  void assertSignatureIsCorrect() {
+    TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == *cpp_signature_),
+        "Tried to access operator ", name_, " with a wrong signature. Accessed with ",
+        CppSignature::make<FuncType>().name(),
+        " but the operator was registered with ",
+        cpp_signature_->name(),
+        " (",
+        debug_.value(),
+        ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
+    );
+  }
+
 private:
 
   OperatorName name_;
   c10::optional<FunctionSchema> schema_;
+  c10::optional<std::string> debug_;
+  // INVARIANT: schema_.has_value() == debug_.has_value()
 
   // The dispatchTable stores the current kernel for each dispatch key
   DispatchTable dispatchTable_;
@@ -140,6 +160,13 @@ private:
   ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelEntry>> kernels_;
 
   std::mutex kernelsMutex_; // protects kernels_
+
+  // signature_hash_ is set to the hash of the function signature if any of
+  // the kernels was created in a way that allowed us to know the function
+  // signature (i.e. by supplying an unboxed C++ kernel function).
+  // If this is set, it will be used in unboxed function calls
+  // to verify their arguments against the known function signature.
+  c10::optional<CppSignature> cpp_signature_;
 
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.

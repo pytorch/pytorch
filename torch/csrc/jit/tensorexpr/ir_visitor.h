@@ -28,8 +28,6 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE)
 class Cast;
 class Var;
 class Buf;
-class Let;
-class LetStmt;
 class Ramp;
 class Load;
 class For;
@@ -47,6 +45,7 @@ class Term;
 class Polynomial;
 class RoundOff;
 class ReduceOp;
+class AtomicAdd;
 
 class TORCH_API IRVisitor {
  public:
@@ -73,8 +72,6 @@ class TORCH_API IRVisitor {
   virtual void visit(const Cast* v);
   virtual void visit(const Var* v);
   virtual void visit(const Buf* v);
-  virtual void visit(const Let* v);
-  virtual void visit(const LetStmt* v);
   virtual void visit(const Ramp* v);
   virtual void visit(const Load* v);
   virtual void visit(const For* v);
@@ -99,6 +96,7 @@ class TORCH_API IRVisitor {
   virtual void visit(const Polynomial* v);
   virtual void visit(const RoundOff* v);
   virtual void visit(const ReduceOp* v);
+  virtual void visit(const AtomicAdd* v);
 };
 
 } // namespace tensorexpr

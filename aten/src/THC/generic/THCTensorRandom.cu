@@ -54,7 +54,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
                 THCudaLongTensor_data(state, larger_short),
                 inputsize - h_large_c, h_large_c
                 );
-  scalar_t q_max = THCTensor_(maxall)(state, _q);
+  scalar_t q_max = at::max(THTensor_wrap(_q)).item<scalar_t>();
   condDiv<<<
     inputBlockDim, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
                       THCTensor_(data)(state, _q),
@@ -69,7 +69,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   THCTensor_free(state, probs);
 }
 
-void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCTensor *_q, THCudaLongTensor *_J, int n_sample, at::Generator gen_){
+void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCTensor *_q, THCudaLongTensor *_J, int n_sample, c10::optional<at::Generator> gen_){
   THArgCheck(_q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
              _q->dim());

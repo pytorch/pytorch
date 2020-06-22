@@ -15,6 +15,11 @@ using qclamp_fn = void (*)(
     Scalar min,
     Scalar max,
     at::Tensor& /*qy*/);
+using qthreshold_fn = void (*)(
+    const at::Tensor& /*qx*/,
+    Scalar threshold,
+    Scalar value,
+    at::Tensor& /*qy*/);
 using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qelu_fn = void(*)(
     const at::Tensor& /*qx*/,
@@ -118,6 +123,18 @@ using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool
 
 using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, int64_t, int64_t, const Tensor&, const Tensor&, const Tensor&, Tensor&);
 
+using qnormalize_fn = void (*)(
+    const Tensor& /* X */,
+    const Tensor& /* gamma */,
+    const Tensor& /* beta */,
+    bool /* affine_per_channel */,
+    int /* num_channels */,
+    int /* num_groups */,
+    int64_t /* M */,
+    int64_t /* N */,
+    double /* eps */,
+    Tensor* /* Y */);
+
 // using qavg_pool2d_fn
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu6_stub);
@@ -125,6 +142,7 @@ DECLARE_DISPATCH(qrelu_leaky_fn, qrelu_leaky_stub);
 DECLARE_DISPATCH(qsigmoid_fn, qsigmoid_stub);
 DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub);
 DECLARE_DISPATCH(qclamp_fn, qclamp_stub);
+DECLARE_DISPATCH(qthreshold_fn, qthreshold_stub);
 DECLARE_DISPATCH(qtanh_fn, qtanh_stub);
 DECLARE_DISPATCH(qbinary_fn, qadd_stub);
 DECLARE_DISPATCH(qbinary_fn, qadd_relu_stub);
@@ -144,6 +162,7 @@ DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
 DECLARE_DISPATCH(qtopk_fn, qtopk_stub);
 DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_stub);
 DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_relu_stub);
+DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub);
 
 } // namespace native
 } // namespace at

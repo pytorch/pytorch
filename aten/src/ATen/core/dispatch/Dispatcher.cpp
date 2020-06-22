@@ -105,8 +105,30 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   return handle;
 }
 
+RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto found = libraries_.find(ns);
+  TORCH_CHECK(
+    found == libraries_.end(),
+    "Only a single TORCH_LIBRARY can be used to register the namespace ", ns,
+    "; please put all of your definitions in a single TORCH_LIBRARY block.  "
+    "If you were trying to specify implementations, consider using TORCH_LIBRARY_IMPL "
+    "(which can be duplicated).  Previous registration of TORCH_LIBRARY was ",
+    found->second, "; latest registration was ", debug
+  );
+  libraries_.emplace(ns, std::move(debug));
+  return RegistrationHandleRAII([this, ns] {
+    deregisterLibrary_(ns);
+  });
+}
 
-RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
+void Dispatcher::deregisterLibrary_(const std::string& ns) {
+  // we need a lock to avoid concurrent writes
+  std::lock_guard<std::mutex> lock(mutex_);
+  libraries_.erase(ns);
+}
+
+RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -115,10 +137,10 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
 
   if (op.operatorIterator_->def_count == 0) {
     // NB: registerSchema is not idempotent! Only do it once!
-    op.operatorIterator_->op.registerSchema(std::move(schema));
+    op.operatorIterator_->op.registerSchema(std::move(schema), std::move(debug));
     listeners_->callOnOperatorRegistered(op);
   } else {
-    checkSchemaCompatibility(op, schema);
+    checkSchemaCompatibility(op, schema, debug);
   }
 
   // NB: do not increment the counts until AFTER error checking
@@ -130,8 +152,8 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
   });
 }
 
-void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema) {
-  TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
+void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug) {
+  TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " (", debug, ") vs ", op.schema(), " (", op.debug(), ")");
   if (schema.isDefaultAliasAnalysisKind()) {
     // [BACKWARDS COMPAT] If the *new* schema is the default alias analysis
     // kind, for BC, we will accept it.  If we don't accept it, most extensions
@@ -145,7 +167,7 @@ void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const Functi
   } else {
     TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
       "Tried to define the schema for ", toString(op.operator_name()), " with different alias analysis kinds: ",
-      toString(op.schema().aliasAnalysis()), " vs ", toString(schema.aliasAnalysis()));
+      toString(op.schema().aliasAnalysis()), " (", op.debug(), ") vs ", toString(schema.aliasAnalysis()), " (", debug, ")");
   }
 }
 
@@ -176,6 +198,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   OperatorName op_name,
   c10::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
+  c10::optional<impl::CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
@@ -183,7 +206,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   auto op = findOrRegisterName_(op_name);
 
-  auto handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(inferred_function_schema), std::move(debug));
+  auto handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(cpp_signature), std::move(inferred_function_schema), std::move(debug));
 
   ++op.operatorIterator_->def_and_impl_count;
 
@@ -205,6 +228,24 @@ void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& o
   cleanup(op, op_name);
 }
 
+RegistrationHandleRAII Dispatcher::registerName(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto op = findOrRegisterName_(op_name);
+  ++op.operatorIterator_->def_and_impl_count;
+  return RegistrationHandleRAII(
+      [this, op, op_name] { deregisterName_(op, op_name); });
+}
+
+void Dispatcher::deregisterName_(
+    const OperatorHandle& op,
+    const OperatorName& op_name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count > 0);
+  --op.operatorIterator_->def_and_impl_count;
+  cleanup(op, op_name);
+}
+
 // Test if the operator entry is completely dead, and if so remove it completely
 void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) {
   if (0 == op.operatorIterator_->def_and_impl_count) {
@@ -217,7 +258,9 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
   }
 }
 
-RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel) {
+RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   // TODO: fallbacks clobber each other completely unsafely, unlike regular
   // kernels
   backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
@@ -231,6 +274,8 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 }
 
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   backendFallbackKernels_.removeKernelIfExists(dispatchKey);
   backendsWithoutFallthrough_ = backendsWithoutFallthrough_.add(dispatchKey);
 }
@@ -284,15 +329,6 @@ void Dispatcher::checkInvariants() const {
 
 void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
   op.operatorIterator_->op.setManuallyBoxedKernel_(func);
-}
-
-bool Dispatcher::isValid(const OperatorHandle& op) const {
-  for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
-    if (iter == op.operatorIterator_) {
-      return true;
-    }
-  }
-  return false;
 }
 
 }

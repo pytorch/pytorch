@@ -21,6 +21,7 @@ void pytorch_q8gemm_dq_ukernel_4x8__neon(
     const float* restrict b,
     float* restrict c,
     size_t c_stride,
+    size_t output_channel_index,
     const struct pytorch_qnnp_conv_dynamic_quantization_params
         quantization_params[RESTRICT_STATIC 1]) {
   int32x4_t vacc0x0123 = {};
@@ -49,10 +50,16 @@ void pytorch_q8gemm_dq_ukernel_4x8__neon(
 
   const uint8x8_t va_zero_point =
       vld1_dup_u8((const uint8_t*)&quantization_params->input_zero_point);
+  // Assumes that kernel_zero_points is an array padded with necessary elements
+  // in order to make it multiple of 8.
   const uint8x8_t vb_zero_point =
-      vld1_dup_u8((const uint8_t*)&quantization_params->kernel_zero_point);
+      vld1_u8((const uint8_t*)&quantization_params->kernel_zero_points
+          [output_channel_index]);
 
-  const float32x4_t vmultiplier = vld1q_dup_f32(&quantization_params->multiplier);
+  const float32x4_t vmultiplier_c0123 =
+      vld1q_f32(&quantization_params->multipliers[output_channel_index]);
+  const float32x4_t vmultiplier_c4567 =
+      vld1q_f32(&quantization_params->multipliers[output_channel_index + 4]);
   const float32x4_t vbias[] = {
     vld1q_f32(b),
     vld1q_f32(b + 4),
@@ -512,20 +519,20 @@ void pytorch_q8gemm_dq_ukernel_4x8__neon(
   }
 
   float32x4_t vout0[] = {
-    vaddq_f32(vmulq_f32(vmultiplier, vcvtq_f32_s32(vacc0x0123)), vbias[0]),
-    vaddq_f32(vmulq_f32(vmultiplier, vcvtq_f32_s32(vacc0x4567)), vbias[1]),
+    vaddq_f32(vmulq_f32(vmultiplier_c0123, vcvtq_f32_s32(vacc0x0123)), vbias[0]),
+    vaddq_f32(vmulq_f32(vmultiplier_c4567, vcvtq_f32_s32(vacc0x4567)), vbias[1]),
   };
   float32x4_t vout1[] = {
-    vaddq_f32(vmulq_f32(vmultiplier, vcvtq_f32_s32(vacc1x0123)), vbias[0]),
-    vaddq_f32(vmulq_f32(vmultiplier, vcvtq_f32_s32(vacc1x4567)), vbias[1]),
+    vaddq_f32(vmulq_f32(vmultiplier_c0123, vcvtq_f32_s32(vacc1x0123)), vbias[0]),
+    vaddq_f32(vmulq_f32(vmultiplier_c4567, vcvtq_f32_s32(vacc1x4567)), vbias[1]),
   };
   float32x4_t vout2[] = {
-    vaddq_f32(vmulq_f32(vmultiplier, vcvtq_f32_s32(vacc2x0123)), vbias[0]),
-    vaddq_f32(vmulq_f32(vmultiplier, vcvtq_f32_s32(vacc2x4567)), vbias[1]),
+    vaddq_f32(vmulq_f32(vmultiplier_c0123, vcvtq_f32_s32(vacc2x0123)), vbias[0]),
+    vaddq_f32(vmulq_f32(vmultiplier_c4567, vcvtq_f32_s32(vacc2x4567)), vbias[1]),
   };
   float32x4_t vout3[] = {
-    vaddq_f32(vmulq_f32(vmultiplier, vcvtq_f32_s32(vacc3x0123)), vbias[0]),
-    vaddq_f32(vmulq_f32(vmultiplier, vcvtq_f32_s32(vacc3x4567)), vbias[1]),
+    vaddq_f32(vmulq_f32(vmultiplier_c0123, vcvtq_f32_s32(vacc3x0123)), vbias[0]),
+    vaddq_f32(vmulq_f32(vmultiplier_c4567, vcvtq_f32_s32(vacc3x4567)), vbias[1]),
   };
 
   float32x4_t * vout0_ptr = vout0;

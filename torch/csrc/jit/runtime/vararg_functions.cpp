@@ -1,4 +1,4 @@
-#include "vararg_functions.h"
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
 namespace jit {

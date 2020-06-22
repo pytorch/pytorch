@@ -1,6 +1,8 @@
 #include <torch/custom_class.h>
 
 #include <ATen/core/jit_type.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/functional.h>
 
 #include <atomic>
 #include <unordered_map>
@@ -24,10 +26,6 @@ void registerCustomClass(at::ClassTypePtr class_type) {
 }
 
 at::ClassTypePtr getCustomClass(const std::string& name) {
-  // BC hack so we can upgrade a binary internally
-  if (name == "__torch__.torch.classes.SentencePiece") {
-    return getCustomClass("__torch__.torch.classes.fb.SentencePiece");
-  }
   return customClasses().count(name) ? customClasses()[name] : nullptr;
 }
 
@@ -44,5 +42,13 @@ std::vector<std::unique_ptr<jit::Function>>& customClassMethods() {
 void registerCustomClassMethod(std::unique_ptr<jit::Function> fn) {
   customClassMethods().emplace_back(std::move(fn));
 }
+
+std::vector<c10::FunctionSchema> customClassSchemasForBCCheck() {
+    auto& methods = customClassMethods();
+    return c10::fmap(methods, [](const std::unique_ptr<jit::Function>& fn) {
+      return fn->getSchema();
+    });
+}
+
 
 } // namespace torch

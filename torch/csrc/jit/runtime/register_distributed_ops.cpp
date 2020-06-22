@@ -1,13 +1,16 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include "register_ops_utils.h"
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/library.h>
+
+#include <fmt/format.h>
 
 using at::Scalar;
 using at::Tensor;
@@ -23,29 +26,13 @@ static auto workerInfo =
     torch::class_<dist_rpc::WorkerInfo>("dist_rpc", "WorkerInfo")
         .def(torch::init<std::string, int64_t>());
 
-at::Tensor toOptionalTensor(const c10::IValue& v) {
-  if (v.isNone()) {
-    return at::Tensor();
-  }
-  return v.toTensor();
-}
-
-at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
-  return v.has_value() ? *v : at::Tensor();
-}
-
-c10::AliasAnalysisKind aliasAnalysisFromSchema() {
-  return c10::AliasAnalysisKind::FROM_SCHEMA;
-}
-
-c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
-  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
-}
-
 RegisterOperators reg_rpc_ops(
     {Operator(
-         "aten::to_here(RRef(t) self) -> t",
+         fmt::format(
+             "aten::to_here(RRef(t) self, float timeout = {}) -> t(*)",
+             torch::distributed::rpc::kDefaultRpcTimeoutSeconds),
          [](Stack& stack) {
+           auto timeout = pop(stack).toDouble();
            auto rref = pop(stack).toRRef();
            IValue res;
            if (rref->isOwner()) {
@@ -54,14 +41,14 @@ RegisterOperators reg_rpc_ops(
                      ->getValue();
            } else {
              res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
-                       ->toHere();
+                       ->toHere(timeout);
            }
            push(stack, std::move(res));
            return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::local_value(RRef(t) self) -> t",
+         "aten::local_value(RRef(t) self) -> t(*)",
          [](Stack& stack) {
            auto rref = pop(stack).toRRef();
            TORCH_CHECK(
@@ -110,6 +97,18 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::dist_backward(int context_id, Tensor[] roots, bool retain_graph=False) -> ()",
+         [](Stack& stack) {
+           bool retain_graph = pop(stack).toBool();
+           auto roots_list = pop(stack).toTensorList();
+           int64_t context_id = pop(stack).toInt();
+           torch::autograd::variable_list roots(
+               roots_list.begin(), roots_list.end());
+           dist_autograd::backward(context_id, roots, retain_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
@@ -121,13 +120,20 @@ RegisterOperators reg_rpc_ops(
              IValue emptyTuple(c10::ivalue::Tuple::create({}));
              IValue emptyDict{
                  c10::impl::GenericDict(AnyType::get(), AnyType::get())};
-             // Equavalent to Python statment
+             // Equivalent to Python statement
              // `args = args if args is not None else ()`.
              auto& argsTupleIValue =
                  num_inputs >= 3 ? *stackIter++ : emptyTuple;
              // `kwargs = kwargs if kwargs is not None else {}`.
              auto& kwargsDictIValue =
                  num_inputs >= 4 ? *stackIter++ : emptyDict;
+
+             // IValue corresponding to placeholder for RPC timeout. Used if no
+             // rpc timeout is specified by user.
+             IValue noTimeout(torch::distributed::rpc::kUnsetRpcTimeout);
+             const auto rpcMaxInputs = 5;
+             auto& timeoutIValue =
+                 num_inputs >= rpcMaxInputs ? *stackIter++ : noTimeout;
              TORCH_INTERNAL_ASSERT(
                  dstWorkerIValue.isString() ||
                  c10::getCustomClassType<
@@ -136,6 +142,7 @@ RegisterOperators reg_rpc_ops(
              TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
              TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
              TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
+             TORCH_INTERNAL_ASSERT(timeoutIValue.isDouble());
 
              // Get FunctionSchema for qualifiedName.
              auto qualifiedName =
@@ -206,13 +213,15 @@ RegisterOperators reg_rpc_ops(
                dstWorkerNameStr =
                    dstWorkerIValue.toCustomClass<dist_rpc::WorkerInfo>()->name_;
              }
-
+             // Get RPC timeout, if specified by user.
+             const auto rpcTimeout = timeoutIValue.toDouble();
              // Send RPC request.
              auto futureIValuePtr = dist_rpc::rpcTorchscript(
                  dstWorkerNameStr,
                  qualifiedName,
                  functionSchema,
-                 userCallableStack);
+                 userCallableStack,
+                 rpcTimeout);
 
              // Push output to the stack.
              drop(stack, num_inputs);
@@ -222,16 +231,16 @@ RegisterOperators reg_rpc_ops(
          },
          aliasAnalysisSpecialCase())});
 
-auto reg_distributed_ops = torch::RegisterOperators().op(
-    "aten::get_gradients(int context_id) -> Dict(Tensor, Tensor)",
-    torch::RegisterOperators::options()
-        .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-        .catchAllKernel([](int64_t context_id) {
-          const auto& autogradContext =
-              dist_autograd::DistAutogradContainer::getInstance()
-                  .retrieveContext(context_id);
-          return autogradContext->getGradients();
-        }));
+// Implementations located in
+// torch/csrc/jit/runtime/register_distributed_ops.cpp
+TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
+  m.impl("get_gradients", [](int64_t context_id) {
+    const auto& autogradContext =
+        dist_autograd::DistAutogradContainer::getInstance().retrieveContext(
+            context_id);
+    return autogradContext->getGradients();
+  });
+}
 
 } // namespace
 } // namespace jit

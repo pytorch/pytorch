@@ -29,33 +29,36 @@ struct pytorch_qnnp_fp32_clamping_params {
 
 union pytorch_qnnp_fp32_requantization_params {
   struct {
-    float scale;
+    float* scales;
+    uint8_t output_zero_point;
+    uint8_t output_max;
+    uint8_t output_min;
     float min_less_zero_point;
     float max_less_zero_point;
     float magic;
     int32_t magic_less_zero_point;
   } scalar;
   struct {
-    float scale;
+    float* scales;
     float max;
     float min;
     float magic;
     int32_t magic_less_zero_point;
   } neon;
   struct {
-    float scale;
+    float* scales;
     int16_t zero_point;
     uint8_t max;
     uint8_t min;
   } neonv8;
   struct {
-    PYTORCH_QNNP_ALIGN(16) float scale[4];
+    PYTORCH_QNNP_ALIGN(16) float* scales;
     PYTORCH_QNNP_ALIGN(16) int16_t zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint8_t max[16];
     PYTORCH_QNNP_ALIGN(16) uint8_t min[16];
   } sse2;
   struct {
-    PYTORCH_QNNP_ALIGN(16) float scale[4];
+    PYTORCH_QNNP_ALIGN(16) float* scales;
     PYTORCH_QNNP_ALIGN(16) float min_less_zero_point[4];
     PYTORCH_QNNP_ALIGN(16) float max_less_zero_point[4];
     PYTORCH_QNNP_ALIGN(16) float magic[4];
@@ -125,36 +128,35 @@ union pytorch_qnnp_q31_requantization_params {
 
 union pytorch_qnnp_conv_quantization_params {
   struct {
-    int32_t kernel_zero_point;
+    const uint8_t* kernel_zero_points;
     int32_t input_zero_point;
-    int32_t multiplier;
-    int32_t remainder_mask;
-    int32_t remainder_threshold;
-    uint32_t shift;
+    const float* requantization_scales;
     int32_t output_min_less_zero_point;
     int32_t output_max_less_zero_point;
     int32_t output_zero_point;
   } scalar;
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   struct {
-    int16_t kernel_zero_point;
+    const uint8_t* kernel_zero_points;
     int16_t input_zero_point;
-    int32_t multiplier;
-    int32_t right_shift;
+    const float* requantization_scales;
     int16_t output_zero_point;
     uint8_t output_max;
     uint8_t output_min;
+    // Following four are for nearest-ties-to-even
+    // rounding in aarch32. This saves some instructions
+    // needed otherwise.
+    float vfmax;
+    float vfmin;
+    float vfmagic;
+    int32_t vimagic;
   } neon;
 #endif /* CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64 */
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   struct {
-    PYTORCH_QNNP_ALIGN(16) int16_t kernel_zero_point[8];
+    PYTORCH_QNNP_ALIGN(16) const uint8_t* kernel_zero_points;
     PYTORCH_QNNP_ALIGN(16) int16_t input_zero_point[8];
-    PYTORCH_QNNP_ALIGN(16) uint32_t multiplier[4];
-    PYTORCH_QNNP_ALIGN(16) uint64_t rounding[2];
-    PYTORCH_QNNP_ALIGN(16) int32_t remainder_mask[4];
-    PYTORCH_QNNP_ALIGN(16) int32_t remainder_threshold[4];
-    PYTORCH_QNNP_ALIGN(16) uint64_t shift[2];
+    const PYTORCH_QNNP_ALIGN(16) float* requantization_scales;
     PYTORCH_QNNP_ALIGN(16) int16_t output_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_max[16];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_min[16];
@@ -164,8 +166,8 @@ union pytorch_qnnp_conv_quantization_params {
 
 struct pytorch_qnnp_conv_dynamic_quantization_params {
   int16_t input_zero_point;
-  int16_t kernel_zero_point;
-  float multiplier;
+  const uint8_t* kernel_zero_points;
+  const float* multipliers;
 };
 
 union pytorch_qnnp_requantization_params {
@@ -220,29 +222,31 @@ union pytorch_qnnp_add_quantization_params {
 union pytorch_qnnp_avgpool_quantization_params {
   struct {
     int32_t bias;
-    int32_t multiplier;
-    int64_t rounding;
-    uint32_t right_shift;
-    int32_t output_min_less_zero_point;
-    int32_t output_max_less_zero_point;
+    float scale;
     int32_t output_zero_point;
+    uint8_t output_max;
+    uint8_t output_min;
   } scalar;
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   struct {
     int32_t bias;
-    int32_t multiplier;
-    int64_t left_shift;
+    float scale;
     int16_t output_zero_point;
     uint8_t output_max;
     uint8_t output_min;
+    // Following four are for nearest-ties-to-even
+    // rounding in aarch32. This saves some instructions
+    // needed otherwise.
+    float vfmax;
+    float vfmin;
+    float vfmagic;
+    int32_t vimagic;
   } neon;
 #endif /* CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64 */
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   struct {
     PYTORCH_QNNP_ALIGN(16) int32_t bias[4];
-    PYTORCH_QNNP_ALIGN(16) uint32_t multiplier[4];
-    PYTORCH_QNNP_ALIGN(16) uint64_t rounding[2];
-    PYTORCH_QNNP_ALIGN(16) uint64_t right_shift[2];
+    PYTORCH_QNNP_ALIGN(16) float scale[4];
     PYTORCH_QNNP_ALIGN(16) int16_t output_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_max[16];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_min[16];
@@ -278,6 +282,7 @@ typedef void (*pytorch_q8gemm_ukernel_function)(
     const void* w,
     uint8_t* c,
     size_t c_stride,
+    size_t output_channel_index,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
 /*
@@ -309,6 +314,7 @@ typedef void (*pytorch_q8gemm_dq_ukernel_function)(
     const float* bias,
     float* c,
     size_t c_stride,
+    size_t output_channel_index,
     const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
 
 typedef void (*pytorch_q8conv_ukernel_function)(
@@ -320,6 +326,7 @@ typedef void (*pytorch_q8conv_ukernel_function)(
     const void* w,
     uint8_t* c,
     size_t c_stride,
+    size_t output_channel_index,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
 typedef void (*pytorch_q8gemm_xzp_ukernel_function)(
@@ -501,11 +508,13 @@ struct pytorch_q8conv_xzp_parameters {
 
 struct pytorch_q8dwconv_up_parameters {
   pytorch_q8dwconv_up_ukernel_function updw;
+  pytorch_q8dwconv_up_ukernel_function updw_per_channel;
   uint8_t cr;
 };
 
 struct pytorch_q8dwconv_mp_parameters {
   pytorch_q8dwconv_mp_ukernel_function mpdw;
+  pytorch_q8dwconv_mp_ukernel_function mpdw_per_channel;
   uint8_t cr;
 };
 

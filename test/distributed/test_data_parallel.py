@@ -1,4 +1,5 @@
 import contextlib
+import io
 import unittest
 from copy import deepcopy
 from collections import OrderedDict
@@ -7,7 +8,7 @@ import torch
 from torch import nn
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES, PY3
+from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_utils import skipIfRocm
@@ -257,7 +258,7 @@ class TestDataParallel(TestCase):
         test(s.cpu(), None, inp, [1, 0], should_fail=True)
         test(s.cuda(1), None, inp, [1, 0], should_fail=False)
 
-    @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_model_no_refcycles(self):
         # Python 2.7 will create reference cycles with the following
         # Module on multiple GPUs, but Python 3 shouldn't unless
@@ -405,7 +406,7 @@ class TestDataParallel(TestCase):
         net = nn.DataParallel(l)
         out = net(i)
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -424,7 +425,7 @@ class TestDataParallel(TestCase):
         n = nn.DataParallel(Net())
         out = n(input=i)
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -443,7 +444,7 @@ class TestDataParallel(TestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': []})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -462,7 +463,7 @@ class TestDataParallel(TestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': {}})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -481,7 +482,7 @@ class TestDataParallel(TestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': ()})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, dtype2prec_DONTUSE[dtype])
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_device_args(self):
@@ -630,9 +631,9 @@ class TestDataParallel(TestCase):
         for devices in [(0, 1), [0, 1]]:
             replicas = dp.replicate(net, devices)
             for i, replica in enumerate(replicas):
-                self.assertEqual(replica.bn.running_mean.get_device(), i, 'buffer on wrong device')
-                self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
-                self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
+                self.assertEqual(replica.bn.running_mean.get_device(), i, msg='buffer on wrong device')
+                self.assertEqual(replica.bn.running_var.get_device(), i, msg='buffer on wrong device')
+                self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, msg='buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_zero_grad(self):
@@ -644,9 +645,10 @@ class TestDataParallel(TestCase):
                 self._testcase = testcase
 
             def forward(self, x):
-                self._testcase.assertWarnsRegex(
-                    lambda: self.zero_grad(),
-                    r"Calling \.zero_grad\(\) from a module that was passed to a nn\.DataParallel\(\) has no effect.")
+                with self._testcase.assertWarnsRegex(
+                        UserWarning,
+                        r"Calling \.zero_grad\(\) from a module created with nn\.DataParallel\(\) has no effect."):
+                    self.zero_grad()
                 return x
 
         module = Net(self).cuda()
@@ -667,6 +669,17 @@ class TestDataParallel(TestCase):
         model = dp.DataParallel(Model().cuda().to(dtype=torch.float32))
         input = torch.randn((8, 8), dtype=torch.float32, device="cuda")
         self.assertTrue(model(input).dtype is torch.float16)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_save_replica_module(self):
+        # DataParallel replicas can be saved (gh-37182)
+        module = torch.nn.Linear(8, 8).cuda()
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=False)
+        data = io.BytesIO()
+        torch.save(dpm, data)
+        dpm = torch.nn.parallel.replicate(module, devices=[0, 1], detach=True)
+        torch.save(dpm, data)
 
 
 if __name__ == '__main__':

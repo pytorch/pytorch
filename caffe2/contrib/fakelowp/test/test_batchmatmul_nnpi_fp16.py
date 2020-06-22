@@ -4,35 +4,33 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
+import unittest
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
-GLOW_MATMUL_RTOL = 1e-3
-
 
 class TestBatchMatMul(serial.SerializedTestCase):
-    # @settings(max_examples=30)
     @given(
         #C=0, #st.integers(min_value=0, max_value=3),  # number of batch dims
         M=st.integers(min_value=1, max_value=10),
         K=st.integers(min_value=1, max_value=10),
         N=st.integers(min_value=1, max_value=10),
+        rand_seed=st.integers(0, 65534),
         trans_a=st.booleans(),
         trans_b=st.booleans(),
-        run_ints=st.booleans(),
-        **hu.gcs
+        run_ints=st.booleans()
     )
-    def test_batch_matmul(self, M, K, N, trans_a, trans_b, run_ints, gc, dc):
+    def test_batch_matmul(self, M, K, N, rand_seed, trans_a, trans_b, run_ints):
+        np.random.seed(rand_seed)
         workspace.ResetWorkspace()
         C = 0  # TODO
         batch_dims = np.random.randint(
@@ -95,26 +93,17 @@ class TestBatchMatMul(serial.SerializedTestCase):
         diff = np.abs((out_c2_fakefp16 - out_glow) / (out_c2_fakefp16 + 1e-8))
         rowdiff = np.max(diff, axis=1)
 
-        success = True
-        if run_ints:
-            if not np.allclose(out_glow, out_c2_fakefp16):
-                success = False
-        else:
-            n_offenders = np.count_nonzero(rowdiff[rowdiff > GLOW_MATMUL_RTOL])
-            # Find the max difference per row, if more than 10% of the rows
-            # are bigger, consider it a failure.
-            if n_offenders * 10 > rowdiff.shape[0]:
-                success = False
-
-        if not success:
-            print_test_debug_info("bmm",
-                {"m": M, "k": K, "n": N, "X": X, "Y": Y,
-                 "out_glow": out_glow,
-                 "out_c2_fakefp16": out_c2_fakefp16,
-                 "diff": diff})
+        if not np.allclose(out_glow, out_c2_fakefp16):
+            print_test_debug_info("bmm", {
+                "seed": rand_seed,
+                "m": M, "k": K,
+                "n": N, "X": X, "Y": Y,
+                "out_glow": out_glow,
+                "out_c2_fakefp16": out_c2_fakefp16,
+                "diff": diff
+            })
             assert(0)
 
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()

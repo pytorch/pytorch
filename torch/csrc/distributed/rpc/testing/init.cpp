@@ -38,14 +38,16 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
       .def(
           py::init<
               int,
-              std::chrono::milliseconds,
+              float,
               std::string,
               std::vector<std::string>,
+              std::unordered_map<std::string, float>,
               int>(),
           py::arg("num_send_recv_threads"),
           py::arg("rpc_timeout"),
           py::arg("init_method"),
           py::arg("messages_to_fail"),
+          py::arg("messages_to_delay"),
           py::arg("num_fail_sends"))
       .def_readwrite(
           "num_send_recv_threads",
@@ -53,6 +55,9 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
       .def_readwrite(
           "messages_to_fail",
           &FaultyProcessGroupRpcBackendOptions::messagesToFail)
+      .def_readwrite(
+          "messages_to_delay",
+          &FaultyProcessGroupRpcBackendOptions::messagesToDelay)
       .def_readwrite(
           "num_fail_sends", &FaultyProcessGroupRpcBackendOptions::numFailSends);
 
@@ -64,13 +69,15 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
               std::shared_ptr<::c10d::ProcessGroup>,
               int,
               std::chrono::milliseconds,
-              std::vector<std::string>,
+              const std::vector<std::string>&,
+              const std::unordered_map<std::string, float>&,
               int>(),
           py::arg("name"),
           py::arg("process_group"),
           py::arg("num_send_recv_threads"),
           py::arg("rpc_timeout"),
           py::arg("messages_to_fail"),
+          py::arg("messages_to_delay"),
           py::arg("failNumSends"))
       .def(
           "join",

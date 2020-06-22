@@ -51,7 +51,9 @@ namespace jit {
   _(ISINSTANCE, "TI") /* check object is one of  types[X:X+N]  */           \
   _(TUPLE_SLICE, "II") /* slice tup[X:(X+N)] */                             \
   _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */    \
-  _(WARN, "") /* emit a warning with line information */
+  _(WARN, "") /* emit a warning with line information */                    \
+  _(ENTER, "EN") /* enter scope of a contextmanager */                      \
+  _(EXIT, "EX") /* exit the last entered contextmanager */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,

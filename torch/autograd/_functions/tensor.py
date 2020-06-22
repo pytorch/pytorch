@@ -36,6 +36,9 @@ class Resize(Function):
                 'x'.join(map(str, sizes)), ctx.numel,
                 'x'.join(map(str, tensor.size())), tensor.numel()))
         ctx.input_sizes = tensor.size()
+        if tensor.is_quantized:
+            tensor.copy_(tensor)
+            return tensor.contiguous().view(*sizes)
         if tensor.is_contiguous():
             result = tensor.new(tensor).contiguous().view(*sizes)
             return result

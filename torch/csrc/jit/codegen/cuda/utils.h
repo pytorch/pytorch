@@ -22,11 +22,11 @@ TORCH_CUDA_API void printScalar(std::ostream& stream, const Value* const value);
 
 TORCH_CUDA_API void printStrides(
     std::ostream& stream,
-    const c10::VaryingStrides& strides);
+    const c10::VaryingShape<int64_t>& strides);
 
 TORCH_CUDA_API void printSizes(
     std::ostream& stream,
-    const c10::VaryingShape& sizes);
+    const c10::VaryingShape<int64_t>& sizes);
 
 TORCH_CUDA_API void printCompleteTensor(
     std::ostream& stream,

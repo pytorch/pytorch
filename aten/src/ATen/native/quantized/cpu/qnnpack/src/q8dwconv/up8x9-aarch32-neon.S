@@ -37,7 +37,9 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     STR r0, [sp, #-8]
     STR r3, [sp, #-4]
 
-    MOV r4, 2
+    # Load the address zero_point array.
+    # For depth wise kernels the array is of single element.
+    LDR r5, [r12], 4
 
     # Load o:
     # - lr = o = output
@@ -45,35 +47,44 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 
     # Load kernel zero point:
     # - d31 = vkernel_zero_point
-    VLD1.8 {d31[]}, [r12], r4
+    VLD1.8 {d31[]}, [r5]
 
     # Load input zero point:
     # - d30 = vinput_zero_point
-    VLD1.8 {d30[]}, [r12], r4
+    VLD1.8 {d30[]}, [r12]
+    # Load the address requantization_scale array.
+    # For depth wise kernels the array is of single element.
+    # pre-index r12 = r12 + 4
+    LDR r5, [r12, 4]!
 
-    # Load multiplier:
-    # - q14 = d28:d29 = vmultiplier
-    VLD1.32 {d28[], d29[]}, [r12]!
+    # add 8 bytes to get to vfmax
+    ADD r12, r12, 8
+    # Load requantization_scale:
+    # - q14 = d28:d29 = requantization_scale
+    VLD1.32 {d28[], d29[]}, [r5]
 
-    # Load right shift:
-    # - q13 = d26:d27 = vright_shift
+    # Load vfmax:
+    # - q13 = d26:d27 = vfmax
     VLD1.32 {d26[], d27[]}, [r12]!
 
-    # Load output zero point:
-    # - q12 = d24:d25 = voutput_zero_point
-    VLD1.16 {d24[], d25[]}, [r12]!
+    # Load vfmin:
+    # - q12 = d24:d25 = vfmin
+    VLD1.32 {d24[], d25[]}, [r12]!
 
-    # Compute vzero_shift_mask
-    # - q11 = vzero_shift_mask
-    VCEQ.S32 q11, q13, 0
+    # Load vfmagic:
+    # - q10 = d20:d21 = vfmagic
+    VLD1.32 {d20[], d21[]}, [r12]!
 
-    # Load output max:
-    # - d20 = voutput_max
-    VLD1.8 {d20[]}, [r12]!
+    # Load vimagic:
+    # - q11 = d22:d23 = vimagic
+    # Since q11/d22 gets used in the remainder channels section
+    # This load will have to occur in that section again.
+    # But since r12 is overwritten below, we will have to push it
+    # on the stack and pop it back.
+    VLD1.32 {d22[], d23[]}, [r12]
 
-    # Load output min:
-    # - d21 = voutput_min
-    VLD1.8 {d21[]}, [r12]
+    VSTR d22, [sp, #-16]
+    VSTR d23, [sp, #-24]
 
     .p2align 3
 0:
@@ -195,25 +206,27 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     VMLAL.S16 q0, d12, d14
     VMLAL.S16 q1, d13, d15
 
-    VQRDMULH.S32 q0, q0, q14
-    VQRDMULH.S32 q1, q1, q14
+    VCVT.F32.S32 q0, q0
+    VCVT.F32.S32 q1, q1
 
-    VBIC q2, q0, q11
-    VBIC q3, q1, q11
+    VMUL.F32 q0, q0, q14
+    VMUL.F32 q1, q1, q14
 
-    VSRA.S32 q0, q2, 31
-    VSRA.S32 q1, q3, 31
+    VMIN.F32 q0, q0, q13
+    VMIN.F32 q1, q1, q13
 
-    VRSHL.S32 q0, q0, q13
-    VRSHL.S32 q1, q1, q13
+    VMAX.F32 q0, q0, q12
+    VMAX.F32 q1, q1, q12
+
+    VADD.F32 q0, q0, q10
+    VADD.F32 q1, q1, q10
+
+    VSUB.S32 q0, q0, q11
+    VSUB.S32 q1, q1, q11
 
     VQMOVN.S32 d0, q0
     VQMOVN.S32 d1, q1
-
-    VQADD.S16 q0, q12
     VQMOVUN.S16 d0, q0
-    VMIN.U8 d0, d0, d20
-    VMAX.U8 d0, d0, d21
 
     VST1.8 {d0}, [lr]!
     SUBS r0, r0, 8
@@ -336,27 +349,31 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     VMLAL.S16 q0, d4, d6
     VMLAL.S16 q1, d5, d7
 
-    VQRDMULH.S32 q0, q0, q14
-    VQRDMULH.S32 q1, q1, q14
+    VLDR.64 d22, [sp, #-16]
+    VLDR.64 d23, [sp, #-24]
 
-    VCEQ.S32 q11, q13, 0
+    VCVT.F32.S32 q0, q0
+    VCVT.F32.S32 q1, q1
 
-    VBIC q2, q0, q11
-    VBIC q3, q1, q11
+    VMUL.F32 q0, q0, q14
+    VMUL.F32 q1, q1, q14
 
-    VSRA.S32 q0, q2, 31
-    VSRA.S32 q1, q3, 31
+    VMIN.F32 q0, q0, q13
+    VMIN.F32 q1, q1, q13
 
-    VRSHL.S32 q0, q0, q13
-    VRSHL.S32 q1, q1, q13
+    VMAX.F32 q0, q0, q12
+    VMAX.F32 q1, q1, q12
+
+    VADD.F32 q0, q0, q10
+    VADD.F32 q1, q1, q10
+
+    VSUB.S32 q0, q0, q11
+    VSUB.S32 q1, q1, q11
 
     VQMOVN.S32 d0, q0
     VQMOVN.S32 d1, q1
-
-    VQADD.S16 q0, q12
     VQMOVUN.S16 d0, q0
-    VMIN.U8 d0, d0, d20
-    VMAX.U8 d0, d0, d21
+
 
     TST r0, 32
     BEQ 3f

@@ -80,7 +80,8 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self, PyObject *noargs)
   } else {
     // TODO: retry on collision
     // TODO: free GIL - but remember to reacquire it when an exception is thrown
-    THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->numel()));
+    THWStoragePtr new_storage(
+        THPStorage_(newFilenameStorage)(storage->nbytes() / sizeof(scalar_t)));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
     ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
@@ -91,7 +92,7 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self, PyObject *noargs)
   if (!manager_handle) return nullptr;
   THPObjectPtr storage_handle(PyBytes_FromString(ctx->filename()));
   if (!storage_handle) return nullptr;
-  THPObjectPtr size(PyLong_FromLong(storage->numel()));
+  THPObjectPtr size(PyLong_FromLong(storage->nbytes() / sizeof(scalar_t)));
   if (!size) return nullptr;
 
   THPObjectPtr tuple(PyTuple_New(3));
@@ -159,7 +160,8 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self, PyObject *noargs)
   if ((ctx = THMapAllocator::fromDataPtr(storage->data_ptr()))) {
     // done
   } else {
-    THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->numel()));
+    THWStoragePtr new_storage(
+        THPStorage_(newFdStorage)(storage->nbytes() / sizeof(scalar_t)));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
     ctx = THMapAllocator::fromDataPtr(storage->data_ptr());
@@ -168,7 +170,7 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self, PyObject *noargs)
 
   THPObjectPtr storage_handle(PyLong_FromLong(ctx->fd()));
   if (!storage_handle) return nullptr;
-  THPObjectPtr size(PyLong_FromLong(storage->numel()));
+  THPObjectPtr size(PyLong_FromLong(storage->nbytes() / sizeof(scalar_t)));
   if (!size) return nullptr;
 
   THPObjectPtr tuple(PyTuple_New(2));
@@ -227,7 +229,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self, PyObject *noargs)
   THPObjectPtr device(PyLong_FromLong(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
-  THPObjectPtr size_bytes(PyLong_FromLong(storage->numel() * sizeof(scalar_t)));
+  THPObjectPtr size_bytes(PyLong_FromLong(storage->nbytes()));
   THPObjectPtr _offset_bytes(PyLong_FromLong(0));
   THPObjectPtr _ref_counter(Py_None);
   Py_INCREF(Py_None);
