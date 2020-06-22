@@ -128,11 +128,11 @@ class MkldnnConv3d(_MkldnnConvNd):
         self.training = state[2]
 
 
-class MkldnnBatchNorm2d(torch.jit.ScriptModule):
+class MkldnnBatchNorm(torch.jit.ScriptModule):
     __constants__ = ['exponential_average_factor', 'eps']
 
     def __init__(self, dense_module):
-        super(MkldnnBatchNorm2d, self).__init__()
+        super(MkldnnBatchNorm, self).__init__()
 
         assert(not dense_module.training)
         assert(dense_module.track_running_stats)
@@ -190,8 +190,8 @@ def to_mkldnn(module):
             return MkldnnConv2d(m)
         elif isinstance(m, torch.nn.Conv3d):
             return MkldnnConv3d(m)
-        elif isinstance(m, torch.nn.BatchNorm2d):
-            return MkldnnBatchNorm2d(m)
+        elif isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm3d):
+            return MkldnnBatchNorm(m)
         else:
             return m
 
