@@ -12,9 +12,13 @@ RegisterOperators reg({Operator(
 
 // NOT FOR LANDING YET THUS COPY PASTA
 void VerifyShapeAnalysis(Block* block) {
-  for (Node* n : block->nodes()) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); it++) {
+    Node * n = *it;
     for (Block* b : n->blocks()) {
       VerifyShapeAnalysis(b);
+    }
+    if (n->kind() == aten::check_tensor) {
+      continue;
     }
     {
       WithInsertPoint guard(n);
