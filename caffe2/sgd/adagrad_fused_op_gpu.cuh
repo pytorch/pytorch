@@ -16,6 +16,26 @@
 
 namespace caffe2 {
 
+template <typename TParam>
+inline __device__ float toFloat(TParam param) {
+  return param;
+}
+
+template <>
+inline __device__ float toFloat<at::Half>(at::Half param) {
+  return __half2float(param);
+}
+
+template <typename TParam>
+inline __device__ TParam toHalf(float param) {
+  return param;
+}
+
+template <>
+inline __device__ at::Half toHalf<at::Half>(float param) {
+  return __float2half(param);
+}
+
 
 static inline __device__ void gpuAtomicAdd(float* address, float val) {
   atomicAdd(address, val);
@@ -89,7 +109,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
 
       // post == blockDim.x
       const size_t paramIdx = index * post + threadIdx.x; // index for param
-      const float x_ij = grad[gradIdx] + weight_decay * param[paramIdx];
+      const float x_ij = grad[gradIdx] + weight_decay * toFloat<TParam>(param[paramIdx]);
       sum_squares += x_ij * x_ij;
 
       // Return the warp-wide sums to each lane0 (threads 0, 32, 64, 96, ...)
@@ -106,7 +126,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
 
       // update param
       float step = LR / (sqrtf(param_mom[index]) + epsilon);
-      param[paramIdx] = param[paramIdx] + x_ij * step;
+      param[paramIdx] = toHalf<TParam>(toFloat<TParam>(param[paramIdx]) + x_ij * step);
     }
   } else {
     // TODO: Tuning NumThreads for sum_squares
@@ -123,7 +143,7 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
       for (int i = threadIdx.x; i < post; i += blockDim.x) {
         // i: index in the embedding dimension
         const float x_ij =
-            grad[group * post + i] + weight_decay * param[index * post + i];
+            grad[group * post + i] + weight_decay * toFloat<TParam>(param[index * post + i]);
         sum_squares += x_ij * x_ij;
       }
       float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
@@ -140,10 +160,10 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
       for (int i = threadIdx.x; i < post; i += blockDim.x) {
         size_t paramIdx = index * post + i; // index for param
         float x_ij = grad[group * post + i] + weight_decay * param[paramIdx];
-        float param_new = param[paramIdx] + x_ij * step;
+        float param_new = toFloat<TParam>(param[paramIdx]) + x_ij * step;
         // float param_new1 = param[paramIdx];
         // printf("step %f, x_ij %f", step, x_ij);
-        param[paramIdx] = param_new;
+        param[paramIdx] = toHalf<TParam>(param_new);
       }
     }
   }
