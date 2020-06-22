@@ -3653,6 +3653,15 @@ class TestScript(JitTestCase):
         self.assertEqual(src, src_eic)
         self.assertEqual(CONSTANTS.c0, CONSTANTS_eic.c0)
 
+    def test_elias_requires_grad(self):
+        @torch.jit.script
+        def foo(x):
+            x.requires_grad_(False)
+            out = x + 2
+            return out
+
+        foo(torch.tensor(3.0, requires_grad=True))
+        g = torch.jit.last_executed_optimized_graph()
 
     def test_oneline_func(self):
         def fn(x): return x  # noqa: E704
