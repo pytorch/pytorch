@@ -127,13 +127,26 @@ class IrParser {
     FusionGuard fg(cuda_kernel_->fusion_.get());
     auto block = graph_->block();
 
-    // in case of broadcast, we don't support explicit broadcast, so we need to
-    // convert/expand all inputs tensors to comply to the broadcasted size.
-    // This supports very limited case, which we try to accomodate in graph
-    // partition, that we only merge nodes with identical output shapes.
+    // [ Note - broadcast support in integration ]
+    //
+    // in case of broadcast, we don't support explicit broadcast,
+    // 1. for point-wise fusion, so we need to convert/expand all inputs
+    // tensors to comply to the broadcasted size. This supports very limited
+    // case, which we try to accomodate in graph partition, that we only merge
+    // nodes with identical output shapes.
+    // 2. in case of reduction-at-end fusion, right now we only support single
+    // reduction operation in fusion, hence we can use the same logig for PW
+    // fusion and conver/expand all inputs to the input tensor to reduction op.
+
+    // TODO: proper broadcast support in integration
     int broadcast_dim = -1;
     // broadcast support hack is disabled to reduction.
-    if (!hasReduction(graph_->block())) {
+    if (hasReduction(graph_->block())) {
+      // reduction-at-end fusion, broadcast all inputs to tensor before
+      // reduction
+      broadcast_dim = block->outputs()[0]->node()->inputs()[0]->type()->cast<TensorType>()->dim().value();
+    } else {
+      // point-wise fusion, broadcast all inputs to output size.
       broadcast_dim =
           block->outputs()[0]->type()->cast<TensorType>()->dim().value();
     }
