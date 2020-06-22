@@ -23,7 +23,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
         torch::List<int64_t> dilation,
         int64_t groups,
         bool transpose) {
-  TORCH_CHECK(!transpose, "FBGEMM doesn't supprort conv_transpose yet.")
+  if (transpose) {
+    TORCH_WARN("FBGEMM doesn't fully supprort conv_transpose yet.");
+  }
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ",
@@ -51,9 +53,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
       " elements for ",
       kSpatialDim,
       "D convolution.");
-  const int output_channels_idx = transpose ? 1 : 0;
-  const int output_channels = weight.size(output_channels_idx);
-  const int input_channels_per_group = weight.size(1);
+  const int output_channels = transpose ? weight.size(1) * groups
+                                        : weight.size(0);
+  const int input_channels_per_group = transpose ? weight.size(0)
+                                                 : weight.size(1);
   const int kernel_d = kSpatialDim == 2 ? 1 : weight.size(2);
   const int kernel_h = weight.size(kSpatialDim);
   const int kernel_w = weight.size(kSpatialDim + 1);
@@ -210,8 +213,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   // QNNPACK expects weights to be of the format {out_c, kH, kW, in_c/groups},
   // but PyTorch lays them out as {out_c, in_c/groups, kH, kW}
   // (or for ConvTranspose {in_c, out_c/groups, kH, kW})
-  const size_t out_ch_idx = transpose ? 1 : 0;
-  const size_t out_ch = weight.size(out_ch_idx);
+  const size_t out_ch = transpose ? weight.size(1) * groups : weight.size(0);
   const uint32_t kernel_h = weight.size(2);
   const uint32_t kernel_w = weight.size(3);
 
@@ -244,7 +246,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   const bool is_per_channel = weight_contig.qscheme() == at::kPerChannelAffine;
 
   std::vector<uint8_t> w_zero_points;
-  at::Tensor  w_scales;
+  at::Tensor w_scales;
   std::tie(w_zero_points, w_scales) =
       make_zero_points_and_scales_tensor(weight_contig);
   // We set the pre-packed conv weights to nullptr below as we call pre-pack
