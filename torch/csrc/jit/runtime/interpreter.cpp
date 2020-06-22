@@ -814,7 +814,8 @@ struct CodeImpl {
       case prim::Param:
         break;
       case aten::check_tensor:
-
+        emitCheckTensor(node);
+        break;
       case prim::CallFunction:
         emitCall(
             node->inputs().at(0)->type()->expect<FunctionType>()->function(),
@@ -1340,8 +1341,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case CHECK_TENSOR: {
             auto type = af.types[inst.X]->expect<TensorType>();
-
             ++af.pc;
+            break;
           }
           case CREATE_OBJECT: {
             auto type = af.types[inst.X]->expect<ClassType>();
