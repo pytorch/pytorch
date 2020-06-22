@@ -319,10 +319,10 @@ CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_p
                 bias,
                 stride,
                 padding,
-                /*output_padding=*/padding,
+                output_padding,
                 dilation,
                 groups,
-                /*transpose=*/false);
+                transpose);
           }
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
@@ -336,10 +336,10 @@ CAFFE2_API torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_p
                 bias,
                 stride,
                 padding,
-                /*output_padding=*/padding,
+                output_padding,
                 dilation,
                 groups,
-                /*transpose=*/false);
+                transpose);
           }
 #endif // USE_PYTORCH_QNNPACK
           TORCH_CHECK(
