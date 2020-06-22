@@ -554,6 +554,7 @@ def gen_pyi(declarations_path, out):
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
         'is_quantized': ['is_quantized: _bool'],
+        'is_meta': ['is_meta: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',

@@ -348,21 +348,10 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_keypoint_rcnn(self):
-        class KeyPointRCNN(torch.nn.Module):
-            def __init__(self):
-                super(KeyPointRCNN, self).__init__()
-                self.model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True,
-                                                                                                  min_size=200,
-                                                                                                  max_size=300)
-
-            def forward(self, images):
-                output = self.model(images)
-                # TODO: The keypoints_scores require the use of Argmax that is updated in ONNX.
-                #       For now we are testing all the output of KeypointRCNN except keypoints_scores.
-                #       Enable When Argmax is updated in ONNX Runtime.
-                return output[0]['boxes'], output[0]['labels'], output[0]['scores'], output[0]['keypoints']
+        model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True, min_size=200,
+                                                                                     max_size=300)
         images = self.get_test_images()
-        self.run_test(KeyPointRCNN(), (images,), rtol=1e-3, atol=1e-5)
+        self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
@@ -2888,6 +2877,27 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x, y))
 
+    def test_cast_to_bool(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.cat((input.to(other), other), 0)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.zeros([2, 3, 4], dtype=torch.bool)
+        model = MyModule()
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_ones_bool(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input):
+                true = torch.ones(input.shape, dtype=torch.bool)
+                return input.to(true) & true
+
+        x = torch.randn(2, 3, 4)
+        model = MyModule()
+        self.run_test(model, x)
+
     def test_log(self):
         class Log(torch.nn.Module):
             def forward(self, input):
@@ -3634,10 +3644,6 @@ def setup_rnn_tests():
                 ('lstm', 'lstm', {}),
                 ('gru', 'gru', {})
         ):
-            # This is a hack to skip elman_rnn bidirectional tests for now
-            # TODO: Revert this once elman_rnn bidirectional issue is fixed
-            if base == 'elman' and bidirectional[1] == 'bidirectional':
-                continue
             make_test(name, base, layer, bidirectional, initial_state,
                       variable_length, dropout,
                       **extra_kwargs)
@@ -3648,10 +3654,8 @@ def setup_rnn_tests():
 
     # make sure no one accidentally disables all the tests without
     # noticing
-    # assert test_count == 192, test_count
-    # TODO: Revert this once elman_rnn bidirectional issue is fixed
-    if test_count != 144:
-        raise ValueError('Expected 144 tests but found {}'.format(test_count))
+    if test_count != 192:
+        raise ValueError('Expected 192 tests but found {}'.format(test_count))
 
 
 setup_rnn_tests()

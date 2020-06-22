@@ -95,7 +95,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // triggered in this context because it conflicts with the struct
           // torch::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
-          .def(py::detail::hash(py::self));
+          .def(py::detail::hash(py::self)) // NOLINT
+          .def("__repr__", [](const WorkerInfo& workerInfo) {
+            std::ostringstream os;
+            os << workerInfo;
+            return os.str();
+          });
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -117,7 +122,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
-      shared_ptr_class_<PyRRef>(module, "RRef", R"(
+      shared_ptr_class_<PyRRef>(module, "PyRRef", R"(
           A class encapsulating a reference to a value of some type on a remote
           worker. This handle will keep the referenced remote value alive on the
           worker. A ``UserRRef`` will be deleted when 1) no references to it in
@@ -166,7 +171,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>> rref = RRef(torch.zeros(2, 2))
               >>> # the following RPC shares the rref with worker1, reference
               >>> # count is automatically updated.
-              >>> rpc.rpc_sync("worker1", f, args(rref,))
+              >>> rpc.rpc_sync("worker1", f, args=(rref,))
           )")
           .def(
               py::init<const py::object&, const py::object&>(),
@@ -213,11 +218,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   owner, returns a reference to the local value.
 
                   Arguments:
-                        timeout (float, optional): Timeout for ``to_here``. If
-                        the call does not complete within this timeframe, an
-                        exception indicating so will be raised. If this argument
-                        is not provided, the default RPC timeout (60s) will be
-                        used.
+                      timeout (float, optional): Timeout for ``to_here``. If
+                          the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this
+                          argument is not provided, the default RPC timeout
+                          (60s) will be used.
               )")
           .def(
               "local_value",
@@ -282,7 +287,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
-                  Create a helper proxy to easily launch an ``remote`` using
+                  Create a helper proxy to easily launch a ``remote`` using
                   the owner of the RRef as the destination to run functions on
                   the object referenced by this RRef. More specifically,
                   ``rref.remote().func_name(*args, **kwargs)`` is the same as
@@ -392,25 +397,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   :meth:`~torch.distributed.rpc.rpc_async` if necessary.
               init_method (str, optional): The URL to initialize
                   ``ProcessGroupGloo`` (default: ``env://``).
-
-
-          Example::
-              >>> import datetime, os
-              >>> from torch.distributed import rpc
-              >>> os.environ['MASTER_ADDR'] = 'localhost'
-              >>> os.environ['MASTER_PORT'] = '29500'
-              >>>
-              >>> rpc.init_rpc(
-              >>>     "worker1",
-              >>>     rank=0,
-              >>>     world_size=2,
-              >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
-              >>>         num_send_recv_threads=16,
-              >>>         rpc_timeout=20 # 20 second timeout
-              >>>     )
-              >>> )
-              >>>
-              >>> # omitting init_rpc invocation on worker2
       )")
       .def(
           py::init<int, float, std::string>(),
@@ -468,11 +454,53 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
-      module, "TensorPipeRpcBackendOptions", rpcBackendOptions)
+      module,
+      "TensorPipeRpcBackendOptions",
+      rpcBackendOptions,
+      R"(
+          The backend options for
+          :class:`~torch.distributed.rpc.TensorPipeAgent`, derived from
+          :class:`~torch.distributed.rpc.RpcBackendOptions`.
+
+          Arguments:
+              num_worker_threads (int, optional): The number of threads in the
+                  thread-pool used by
+                  :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
+                  requests (default: 16).
+              rpc_timeout (float, optional): The default timeout, in seconds,
+                  for RPC requests (default: 60 seconds). If the RPC has not
+                  completed in this timeframe, an exception indicating so will
+                  be raised. Callers can override this timeout for individual
+                  RPCs in :meth:`~torch.distributed.rpc.rpc_sync` and
+                  :meth:`~torch.distributed.rpc.rpc_async` if necessary.
+              init_method (str, optional): The URL to initialize the distributed
+                  store used for rendezvous. It takes any value accepted for the
+                  same argument of :meth:`~torch.distributed.init_process_group`
+                  (default: ``env://``).
+      )")
       .def(
-          py::init<float, std::string>(),
+          py::init<
+              int,
+              optional<std::vector<std::string>>,
+              optional<std::vector<std::string>>,
+              float,
+              std::string>(),
+          py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
+          py::arg("_transports") = optional<std::vector<std::string>>(),
+          py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod);
+          py::arg("init_method") = kDefaultInitMethod)
+      .def_readwrite(
+          "num_worker_threads",
+          &TensorPipeRpcBackendOptions::numWorkerThreads,
+          R"(
+              The number of threads in the thread-pool used by
+              :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
+              requests.
+          )");
+
+  module.attr("_DEFAULT_NUM_WORKER_THREADS") =
+      py::cast(kDefaultNumWorkerThreads);
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
@@ -692,6 +720,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
   module.def(
       "_disable_server_process_global_profiler",
       &profiler::processglobal::disableServer);
+
+  module.def("_set_profiler_node_id", &at::RecordFunction::setDefaultNodeId);
 
   Py_RETURN_TRUE;
 }

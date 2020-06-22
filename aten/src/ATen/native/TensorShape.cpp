@@ -189,12 +189,12 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     auto result_slice_data = result_slice.data_ptr();
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
 
-    auto iter = TensorIterator();
-    iter.dont_resize_outputs();
-    iter.add_output(result_slice);
-    iter.add_input(source_slice);
-    iter.enforce_safe_casting_to_output(true);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+      .resize_outputs(false)
+      .add_output(result_slice)
+      .add_input(source_slice)
+      .enforce_safe_casting_to_output(true)
+      .build();
 
     for (auto const &tensor : tensors) {
       if (should_skip(tensor)) {
@@ -215,14 +215,14 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       auto slice_dim_size = tensor.size(dim);
       auto result_slice = result.narrow(dim, offset, slice_dim_size);
 
-      auto iter = TensorIterator();
-      iter.dont_resize_outputs();
-      iter.add_output(result_slice);
-      iter.add_input(tensor);
-      iter.promote_inputs_to_common_dtype(true);
-      iter.cast_common_dtype_to_outputs(true);
-      iter.enforce_safe_casting_to_output(true);
-      iter.build();
+      auto iter = TensorIteratorConfig()
+        .resize_outputs(false)
+        .add_output(result_slice)
+        .add_input(tensor)
+        .promote_inputs_to_common_dtype(true)
+        .cast_common_dtype_to_outputs(true)
+        .enforce_safe_casting_to_output(true)
+        .build();
       copy_stub(iter.device_type(), iter, false);
       offset += slice_dim_size;
     }
