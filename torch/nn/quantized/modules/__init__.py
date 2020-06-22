@@ -7,6 +7,7 @@ from .batchnorm import BatchNorm2d, BatchNorm3d
 from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
     InstanceNorm2d, InstanceNorm3d
 from .conv import Conv1d, Conv2d, Conv3d
+from .conv import ConvTranspose1d, ConvTranspose2d
 from .linear import Linear
 
 from .functional_modules import FloatFunctional, QFunctional
@@ -84,6 +85,8 @@ __all__ = [
     'Conv1d',
     'Conv2d',
     'Conv3d',
+    'ConvTranspose1d',
+    'ConvTranspose2d',
     'DeQuantize',
     'Linear',
     'MaxPool2d',
