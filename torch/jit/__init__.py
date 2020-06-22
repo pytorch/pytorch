@@ -1895,6 +1895,9 @@ if _enabled:
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
+        def __copy__(self):
+            return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
+
         def __deepcopy__(self, memo):
             return torch.jit._recursive.wrap_cpp_module(copy.deepcopy(self._c, memo))
 
