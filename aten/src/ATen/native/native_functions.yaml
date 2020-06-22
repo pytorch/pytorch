@@ -1355,9 +1355,7 @@
 # FFT
 
 - func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  dispatch:
-    CPU: fft
-    CUDA: fft
+  use_c10_dispatcher: full
   variants: function, method
 
 - func: ifft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor

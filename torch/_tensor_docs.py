@@ -3601,11 +3601,11 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
 See :func:`torch.istft`
 """)
 
-add_docstr_all('fftfn',
+add_docstr_all('fft',
                r"""
-fftfn(signal_ndim, normalized=False) -> Tensor
+fft(signal_ndim, normalized=False) -> Tensor
 
-See :func:`torch.fftfn`
+See :func:`torch.fft`
 """)
 
 add_docstr_all('ifft',

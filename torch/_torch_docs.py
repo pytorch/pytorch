@@ -6028,7 +6028,7 @@ fliplr(input) -> Tensor
 
 Flip array in the left/right direction, returning a new tensor.
 
-Flip the entries in each row in the left/right direction. 
+Flip the entries in each row in the left/right direction.
 Columns are preserved, but appear in a different order than before.
 
 Note:
@@ -7159,7 +7159,7 @@ Example::
 .. _[2]: https://www.jstor.org/stable/2156365
 """)
 
-add_docstr(torch.fftfn,
+add_docstr(torch.fft,
            r"""
 fft(input, signal_ndim, normalized=False) -> Tensor
 
