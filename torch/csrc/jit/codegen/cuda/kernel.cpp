@@ -6,10 +6,10 @@
 #include <c10/util/ArrayRef.h>
 
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
-#include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <torch/csrc/jit/resource_guard.h>
 #include <fstream>
