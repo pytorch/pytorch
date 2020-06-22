@@ -5119,6 +5119,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     self.assertEqual(output3, output1)
                     self.assertEqual(output3, output2)
 
+        def test_empty_meta(self):
+            x = torch.empty_meta(2 ** 20, 2 ** 20)
+            y = torch.empty_meta(2 ** 20)
+            z = x + y
+            self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
+
         def test_tensor_grad_warnings(self):
             dummy = torch.empty(1)
 
@@ -18677,15 +18683,15 @@ tensor_op_tests = [
     ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
-    ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-5, 1e-5, _float_types),
-    ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1),
-    ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1),
-    ('pow', '3', _small_3d, lambda t, d: [_number(3., 3, t)], 1e-1),
-    ('pow', '-1', _small_3d, lambda t, d: [_number(-1., -1, t)], 1e-1, 1e-5, 1e-5, _float_types),
+    ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-1, 1e-5, _float_types2),
+    ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1, 1e-1, 1e-5, _float_types2),
+    ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1, 1e-1, 1e-5, _float_types2),
+    ('pow', '3', _small_3d, lambda t, d: [_number(3., 3, t)], 1e-1, 1e-1, 1e-5, _float_types2),
+    ('pow', '-1', _small_3d, lambda t, d: [_number(-1., -1, t)], 1e-1, 1e-1, 1e-5, _float_types2),
     ('pow', '-2', _small_3d, lambda t, d: [_number(-2., -2, t)],
         1e-1, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfRocm]),
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
-        1e-1, 1e-5, 1e-5, _float_types),
+        1e-1, 1e-1, 1e-5, _float_types2),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types2),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
@@ -18978,11 +18984,11 @@ tensor_op_tests = [
     ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('cos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('cosh', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _float_types),
-    ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('exp', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
-    ('exp', 'samll', lambda t, d: _small_3d(t, d).clamp(-1, 1),
-        lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('exp', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
+        lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('expm1', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
     ('expm1', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
         lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),

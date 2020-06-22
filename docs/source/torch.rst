@@ -421,6 +421,8 @@ Other Operations
     triu
     triu_indices
     vander
+    view_as_real
+    view_as_complex
 
 
 BLAS and LAPACK Operations
