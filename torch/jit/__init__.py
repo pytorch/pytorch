@@ -1656,12 +1656,6 @@ if _enabled:
 
             setattr(self._actual_script_module, attr, value)
 
-        def __getstate__(self):
-            raise pickle.PickleError(
-                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. " +
-                "Mixed serialization of script and non-script modules is not supported. " +
-                "For purely script modules use my_script_module.save(<filename>) instead.")
-
         def define(self, src):
             if "_actual_script_module" in self.__dict__:
                 # If we have completed initialization, just defer to the
@@ -1894,6 +1888,12 @@ if _enabled:
 
         def copy_instance(self):
             return torch.jit._recursive.wrap_cpp_module(self._c._clone_instance())
+
+        def __getstate__(self):
+            raise pickle.PickleError(
+                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. " +
+                "Mixed serialization of script and non-script modules is not supported. " +
+                "For purely script modules use my_script_module.save(<filename>) instead.")
 
         def __deepcopy__(self, memo):
             return torch.jit._recursive.wrap_cpp_module(copy.deepcopy(self._c, memo))
