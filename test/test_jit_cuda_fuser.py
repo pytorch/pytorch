@@ -493,7 +493,30 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(oo.dtype, jit_oo.dtype)
             self.assertEqual(oo, jit_oo)
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GROUP)
-        print(t_jit.graph_for(x, y, z))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
+    @skipIfRocm
+    def test_single_reduction_broadcast(self):
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn([7, 4, 8], dtype=dtype, device=device)
+        y = torch.randn([4, 8], dtype=dtype, device=device)
+        z = torch.randn([1, 4, 8], dtype=dtype, device=device)
+        def t(x: torch.Tensor, y: torch.Tensor, z : torch.Tensor):
+            o = torch.add(x, y)
+            o = torch.add(o, z)
+            o = torch.sum(o, dim=[0])
+            return o
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y, z)
+        jit_o = t_jit(x, y, z)
+        o = t(x, y, z)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+        self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GROUP)
 
 class TestPassManagerCudaFuser(JitTestCase):
 
