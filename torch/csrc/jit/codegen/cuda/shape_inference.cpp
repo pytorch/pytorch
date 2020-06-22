@@ -172,7 +172,6 @@ class NaiveShapeTypePropagator {
         "requires complete shape on input");
     std::vector<int64_t> output_size;
     std::vector<int64_t> input_size = *op->sizes().concrete_sizes();
-    printf("input size with dimension: %zu\n", input_size.size());
     for (int i = 0; i < input_size.size(); i++) {
       if (std::find(dims.begin(), dims.end(), i) == dims.end()) {
         output_size.emplace_back(input_size[i]);
@@ -180,7 +179,6 @@ class NaiveShapeTypePropagator {
         output_size.emplace_back(1);
       }
     }
-    printf("output size with dimension: %zu\n", output_size.size());
     return TensorType::createContiguous(
           *op->scalarType(),
           *op->device(),
