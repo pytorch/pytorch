@@ -562,6 +562,9 @@ struct ParserImpl {
         L.expect(TK_NEWLINE);
         return Delete::create(expr);
       }
+      case TK_WITH: {
+        return parseWith();
+      }
       default: {
         auto lhs = parseExpOrExpTuple();
         if (L.cur().kind != TK_NEWLINE) {
@@ -573,6 +576,25 @@ struct ParserImpl {
       }
     }
   }
+
+  WithItem parseWithItem() {
+    auto target = parseExp();
+
+    if (L.cur().kind == TK_AS) {
+      // If the current token is TK_AS, this with item is of the form
+      // "expression as target".
+      auto token = L.expect(TK_AS);
+      Ident ident = parseIdent();
+      auto var = Var::create(ident.range(), ident);
+      return WithItem::create(
+          token.range, target, Maybe<Var>::create(ident.range(), var));
+    } else {
+      // If not, this with item is of the form "expression".
+      return WithItem::create(
+          target.range(), target, Maybe<Var>::create(target.range()));
+    }
+  }
+
   TreeRef parseIf(bool expect_if = true) {
     auto r = L.cur().range;
     if (expect_if)
@@ -610,6 +632,16 @@ struct ParserImpl {
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     auto body = parseStatements(/*expect_indent=*/true);
     return For::create(r, targets, itrs, body);
+  }
+
+  TreeRef parseWith() {
+    auto r = L.cur().range;
+    // Parse "with expression [as target][, expression [as target]]*:".
+    L.expect(TK_WITH);
+    auto targets = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseWithItem);
+    // Parse the body.
+    auto body = parseStatements(/*expect_indent=*/true);
+    return With::create(r, targets, body);
   }
 
   TreeRef parseStatements(bool expect_indent, bool in_class = false) {

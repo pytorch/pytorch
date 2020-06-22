@@ -230,13 +230,6 @@ static_assert(
 C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 
-// For backwards compatibility with XLA repository
-// (I don't want to fix this in XLA right now because there might be
-// more renaming coming in the future.)
-static inline DispatchKey XLA() {
-  return DispatchKey::XLA;
-}
-
 // These are some convenience identifiers for dispatch keys which are
 // shorter to type than their long counterparts.  Note that some of these
 // dispatch keys directly correspond to DeviceType; and most APIs that
