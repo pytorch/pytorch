@@ -373,9 +373,10 @@ class DistributedDataParallel(Module):
             # torch.cuda.synchronize()
             print("before replicate, rank = ", self.rank_from_test, flush=True)
             self._module_copies = replicate(self.module, self.device_ids, detach=True)
-            for dev in self.device_ids:
-                torch.cuda.synchronize(dev)
-                print("after replicate, synced with {}, rank = {}".format(dev, self.rank_from_test), flush=True)
+            if self.device_ids:
+                for dev in self.device_ids:
+                    torch.cuda.synchronize(dev)
+                    print("after replicate, synced with {}, rank = {}".format(dev, self.rank_from_test), flush=True)
             self._module_copies[0] = self.module
 
             for module_copy in self._module_copies[1:]:
@@ -437,9 +438,10 @@ class DistributedDataParallel(Module):
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap)
-        for dev in self.device_ids:
-            torch.cuda.synchronize(dev)
-            print("after Reducer, synced with {}, rank = {}".format(dev, self.rank_from_test), flush=True)
+        if self.device_ids:
+            for dev in self.device_ids:
+                torch.cuda.synchronize(dev)
+                print("after Reducer, synced with {}, rank = {}".format(dev, self.rank_from_test), flush=True)
 
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
