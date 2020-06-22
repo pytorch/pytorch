@@ -790,12 +790,10 @@ def wrap_check_inputs(check_inputs):
     return [{'forward' : c} for c in check_inputs]
 
 
-def fork(func,
-          *args,
-          **kwargs):
+def fork(func, *args, **kwargs):
     """
-    Creates an asynchronous task executing `func` and return a reference
-    to the execution of this function. `fork` will return immediately,
+    Creates an asynchronous task executing `func` and a reference to the value
+    of the result of this execution. `fork` will return immediately,
     so the return value of `func` may not have been computed yet. To force completion
     of the task and access the return value invoke `torch.jit.wait` on the Future. `fork` invoked
     with a `func` which returns `T` is typed as `torch.jit.Future[T]`. `fork` calls can be arbitrarily
@@ -819,7 +817,7 @@ def fork(func,
 
     Returns:
         `torch.jit.Future[T]`: a reference to the execution of `func`. The value `T`
-        can only be accessed by forcing copmletion of `func` through `torch.jit.wait`.
+        can only be accessed by forcing completion of `func` through `torch.jit.wait`.
 
     Example (fork a free function):
 
@@ -832,8 +830,8 @@ def fork(func,
             return a + b
 
         def bar(a):
-            fut : torch.jit.Future[Tensor] = torch.jit._fork(foo, a, b=2)
-            return torch.jit._wait(fut)
+            fut : torch.jit.Future[Tensor] = torch.jit.fork(foo, a, b=2)
+            return torch.jit.wait(fut)
 
         script_bar = torch.jit.script(bar)
         input = torch.tensor(2)
@@ -862,8 +860,8 @@ def fork(func,
                 self.mod = SubMod()
 
             def forward(self, input):
-                fut = torch.jit._fork(self.mod, a, b=2)
-                return torch.jit._wait(fut)
+                fut = torch.jit.fork(self.mod, a, b=2)
+                return torch.jit.wait(fut)
 
         input = torch.tensor(2)
         mod = Mod()
