@@ -2943,6 +2943,7 @@ class ComputeBucketAssignmentTest(TestCase):
         result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
 
+@skip_if_rocm
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
@@ -3053,6 +3054,24 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_sigterm(self):
         self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGTERM))
+
+    @requires_nccl()
+    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @skip_if_lt_x_gpu(3)
+    def test_nccl_blocking_wait_with_barrier(self):
+        os.environ["NCCL_BLOCKING_WAIT"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=self.op_timeout_sec))
+        process_group.barrier().wait()
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+                # This should timeout
+                process_group.barrier().wait()
+
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["NCCL_BLOCKING_WAIT"] = val
