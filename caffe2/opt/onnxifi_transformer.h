@@ -41,6 +41,9 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Whether the net has been ssaRewritten
   bool predictor_net_ssa_rewritten{false};
+
+  // Inference timeout
+  int timeout{0};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
@@ -77,7 +80,6 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   // We already have all the ops and external inputs and outputs!
   OperatorDef buildOnnxifiOp(
       const std::string& onnx_model_str,
-      const std::unordered_map<std::string, TensorShape>& output_size_hints,
       const std::unordered_set<std::string>& initialization_list,
       const std::vector<std::string>& external_inputs,
       const std::vector<std::string>& external_outputs,

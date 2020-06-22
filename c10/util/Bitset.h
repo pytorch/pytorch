@@ -37,8 +37,10 @@ public:
   constexpr bitset() noexcept : bitset_(0) {}
   constexpr bitset(const bitset&) noexcept = default;
   constexpr bitset(bitset&&) noexcept = default;
-  constexpr bitset& operator=(const bitset&) noexcept = default;
-  constexpr bitset& operator=(bitset&&) noexcept = default;
+  // there is an issure for gcc 5.3.0 when define default function as constexpr
+  // see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=68754.
+  bitset& operator=(const bitset&) noexcept = default;
+  bitset& operator=(bitset&&) noexcept = default;
 
   constexpr void set(size_t index) noexcept {
     bitset_ |= (static_cast<long long int>(1) << index);
@@ -75,13 +77,29 @@ private:
   // (i.e. if the very first bit is set, this function returns '1'), and a return
   // of '0' means that there was no bit set.
   size_t find_first_set() const {
-    #if defined(_MSC_VER)
+    #if defined(_MSC_VER) && defined(_M_X64)
       unsigned long result;
       bool has_bits_set = (0 != _BitScanForward64(&result, bitset_));
       if (!has_bits_set) {
         return 0;
       }
       return result + 1;
+    #elif defined(_MSC_VER) && defined(_M_IX86)
+      unsigned long result;
+      if (static_cast<uint32_t>(bitset_) != 0) {
+        bool has_bits_set = (0 != _BitScanForward(&result, static_cast<uint32_t>(bitset_)));
+        if (!has_bits_set) {
+          return 0;
+        }
+        return result + 1;
+      }
+      else {
+        bool has_bits_set = (0 != _BitScanForward(&result, static_cast<uint32_t>(bitset_ >> 32)));
+        if (!has_bits_set) {
+          return 32;
+        }
+        return result + 33;
+      }
     #else
       return __builtin_ffsll(bitset_);
     #endif

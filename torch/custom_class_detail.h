@@ -82,7 +82,7 @@ call_torchbind_method_from_stack(
                    std::remove_cv_t<std::remove_reference_t<
                        c10::guts::typelist::
                            element_t<ivalue_arg_indices, IValueArgTypes>>>,
-                   AllowDeprecatedTypes>(std::move(
+                   AllowDeprecatedTypes>::call(std::move(
       torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args)))...);
 }
 
@@ -147,6 +147,10 @@ TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 // Given an IValue, return true if the object contained in that IValue
 // is a custom C++ class, otherwise return false.
 TORCH_API bool isCustomClass(const c10::IValue& v);
+
+// This API is for testing purposes ONLY. It should not be used in
+// any load-bearing code.
+TORCH_API std::vector<c10::FunctionSchema> customClassSchemasForBCCheck();
 
 namespace jit {
 using ::torch::registerCustomClass;

@@ -30,7 +30,9 @@ enum class DispatchKey : uint8_t {
 
   Undefined = 0,
 
-
+  // Define an alias for Undefined to represent CatchAll (long term
+  // this will get eliminated, but for now it's convenient)
+  CatchAll = Undefined,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // A "backend" is colloquially used to refer to handlers for dispatch
@@ -46,11 +48,15 @@ enum class DispatchKey : uint8_t {
 
   // Here are backends which you think of as traditionally specifying
   // how to implement operations on some device.
-  CPU,    // registered at build/aten/src/ATen/CPUType.cpp
-  CUDA,   // registered at build/aten/src/ATen/CUDAType.cpp
-  HIP,    // NB: I think this is not actually used, due to Note [Masquerading as CUDA]
-  MSNPU,  // unused externally, but tested at test/cpp_extensions/msnpu_extension.cpp
-  XLA,    // lives out of tree at https://github.com/pytorch/xla
+  CPU, // registered at build/aten/src/ATen/CPUType.cpp
+  CUDA, // registered at build/aten/src/ATen/CUDAType.cpp
+  HIP, // NB: I think this is not actually used, due to Note [Masquerading as
+       // CUDA]
+  FPGA, // Xilinx support lives out of tree at https://gitlab.com/pytorch-complex/vitis_kernels
+  MSNPU, // unused externally, but tested at
+         // test/cpp_extensions/msnpu_extension.cpp
+  XLA, // lives out of tree at https://github.com/pytorch/xla
+  Vulkan,
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
@@ -64,10 +70,13 @@ enum class DispatchKey : uint8_t {
   // Here are backends which specify more specialized operators
   // based on the dtype of the tensor.
   QuantizedCPU, // registered at build/aten/src/ATen/QuantizedCPUType.cpp
-  ComplexCPU,   // lives out of tree at https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
-  ComplexCUDA,  // and https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
-                        // tested at test/cpp_extensions/complex_registration_extension.cpp
-                        // TODO: Remove Complex dispatch keys when Complex is moved in tree
+  QuantizedCUDA, // registered at build/aten/src/ATen/QuantizedCUDAType.cpp
+  ComplexCPU, // lives out of tree at
+              // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
+  ComplexCUDA, // and
+               // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
+  // tested at test/cpp_extensions/complex_registration_extension.cpp
+  // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
@@ -84,17 +93,71 @@ enum class DispatchKey : uint8_t {
   // based on the layout of the tensor.  Note that the sparse backends
   // are one case where ordering matters: sparse multi-dispatches with
   // the corresponding dense tensors, and must be handled before them.
-  MkldnnCPU,  // registered at build/aten/src/ATen/MkldnnCPUType.cpp
-                      // NB: not to be confused with MKLDNN, which is Caffe2 only
-  SparseCPU,  // registered at build/aten/src/ATen/SparseCPUType.cpp
+  MkldnnCPU, // registered at build/aten/src/ATen/MkldnnCPUType.cpp
+  // NB: not to be confused with MKLDNN, which is Caffe2 only
+  SparseCPU, // registered at build/aten/src/ATen/SparseCPUType.cpp
   SparseCUDA, // registered at build/aten/src/ATen/SparseCUDAType.cpp
-  SparseHIP,  // TODO: I think this is not actually used, due to Note [Masquerading as CUDA]
+  SparseHIP, // TODO: I think this is not actually used, due to Note
+             // [Masquerading as CUDA]
 
-  // Here are reserved backends for user-defined backends, see Note [Private use DispatchKey]
+  // Here are reserved backends for user-defined backends, see Note [Private use
+  // DispatchKey]
   // To see some example about how to use this, check out MSNPU
   PrivateUse1,
   PrivateUse2,
   PrivateUse3,
+
+  // The meta function characterizes how an operation affects the metadata of a
+  // tensor (shape, dtype) without doing any of the actual computation.  A
+  // meta tensor can be used to dry run operators without actually doing
+  // any computation, e.g., add on two meta tensors would give you another
+  // meta tensor with the output shape and dtype, but wouldn't actually
+  // add anything.  A meta implementation typically would look something like:
+  //
+  //  Tensor meta::add(const Tensor& self, const Tensor& other) {
+  //    TORCH_CHECK(self.size().equals(other.size()));
+  //    return at::empty_like(self, self.size());
+  //  }
+  //
+  // The meta function would get invoked if you ran an operator passing
+  // in meta tensors.  The call stack in such a case would look something like
+  // this:
+  //
+  //  at::add(x: Meta, y: Meta) {
+  //    return [dispatch] meta::add(x: Meta, y: Meta) {
+  //      output_shape = ...
+  //      [dispatch] meta::empty(output_shape) {
+  //        return ... meta tensor with output_shape but no data allocated ...
+  //      }
+  //    }
+  //  }
+  //
+  // Meta functions have an important secondary function, which is they can
+  // be used as tensor "allocators".  A typical backend implementation should
+  // be implemented in this way:
+  //
+  //  Tensor cpu::add(const Tensor& self, const Tensor& other) {
+  //    Tensor result = meta::add(self, other);
+  //    // ... do the actual computation into result ...
+  //    return result;
+  //  }
+  //
+  // In this case, the internal at::empty_like invocation would dispatch to the
+  // CPU factory function, not the meta factory function.  The call stack in
+  // this case looks like:
+  //
+  //  at::add(x: CPU, y: CPU) {
+  //    return [dispatch] cpu::add(x: CPU, y: CPU) {
+  //      output = [direct] meta::add(x: CPU, y: CPU) {
+  //        output_shape = ...
+  //        [dispatch] cpu::empty(output_shape)
+  //      }
+  //      ... compute on output ...
+  //      return output;
+  //    }
+  //  }
+  //
+  Meta,
 
   // In some situations, it is not immediately obvious what the correct
   // backend for function is, because the function in question doesn't
@@ -103,7 +166,19 @@ enum class DispatchKey : uint8_t {
   // correct backend.
   BackendSelect,
 
-
+  // The named dispatch key is set for any tensors with named dimensions.
+  // Although we have a dispatch key for named tensors, for historical reasons,
+  // this dispatch key doesn't do any of the substantive functionality for named
+  // tensor (though, hypothetically, it could!)  At the moment, it's just
+  // responsible for letting us give good error messages when operations
+  // don't support named tensors.
+  //
+  // NB: If you ever consider moving named tensor functionality into
+  // this dispatch key, note that it might be necessary add another dispatch
+  // key that triggers before composite operators, in case a composite operator
+  // has named dimension propagation that doesn't match that of its
+  // constituent parts.
+  Named,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AUTOGRAD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // All backends are oblivious to autograd; autograd is handled as a
@@ -113,6 +188,10 @@ enum class DispatchKey : uint8_t {
   // actually do the numeric computation.  Autograd contains
   // the bulk of this logic.
   Autograd,
+
+  Profiler,
+
+  Tracer,
 
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
   // (aka Autograd) for operators which have a Variable kernel
@@ -131,34 +210,36 @@ enum class DispatchKey : uint8_t {
   // and inputs are saved for backward in the post-autocast type.
   Autocast,
 
-  // Here are some reserved pre-autograd keys for user-defined backends, see Note [Private use DispatchKey]
+  // Here are some reserved pre-autograd keys for user-defined backends, see
+  // Note [Private use DispatchKey]
   PrivateUse1_PreAutograd,
   PrivateUse2_PreAutograd,
   PrivateUse3_PreAutograd,
-
-
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before
   // autograd; for example, error checking, tracing, profiling or vmap.  They
   // go here.
 
+  // This is the dispatch key for BatchedTensorImpl, which is used to implement
+  // batching rules for vmap.
+  Batched,
+
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
   // process test.  Use it by creating a TensorImpl with this DispatchKey, and
   // then registering operators to operate on this type id.  See
-  // aten/src/ATen/test/backend_fallback_test.cpp for a usage example.
+  // aten/src/ATen/core/dispatch/backend_fallback_test.cpp for a usage example.
   TESTING_ONLY_GenericWrapper,
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a ingle
   // process test.  Use it by toggling the mode on and off via
   // TESTING_ONLY_tls_generic_mode_set_enabled and then registering operators
-  // to operate on this type id.  See aten/src/ATen/test/backend_fallback_test.cpp
+  // to operate on this type id.  See
+  // aten/src/ATen/core/dispatch/backend_fallback_test.cpp
   // for a usage example
   TESTING_ONLY_GenericMode,
-
-
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   NumDispatchKeys, // Sentinel
@@ -169,8 +250,6 @@ enum class DispatchKey : uint8_t {
   CPUTensorId = CPU,
   CUDATensorId = CUDA,
 };
-
-
 
 // Note [Private use DispatchKey]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -202,13 +281,6 @@ static_assert(
 
 C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
-
-// For backwards compatibility with XLA repository
-// (I don't want to fix this in XLA right now because there might be
-// more renaming coming in the future.)
-static inline DispatchKey XLA() {
-  return DispatchKey::XLA;
-}
 
 // These are some convenience identifiers for dispatch keys which are
 // shorter to type than their long counterparts.  Note that some of these

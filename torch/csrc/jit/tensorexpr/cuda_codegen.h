@@ -47,18 +47,7 @@ class CudaPrinter : public IRPrinter {
     }
   }
 
-  void visit(const Cast* v) override {
-    auto dtype = v->dtype();
-    if (dtype == kHalf) {
-      os() << "half";
-    } else {
-      os() << dtype;
-    }
-    os() << "(";
-    v->src_value()->accept(this);
-    os() << ")";
-  }
-
+  void visit(const Cast* v) override;
   void visit(const Intrinsics* v) override;
   void visit(const For* v) override;
 
@@ -67,8 +56,10 @@ class CudaPrinter : public IRPrinter {
   void visit(const AtomicAdd* v) override;
   void visit(const Max* v) override;
   void visit(const Min* v) override;
-  void visit(const LetStmt* v) override;
   void visit(const IfThenElse* v) override;
+  void visit(const Block* v) override;
+  void visit(const Allocate* v) override;
+  void visit(const Free* v) override;
 
   const std::vector<const Expr*>& gpu_block_extents() const {
     return gpu_block_extents_;
@@ -86,10 +77,13 @@ class CudaPrinter : public IRPrinter {
   using IRPrinter::visit;
 
  private:
+  void maybe_insert_sync();
   std::vector<const Expr*> gpu_block_extents_;
   std::vector<const Expr*> gpu_thread_extents_;
   const Var* rand_func_;
   const CudaAnalysis* cuda_analysis_;
+  bool need_sync_ = false;
+  std::unordered_set<const Var*> thread_local_bufs_;
 };
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel

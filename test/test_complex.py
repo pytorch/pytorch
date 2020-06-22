@@ -26,12 +26,11 @@ class TestComplexTensor(TestCase):
         exp_fn(torch.complex64)
         exp_fn(torch.complex128)
 
-    def test_copy_real_imag_methods(self):
-        real = torch.randn(4)
-        imag = torch.randn(4)
-        complex_tensor = real + 1j * imag
-        self.assertEqual(complex_tensor.copy_real(), real)
-        self.assertEqual(complex_tensor.copy_imag(), imag)
+    def test_dtype_inference(self):
+        # issue: https://github.com/pytorch/pytorch/issues/36834
+        torch.set_default_dtype(torch.double)
+        x = torch.tensor([3., 3. + 5.j])
+        self.assertEqual(x.dtype, torch.cdouble)
 
 if __name__ == '__main__':
     run_tests()

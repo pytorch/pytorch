@@ -503,7 +503,7 @@ static PyMethodDef torch_functions[] = {
 
 static PyTypeObject THPVariableFunctions = {
   PyVarObject_HEAD_INIT(NULL, 0)
-  "torch._C._VariableFunctions",         /* tp_name */
+  "torch._C._VariableFunctionsClass",    /* tp_name */
   0,                                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
@@ -547,6 +547,12 @@ void initTorchFunctions(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPVariableFunctions);
+
+  // Steals
+  Py_INCREF(&THPVariableFunctions);
+  if (PyModule_AddObject(module, "_VariableFunctionsClass", reinterpret_cast<PyObject*>(&THPVariableFunctions)) < 0) {
+    throw python_error();
+  }
   // PyType_GenericNew returns a new reference
   THPVariableFunctionsModule = PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
   // PyModule_AddObject steals a reference

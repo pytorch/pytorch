@@ -16,7 +16,7 @@ constexpr auto kDefaultNumSendRecvThreads = 4;
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
   ProcessGroupRpcBackendOptions(
       int num_send_recv_threads,
-      std::chrono::milliseconds rpc_timeout,
+      float rpc_timeout,
       std::string init_method)
       : RpcBackendOptions(rpc_timeout, init_method),
         numSendRecvThreads(num_send_recv_threads) {
@@ -86,15 +86,17 @@ class ProcessGroupAgent : public RpcAgent {
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
-  std::shared_ptr<FutureMessage> send(const WorkerInfo& to, Message&& message)
-      override;
+  std::shared_ptr<FutureMessage> send(
+      const WorkerInfo& to,
+      Message&& message,
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
+
+  // put SendWork into a queue and notify the worker thread
+  virtual void enqueueSend(SendWork work);
+  // Bypass handleSend() logic and send a message to self rank
+  virtual void sendToSelf(Message&& message);
 
  private:
-  using steady_clock_time_point =
-      std::chrono::time_point<std::chrono::steady_clock>;
-
-  static const steady_clock_time_point kInfiniteTimeoutTimePoint;
-
   class MessageCounter {
    public:
     explicit MessageCounter(int worldSize);
@@ -143,8 +145,6 @@ class ProcessGroupAgent : public RpcAgent {
   };
 
   void collectNames();
-  // put SendWork into a queue and notify the worker thread
-  void enqueueSend(SendWork work);
   // handle a SendWork request. This serializes the payload inside the work
   // object, and sends the message to the receiver using the underlying
   // ProcessGroup.
@@ -156,10 +156,10 @@ class ProcessGroupAgent : public RpcAgent {
   // the timeout). This ensures that the messages accounted for in
   // hasPendingMessage() are tallied properly during a graceful shutdown.
   bool handleRecv(RecvWork& work);
-  // Loop for receiving messages. Calls listenLoopInternal and handles errors
-  // such as timeouts on the process group.
-  virtual void listenLoopInternal();
-  // Main function for receiving messages
+  // Loop that receives and processes messages
+  void listenLoopInternal();
+  // Calls listenLoopInternal and handles errors such as timeouts on the
+  // process group.
   void listenLoop();
   // exception_pointer correspnding to an exception raised in listenLoop (if
   // there is one), and lock to guard access.

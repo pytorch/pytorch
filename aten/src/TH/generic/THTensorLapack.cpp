@@ -9,6 +9,19 @@ static int THTensor_(isTransposedContiguous)(THTensor *self)
 {
   return self->stride(0) == 1 && self->stride(1) == self->size(0);
 }
+
+/*
+Check if self contains any inf or NaN values
+*/
+static int THTensor_(isFinite)(THTensor *self)
+{
+  std::atomic<int> finite{1};
+  TH_TENSOR_APPLY(scalar_t, self, if (finite && !std::isfinite(*self_data)) {
+                        finite = 0;
+                        TH_TENSOR_APPLY_hasFinished = 1; break;
+                     });
+  return finite;
+}
 /*
 If a matrix is a regular contiguous matrix, make sure it is transposed
 because this is what we return from Lapack calls.
@@ -192,6 +205,7 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, bool eigenvecto
 
   THArgCheck(a_->dim() == 2, 1, "A should be 2 dimensional");
   THArgCheck(a_->size(0) == a_->size(1), 1,"A should be square");
+  THArgCheck(THTensor_(isFinite)(a_), 1, "A should not contain infs or NaNs");
 
   /* we want to definitely clone a_ for geev*/
   a = THTensor_(cloneColumnMajor)(NULL, a_);

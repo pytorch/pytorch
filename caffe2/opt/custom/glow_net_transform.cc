@@ -28,6 +28,11 @@ C10_DEFINE_int32(
     1,
     "Minimum number of ops for a subgraph to be lowered to backend");
 
+C10_DEFINE_int32(
+    onnxifi_timeout_ms,
+    0,
+    "Timeout limit for onnxifi inference in milliseconds. 0 means no timeout");
+
 C10_DEFINE_string(
     onnxifi_shape_hints,
     "",
@@ -63,6 +68,10 @@ std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   }
   auto tokens = caffe2::split(',', str);
   for (const auto& token : tokens) {
+    if (token == "-1") {
+      net_position_list.emplace(-1);
+      continue;
+    }
     auto range = caffe2::split('-', token);
     if (range.size() == 1) {
       net_position_list.emplace(std::stoi(range[0]));
@@ -133,6 +142,7 @@ void onnxifi(
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
   opts.loop_test = FLAGS_onnxifi_loop_test_mode;
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
+  opts.timeout = FLAGS_onnxifi_timeout_ms;
 
   ShapeInfoMap more_shape_hints = shape_hints;
   if (!FLAGS_onnxifi_shape_hints.empty()) {

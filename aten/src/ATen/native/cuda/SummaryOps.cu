@@ -206,6 +206,10 @@ bool CUDA_tensor_histogram(
   }
   auto totalElements = b.numel();
 
+  if (totalElements == 0) {
+    return false;
+  }
+
   const dim3 block = getApplyBlock();
   dim3 grid;
   int64_t curDevice = current_device();

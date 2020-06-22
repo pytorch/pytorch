@@ -4,6 +4,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/autograd.h>
+#include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
 
 using namespace at;
@@ -80,7 +81,7 @@ namespace {
 void backward(
     const Tensor& self,
     const Tensor& gradient,
-    bool keep_graph,
+    c10::optional<bool> keep_graph,
     bool create_graph) {
   torch::autograd::backward({self}, {gradient}, keep_graph, create_graph);
 }
@@ -214,9 +215,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  // currently, isFloatingType will return false for (floating) complex types,
-  // so this might have to be amended when they should be differentiable
-  requires_grad &= isFloatingType(self.scalar_type());
+  requires_grad &= isDifferentiableType(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
@@ -224,6 +223,8 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     grad_fn->src_device = src.device();
   }
   {
+    // TODO: move tracing logic into TraceTypeManual.cpp
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.copy_(src_, non_blocking);
   }
@@ -253,6 +254,8 @@ Tensor& resize_(
   }
 #endif
   {
+    // TODO: move tracing logic into TraceTypeManual.cpp
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.resize_(size, std::move(optional_memory_format));
   }
@@ -275,6 +278,8 @@ Tensor& resize_as_(
   }
 #endif
   {
+    // TODO: move tracing logic into TraceTypeManual.cpp
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     at::resize_as_(self_, the_template_, std::move(optional_memory_format));
   }
@@ -364,7 +369,7 @@ static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::detach(Tensor self) -> Tensor")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .kernel<decltype(VariableType::detach)>(DispatchKey::Autograd, &VariableType::detach))
+    .kernel<decltype(VariableType::detach), &VariableType::detach>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
     .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
@@ -374,7 +379,7 @@ static auto registry = torch::RegisterOperators()
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .impl_unboxedOnlyKernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
-    .schema("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()")
+    .schema("aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     // For backward(), we need the catch-all kernel (see comment above), but we also need the Autograd backend
     // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,

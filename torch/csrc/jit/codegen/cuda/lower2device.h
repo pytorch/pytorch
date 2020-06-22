@@ -2,12 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/index_compute.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
 #include <map>
 #include <ostream>
@@ -21,71 +16,31 @@ namespace fuser {
 // keep user references intact so they can lower it as they describe the kernel.
 // Right now we can only lower once.
 
-struct TORCH_CUDA_API GPULower : public OptOutDispatch {
+struct TORCH_CUDA_API GPULower : public OptOutMutator {
  private:
-  bool lowered = false;
-  Fusion* fusion_;
+  Fusion* const fusion_;
   std::vector<Expr*> lowered_exprs;
   Expr* active_scope = nullptr;
-  // Track the last computeAt TensorView and axis
-  const TensorView* active_view;
-  unsigned int active_view_axis;
 
-  // Open a new inner most for loop
-  void openFor(IterDomain*);
-  // Close the inner most for loop
-  void closeScope();
-  // Close all for loops
-  void resetScope();
-  // Clear out the last recorded computeAtView
-  void clearActiveView();
-  // Set active views from computeAtView
-  void setActiveView(const TensorView* const);
-  // Grab the index variables of the active loop nest
-  std::vector<Val*> getLoopIndices();
-  // Grab the iterDomains of the active loops
-  std::vector<IterDomain*> getLoopIterDomains();
-  // Gets the indexing of a TensorView producer. These are values consumed in a
-  // TensorView Expr. We use the consumer (left hand side of the =) to compute
-  // the indexing into the consumer.
-  TensorIndex* getProducerIndex(TensorView* producer, TensorView* consumer);
-  TensorIndex* getGlobalProducerIndex(
-      TensorView* producer,
-      TensorView* consumer);
-  TensorIndex* getLocalProducerIndex(
-      TensorView* producer,
-      TensorView* consumer);
-  TensorIndex* getConsumerIndex(TensorView* consumer);
-  TensorIndex* getGlobalConsumerIndex(TensorView* consumer);
-  TensorIndex* getLocalConsumerIndex(TensorView* consumer);
-
-  // Track how far our for loop scope is
-  unsigned int computeForDepth();
-  // Push an expr to the active scope
-  void pushBack(Expr* expr);
-  // Return the parent of the active scope
-  Expr* parentScope();
-
-  // Get Register allocation statement for tensorview
-  Allocate* getAlloc(TensorView*);
-  // Get a predicate based on a particular tensorview
-  IfThenElse* getPredicate(const TensorView* const);
+  // Wrap pushBack in lower_utils if active_scope is null we want it to go
+  // straight to lower_exprs
+  void pushBack(Expr*);
 
   // Custom dispatch for Expr, want to find out of it's a TV op
-  void handle(Expr*) final;
+  Statement* mutate(Expr*) final;
+
+  // Open the for loop.
+  Statement* mutate(ForLoop*) final;
+
+  // Open the for loop.
+  Statement* mutate(IfThenElse*) final;
 
   // Remake operations with TensorIndex
-  void handle(UnaryOp*) final;
-  void handle(BinaryOp*) final;
-
-  // Ignore split/merge/reorder operations,
-  // we don't want to print them.
-  void handle(Split*) final {}
-  void handle(Merge*) final {}
-  void handle(Reorder*) final {}
-
-  // Update for loop structure based on producing provided TensorView
-  void updateView(TensorView*);
+  Statement* mutate(UnaryOp*) final;
+  Statement* mutate(BinaryOp*) final;
+  Statement* mutate(TernaryOp*) final;
+  Statement* mutate(ReductionOp*) final;
+  Statement* mutate(BroadcastOp*) final;
 
   // TensorViews are all based on symbolic sizes. When we first initialize them
   // we don't know if they're inputs or outputs which would mean that they have
@@ -94,6 +49,7 @@ struct TORCH_CUDA_API GPULower : public OptOutDispatch {
   // the kernel being fetched for shapes, we want to replace input and output
   // tensors to reference the runtime structure containing sizes.
   void replaceSizes();
+  void fixComputeAt(Fusion* fusion);
 
  public:
   // Init printer on ostream

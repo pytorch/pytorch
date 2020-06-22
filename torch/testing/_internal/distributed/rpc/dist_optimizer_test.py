@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import threading
-import unittest
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -11,6 +10,9 @@ from torch.distributed.optim import DistributedOptimizer
 from torch.testing._internal.dist_utils import dist_init
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
+)
+from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
+    TensorPipeRpcAgentTestFixture,
 )
 
 
@@ -35,7 +37,7 @@ class MyModule:
 
 class FailingOptimizer(optim.Optimizer):
     def __init__(self, params):
-        super(FailingOptimizer, self).__init__(params, {})
+        super().__init__(params, {})
 
     def step(self, closure=None):
         raise ValueError("Error running optimizer.")
@@ -43,7 +45,7 @@ class FailingOptimizer(optim.Optimizer):
 
 class OptimizerFailingOnConstructor(optim.Optimizer):
     def __init__(self, params):
-        super(OptimizerFailingOnConstructor, self).__init__(params, {})
+        super().__init__(params, {})
         raise ValueError("Error creating optimizer.")
 
     def step(self, closure=None):
@@ -94,9 +96,6 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
     )
 
 
-@unittest.skipIf(
-    not torch._six.PY3, "Pytorch distributed optim does not support python2"
-)
 class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception(self):
@@ -203,3 +202,10 @@ class DistOptimizerTest(RpcAgentTestFixture):
             # ensure local equals remote
             self.assertEqual(new_w1, module1.get_w())
             self.assertEqual(new_w2, module2.get_w())
+
+class TensorPipeRpcAgentDistOptimizerTest(TensorPipeRpcAgentTestFixture,
+                                          DistOptimizerTest):
+
+    @dist_init
+    def test_verify_backend_options(self):
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.TENSORPIPE)
