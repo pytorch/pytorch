@@ -123,3 +123,23 @@ class Hardswish(torch.nn.Hardswish):
     def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return Hardswish(float(scale), int(zero_point))
+
+class ELU(torch.nn.ELU):
+    r"""This is the quantized equivalent of :class:`torch.nn.ELU`.
+    """
+    def __init__(self, scale, zero_point, alpha=1.):
+        super(ELU, self).__init__(alpha)
+        self.scale = scale
+        self.zero_point = zero_point
+
+    def forward(self, input):
+        return torch.nn.quantized.functional.elu(
+            input, self.scale, self.zero_point, self.alpha)
+
+    def _get_name(self):
+        return 'QuantizedELU'
+
+    @staticmethod
+    def from_float(mod):
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        return ELU(float(scale), int(zero_point), mod.alpha)
