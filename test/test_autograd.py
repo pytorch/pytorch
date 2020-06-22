@@ -1327,7 +1327,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                return (grad_output * 0).type(torch.DoubleTensor)
+                return (grad_output * 0).to(torch.double)
 
         x = torch.randn(5, 5, requires_grad=True)
         mask = MyFunction.apply(x)
@@ -4182,7 +4182,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.Tensor) and output_variable.requires_grad and self_variable is not None:
         output_variable.backward(randn_like(output_variable))
-        test_case.assertEqual(self_variable.type(), self_variable.grad.type())
+        test_case.assertEqualTypeString(self_variable, self_variable.grad)
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
 # white list for complex
