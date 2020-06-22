@@ -2668,7 +2668,7 @@ class TestQuantizedConv(unittest.TestCase):
         use_bias, use_channelwise, use_transpose
     ):
         assert not (use_channelwise and use_transpose), \
-               "Cannot generate channelwise qconv_transpose_tensors "
+            "Cannot generate channelwise qconv_transpose_tensors "
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
@@ -3022,7 +3022,7 @@ class TestQuantizedConv(unittest.TestCase):
             # Only QNNPACK conv_transpose is supported for now...
             return
         if qengine == 'qnnpack':
-            assume(channelwise == False)
+            assume(not channelwise)
         assume(channelwise ^ transposed)  # See TODO in _test_qconv_unpack_impl
 
         if transposed:
