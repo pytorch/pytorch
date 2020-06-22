@@ -71,7 +71,7 @@ class RandomSampler(Sampler):
 
     Arguments:
         data_source (Dataset): dataset to sample from
-        replacement (bool): samples are drawn on-demand  with replacement if ``True``, default=``False``
+        replacement (bool): samples are drawn on-demand with replacement if ``True``, default=``False``
         num_samples (int): number of samples to draw, default=`len(dataset)`. This argument
             is supposed to be specified only when `replacement` is ``True``.
         generator (Generator): Generator used in sampling.
