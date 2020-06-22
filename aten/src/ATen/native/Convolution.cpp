@@ -235,6 +235,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.options().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
+     !is_dilated() && // doesn't support dilation
      !transposed // or transposed tensors
     );
 #endif
