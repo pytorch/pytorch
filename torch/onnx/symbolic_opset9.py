@@ -859,7 +859,6 @@ def constant_pad_nd(g, input, padding, value):
     return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
 
 
-@parse_args('v', 'is')
 def reflection_pad(g, input, padding):
     mode = "reflect"
     padding = _convert_padding_node(padding)
@@ -867,7 +866,6 @@ def reflection_pad(g, input, padding):
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
-@parse_args('v', 'is')
 def replication_pad(g, input, padding):
     mode = "edge"
     padding = _convert_padding_node(padding)
