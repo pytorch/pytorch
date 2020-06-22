@@ -656,7 +656,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 X, x_scale, x_zero_point, dtype=torch.quint8)
             dqX = qX.dequantize()
 
-            float_mod = float_cls(dims[1], affine=True).float()
+            float_mod = float_cls(dims[1]).float()
             float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
             float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
 
@@ -673,6 +673,35 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
                 msg="InstanceNorm module API failed, qY_ref\n{} vs qY\n{}"
                 .format(qY_ref, qY))
+
+    def test_elu(self):
+        """Tests the correctness of the ELU module.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+        alpha = 1.5
+
+        dims = (1, 4, 8)
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = torch.nn.ELU(alpha).float()
+
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = nnq.ELU(y_scale, y_zero_point, alpha)
+        qY = quant_mod(qX)
+
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         msg="ELU module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(qY_ref, qY))
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
     @given(
