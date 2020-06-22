@@ -88,8 +88,8 @@ class ProcessGroup {
     virtual void abort();
 
    protected:
-    // Completes the work and optionally sets the exception in a thread-safe
-    // manner. Notifies all waiting condition variables as well.
+    // Completes the work object and optionally sets the exception in a
+    // thread-safe manner. Notifies all waiting condition variables as well.
     void finish(std::exception_ptr exception = nullptr);
 
     // Similar to finish, but throws an exception if one is already set or

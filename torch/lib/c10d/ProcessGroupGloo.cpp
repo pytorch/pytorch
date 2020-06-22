@@ -342,8 +342,7 @@ bool ProcessGroupGloo::SendWork::wait() {
     exception = std::current_exception();
   }
 
-  // Lock to write completed_ and exception_, and throw if there is an
-  // exception.
+  // Completes the Work object and throws the exception.
   finishAndThrow(exception);
   return sendCompleted;
 }
@@ -371,8 +370,7 @@ bool ProcessGroupGloo::RecvWork::wait() {
     exception = std::current_exception();
   }
 
-  // Lock to write completed_ and exception_, and throw if there is an
-  // exception.
+  // Completes the Work object and throws the exception.
   finishAndThrow(exception);
   return recvCompleted;
 }
