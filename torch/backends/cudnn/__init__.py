@@ -51,10 +51,10 @@ def version():
     return __cudnn_version
 
 
-CUDNN_TENSOR_TYPES = {
-    'torch.cuda.HalfTensor',
-    'torch.cuda.FloatTensor',
-    'torch.cuda.DoubleTensor',
+CUDNN_TENSOR_DTYPES = {
+    torch.half,
+    torch.float,
+    torch.double,
 }
 
 
@@ -66,7 +66,7 @@ def is_available():
 def is_acceptable(tensor):
     if not torch._C._get_cudnn_enabled():
         return False
-    if tensor.type() not in CUDNN_TENSOR_TYPES:
+    if tensor.device.type != 'cuda' or tensor.dtype not in CUDNN_TENSOR_DTYPES:
         return False
     if not is_available():
         warnings.warn(
