@@ -297,14 +297,6 @@ inline InferredType tryToInferType(py::handle input) {
       TORCH_INTERNAL_ASSERT(class_type);
       return InferredType(class_type);
     }
-
-    // Check if it is a NamedTuple.
-    auto named_tuple_type = py::cast<TupleTypePtr>(
-        py::module::import("torch._jit_internal")
-            .attr("try_make_named_tuple_type")(input.get_type(), input, true));
-    if (named_tuple_type) {
-      return InferredType(named_tuple_type);
-    }
   }
 
   if (py::isinstance<Object>(input)) {

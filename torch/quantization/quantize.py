@@ -73,7 +73,7 @@ def _observer_forward_hook(self, input, output):
     """
     return self.activation_post_process(output)
 
-def add_observer_(module, device=None):
+def add_observer_(module, non_leaf_module_list=None, device=None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -82,6 +82,7 @@ def add_observer_(module, device=None):
     Args:
         module: input module with qconfig attributes for all the leaf modules that we want to quantize
         device: parent device, if any
+        non_leaf_module_list: list of non-leaf modules we want to add observer
 
     Return:
         None, module is modified inplace with added observer modules and forward_hooks
@@ -102,8 +103,12 @@ def add_observer_(module, device=None):
                 if device is not None:
                     activation.to(device)
                 child.activation_post_process = activation
+        elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
+            if hasattr(child, 'qconfig') and child.qconfig is not None:
+                child.add_module('activation_post_process', child.qconfig.activation())
+                child.register_forward_hook(_observer_forward_hook)
         else:
-            add_observer_(child, device)
+            add_observer_(child, non_leaf_module_list, device)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
@@ -142,7 +147,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST):
+def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST, observer_non_leaf_module_list=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
     Quantization configuration should be assigned preemptively
@@ -154,6 +159,8 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
     Args:
         model: input model to be modified in-place
         inplace: carry out model transformations in-place, the original module is mutated
+        white_list: list of quantizable modules
+        observer_non_leaf_module_list: list of non-leaf modules we want to add observer
     """
     if not inplace:
         model = copy.deepcopy(model)
@@ -163,7 +170,7 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
         warnings.warn("None of the submodule got qconfig applied. Make sure you "
                       "passed correct configuration through `qconfig_dict` or "
                       "by assigning the `.qconfig` attribute directly on submodules")
-    add_observer_(model)
+    add_observer_(model, observer_non_leaf_module_list)
     return model
 
 def _remove_qconfig(module):
@@ -180,17 +187,15 @@ def _remove_qconfig(module):
         del module.qconfig
 
 def quantize(model, run_fn, run_args, mapping=None, inplace=False):
-    r"""Converts a float model to quantized model.
+    r"""Quantize the input float model with post training static quantization.
 
-    First it will prepare the model for calibration or training, then it calls
-    `run_fn` which will run the calibration step or training step,
-    after that we will call `convert` which will convert the model to a
-    quantized model.
+    First it will prepare the model for calibration, then it calls
+    `run_fn` which will run the calibration step, after that we will
+    convert the model to a quantized model.
 
     Args:
-        model: input model
-        run_fn: a function for evaluating the prepared model, can be a
-            function that simply runs the prepared model or a training loop
+        model: input float model
+        run_fn: a calibration function for calibrating the prepared model
         run_args: positional arguments for `run_fn`
         inplace: carry out model transformations in-place, the original module is mutated
         mapping: correspondence between original module types and quantized counterparts
