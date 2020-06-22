@@ -1,12 +1,9 @@
+from functools import partial
 import itertools
 import statistics
 import timeit
 import torch
 
-profiling_enabled = None
-profiling_tensor_size = None
-use_cuda = None
-input_x = None
 TENSOR_SIZES = [1, 32, 128, 256, 512]
 INTERNAL_ITER = 256
 PARALLEL_TASKS_NUM = 4
@@ -18,7 +15,7 @@ def loop_workload(x):
     return x
 
 traced_loop_workload = None
-def run_profiler_benchmark_loop():
+def run_profiler_benchmark_loop(input_x, use_cuda, profiling_enabled):
     if profiling_enabled:
         with torch.autograd.profiler.profile(use_cuda=use_cuda) as prof:
             traced_loop_workload(input_x)
@@ -39,7 +36,7 @@ def parallel_workload(x):
     return x
 
 traced_parallel_workload = None
-def run_profiler_benchmark_parallel():
+def run_profiler_benchmark_parallel(input_x, use_cuda, profiling_enabled):
     if profiling_enabled:
         with torch.autograd.profiler.profile(use_cuda=use_cuda) as prof:
             traced_parallel_workload(input_x)
@@ -67,10 +64,12 @@ if __name__ == '__main__':
                 input_x = input_x.cuda()
             workload = None
             if workload_name == "loop":
-                workload = run_profiler_benchmark_loop
+                workload = partial(
+                    run_profiler_benchmark_loop, input_x, use_cuda, profiling_enabled)
                 traced_loop_workload = torch.jit.trace(loop_workload, input_x)
             elif workload_name == "parallel":
-                workload = run_profiler_benchmark_parallel
+                workload = partial(
+                    run_profiler_benchmark_parallel, input_x, use_cuda, profiling_enabled)
                 traced_parallel_workload = torch.jit.trace(
                     parallel_workload, input_x)
 
