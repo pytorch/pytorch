@@ -2677,6 +2677,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(12)
         self.run_test(FullModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_full_like(self):
+        class FullLikeModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.full_like(x, 4)
+
+        x = torch.tensor(12)
+        self.run_test(FullLikeModel(), x)
+
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
