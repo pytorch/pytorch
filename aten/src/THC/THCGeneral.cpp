@@ -47,6 +47,8 @@ void THCudaInit(THCState* state)
   THCudaCheck(cudaGetDeviceCount(&numDevices));
   state->numDevices = numDevices;
 
+  c10::cuda::CUDACachingAllocator::init(numDevices);
+
   int device = 0;
   THCudaCheck(cudaGetDevice(&device));
 

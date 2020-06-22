@@ -77,7 +77,7 @@ TORCH_API void writeArchiveAndTensors(
     const std::string& archive_name,
     const char* pickle_bytes,
     size_t size,
-    const std::vector<WriteableTensorData>& tensors,
+    const std::vector<at::Tensor>& tensors,
     caffe2::serialize::PyTorchStreamWriter& out);
 
 // Surrounding system can install an additional hook to produce extra files

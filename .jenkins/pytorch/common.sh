@@ -187,7 +187,7 @@ function file_diff_from_base() {
   set +e
   git fetch origin master --quiet
   set -e
-  git diff --name-only "$(git merge-base origin master HEAD)" > "$1"
+  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
 }
 
 function get_bazel() {

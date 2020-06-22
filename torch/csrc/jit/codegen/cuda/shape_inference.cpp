@@ -100,6 +100,7 @@ class NaiveShapeTypePropagator {
       case aten::pow:
       case aten::remainder:
       case aten::fmod:
+      case aten::lerp:
       // add/sub could be ternary op and the third argument does not contribute
       // to neither type promoteion nor shape.
       case aten::add:
@@ -128,6 +129,15 @@ class NaiveShapeTypePropagator {
         auto promoted_type = binary_broadcast_type(
             node->input(1)->type()->cast<TensorType>(),
             node->input(2)->type()->cast<TensorType>());
+        node->output()->setType(promoted_type);
+        break;
+      }
+      case aten::addcmul: {
+        auto promoted_type = binary_broadcast_type(
+            node->input(1)->type()->cast<TensorType>(),
+            node->input(2)->type()->cast<TensorType>());
+        promoted_type = binary_broadcast_type(
+            promoted_type, node->input(0)->type()->cast<TensorType>());
         node->output()->setType(promoted_type);
         break;
       }

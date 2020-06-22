@@ -13,6 +13,92 @@
 namespace torch {
 namespace jit {
 
+namespace tensorexpr {
+bool isSupported(Node* node) {
+  // TODO:
+  switch (node->kind()) {
+    case aten::add:
+    case aten::_cast_Float:
+    case aten::type_as:
+    case aten::sub:
+    case aten::mul:
+    case aten::div:
+    case aten::eq:
+    case aten::ne:
+    case aten::ge:
+    case aten::gt:
+    case aten::le:
+    case aten::lt:
+    case aten::pow:
+    case aten::clamp:
+    case aten::lerp:
+    case aten::log10:
+    case aten::log:
+    case aten::log2:
+    case aten::exp:
+    case aten::erf:
+    case aten::erfc:
+    case aten::fmod:
+    case aten::cos:
+    case aten::sin:
+    case aten::tan:
+    case aten::acos:
+    case aten::asin:
+    case aten::atan:
+    case aten::atan2:
+    case aten::cosh:
+    case aten::sinh:
+    case aten::tanh:
+    case aten::sqrt:
+    case aten::rsqrt:
+    case aten::abs:
+    case aten::floor:
+    case aten::ceil:
+    case aten::round:
+    case aten::trunc:
+    case aten::threshold:
+    case aten::remainder:
+    case prim::ConstantChunk:
+    case aten::cat:
+    case prim::ListConstruct:
+    case aten::sigmoid:
+    case aten::relu:
+    case aten::addcmul:
+    case aten::neg:
+    case aten::reciprocal:
+    case aten::expm1:
+    case aten::lgamma:
+    case aten::slice:
+    case aten::unsqueeze:
+    case aten::frac:
+    // TODO: uncomment once we can handle rand+broadcasts
+    // case aten::rand_like:
+    case aten::_sigmoid_backward:
+    case aten::_tanh_backward:
+    case aten::__and__:
+    case aten::__or__:
+    case aten::__xor__:
+    case aten::__lshift__:
+    case aten::__rshift__:
+    case aten::where:
+      return true;
+    // Operators that can be both elementwise or reductions:
+    case aten::min:
+    case aten::max:
+      if (node->inputs().size() != 2) {
+        return false;
+      }
+      if (!node->inputs()[0]->type()->cast<TensorType>() ||
+          !node->inputs()[1]->type()->cast<TensorType>()) {
+        return false;
+      }
+      return true;
+    default:
+      return false;
+  }
+}
+} // namespace tensorexpr
+
 static bool texpr_fuser_enabled_ = false;
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
@@ -75,81 +161,6 @@ bool allShapesAreKnown(Node* node) {
   return true;
 }
 
-bool isSupported(Node* node) {
-  // TODO:
-  switch (node->kind()) {
-    case aten::add:
-    case aten::_cast_Float:
-    case aten::type_as:
-    case aten::sub:
-    case aten::mul:
-    case aten::div:
-    case aten::eq:
-    case aten::ne:
-    case aten::ge:
-    case aten::gt:
-    case aten::le:
-    case aten::lt:
-    case aten::min:
-    case aten::max:
-    case aten::pow:
-    case aten::clamp:
-    case aten::lerp:
-    case aten::log10:
-    case aten::log:
-    case aten::log2:
-    case aten::exp:
-    case aten::erf:
-    case aten::erfc:
-    case aten::fmod:
-    case aten::cos:
-    case aten::sin:
-    case aten::tan:
-    case aten::acos:
-    case aten::asin:
-    case aten::atan:
-    case aten::atan2:
-    case aten::cosh:
-    case aten::sinh:
-    case aten::tanh:
-    case aten::sqrt:
-    case aten::rsqrt:
-    case aten::abs:
-    case aten::floor:
-    case aten::ceil:
-    case aten::round:
-    case aten::trunc:
-    case aten::threshold:
-    case aten::remainder:
-    case prim::ConstantChunk:
-    case aten::cat:
-    case prim::ListConstruct:
-    case aten::sigmoid:
-    case aten::relu:
-    case aten::addcmul:
-    case aten::neg:
-    case aten::reciprocal:
-    case aten::expm1:
-    case aten::lgamma:
-    case aten::slice:
-    case aten::unsqueeze:
-    case aten::frac:
-    // TODO: uncomment once we can handle rand+broadcasts
-    // case aten::rand_like:
-    case aten::_sigmoid_backward:
-    case aten::_tanh_backward:
-    case aten::__and__:
-    case aten::__or__:
-    case aten::__xor__:
-    case aten::__lshift__:
-    case aten::__rshift__:
-    case aten::where:
-      return true;
-    default:
-      return false;
-  }
-}
-
 bool canHandle(Node* node, AliasDb& aliasDb) {
   if (node->kind() == prim::Constant) {
     if (node->output()->type()->cast<TensorType>()) {
@@ -174,7 +185,7 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
       return false;
     }
   }
-  return isSupported(node);
+  return tensorexpr::isSupported(node);
 }
 
 #define REQ(cond)                           \
@@ -199,7 +210,7 @@ bool canMerge(Node* consumer, Node* producer, AliasDb& aliasDb) {
        consumer->kind() == getTensorExprSymbol()));
 
   // Alias checks
-  REQ(aliasDb.couldMoveAfterTopologically(consumer, producer));
+  REQ(aliasDb.couldMoveBeforeTopologically(producer, consumer));
 
   // Ops that return aliases can only be folded if this is the only use.
   if (producer->kind() == aten::slice || producer->kind() == aten::unsqueeze ||
@@ -265,17 +276,17 @@ c10::optional<Node*> tryMerge(
   if (producer->kind() == aten::cat) {
     Node* listconstruct = producer->inputs()[0]->node();
 
-    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
 
-    aliasDb.moveAfterTopologicallyValid(consumer, listconstruct);
+    aliasDb.moveBeforeTopologicallyValid(listconstruct, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(listconstruct), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(listconstruct, consumer);
   } else {
-    aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    aliasDb.moveBeforeTopologicallyValid(producer, consumer);
     GRAPH_UPDATE(
         "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);

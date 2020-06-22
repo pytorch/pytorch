@@ -90,7 +90,7 @@ void csrmm2(
   T alpha, T *csrvala, int *csrrowptra, int *csrcolinda, 
   T *b, int64_t ldb, T beta, T *c, int64_t ldc)
 {
-  static_assert(std::is_same<float, T>::value || std::is_same<double, T>::value); 
+  static_assert(std::is_same<float, T>::value || std::is_same<double, T>::value, "csrmm2 only supports float and double value types"); 
   constexpr auto cusparse_value_type = std::is_same<float, T>::value ? CUDA_R_32F : CUDA_R_64F; 
 
   if (csrvala == nullptr || b == nullptr || c == nullptr) return; 

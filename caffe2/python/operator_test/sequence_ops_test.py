@@ -210,7 +210,7 @@ class TestSequenceOps(serial.SerializedTestCase):
             reference=partial(_gather_padding_ref, start_pad_width, end_pad_width))
 
     @serial.given(data=hu.tensor(min_dim=3, max_dim=3, dtype=np.float32,
-                          elements=st.floats(min_value=-np.inf,
+                          elements=hu.floats(min_value=-np.inf,
                                              max_value=np.inf),
                           min_value=1, max_value=10),
                           **hu.gcs)
@@ -244,7 +244,7 @@ class TestSequenceOps(serial.SerializedTestCase):
             grad_reference=op_grad_ref)
 
     @serial.given(data=hu.tensor(min_dim=1, max_dim=3, dtype=np.float32,
-                          elements=st.floats(min_value=-np.inf,
+                          elements=hu.floats(min_value=-np.inf,
                                              max_value=np.inf),
                           min_value=10, max_value=10),
            indices=st.lists(st.integers(min_value=0, max_value=9),
