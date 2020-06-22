@@ -26,6 +26,8 @@ void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs);
 
 void createObject(Stack& stack, at::ClassTypePtr type);
 
+void checkTensor(Stack& stack, at::TensorTypePtr type);
+
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types);
 
 void tupleSlice(Stack& stack, size_t begin, size_t end);

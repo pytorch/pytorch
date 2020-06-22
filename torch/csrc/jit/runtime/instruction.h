@@ -47,7 +47,8 @@ namespace jit {
     "TI") /* construct a tuple of type X, using N inputs */                 \
   _(LIST_CONSTRUCT, "TI") /* construct a list of type X, using N inputs */  \
   _(DICT_CONSTRUCT, "TI") /* construct a dict of type X, using N inputs */  \
-  _(CREATE_OBJECT, "T") /* create an object of type X */                    \
+  _(CREATE_OBJECT, "TI") /* create an object of type X */                   \
+  _(CHECK_TENSOR, "T") /* check tensor is of type X */                      \
   _(ISINSTANCE, "TI") /* check object is one of  types[X:X+N]  */           \
   _(TUPLE_SLICE, "II") /* slice tup[X:(X+N)] */                             \
   _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */    \

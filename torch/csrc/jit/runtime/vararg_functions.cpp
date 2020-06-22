@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <c10/util/Exception.h>
 
 namespace torch {
 namespace jit {
@@ -96,6 +97,12 @@ void createObject(Stack& stack, at::ClassTypePtr type) {
       c10::StrongTypePtr(type->compilation_unit(), type),
       type->numAttributes());
   push(stack, std::move(userObj));
+}
+
+void checkTensor(Stack& stack, at::TensorTypePtr type) {
+  at::Tensor ten = pop(stack).toTensor();
+  TORCH_CHECK(type->matchTensor(ten), "Tensor did not match type");
+  push(stack, IValue());
 }
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
