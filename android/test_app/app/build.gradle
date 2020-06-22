@@ -29,12 +29,13 @@ android {
         ndk {
             abiFilters ABI_FILTERS.split(",")
         }
-        externalNativeBuild {
-            cmake {
-                abiFilters ABI_FILTERS.split(",")
-                arguments "-DANDROID_STL=c++_shared"
-            }
-        }
+        // Commented due to dependency on local copy of pytorch_android aar to aars folder
+        //externalNativeBuild {
+        //    cmake {
+        //        abiFilters ABI_FILTERS.split(",")
+        //        arguments "-DANDROID_STL=c++_shared"
+        //    }
+        //}
         buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
         buildConfigField("String", "LOGCAT_TAG", "@string/app_name")
         buildConfigField("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 224, 224}")
@@ -50,11 +51,12 @@ android {
             minifyEnabled false
         }
     }
-    externalNativeBuild {
-        cmake {
-            path "CMakeLists.txt"
-        }
-    }
+    // Commented due to dependency on local copy of pytorch_android aar to aars folder
+    //externalNativeBuild {
+    //    cmake {
+    //        path "CMakeLists.txt"
+    //    }
+    //}
     flavorDimensions "model", "build", "activity"
     productFlavors {
         mbq {
@@ -66,7 +68,7 @@ android {
         }
         resnet18 {
             dimension "model"
-            applicationIdSuffix ".resnet18"
+            applicationIdSuffix ".resneti18"
             buildConfigField("String", "MODULE_ASSET_NAME", "\"resnet18.pt\"")
             addManifestPlaceholders([APP_NAME: "RN18"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
@@ -80,10 +82,11 @@ android {
         aar {
             dimension "build"
         }
-        nativeBuild {
-            dimension "build"
-            buildConfigField("boolean", "NATIVE_BUILD", "true")
-        }
+        // Commented due to dependency on local copy of pytorch_android aar to aars folder
+        //nativeBuild {
+        //    dimension "build"
+        //    buildConfigField("boolean", "NATIVE_BUILD", "true")
+        //}
         camera {
             dimension "activity"
             addManifestPlaceholders([MAIN_ACTIVITY: "org.pytorch.testapp.CameraActivity"])
@@ -117,6 +120,14 @@ android {
     }
 }
 
+tasks.all { task ->
+    // Disable externalNativeBuild for all but nativeBuild variant
+    if (task.name.startsWith('externalNativeBuild') 
+          && !task.name.contains('NativeBuild')) {
+        task.enabled = false
+    }
+}
+
 dependencies {
     implementation 'com.android.support:appcompat-v7:28.0.0'
     implementation 'com.facebook.soloader:nativeloader:0.8.0'
@@ -124,9 +135,9 @@ dependencies {
     localImplementation project(':pytorch_android')
     localImplementation project(':pytorch_android_torchvision')
 
-    nativeBuildImplementation(name: 'pytorch_android-release', ext: 'aar')
-    nativeBuildImplementation(name: 'pytorch_android_torchvision-release', ext: 'aar')
     // Commented due to dependency on local copy of pytorch_android aar to aars folder
+    //nativeBuildImplementation(name: 'pytorch_android-release', ext: 'aar')
+    //nativeBuildImplementation(name: 'pytorch_android_torchvision-release', ext: 'aar')
     //extractForNativeBuild(name: 'pytorch_android-release', ext: 'aar')
 
     nightlyImplementation 'org.pytorch:pytorch_android:1.6.0-SNAPSHOT'
