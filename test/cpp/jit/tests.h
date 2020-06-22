@@ -110,6 +110,7 @@ namespace jit {
   _(GPU_FusionExprEvalBindings)   \
   _(GPU_FusionExprEvalBasic)      \
   _(GPU_FusionExprEvalComplex)    \
+  _(GPU_FusionExprEvalPostLower)  \
   _(GPU_FusionSimpleTypePromote)  \
   _(GPU_FusionMutator)            \
   _(GPU_FusionRegister)           \

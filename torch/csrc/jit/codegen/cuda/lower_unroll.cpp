@@ -184,8 +184,7 @@ void UnrollPass::handle(ForLoop* fl) {
     } // for expr
   } else { //  if(!within_unroll)
     // modify in place, so grab a copy of exprs first.
-    std::vector<Expr*> exprs(
-        fl->body().exprs().begin(), fl->body().exprs().end());
+    const std::vector<Expr*> exprs = fl->body().exprs();
 
     for (auto expr : exprs) {
       if (!ir_utils::isTVOp(expr))

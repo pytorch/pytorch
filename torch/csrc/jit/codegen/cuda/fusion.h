@@ -163,8 +163,12 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Print this fusion to cout.
   void print();
 
+  // Print value mapping
+  void printValuesMap();
+
   // Print Arith exprs used in outputs
   void printMath();
+
   // Print transformations used in fusion (can be very verbose)
   void printTransforms();
   // Lower the fusion and print a kernel
@@ -209,6 +213,20 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   bool hasGridReduction();
   size_t gridReductionTempBufferSize();
 
+  void setValuesMap(std::unordered_map<Val*, Val*> values_map) {
+    values_map_ = std::move(values_map);
+  }
+
+  Val* loweredVal(Val* value) const {
+    auto it = values_map_.find(value);
+    return it != values_map_.end() ? it->second : value;
+  }
+
+  const Val* loweredVal(const Val* value) const {
+    auto it = values_map_.find(const_cast<Val*>(value));
+    return it != values_map_.end() ? it->second : value;
+  }
+
  private:
   // Sets of all Vals/Exprs registered with this fusion
   // (val_deque_ is not owning the objects)
@@ -235,6 +253,9 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Dependency tracking for Vals. Where did it come from? Where is it used?
   std::unordered_map<Val*, Expr*> origin_;
   std::unordered_map<Val*, std::unordered_set<Expr*>> uses_;
+
+  // Map a subset of values to the lowered equivalent (ex. sizes)
+  std::unordered_map<Val*, Val*> values_map_;
 };
 
 } // namespace fuser

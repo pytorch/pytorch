@@ -214,6 +214,20 @@ void Fusion::print() {
   std::cout << "}\n";
 }
 
+void Fusion::printValuesMap() {
+  IRPrinter ir_printer(std::cout);
+  ir_printer.follow_val_map = false;
+  std::cout << "\nValues map\n";
+  std::cout << "--------------------\n";
+  for (const auto& kv : values_map_) {
+    ir_printer.handle(kv.first);
+    std::cout << " -> ";
+    ir_printer.handle(kv.second);
+    std::cout << "\n";
+  }
+  std::cout << "--------------------\n\n";
+}
+
 void Fusion::printKernel() {
   FusionGuard fg(this);
   GPULower lower(this);

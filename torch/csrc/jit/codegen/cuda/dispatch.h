@@ -93,32 +93,32 @@ struct TORCH_CUDA_API OptOutConstDispatch {
   OptOutConstDispatch& operator=(OptOutConstDispatch&& other) = default;
 
   // Hierarchal dispatch functions for handle
-  virtual void handle(const Statement* const);
-  virtual void handle(const Expr* const);
-  virtual void handle(const Val* const);
+  virtual void handle(const Statement*);
+  virtual void handle(const Expr*);
+  virtual void handle(const Val*);
 
   // Vals
-  virtual void handle(const IterDomain* const) {}
-  virtual void handle(const TensorDomain* const) {}
-  virtual void handle(const TensorView* const) {}
-  virtual void handle(const TensorIndex* const) {}
-  virtual void handle(const Bool* const) {}
-  virtual void handle(const Float* const) {}
-  virtual void handle(const Half* const) {}
-  virtual void handle(const Int* const) {}
-  virtual void handle(const NamedScalar* const) {}
+  virtual void handle(const IterDomain*) {}
+  virtual void handle(const TensorDomain*) {}
+  virtual void handle(const TensorView*) {}
+  virtual void handle(const TensorIndex*) {}
+  virtual void handle(const Bool*) {}
+  virtual void handle(const Float*) {}
+  virtual void handle(const Half*) {}
+  virtual void handle(const Int*) {}
+  virtual void handle(const NamedScalar*) {}
 
   // Exprs
-  virtual void handle(const Split* const) {}
-  virtual void handle(const Merge* const) {}
-  virtual void handle(const UnaryOp* const) {}
-  virtual void handle(const BinaryOp* const) {}
-  virtual void handle(const TernaryOp* const) {}
-  virtual void handle(const ReductionOp* const) {}
-  virtual void handle(const BroadcastOp* const) {}
-  virtual void handle(const ForLoop* const) {}
-  virtual void handle(const IfThenElse* const) {}
-  virtual void handle(const Allocate* const) {}
+  virtual void handle(const Split*) {}
+  virtual void handle(const Merge*) {}
+  virtual void handle(const UnaryOp*) {}
+  virtual void handle(const BinaryOp*) {}
+  virtual void handle(const TernaryOp*) {}
+  virtual void handle(const ReductionOp*) {}
+  virtual void handle(const BroadcastOp*) {}
+  virtual void handle(const ForLoop*) {}
+  virtual void handle(const IfThenElse*) {}
+  virtual void handle(const Allocate*) {}
 };
 
 struct TORCH_CUDA_API OptOutDispatch {
@@ -171,68 +171,68 @@ struct TORCH_CUDA_API OptInConstDispatch {
   OptInConstDispatch& operator=(OptInConstDispatch&& other) = default;
 
   // Hierarchal dispatch functions for handle
-  virtual void handle(const Statement* const);
-  virtual void handle(const Expr* const);
-  virtual void handle(const Val* const);
+  virtual void handle(const Statement*);
+  virtual void handle(const Expr*);
+  virtual void handle(const Val*);
 
   // Vals
-  virtual void handle(const IterDomain* const) {
+  virtual void handle(const IterDomain*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IterDomain.");
   }
-  virtual void handle(const TensorDomain* const) {
+  virtual void handle(const TensorDomain*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorDomain.");
   }
-  virtual void handle(const TensorView* const) {
+  virtual void handle(const TensorView*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
   }
-  virtual void handle(const TensorIndex* const) {
+  virtual void handle(const TensorIndex*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorIndex.");
   }
-  virtual void handle(const Bool* const) {
+  virtual void handle(const Bool*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
   }
-  virtual void handle(const Float* const) {
+  virtual void handle(const Float*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Float.");
   }
-  virtual void handle(const Half* const) {
+  virtual void handle(const Half*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Half.");
   }
-  virtual void handle(const Int* const) {
+  virtual void handle(const Int*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
   }
-  virtual void handle(const NamedScalar* const) {
+  virtual void handle(const NamedScalar*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for NamedScalar.");
   }
 
   // Exprs
-  virtual void handle(const Split* const) {
+  virtual void handle(const Split*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Split.");
   }
-  virtual void handle(const Merge* const) {
+  virtual void handle(const Merge*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Merge.");
   }
-  virtual void handle(const UnaryOp* const) {
+  virtual void handle(const UnaryOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for UnaryOp.");
   }
-  virtual void handle(const BinaryOp* const) {
+  virtual void handle(const BinaryOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
   }
-  virtual void handle(const TernaryOp* const) {
+  virtual void handle(const TernaryOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TernaryOp.");
   }
-  virtual void handle(const ReductionOp* const) {
+  virtual void handle(const ReductionOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ReductionOp.");
   }
-  virtual void handle(const BroadcastOp* const) {
+  virtual void handle(const BroadcastOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
   }
-  virtual void handle(const ForLoop* const) {
+  virtual void handle(const ForLoop*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ForLoop.");
   }
-  virtual void handle(const Allocate* const) {
+  virtual void handle(const Allocate*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Allocate.");
   }
-  virtual void handle(const IfThenElse* const) {
+  virtual void handle(const IfThenElse*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IfThenElse.");
   }
 };

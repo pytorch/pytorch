@@ -10,7 +10,7 @@ namespace fuser {
 
 namespace {
 // Make sure we can inline something, before we attempt to.
-void check_inlineable(const IRInputOutput* const irio) {
+void check_inlineable(const IRInputOutput* irio) {
   for (auto inp : irio->inputs())
     TORCH_CHECK(
         inp->isScalar(),
@@ -23,6 +23,23 @@ void check_inlineable(const IRInputOutput* const irio) {
       "Printing inline computations involving values other than scalars is not currently supported.");
 }
 } // namespace
+
+void IRPrinter::handle(const Statement* s) {
+  OptInConstDispatch::handle(s);
+}
+
+void IRPrinter::handle(const Val* v) {
+  if (follow_val_map) {
+    // Follow a single maping (permutation chains are not expected)
+    v = FusionGuard::getCurFusion()->loweredVal(v);
+    TORCH_INTERNAL_ASSERT(v == FusionGuard::getCurFusion()->loweredVal(v));
+  }
+  OptInConstDispatch::handle(v);
+}
+
+void IRPrinter::handle(const Expr* e) {
+  OptInConstDispatch::handle(e);
+}
 
 void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   os << "__global__ void " << kernel_name_ << "(";
@@ -85,7 +102,7 @@ void IRPrinter::handle(Fusion* fusion) {
   }
 }
 
-void IRPrinter::handle(const TensorDomain* const td) {
+void IRPrinter::handle(const TensorDomain* td) {
   os << "[ ";
   for (std::vector<const IterDomain*>::size_type i = 0; i < td->nDims(); i++) {
     handle(td->axis(i));
@@ -95,7 +112,7 @@ void IRPrinter::handle(const TensorDomain* const td) {
   os << " ]";
 }
 
-void IRPrinter::handle(const TensorView* const tv) {
+void IRPrinter::handle(const TensorView* tv) {
   os << "T" << tv->name();
   handle(tv->domain());
 
@@ -106,7 +123,7 @@ void IRPrinter::handle(const TensorView* const tv) {
   }
 }
 
-void IRPrinter::handle(const IterDomain* const id) {
+void IRPrinter::handle(const IterDomain* id) {
   if (id->isReduction())
     os << "r";
   else if (id->isBroadcast())
@@ -138,7 +155,7 @@ void IRPrinter::handle(const IterDomain* const id) {
     os << "rf";
 }
 
-void IRPrinter::handle(const TensorIndex* const ti) {
+void IRPrinter::handle(const TensorIndex* ti) {
   os << "T" << ti->view()->name() << "[ ";
 
   bool first = true;
@@ -151,7 +168,7 @@ void IRPrinter::handle(const TensorIndex* const ti) {
   os << " ]";
 }
 
-void IRPrinter::handle(const Bool* const b) {
+void IRPrinter::handle(const Bool* b) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(b) != nullptr) {
     os << "( ";
     handle(FusionGuard::getCurFusion()->origin(b));
@@ -166,7 +183,7 @@ void IRPrinter::handle(const Bool* const b) {
   }
 }
 
-void IRPrinter::handle(const Float* const f) {
+void IRPrinter::handle(const Float* f) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
     os << "( ";
     handle(FusionGuard::getCurFusion()->origin(f));
@@ -184,7 +201,7 @@ void IRPrinter::handle(const Float* const f) {
   }
 }
 
-void IRPrinter::handle(const Half* const h) {
+void IRPrinter::handle(const Half* h) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(h) != nullptr) {
     os << "( ";
     handle(FusionGuard::getCurFusion()->origin(h));
@@ -199,12 +216,19 @@ void IRPrinter::handle(const Half* const h) {
   }
 }
 
-void IRPrinter::handle(const Int* const i) {
-  if (print_inline_ && FusionGuard::getCurFusion()->origin(i) != nullptr) {
-    os << "( ";
-    handle(FusionGuard::getCurFusion()->origin(i));
-    os << " )";
-    return;
+void IRPrinter::handle(const Int* i) {
+  // Make sure we didn't bypass the value mapping
+  // (for example calling IRPrinter::handle() with a Int*)
+  TORCH_CHECK(
+      !follow_val_map || i == FusionGuard::getCurFusion()->loweredVal(i));
+
+  if (print_inline_) {
+    if (auto def = FusionGuard::getCurFusion()->origin(i)) {
+      os << "( ";
+      handle(def);
+      os << " )";
+      return;
+    }
   }
 
   if (i->isSymbolic()) {
@@ -214,27 +238,27 @@ void IRPrinter::handle(const Int* const i) {
   }
 }
 
-void IRPrinter::handle(const NamedScalar* const i) {
+void IRPrinter::handle(const NamedScalar* i) {
   os << i->name();
 }
 
 namespace {
 
-bool isTV(const Val* const val) {
+bool isTV(const Val* val) {
   return (
       val->getValType().value() == ValType::TensorView ||
       val->getValType().value() == ValType::TensorIndex);
 }
 
 // Check if we're a TensorView op that we can generate code for.
-bool isTVOp(const Expr* const expr) {
+bool isTVOp(const Expr* expr) {
   if (expr->nOutputs() == 1 && isTV(expr->output(0)))
     return true;
   return false;
 }
 } // namespace
 
-void IRPrinter::handle(const UnaryOp* const uop) {
+void IRPrinter::handle(const UnaryOp* uop) {
   bool istvop = isTVOp(uop);
   if (!print_inline_) {
     indent();
@@ -280,7 +304,7 @@ void IRPrinter::handle(const UnaryOp* const uop) {
     os << ";\n";
 }
 
-void IRPrinter::handle(const BinaryOp* const bop) {
+void IRPrinter::handle(const BinaryOp* bop) {
   bool istvop = isTVOp(bop);
   if (!print_inline_) {
     indent();
@@ -325,7 +349,7 @@ void IRPrinter::handle(const BinaryOp* const bop) {
     os << ";\n";
 }
 
-void IRPrinter::handle(const TernaryOp* const top) {
+void IRPrinter::handle(const TernaryOp* top) {
   bool istvop = isTVOp(top);
   if (!print_inline_) {
     indent();
@@ -366,7 +390,7 @@ void IRPrinter::handle(const TernaryOp* const top) {
     os << ";\n";
 }
 
-void IRPrinter::handle(const ReductionOp* const rop) {
+void IRPrinter::handle(const ReductionOp* rop) {
   // Check if we've lowered yet.
 
   bool lowered = rop->out()->getValType() == ValType::TensorIndex;
@@ -448,7 +472,7 @@ void IRPrinter::handle(const ReductionOp* const rop) {
   }
 }
 
-void IRPrinter::handle(const BroadcastOp* const bop) {
+void IRPrinter::handle(const BroadcastOp* bop) {
   indent();
   handle(bop->out());
   os << "\n";
@@ -460,7 +484,7 @@ void IRPrinter::handle(const BroadcastOp* const bop) {
   os << ";\n";
 }
 
-void IRPrinter::handle(const ForLoop* const fl) {
+void IRPrinter::handle(const ForLoop* fl) {
   if (fl->iter_domain()->isThread() || fl->iter_domain()->isBroadcast()) {
     for (auto& expr : fl->constBody().exprs())
       handle(expr);
@@ -488,7 +512,7 @@ void IRPrinter::handle(const ForLoop* const fl) {
   os << "}\n";
 }
 
-void IRPrinter::handle(const IfThenElse* const ite) {
+void IRPrinter::handle(const IfThenElse* ite) {
   indent();
 
   // IF
@@ -516,7 +540,7 @@ void IRPrinter::handle(const IfThenElse* const ite) {
   os << "}\n";
 }
 
-void IRPrinter::handle(const Allocate* const a) {
+void IRPrinter::handle(const Allocate* a) {
   indent();
   os << a->buf_type();
   if (a->buffer()->getValType() == ValType::TensorView) {
@@ -537,7 +561,7 @@ void IRPrinter::handle(const Allocate* const a) {
   }
 }
 
-void IRPrinter::handle(const Split* const s) {
+void IRPrinter::handle(const Split* s) {
   os << "Split: ";
   handle(s->in());
   os << " by factor " << s->factor() << " -> ";
@@ -547,7 +571,7 @@ void IRPrinter::handle(const Split* const s) {
   os << "\n";
 }
 
-void IRPrinter::handle(const Merge* const m) {
+void IRPrinter::handle(const Merge* m) {
   os << "Merge: ";
   handle(m->outer());
   os << " and ";
@@ -601,7 +625,6 @@ void IRPrinter::printKernel(
     const std::vector<Expr*>& exprs,
     const std::string& kernel_name) {
   Fusion* fusion = FusionGuard::getCurFusion();
-
   printReductionOps(fusion);
   printHeader(fusion, kernel_name);
   for (auto* expr : exprs) {
@@ -610,7 +633,7 @@ void IRPrinter::printKernel(
   os << "}\n";
 }
 
-std::ostream& operator<<(std::ostream& os, const Statement* const stmt) {
+std::ostream& operator<<(std::ostream& os, const Statement* stmt) {
   IRPrinter p(os);
   p.handle(stmt);
   return os;

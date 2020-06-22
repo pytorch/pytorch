@@ -64,14 +64,12 @@ IndexCompute::IndexCompute(
     return;
   }
 
-  bool exclude_reduction = td->nDims() > indices.size();
+  const bool exclude_reduction = td->nDims() > indices.size();
 
   TORCH_INTERNAL_ASSERT(
       td->noReductions().size() == indices.size() ||
           td->nDims() == indices.size(),
       "For IndexCompute the number of axes should match the number of dimensions in the TensorDomain.");
-
-  TORCH_INTERNAL_ASSERT(!td->hasRFactor(), "Not implemented yet.");
 
   {
     size_t i = 0;
@@ -82,7 +80,7 @@ IndexCompute::IndexCompute(
     }
   }
 
-  std::vector<Val*> domain_vals(td->domain().begin(), td->domain().end());
+  const std::vector<Val*> domain_vals(td->domain().begin(), td->domain().end());
 
   // Run the split/merge operations backwards. This will modify the index_map_
   // so it can be used to index the root TensorDomain. Each entry in the root
@@ -92,7 +90,6 @@ IndexCompute::IndexCompute(
   // map at the rfactor IterDomains.
   traverseFrom(indices[0]->fusion(), domain_vals, false);
 
-  std::vector<Val*> inds;
   for (auto id : td->rootDomain()) {
     if (exclude_reduction && id->isReduction())
       continue;

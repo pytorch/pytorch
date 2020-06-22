@@ -403,7 +403,7 @@ std::vector<IterDomain*> iterDomains(std::vector<ForLoop*> loops) {
   return ids;
 }
 
-bool isTV(const Val* const val) {
+bool isTV(const Val* val) {
   return val->getValType().value() == ValType::TensorView;
 }
 
@@ -454,7 +454,7 @@ ForLoop* asForLoop(Statement* stmt) {
   return static_cast<ForLoop*>(expr);
 }
 
-const TensorView* asConstTV(const Val* const val) {
+const TensorView* asConstTV(const Val* val) {
   TORCH_INTERNAL_ASSERT(isTV(val));
   return static_cast<const TensorView*>(val);
 }

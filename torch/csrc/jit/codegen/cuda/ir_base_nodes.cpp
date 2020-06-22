@@ -29,7 +29,7 @@ Expr* Statement::asExpr() {
   return static_cast<Expr*>(this);
 }
 
-void Statement::print() {
+void Statement::print() const {
   IRPrinter ir_printer(std::cout);
   ir_printer.handle(this);
   std::cout << std::endl;
@@ -55,33 +55,33 @@ struct ConstCheck : OptOutConstDispatch {
  private:
   bool is_const_ = true;
 
-  void handle(const Bool* const b) override {
+  void handle(const Bool* b) override {
     is_const_ = is_const_ && b->isConst();
   }
 
-  void handle(const Float* const f) override {
+  void handle(const Float* f) override {
     is_const_ = is_const_ && f->isConst();
   }
 
-  void handle(const Half* const h) override {
+  void handle(const Half* h) override {
     is_const_ = is_const_ && h->isConst();
   }
 
-  void handle(const Int* const i) override {
+  void handle(const Int* i) override {
     is_const_ = is_const_ && i->isConst();
   }
 
-  void handle(const NamedScalar* const ns) override {
+  void handle(const NamedScalar* ns) override {
     is_const_ = is_const_ && false;
   }
 
-  void handle(const Expr* const expr) override {
+  void handle(const Expr* expr) override {
     for (auto inp : expr->inputs()) {
       OptOutConstDispatch::handle(inp);
     }
   }
 
-  void handle(const Val* const val) override {
+  void handle(const Val* val) override {
     const Expr* orig = FusionGuard::getCurFusion()->origin(val);
     if (orig != nullptr)
       handle(orig);
@@ -90,7 +90,7 @@ struct ConstCheck : OptOutConstDispatch {
   }
 
  public:
-  static bool isConst(const Val* const val) {
+  static bool isConst(const Val* val) {
     ConstCheck cc;
     cc.handle(val);
     return cc.is_const_;
@@ -183,14 +183,14 @@ void Scope::clear() {
   this->exprs_ = std::vector<Expr*>();
 }
 
-bool IRInputOutput::hasInput(const Val* const input) const {
+bool IRInputOutput::hasInput(const Val* input) const {
   for (auto val : inputs_)
     if (val == input)
       return true;
   return false;
 }
 
-bool IRInputOutput::hasOutput(const Val* const output) const {
+bool IRInputOutput::hasOutput(const Val* output) const {
   for (auto val : outputs_)
     if (val == output)
       return true;
