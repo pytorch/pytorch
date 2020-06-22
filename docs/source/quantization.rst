@@ -241,13 +241,6 @@ Layers for the quantization-aware training
 
 * :class:`~torch.nn.qat.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.qat.Conv2d` — 2D convolution
-* :class:`~torch.nn.qat.ELU` — ELU
-* :class:`~torch.nn.qat.Hardswish` — Hardswish
-* :class:`~torch.nn.qat.LayerNorm` — LayerNorm
-* :class:`~torch.nn.qat.GroupNorm` — GroupNorm
-* :class:`~torch.nn.qat.InstanceNorm1d` — InstanceNorm1d
-* :class:`~torch.nn.qat.InstanceNorm2d` — InstanceNorm2d
-* :class:`~torch.nn.qat.InstanceNorm3d` — InstanceNorm3d
 
 ``torch.quantization``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -721,40 +714,6 @@ Linear
 .. autoclass:: Linear
     :members:
 
-ELU
-~~~~~~~~~~~~~~~
-.. autoclass:: ELU
-    :members:
-
-Hardswish
-~~~~~~~~~~~~~~~
-.. autoclass:: Hardswish
-    :members:
-
-LayerNorm
-~~~~~~~~~~~~~~~
-.. autoclass:: LayerNorm
-    :members:
-
-GroupNorm
-~~~~~~~~~~~~~~~
-.. autoclass:: GroupNorm
-    :members:
-
-InstanceNorm1d
-~~~~~~~~~~~~~~~
-.. autoclass:: InstanceNorm1d
-    :members:
-
-InstanceNorm2d
-~~~~~~~~~~~~~~~
-.. autoclass:: InstanceNorm2d
-    :members:
-
-InstanceNorm3d
-~~~~~~~~~~~~~~~
-.. autoclass:: InstanceNorm3d
-    :members:
 
 torch.nn.quantized
 ----------------------------
