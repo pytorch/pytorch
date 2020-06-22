@@ -2998,7 +2998,8 @@ class TestONNXRuntime(unittest.TestCase):
             run()
 
         the_exception = cm.exception
-        self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. Please try opset version 11.', the_exception.args[0])
+        self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
+                         'Please try opset version 11.', the_exception.args[0])
 
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
