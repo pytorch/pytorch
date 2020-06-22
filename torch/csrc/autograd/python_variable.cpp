@@ -487,6 +487,14 @@ PyObject *THPVariable_is_quantized(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_meta(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_meta());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_complex(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -558,6 +566,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
+  {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
