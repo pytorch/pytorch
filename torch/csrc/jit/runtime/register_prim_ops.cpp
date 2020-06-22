@@ -426,7 +426,9 @@ RegisterOperators reg(
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),
-
+     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
+     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
+     DEFINE_UNARY_OP(aten::neg, -a, int, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and
      // Python (on negative), we preserve the python behavior as it's more
@@ -621,12 +623,12 @@ RegisterOperators reg(
 // these ops are not defined for Tensor
 #define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
   Operator(                                                                   \
-      "prim::min." decl_type "(" decl_type "[] l, " decl_type                 \
+      "prim::min." decl_type "_list(" decl_type "[] l, " decl_type            \
       "[] r) -> " decl_type "[]",                                             \
       minList<value_type>,                                                    \
       aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
-          "prim::max." decl_type "(" decl_type "[] l, " decl_type             \
+          "prim::max." decl_type "_list(" decl_type "[] l, " decl_type        \
           "[] r) -> " decl_type "[]",                                         \
           maxList<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \

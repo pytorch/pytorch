@@ -1347,11 +1347,6 @@
     CPU: native_group_norm_backward
     CUDA: native_group_norm_backward
 
-- func: quantized_group_norm(Tensor input, int num_groups, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
-  requires_tensor: True
-  dispatch:
-    QuantizedCPU: quantized_group_norm_impl
-
 # FFT
 
 - func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
@@ -1425,11 +1420,6 @@
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
-
-- func: quantized_instance_norm(Tensor input, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
-  requires_tensor: True
-  dispatch:
-    QuantizedCPU: quantized_instance_norm_impl
 
 - func: inverse(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1522,11 +1512,6 @@
   dispatch:
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
-
-- func: quantized_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor
-  requires_tensor: True
-  dispatch:
-    QuantizedCPU: quantized_layer_norm_impl
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -2758,6 +2743,14 @@
   dispatch:
     CPU: flip_cpu
     CUDA: flip_cuda
+
+- func: fliplr(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: flipud(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
 
 - func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
   use_c10_dispatcher: full
@@ -4338,15 +4331,12 @@
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: diag_out
-    CUDA: legacy::cuda::_th_diag_out
+    CPU: diag_cpu_out
+    CUDA: diag_cuda_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: diag
-    CUDA: legacy::cuda::_th_diag
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -4387,7 +4377,7 @@
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_trace
-    CUDA: legacy::cuda::_th_trace
+    CUDA: trace_cuda
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5484,18 +5474,10 @@
 
 - func: elu.out(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: elu_out
-    CUDA: elu_out
-    QuantizedCPU: quantized_elu_out
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: elu
-    CUDA: elu
-    QuantizedCPU: quantized_elu
 
 - func: elu_backward.grad_input(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -5509,10 +5491,6 @@
 
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: elu_
-    CUDA: elu_
-    QuantizedCPU: quantized_elu_
 
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

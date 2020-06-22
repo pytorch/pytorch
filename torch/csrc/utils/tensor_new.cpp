@@ -336,7 +336,7 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
     TORCH_CHECK(dispatch_key == c10::DispatchKey::CPU
                 || dispatch_key == c10::DispatchKey::CUDA
                 || dispatch_key == c10::DispatchKey::HIP
-                || dispatch_key == c10::XLA(),
+                || c10::XLA().has(dispatch_key),
                 "new(): expected DispatchKey: ", c10::DispatchKey::CPU,
                 " or ", c10::DispatchKey::CUDA,
                 " or ", c10::DispatchKey::HIP,

@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/Parallel.h>
+#include <ATen/cpu/vec256/vec256.h>
 
 namespace at {
 namespace native {
@@ -76,24 +77,24 @@ void cpu_upsample_nearest(
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
-  auto loop1d = [&](int64_t start, int64_t end) {
+  auto loop1d = [&](int64_t begin, int64_t end) {
     int64_t c = 0;
     int64_t ow = 0;
-    data_index_init(start, c, channels, ow, output_width);
-    for (int64_t i = start; i < end; i++) {
+    data_index_init(begin, c, channels, ow, output_width);
+    for (int64_t i = begin; i < end; i++) {
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[0]);
       output_data[i] = input_data[c * input_width + iw];
       data_index_step(c, channels, ow, output_width);
     }
   };
 
-  auto loop2d = [&](int64_t start, int64_t end) {
+  auto loop2d = [&](int64_t begin, int64_t end) {
     int64_t c = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    data_index_init(start, c, channels, oh, output_height, ow, output_width);
+    data_index_init(begin, c, channels, oh, output_height, ow, output_width);
 
-    for (int64_t i = start; i < end; i++) {
+    for (int64_t i = begin; i < end; i++) {
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
       output_data[i] = input_data[c * input_height * input_width + ih * input_width + iw];
@@ -101,14 +102,14 @@ void cpu_upsample_nearest(
     }
   };
 
-  auto loop3d = [&](int64_t start, int64_t end) {
+  auto loop3d = [&](int64_t begin, int64_t end) {
     int64_t c = 0;
     int64_t od = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    data_index_init(start, c, channels, od, output_depth, oh, output_height, ow, output_width);
+    data_index_init(begin, c, channels, od, output_depth, oh, output_height, ow, output_width);
 
-    for (int64_t i = start; i < end; i++) {
+    for (int64_t i = begin; i < end; i++) {
       int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
@@ -156,7 +157,6 @@ void cpu_upsample_nearest_channels_last(
   auto input_data = input.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
-  // treat nbatch and channels as one dimension
   int64_t num_batches =  input_sizes[0];
   int64_t channels =  input_sizes[1];
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
@@ -165,67 +165,66 @@ void cpu_upsample_nearest_channels_last(
   int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
-  auto num_work_items = num_batches * output_depth
-                      * output_height
-                      * output_width
-                      ;
+  int64_t numel = output.numel();
 
-  auto loop2d = [&](int64_t start, int64_t end) {
+  TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
+
+  using Vec = vec256::Vec256<scalar_t>;
+  auto copy = [](scalar_t* out, scalar_t* in, int64_t size) {
+    int64_t d = 0;
+    for (; d < size - (size % Vec::size()); d += Vec::size()) {
+      Vec out_vec = Vec::loadu(in + d);
+      out_vec.store(out + d);
+    }
+    for (; d < size; d++) {
+      out[d] = in[d];
+    }
+  };
+
+  auto loop2d = [&](int64_t begin, int64_t end) {
     int64_t n = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    data_index_init(start, n, num_batches, oh, output_height, ow, output_width);
+    data_index_init(begin, n, num_batches, oh, output_height, ow, output_width);
 
-    // We can unroll this loop by some factor. Perhaps by 4 or something.
-    // But if we are doing memcpy then it may not help.
-    // Then we need custom sort of memcpy.
-    for (int64_t i = start; i < end; i++) {
+    for (int64_t i = begin; i < end; i++) {
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
-      auto input_data_ptr = input_data + n * (input_height * input_width * channels)
-        + ih * (input_width * channels) + iw * channels;
-      auto output_data_ptr = output_data + n * (output_height * output_width * channels)
-        + oh * (output_width * channels) + ow * channels;
-      std::memcpy(output_data_ptr, input_data_ptr, sizeof(scalar_t) * channels);
+      scalar_t* output_ptr = output_data + i * channels;
+      scalar_t* input_ptr = input_data + n * input_height * input_width * channels +
+          ih * input_width * channels + iw * channels;
+      copy(output_ptr, input_ptr, channels);
       data_index_step(n, num_batches, oh, output_height, ow, output_width);
     }
   };
 
-  auto loop3d = [&](int64_t start, int64_t end) {
+  auto loop3d = [&](int64_t begin, int64_t end) {
     int64_t n = 0;
     int64_t od = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    data_index_init(start, n, num_batches, oh, output_height, ow, output_width);
-    data_index_init(start, n, num_batches, od, output_depth, oh, output_height, ow, output_width);
+    data_index_init(begin, n, num_batches, od, output_depth, oh, output_height, ow, output_width);
 
-    // We need to unroll this loop by some factor. Perhaps by 4 or something.
-    // But we are doing memcpy then it may not help.
-    // Then we need custom sort of memcpy.
-    for (int64_t i = start; i < end; i++) {
+    for (int64_t i = begin; i < end; i++) {
       int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
-      auto input_data_ptr = input_data
-        + n * (input_depth * input_height * input_width * channels)
-        + id * (input_height * input_width * channels)
-        + ih * (input_width * channels) + iw * channels;
-      auto output_data_ptr = output_data
-        + n * (output_depth * output_height * output_width * channels)
-        + od * (output_height * output_width * channels)
-        + oh * (output_width * channels) + ow * channels;
-      std::memcpy(output_data_ptr, input_data_ptr, sizeof(scalar_t) * channels);
+      scalar_t* output_ptr = output_data + i * channels;
+      scalar_t* input_ptr = input_data + n * input_depth * input_height * input_width * channels +
+          id * input_height * input_width * channels +
+          ih * input_width * channels + iw * channels;
+      copy(output_ptr, input_ptr, channels);
       data_index_step(n, num_batches, od, output_depth, oh, output_height, ow, output_width);
     }
   };
 
   if (ndim == 4) {
     // upsample nearest 2d
-    at::parallel_for(0, num_work_items, at::internal::GRAIN_SIZE, loop2d);
+    at::parallel_for(0, numel / channels, at::internal::GRAIN_SIZE / channels, loop2d);
   } else {
     // upsample nearest 3d
     TORCH_INTERNAL_ASSERT(ndim == 5);
-    at::parallel_for(0, num_work_items, at::internal::GRAIN_SIZE, loop3d);
+    at::parallel_for(0, numel / channels, at::internal::GRAIN_SIZE / channels, loop3d);
   }
 
   if (!output_.is_contiguous(channels_last_memory_format)) {
@@ -318,7 +317,6 @@ void cpu_upsample_nearest_backward(
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop3d);
   }
 
-  // Should this actually check for is_contiguous(input.suggest_memory_format())
   if (!grad_input_.is_contiguous()) {
     grad_input_.copy_(grad_input);
   }
@@ -329,7 +327,7 @@ void upsample_nearest1d_kernel_impl(
     Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest1d", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest1d", [&] {
     cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_w});
   });
 }
@@ -340,11 +338,11 @@ void upsample_nearest2d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d", [&] {
       cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_h, scales_w});
     });
   }
@@ -357,11 +355,11 @@ void upsample_nearest3d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d", [&] {
       cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
     });
   }
@@ -371,7 +369,7 @@ void upsample_nearest1d_backward_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_w});
   });
 }
@@ -381,7 +379,7 @@ void upsample_nearest2d_backward_kernel_impl(
     const Tensor& grad_output,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_h, scales_w});
   });
 }
@@ -392,11 +390,10 @@ void upsample_nearest3d_backward_kernel_impl(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_d, scales_h, scales_w});
   });
 }
-
 
 } // anonymous namespace
 

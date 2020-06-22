@@ -29,14 +29,41 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
     arguments_parsed_ = true;
   }
 
+  CAFFE_ENFORCE(InputSize() == 1 || InputSize() == 3);
   CAFFE_ENFORCE(Input(0).template IsType<float>());
 
-  TensorQuantizationParams in_qparams;
-  if (HasStaticQuantization(this)) {
-    in_qparams = GetStaticQuantizationParamsOf(this, 0);
-  } else {
-    in_qparams = GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+  bool use_input_qparam = false;
+  float in_scale = 0;
+  int in_zero_point = 0;
+  if (InputSize() == 3) {
+    use_input_qparam = true;
+
+    CAFFE_ENFORCE(Input(1).template IsType<float>());
+    CAFFE_ENFORCE(Input(2).template IsType<int>());
+
+    const auto& in_1 = Input(1);
+    CAFFE_ENFORCE_EQ(in_1.numel(), 1);
+    in_scale = *(in_1.template data<float>());
+
+    const auto& in_2 = Input(2);
+    CAFFE_ENFORCE_EQ(in_2.numel(), 1);
+    in_zero_point = *(in_2.template data<int>());
   }
+
+  TensorQuantizationParams in_qparams;
+
+  if (use_input_qparam) {
+    in_qparams.scale = in_scale;
+    in_qparams.zero_point = in_zero_point;
+    in_qparams.precision = qfactory_->GetActivationPrecision();
+  } else {
+    if (HasStaticQuantization(this)) {
+      in_qparams = GetStaticQuantizationParamsOf(this, 0);
+    } else {
+      in_qparams = GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+    }
+  }
+
   int8::Int8TensorCPU* output =
       Outputs()[0]->template GetMutable<int8::Int8TensorCPU>();
   output->t.ResizeLike(Input(0));
@@ -61,7 +88,7 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
 }
 
 OPERATOR_SCHEMA(Quantize)
-    .NumInputs(1)
+    .NumInputs(1, 3)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInput(0);
 
