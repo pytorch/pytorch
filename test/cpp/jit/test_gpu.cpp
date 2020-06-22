@@ -134,7 +134,6 @@ void testGPU_FusionExprEvalConstants() {
   checkIntValue(&eval_context, neg(mul(sub(a, b), div(a, b))), -8);
   checkIntValue(&eval_context, mod(a, b), 1);
   checkIntValue(&eval_context, ceilDiv(a, b), 3);
-  checkIntValue(&eval_context, b, 3);
 }
 
 // Evaluate basic scalar operations with bound values
@@ -217,6 +216,7 @@ void testGPU_FusionExprEvalBasic() {
   // b. You must use the original (rootDomain) extents
   //  (ex. `tv0->getRootDomain()[0]->extent()`
   //   instead of `tv0->axis(0)->extent()`)
+  //
   eval_context.bind(tv0->getRootDomain()[0]->extent(), 6);
   eval_context.bind(tv0->getRootDomain()[1]->extent(), 128);
   eval_context.bind(tv1->getRootDomain()[0]->extent(), 6);
@@ -2359,14 +2359,13 @@ void testGPU_FusionReduction3() {
     tv6->computeAt(tv3, 1);
     tv3->computeAt(tv5, 1);
 
-    tv5->axis(0)->parallelize(ParallelType::BIDx); 
+    tv5->axis(0)->parallelize(ParallelType::BIDx);
+
     // Intermediate tensors only need this, but doesn't hurt to do on inputs
     // tv0, 1, 4
     tv2->axis(-1)->parallelize(ParallelType::TIDx);
     tv3->axis(-1)->parallelize(ParallelType::TIDx);
     tv6->axis(-1)->parallelize(ParallelType::TIDx);
-
-    std::cout << fusion << std::endl;
 
     int numel_x = 1025;
     int numel_y = 129;
@@ -2417,30 +2416,22 @@ void testGPU_FusionReduction4() {
   int tidx = 5;
 
   int dim1 = 11;
-  std::cout << "phase 1:\n" << fusion << std::endl;
 
   tv1->split(-2, tidy);
-  std::cout << "phase 2:\n" << fusion << std::endl;
 
   TensorView* tv2 = tv1->rFactor({-3});
-  std::cout << "phase 3:\n" << fusion << std::endl;
 
   tv0->computeAt(tv1, 1);
-  std::cout << "phase 4:\n" << fusion << std::endl;
 
   tv1->axis(0)->parallelize(ParallelType::BIDy);
-  std::cout << "phase 5:\n" << fusion << std::endl;
 
   for (auto* val : fusion.vals()) {
     if (val->getValType().value() == ValType::TensorView)
       val->as<TensorView>()->axis(-1)->parallelize(ParallelType::TIDx);
   }
-  std::cout << "phase 6:\n" << fusion << std::endl;
 
   tv2->axis(-2)->parallelize(ParallelType::TIDy);
   tv1->axis(-2)->parallelize(ParallelType::TIDy);
-
-  std::cout << "phase last:\n" << fusion << std::endl;
 
   prog.device_ = 0;
   prog.grid(1, bidy);
@@ -2459,68 +2450,6 @@ void testGPU_FusionReduction4() {
 }
 
 void testGPU_FusionReduction5() {
-  torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
-
-  // Set up your input tensor views
-  TensorView* tv0 = makeDummyTensor(3);
-
-  fusion.addInput(tv0);
-
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
-
-  fusion.addOutput(tv1);
-
-  int bidy = 2;
-  int bidx = 3;
-  int tidy = 4;
-  int tidx = 5;
-
-  int dim1 = 11;
-  std::cout << "phase 1:\n" << fusion << std::endl;
-
-  tv1->split(-2, tidy);
-  std::cout << "phase 2:\n" << fusion << std::endl;
-
-  TensorView* tv2 = tv1->rFactor({-3});
-  std::cout << "phase 3:\n" << fusion << std::endl;
-
-  tv0->computeAt(tv1, 1);
-  std::cout << "phase 4:\n" << fusion << std::endl;
-
-  tv1->axis(0)->parallelize(ParallelType::BIDy);
-  std::cout << "phase 5:\n" << fusion << std::endl;
-
-  for (auto* val : fusion.vals()) {
-    if (val->getValType().value() == ValType::TensorView)
-      val->as<TensorView>()->axis(-1)->parallelize(ParallelType::TIDx);
-  }
-  std::cout << "phase 6:\n" << fusion << std::endl;
-
-  tv2->axis(-2)->parallelize(ParallelType::TIDy);
-  tv1->axis(-2)->parallelize(ParallelType::TIDy);
-
-  std::cout << "phase last:\n" << fusion << std::endl;
-
-  prog.device_ = 0;
-  prog.grid(1, bidy);
-  prog.block(tidx, tidy);
-  torch::jit::fuser::cuda::compileKernel(&prog);
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::randn({bidy, dim1, tidx}, options);
-
-  at::Tensor cg_output = at::empty({bidy, tidx}, options);
-
-  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {cg_output});
-
-  auto aten_output = input.sum({1});
-  TORCH_CHECK(aten_output.allclose(cg_output));
-}
-
-/*
-void testGPU_FusionReductionJ() {
   torch::jit::fuser::cuda::CudaKernel prog;
   Fusion& fusion = *prog.fusion_;
   FusionGuard fg(&fusion);
@@ -2585,7 +2514,6 @@ void testGPU_FusionReductionJ() {
   auto aten_output = input.sum({1, 2});
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
-*/
 
 void testGPU_FusionReductionTFT() {
   torch::jit::fuser::cuda::CudaKernel prog;
@@ -2646,240 +2574,6 @@ void testGPU_FusionReductionTFT() {
 
   auto aten_output = input.sum({1});
   TORCH_CHECK(aten_output.allclose(cg_output));
-}
-
-/*
-void testGPU_FusionReductionJ() {
-  // Set up your input tensor views
-  TensorView* tv0 = makeDummyTensor(8);
-  TensorView* tv1 = makeDummyTensor(8);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  TensorView* tv2 = add(tv0, tv1);
-  TensorView* tv3 = reductionOp(BinaryOpType::Add, {2, 3, 7}, new Float(0), tv2);
-  std::cout << "fusion 0: \n" << fusion << std::endl;
-  fusion.addOutput(tv3);
-
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
-  tv3->reorder({{2, 5}, {3, 6}});
-  std::cout << "fusion 1: \n" << fusion << std::endl;
-  while (tv3->nDims() > 4) {
-    tv3->merge(0, 1);
-  }
-  while (tv3->nDims() > 2) {
-    tv3->merge(1, 2);
-  }
-  std::cout << "fusion 2: \n" << fusion << std::endl;
-
-  tv3->split(1, 128);
-  auto tv4 = tv3->rFactor({-2});
-  std::cout << "fusion 3: \n" << fusion << std::endl;
-
-  tv0->computeAt(tv4, -1);
-  tv1->computeAt(tv4, -1);
-  //tv4->computeAt(tv3, 1);
-  std::cout << "fusion 4: \n" << fusion << std::endl;
-
-  tv3->axis(0)->parallelize(ParallelType::BIDx);
-  tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  std::cout << "fusion 5: \n" << fusion << std::endl;
-  tv0->axis(-1)->parallelize(ParallelType::TIDx);
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
-  tv4->axis(-1)->parallelize(ParallelType::TIDx);
-  // why is this one necessary?
-  tv4->axis(0)->parallelize(ParallelType::BIDx);
-  std::cout << "fusion 6: \n" << fusion << std::endl;
-  
-  GPULower gpulw(&fusion);
-  std::stringstream cdg;
-  gpulw.printKernel(cdg);
-  std::cout << cdg.str() << std::endl;
-}
-*/
-
-/*
-void testGPU_FusionReductionJ() {
-  torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
-
-  // Set up your input tensor views
-  TensorView* tv0 = makeDummyTensor(8);
-  TensorView* tv1 = makeDummyTensor(8);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  TensorView* tv2 = add(tv0, tv1);
-  TensorView* tv3 = reductionOp(BinaryOpType::Add, {2, 3}, new Float(0), tv2);
-  std::cout << "fusion 0: \n" << fusion << std::endl;
-  fusion.addOutput(tv3);
-
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
-  tv3->reorder({{2, 6}, {3, 7}});
-  std::cout << "fusion 1: \n" << fusion << std::endl;
-  while (tv3->nDims() > 3) {
-    tv3->merge(0, 1);
-  }
-  while (tv3->nDims() > 2) {
-    tv3->merge(1, 2);
-  }
-  std::cout << "fusion 2: \n" << fusion << std::endl;
-
-  tv3->split(0, 32);
-  tv3->split(-1, 32);
-  auto tv4 = tv3->rFactor({-2});
-  std::cout << "fusion 3: \n" << fusion << std::endl;
-
-  tv0->computeAt(tv4, -1);
-  tv1->computeAt(tv4, -1);
-  tv4->computeAt(tv3, -2);
-  std::cout << "fusion 4: \n" << fusion << std::endl;
-
-  tv3->axis(0)->parallelize(ParallelType::BIDx);
-  tv3->axis(1)->parallelize(ParallelType::TIDx);
-  tv3->axis(-1)->parallelize(ParallelType::TIDy);
-  std::cout << "fusion 5: \n" << fusion << std::endl;
-  //tv0->axis(1)->parallelize(ParallelType::TIDx);
-  tv0->axis(-1)->parallelize(ParallelType::TIDy);
-  //tv1->axis(1)->parallelize(ParallelType::TIDx);
-  tv1->axis(-1)->parallelize(ParallelType::TIDy);
-  // why is this one necessary?
-  //tv4->axis(0)->parallelize(ParallelType::BIDx);
-  //tv4->axis(1)->parallelize(ParallelType::TIDx);
-  tv4->axis(-1)->parallelize(ParallelType::TIDy);
-  std::cout << "fusion 6: \n" << fusion << std::endl;
-  
-  GPULower gpulw(&fusion);
-  std::stringstream cdg;
-  gpulw.printKernel(cdg);
-  std::cout << cdg.str() << std::endl;
-}
-*/
-
-/*
-void testGPU_FusionReductionJ() {
-  torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
-
-  // Set up your input tensor views
-  TensorView* tv0 = makeDummyTensor(4);
-  TensorView* tv1 = makeDummyTensor(4);
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  TensorView* tv2 = add(tv0, tv1);
-  // tv2[I1, I3, I5] = tv0[I1, I3, I5] + tv0[I7, I9, I11]
-  TensorView* tv3 = reductionOp(BinaryOpType::Add, {1, 2}, new Float(0), tv2);
-  // tv3[I1, R{I3}, I5] = tv2[I1, I3, I5]
-  fusion.addOutput(tv3);
-
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
-  tv3->merge(1, 2);
-  tv3->split(1, 4);
-  auto tv4 = tv3->rFactor({1});
-  std::cout << "fusion 1: \n" << fusion << std::endl;
-  tv2->computeAt(tv4, 2);
-  std::cout << "fusion 2: \n" << fusion << std::endl;
-  tv4->computeAt(tv3, 1);
-  std::cout << "fusion 3: \n" << fusion << std::endl;
-  tv3->axis(0)->parallelize(ParallelType::BIDx);
-  tv3->axis(-1)->parallelize(ParallelType::TIDx);
-  tv2->axis(0)->parallelize(ParallelType::BIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
-  tv4->axis(0)->parallelize(ParallelType::BIDx);
-  tv4->axis(-1)->parallelize(ParallelType::TIDx);
-  
-  int numel_x = 128;
-  int numel_y = 16;
-  int numel_y2 = 16;
-  int numel_z = 128;
-
-  prog.device_ = 0;
-  prog.grid(numel_x);
-  prog.block(numel_z);
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input0 = at::rand({numel_x, numel_y, numel_y2, numel_z}, options);
-  at::Tensor input1 = at::rand({numel_x, numel_y, numel_y2, numel_z}, options);
-  at::Tensor cg_output = at::empty({numel_x, numel_z}, options);
-
-  torch::jit::fuser::cuda::compileKernel(&prog);
-  torch::jit::fuser::cuda::runTestKernel(&prog, {input0, input1}, {cg_output});
-
-  auto aten_output = input0.add(input1).sum({1, 2});
-  TORCH_CHECK(aten_output.allclose(cg_output));
-}
-*/
-
-/*
-void testGPU_FusionReductionJ() {
-  torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
-
-  // Set up your input tensor views
-  TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
-
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
-  fusion.addOutput(tv1);
-
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
-  tv1->split(1, 128);
-  auto tv2 = tv1->rFactor({1});
-  std::cout << "fusion 1: \n" << fusion << std::endl;
-
-  tv0->computeAt(tv2, 2);
-  std::cout << "fusion 2: \n" << fusion << std::endl;
-  tv1->axis(0)->parallelize(ParallelType::BIDx);
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
-
-  tv0->axis(-1)->parallelize(ParallelType::TIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
-
-  //tv0->axis(0)->parallelize(ParallelType::BIDx);
-  tv2->axis(0)->parallelize(ParallelType::BIDx);
-  std::cout << "fusion 3: \n" << fusion << std::endl;
-
-  GPULower gpulw(&fusion);
-  std::stringstream cdg;
-  gpulw.printKernel(cdg);
-  std::cout << cdg.str() << std::endl;
-}
-*/
-
-void testGPU_FusionReductionJ() {
-  torch::jit::fuser::cuda::CudaKernel prog;
-  Fusion& fusion = *prog.fusion_;
-  FusionGuard fg(&fusion);
-
-  // Set up your input tensor views
-  TensorView* tv0 = makeDummyTensor(2);
-  fusion.addInput(tv0);
-
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
-  fusion.addOutput(tv1);
-
-  TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
-  tv1->split(1, 128);
-  auto tv2 = tv1->rFactor({1});
-
-  //tv0->computeAt(tv1, 2);
-  tv0->computeAt(tv2, 3);
-
-  tv0->axis(0)->parallelize(ParallelType::BIDx);
-  tv1->axis(0)->parallelize(ParallelType::BIDx);
-  tv2->axis(0)->parallelize(ParallelType::BIDx);
-  tv0->axis(-1)->parallelize(ParallelType::TIDx);
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
-
-  GPULower gpulw(&fusion);
-  std::stringstream cdg;
-  gpulw.printKernel(cdg);
-  std::cout << cdg.str() << std::endl;
 }
 
 void testGPU_FusionSimpleBCast() {
