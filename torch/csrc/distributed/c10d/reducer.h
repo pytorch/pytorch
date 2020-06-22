@@ -109,8 +109,6 @@ class Reducer {
 
   void finalize_bucket_dense(Bucket& replica);
 
-  void finalize_bucket_sparse(Bucket& replica);
-
   void finalize_backward();
 
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
