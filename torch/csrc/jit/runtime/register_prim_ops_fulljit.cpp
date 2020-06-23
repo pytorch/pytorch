@@ -291,6 +291,15 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_meta(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_meta());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::name(Tensor a) -> str?",
          [](Stack& stack) {
            at::Tensor a;
