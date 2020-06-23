@@ -136,9 +136,6 @@ public static String assetFilePath(Context context, String assetName) {
     }
 
     final long[] shape = new long[] {2, 2};
-    Tensor t0 = makeTensor(shape, 1);
-    Tensor t1 = makeTensor(shape, 2);
-    Tensor t2 = makeTensor(shape, 3);
 
     IValue ivalue = IValue.listFrom(
       makeTensor(shape, 1),
