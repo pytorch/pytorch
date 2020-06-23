@@ -39,7 +39,7 @@ void initJitBackendBindings(PyObject* module) {
 
           // Generate LoweredModule.
           Module loweredModule(
-              "torch.jit." + backend_name + "LoweredModule",
+              "torch.jit.backends." + backend_name + "LoweredModule",
               get_python_cu(),
               /*shouldMangle=*/true);
 
