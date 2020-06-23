@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <vector>
 
@@ -8,8 +8,8 @@
  * Index compute takes in a list of indices typically generated from the
  * surrounding for loop nest. The number of indicies are intended to match the
  * number of dimensions of the incomming TensorView which may have less or more
- * dimensions than its root due to split/merge/reorder operations.
- * Split/merge/reorder operations are then replayed backwards produce resulting
+ * dimensions than its root due to split/merge operations.
+ * Split/merge operations are then replayed backwards produce resulting
  * indices (based on input indices) that match the root dimension.
  *
  * For example with GLOBAL tensor:
@@ -55,19 +55,19 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct IndexCompute : public TransformIter {
+struct IndexCompute : public BackwardVisitor {
  private:
-  TensorDomain* replayBackward(Split*, TensorDomain*) override;
-  TensorDomain* replayBackward(Merge*, TensorDomain*) override;
-  TensorDomain* replayBackward(Reorder*, TensorDomain*) override;
+  using BackwardVisitor::handle;
+  void handle(Split*) override;
+  void handle(Merge*) override;
+  void handle(Expr*) override;
 
-  TensorDomain* runBackward(std::vector<Expr*> history);
+  // Otherwise warning on runBackward as it hides an overloaded virtual
+  // using TransformIter::runBackward;
 
-  // Otherwise warning on runBackward as it hides an overloaded virtual function
-  using TransformIter::runBackward;
-
-  IndexCompute(TensorDomain* td, std::vector<Val*> _indices);
-  std::vector<Val*> indices;
+  IndexCompute(TensorDomain* td, const std::vector<Val*>& _indices);
+  std::unordered_map<IterDomain*, Val*> index_map_;
+  std::vector<Val*> indices_;
 
  public:
   static std::vector<Val*> get(
@@ -76,7 +76,7 @@ struct IndexCompute : public TransformIter {
 };
 
 // Simple interface for IndexCompute
-struct Index : public TransformIter {
+struct Index {
  private:
   // Producer indexing if it's in shared or local memory
   static TensorIndex* getProducerIndex_impl(
