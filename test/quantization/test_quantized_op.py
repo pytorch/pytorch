@@ -199,40 +199,6 @@ class TestQuantizedOps(TestCase):
                     fn_name, q_op, qY, qY_hat
                 ))
 
-    """Tests the correctness of the quantized::sigmoid op."""
-    @override_qengines
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qsigmoid(self, X):
-        sigmoid_test_configs = [
-            {
-                'quantized_fn': [
-                    torch.sigmoid
-                ],
-                'reference_fn': torch.sigmoid,
-                'output_range': (0.0, 1.0),
-                'change_zero_point': True
-            }
-        ]
-        self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
-
-    """Tests the correctness of the quantized::hardsigmoid op."""
-    @override_qengines
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qhardsigmoid(self, X):
-        hardsigmoid_test_configs = [
-            {
-                'quantized_fn': [
-                    torch.nn.quantized.functional.hardsigmoid
-                ],
-                'reference_fn': torch.nn.functional.hardsigmoid,
-                'output_range': (0.0, 1.0),
-                'change_zero_point': True
-            }
-        ]
-        self._test_activation_function(X, 'hardsigmoid', hardsigmoid_test_configs)
-
     """Tests the correctness of the quantized::relu op."""
     @override_qengines
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -277,6 +243,40 @@ class TestQuantizedOps(TestCase):
             }
         ]
         self._test_activation_function(X, 'relu6', relu6_test_configs)
+
+    """Tests the correctness of the quantized::sigmoid op."""
+    @override_qengines
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qsigmoid(self, X):
+        sigmoid_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.sigmoid
+                ],
+                'reference_fn': torch.sigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True
+            }
+        ]
+        self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
+
+    """Tests the correctness of the quantized::hardsigmoid op."""
+    @override_qengines
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qhardsigmoid(self, X):
+        hardsigmoid_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.nn.quantized.functional.hardsigmoid
+                ],
+                'reference_fn': torch.nn.functional.hardsigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True
+            }
+        ]
+        self._test_activation_function(X, 'hardsigmoid', hardsigmoid_test_configs)
 
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
