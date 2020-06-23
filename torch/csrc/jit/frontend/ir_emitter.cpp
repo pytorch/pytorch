@@ -3547,21 +3547,31 @@ struct to_ir {
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
       if(sv->kind() == "module") {
-        auto s_tuple_val = sv->asTupleValue(val_range, method);
+        // auto s_tuple_val = sv->asTupleValue(val_range, method);
+        auto s_tuple = sv->asTuple(val_range, method);
+        // ArrayRef<std::shared_ptr<SugaredValue>> vals(s_tuple);
+        auto vals = fmap(s_tuple, [&](const SugaredValuePtr& sv) {
+          return sv->asValue(val_range, method);
+        });
+        auto s_tuple_node = graph->createTuple(vals)->output();
 
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        auto begin = NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+        auto end = NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
         if (slice.end().present()) {
           auto tupleSliceValue = emitTupleSlice(
               val_range,
-              s_tuple_val->asValue(val_range, method),
-              NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0)))),
-              NamedValue(val_range, "end", emitExpr(Expr(slice.end().get()))));
+              // s_tuple_val->asValue(val_range, method),
+              s_tuple_node,
+              begin,
+              end);
           return std::make_shared<SimpleValue>(tupleSliceValue);
         } else {
           auto tupleSliceValue = emitTupleSlice(
               val_range,
-              s_tuple_val->asValue(val_range, method),
-              NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0)))),
+              // s_tuple_val->asValue(val_range, method),
+              s_tuple_node,
+              begin,
               c10::nullopt);
           return std::make_shared<SimpleValue>(tupleSliceValue);
         }

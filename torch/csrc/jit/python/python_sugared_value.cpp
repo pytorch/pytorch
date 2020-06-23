@@ -219,10 +219,13 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
-SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
+std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
+    const SourceRange& loc,
+    Function& m,
+    const c10::optional<size_t>& size_hint) {
   auto dict = getSugaredDict(loc, m);
   auto mods = dict->getModules();
-  return mods;
+  return mods->asTuple(loc, m);
 }
 
 SugaredValuePtr ModuleValue::getitem(

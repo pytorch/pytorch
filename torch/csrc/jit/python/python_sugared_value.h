@@ -114,7 +114,7 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
       Function& f,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override {
+      size_t n_binders) {
     if (inputs.size() || attributes.size()) {
       throw ErrorReport(loc)
           << name_ << " method does not accept any arguments";
@@ -143,9 +143,12 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
     return "module";
   }
 
-  Value* asValue(const SourceRange& loc, Function& m) override;
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      const SourceRange& loc,
+      Function& m,
+      const c10::optional<size_t>& size_hint = {}) override;
 
-  SugaredValuePtr asTupleValue(const SourceRange& loc, Function& m) override;
+  Value* asValue(const SourceRange& loc, Function& m) override;
 
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> tryGetAttr(
