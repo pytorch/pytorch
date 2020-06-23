@@ -186,20 +186,21 @@ class GradScaler(object):
                     if (not allow_fp16) and param.grad.dtype == torch.float16:
                         raise ValueError("Attempting to unscale FP16 gradients.")
                     else:
-                        g = param.grad
-                        to_unscale = g._values() if g.is_sparse else g
-                        if g.is_sparse and g.dtype is torch.float16 and not g.is_coalesced():
-                            # is_coalesced() = False means the sparse grad has values with duplicate indices.
-                            # coalesce() deduplicates indices and adds all values that have the same index.
-                            # For scaled fp16 values, there's a good chance coalescing will cause overflow,
-                            # so we should double check the coalesced _values().
-                            torch._amp_non_finite_check_and_unscale_(g.coalesce()._values(),
-                                                                     per_device_found_inf.get(g.device),
-                                                                     per_device_inv_scale.get(g.device))
+                        with torch.no_grad():
+                            if param.grad.is_sparse:
+                                # is_coalesced() == False means the sparse grad has values with duplicate indices.
+                                # coalesce() deduplicates indices and adds all values that have the same index.
+                                # For scaled fp16 values, there's a good chance coalescing will cause overflow,
+                                # so we should check the coalesced _values().
+                                if param.grad.dtype is torch.float16:
+                                    param.grad = param.grad.coalesce()
+                                to_unscale = param.grad._values()
+                            else:
+                                to_unscale = param.grad
 
-                        torch._amp_non_finite_check_and_unscale_(to_unscale,
-                                                                 per_device_found_inf.get(g.device),
-                                                                 per_device_inv_scale.get(g.device))
+                            torch._amp_non_finite_check_and_unscale_(to_unscale,
+                                                                     per_device_found_inf.get(param.grad.device),
+                                                                     per_device_inv_scale.get(param.grad.device))
 
         return per_device_found_inf._per_device_tensors
 
@@ -231,6 +232,9 @@ class GradScaler(object):
             :meth:`unscale_` should only be called once per optimizer per :meth:`step` call,
             and only after all gradients for that optimizer's assigned parameters have been accumulated.
             Calling :meth:`unscale_` twice for a given optimizer between each :meth:`step` triggers a RuntimeError.
+
+        .. warning::
+            :meth:`unscale_` may unscale sparse gradients out of place, replacing the ``.grad`` attribute.
         """
         if not self._enabled:
             return
