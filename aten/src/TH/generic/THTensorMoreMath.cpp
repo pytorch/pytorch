@@ -710,20 +710,6 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
   c10::raw::intrusive_ptr::decref(rowS);
 }
 
-accreal THTensor_(var_all)(THTensor *tensor, bool unbiased)
-{
-  accreal mean = THTensor_wrap(tensor).mean().item<accreal>();
-  accreal sum = 0;
-  TH_TENSOR_APPLY(scalar_t, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (unbiased ? 1 : 0));
-  return sum;
-}
-
-accreal THTensor_(std_all)(THTensor *tensor, bool unbiased)
-{
-  return sqrt(THTensor_(var_all)(tensor, unbiased));
-}
-
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)
 {
   if (nbins <= 0) {
