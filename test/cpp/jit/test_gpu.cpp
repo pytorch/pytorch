@@ -3407,8 +3407,6 @@ void testGPU_FusionSplitBCast() {
 
   fusion.addOutput(output_tv4);
 
-  fusion.printMath();
-
   prog.device_ = 0;
   prog.grid(32, 32);
   prog.block(32);
