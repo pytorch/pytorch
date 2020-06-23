@@ -376,7 +376,7 @@ def celu(input, alpha=1.):
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.celu' must be quantized!")
-    return torch.celu(input, alpha)
+    return torch.ops.quantized.celu(input, alpha)
 
 
 def relu(input, inplace=False):
