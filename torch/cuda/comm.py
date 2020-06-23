@@ -153,7 +153,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
     Arguments:
         tensor (Tensor): tensor to scatter. Can be on CPU or CUDA.
         devices (Iterable[torch.device, str or int], optional): an iterable of
-          CUDA devices, among which to broadcast.
+          CUDA devices, among which to scatter.
         chunk_sizes (Iterable[int], optional): sizes of chunks to be placed on
           each device. It should match :attr:`devices` in length and sums to
           ``tensor.size(dim)``. If not specified, :attr:`tensor` will be divided
