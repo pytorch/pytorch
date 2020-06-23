@@ -20,6 +20,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "linear",
     "batch_norm",
     "hardswish",
+    "elu",
     "layer_norm",
     "group_norm",
     "instance_norm",
@@ -33,6 +34,9 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "addmm",
     "matmul",
     "hardswish",
+    "hardswish_",
+    "elu",
+    "elu_",
     "batch_norm",
     "layer_norm",
     "group_norm",
@@ -60,7 +64,6 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "_max_pool3d",
     "dropout",
     "relu",
-    "hardsigmoid",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -84,9 +87,16 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "transpose",
     "contiguous",
     "permute",
+    "repeat",
     "repeat_interleave",
     "relu",
     "relu_",
+    "squeeze",
+    "squeeze_",
+    "unsqueeze",
+    "unsqueeze_",
+    "detach",
+    "detach_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -106,7 +116,6 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "upsample_bilinear",
     "upsample_nearest",
     "hardtanh",
-    "elu",
     "leaky_relu",
 };
 
@@ -133,8 +142,6 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     // "clamp_",  // Enable when quantized `clamp_` is ready
     "hardtanh",
     "hardtanh_",
-    "elu",
-    "elu_",
     "leaky_relu",
     "leaky_relu_",
 };
@@ -295,9 +302,10 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
       inputs.push_back(output);
     }
     return inputs;
-  } else if (n->kind() == prim::ListUnpack) {
+  } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
     return {n->input(0)};
-  } else if (n->kind() == prim::ListConstruct) {
+  } else if (
+      n->kind() == prim::ListConstruct || n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -589,6 +597,19 @@ bool is_relu_module(
       match, vmap, "relu", "__torch__.torch.nn.modules.activation.ReLU");
 }
 
+bool is_functional_linear(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_functional(match, vmap, "linear", "linear");
+}
+
+bool is_linear_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match, vmap, "linear", "__torch__.torch.nn.modules.linear.Linear");
+}
+
 bool is_conv1d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
@@ -618,6 +639,16 @@ bool is_batchnorm2d_module(
       vmap,
       "batchnorm",
       "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
+}
+
+bool is_batchnorm3d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match,
+      vmap,
+      "batchnorm",
+      "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
 }
 
 } // namespace jit

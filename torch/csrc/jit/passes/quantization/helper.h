@@ -107,6 +107,13 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
 // ==================== filter functions for matches ==============
+// filter to check Value `vname` is a constant of int value `value`
+bool is_int_constant(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap,
+    const std::string& vname,
+    int value);
+
 // filter to check if the %alpha argument of aten::add is constant 1
 bool aten_add_alpha_is_one(
     const Match& match,
@@ -119,6 +126,14 @@ bool is_functional_relu(
 
 // filter to check if the module is torch.nn.ReLU
 bool is_relu_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_functional_linear(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_linear_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
@@ -136,6 +151,10 @@ bool is_conv3d_module(
     const std::unordered_map<std::string, Value*>& vmap);
 
 bool is_batchnorm2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
