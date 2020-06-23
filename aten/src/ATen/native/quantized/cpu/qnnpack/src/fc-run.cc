@@ -1,10 +1,7 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
+#include <qnnpack/fpu.h>
 #include <cstring>
-
-#if defined(__SSE__) || defined(__x86_64__)
-#include <xmmintrin.h>
-#endif
 
 namespace qnnpack {
 struct q8gemm_context {
@@ -20,61 +17,6 @@ struct q8gemm_context {
   union pytorch_qnnp_conv_quantization_params quantization_params;
   const pytorch_q8gemm_ukernel_function ukernel;
 };
-
-struct fpu_state {
-#if defined(__SSE__) || defined(__x86_64__)
-  uint32_t mxcsr;
-#elif defined(__arm__) && defined(__ARM_FP) && (__ARM_FP != 0)
-  uint32_t fpscr;
-#elif defined(__aarch64__)
-  uint64_t fpcr;
-#else
-  char unused;
-#endif
-};
-
-static inline struct fpu_state get_fpu_state() {
-  struct fpu_state state = { 0 };
-#if defined(__SSE__) || defined(__x86_64__)
-  state.mxcsr = (uint32_t) _mm_getcsr();
-#elif defined(__arm__) && defined(__ARM_FP) && (__ARM_FP != 0)
-  __asm__ __volatile__("VMRS %[fpscr], fpscr" : [fpscr] "=r" (state.fpscr));
-#elif defined(__aarch64__)
-  __asm__ __volatile__("MRS %[fpcr], fpcr" : [fpcr] "=r" (state.fpcr));
-#endif
-  return state;
-}
-
-static inline void set_fpu_state(const struct fpu_state state) {
-#if defined(__SSE__) || defined(__x86_64__)
-  _mm_setcsr((unsigned int) state.mxcsr);
-#elif defined(__arm__) && defined(__ARM_FP) && (__ARM_FP != 0)
-  __asm__ __volatile__("VMSR fpscr, %[fpscr]" : : [fpscr] "r" (state.fpscr));
-#elif defined(__aarch64__)
-  __asm__ __volatile__("MSR fpcr, %[fpcr]" : : [fpcr] "r" (state.fpcr));
-#endif
-}
-
-static inline void disable_fpu_denormals() {
-#if defined(__SSE__) || defined(__x86_64__)
-  _mm_setcsr(_mm_getcsr() | 0x8040);
-#elif defined(__arm__) && defined(__ARM_FP) && (__ARM_FP != 0)
-  uint32_t fpscr;
-  __asm__ __volatile__(
-      "VMRS %[fpscr], fpscr\n"
-      "ORR %[fpscr], #0x1000000\n"
-      "VMSR fpscr, %[fpscr]\n"
-    : [fpscr] "=r" (fpscr));
-#elif defined(__aarch64__)
-  uint64_t fpcr;
-  __asm__ __volatile__(
-      "MRS %[fpcr], fpcr\n"
-      "ORR %w[fpcr], %w[fpcr], 0x1000000\n"
-      "ORR %w[fpcr], %w[fpcr], 0x80000\n"
-      "MSR fpcr, %[fpcr]\n"
-    : [fpcr] "=r" (fpcr));
-#endif
-}
 
 static void compute_q8gemm(
     const struct q8gemm_context context[1],
@@ -97,8 +39,8 @@ static void compute_q8gemm(
   uint8_t* c = context->c;
   const size_t c_stride = context->c_stride;
 
-  const fpu_state saved_fpu_state = get_fpu_state();
-  disable_fpu_denormals();
+  const pytorch_qnnp_fpu_state saved_fpu_state = pytorch_qnnp_get_fpu_state();
+  pytorch_qnnp_disable_fpu_denormals();
 
   size_t output_channel_index = nr_block_start;
   context->ukernel(
@@ -113,7 +55,7 @@ static void compute_q8gemm(
       output_channel_index,
       &context->quantization_params);
 
-  set_fpu_state(saved_fpu_state);
+  pytorch_qnnp_set_fpu_state(saved_fpu_state);
 }
 
 enum pytorch_qnnp_status qnnpackLinear(
