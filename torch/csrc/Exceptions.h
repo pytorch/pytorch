@@ -62,6 +62,12 @@
       PyErr_SetString(PyExc_ValueError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
+    catch (const c10::TypeError& e) {                               \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_TypeError, torch::processErrorMsg(msg).c_str()); \
+      retstmnt;                                                      \
+    }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
