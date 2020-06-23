@@ -242,7 +242,7 @@ Layers for the quantization-aware training
 ``torch.quantization``
 ~~~~~~~~~~~~~~~~~~~~~~
 
-* Functions for quantization:
+* Functions for eager mode quantization:
 
   * :func:`~torch.quantization.add_observer_` — Adds observer for the leaf
     modules (if quantization configuration is provided)
@@ -259,24 +259,18 @@ Layers for the quantization-aware training
   * :func:`~torch.quantization.propagate_qconfig_` — Propagates quantization
     configurations through the module hierarchy and assign them to each leaf
     module
-  * :func:`~torch.quantization.quantize` — Converts a float module to quantized version
-  * :func:`~torch.quantization.quantize_dynamic` — Converts a float module to
-    dynamically quantized version
-  * :func:`~torch.quantization.quantize_qat` — Converts a float module to
-    quantized version used in quantization aware training
+  * :func:`~torch.quantization.quantize` — Function for eager mode post training static quantization
+  * :func:`~torch.quantization.quantize_dynamic` — Function for eager mode post training dynamic quantization
+  * :func:`~torch.quantization.quantize_qat` — Function for eager mode quantization aware training function
   * :func:`~torch.quantization.swap_module` — Swaps the module with its
     quantized counterpart (if quantizable and if it has an observer)
-
-* :func:`~torch.quantization.default_eval_fn` — Default evaluation function
+  * :func:`~torch.quantization.default_eval_fn` — Default evaluation function
   used by the :func:`torch.quantization.quantize`
-* :func:`~torch.quantization.fuse_modules`
-* :class:`~torch.quantization.FakeQuantize` — Module for simulating the
-  quantization/dequantization at training time
-* Default Observers. The rest of observers are available from
-  ``torch.quantization.observer``:
-  * :attr:`~torch.quantization.default_observer` — Same as ``MinMaxObserver.with_args(reduce_range=True)``
-  * :attr:`~torch.quantization.default_weight_observer` — Same as ``MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)``
-  * :class:`~torch.quantization.Observer` — Abstract base class for observers
+  * :func:`~torch.quantization.fuse_modules`
+
+* Functions for graph mode quantization:
+  * :func:`~torch.quantization.quantize_jit` - Function for graph mode post training static quantization
+  * :func:`~torch.quantization.quantize_dynamic_jit` - Function for graph mode post training dynamic quantization
 
 * Quantization configurations
     * :class:`~torch.quantization.QConfig` — Quantization configuration class
@@ -303,28 +297,37 @@ Layers for the quantization-aware training
       quantized. Inserts the :class:`~torch.quantization.QuantStub` and
     * :class:`~torch.quantization.DeQuantStub`
 
-Observers for computing the quantization parameters
+* Observers for computing the quantization parameters
+  * Default Observers. The rest of observers are available from
+    ``torch.quantization.observer``:
+    * :attr:`~torch.quantization.default_observer` — Same as ``MinMaxObserver.with_args(reduce_range=True)``
+    * :attr:`~torch.quantization.default_weight_observer` — Same as ``MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)``
+  * :class:`~torch.quantization.Observer` — Abstract base class for observers
+  * :class:`~torch.quantization.MinMaxObserver` — Derives the quantization
+    parameters from the running minimum and maximum of the observed tensor inputs
+    (per tensor variant)
+  * :class:`~torch.quantization.MovingAverageMinMaxObserver` — Derives the
+    quantization parameters from the running averages of the minimums and
+    maximums of the observed tensor inputs (per tensor variant)
+  * :class:`~torch.quantization.PerChannelMinMaxObserver` — Derives the
+    quantization parameters from the running minimum and maximum of the observed
+    tensor inputs (per channel variant)
+  * :class:`~torch.quantization.MovingAveragePerChannelMinMaxObserver` — Derives
+    the quantization parameters from the running averages of the minimums and
+    maximums of the observed tensor inputs (per channel variant)
+  * :class:`~torch.quantization.HistogramObserver` — Derives the quantization
+    parameters by creating a histogram of running minimums and maximums.
 
-* :class:`~torch.quantization.MinMaxObserver` — Derives the quantization
-  parameters from the running minimum and maximum of the observed tensor inputs
-  (per tensor variant)
-* :class:`~torch.quantization.MovingAverageMinMaxObserver` — Derives the
-  quantization parameters from the running averages of the minimums and
-  maximums of the observed tensor inputs (per tensor variant)
-* :class:`~torch.quantization.PerChannelMinMaxObserver` — Derives the
-  quantization parameters from the running minimum and maximum of the observed
-  tensor inputs (per channel variant)
-* :class:`~torch.quantization.MovingAveragePerChannelMinMaxObserver` — Derives
-  the quantization parameters from the running averages of the minimums and
-  maximums of the observed tensor inputs (per channel variant)
-* :class:`~torch.quantization.HistogramObserver` — Derives the quantization
-  parameters by creating a histogram of running minimums and maximums.
 * Observers that do not compute the quantization parameters:
     * :class:`~torch.quantization.RecordingObserver` — Records all incoming
       tensors. Used for debugging only.
     * :class:`~torch.quantization.NoopObserver` — Pass-through observer. Used
       for situation when there are no quantization parameters (i.e.
       quantization to ``float16``)
+
+* FakeQuantize module
+  * :class:`~torch.quantization.FakeQuantize` — Module for simulating the
+    quantization/dequantization at training time
 
 ``torch.nn.quantized``
 ~~~~~~~~~~~~~~~~~~~~~~

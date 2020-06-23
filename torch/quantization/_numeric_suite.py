@@ -3,9 +3,34 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import prepare
 
-from .default_mappings import DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST
+from .default_mappings import (
+    _EXCLUDE_QCONFIG_PROPAGATE_LIST,
+    _INCLUDE_QCONFIG_PROPAGATE_LIST,
+    DEFAULT_DYNAMIC_MODULE_MAPPING,
+    DEFAULT_MODULE_MAPPING,
+    DEFAULT_QAT_MODULE_MAPPING,
+)
+
+
+DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
+    set(DEFAULT_MODULE_MAPPING.values())
+    | set(DEFAULT_QAT_MODULE_MAPPING.values())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
+    | set(DEFAULT_MODULE_MAPPING.keys())
+    | set(DEFAULT_QAT_MODULE_MAPPING.keys())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
+    | _INCLUDE_QCONFIG_PROPAGATE_LIST
+) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
+
+NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {
+    nnqd.Linear,
+    nnq.Linear,
+    nnqd.LSTM,
+    nn.LSTM,
+}
 
 
 def _find_match(str_list, key_str, postfix):
@@ -19,6 +44,19 @@ def _find_match(str_list, key_str, postfix):
                 return s2
             if match_string == pattern2:
                 return s2
+
+        # For matching "fc.weight" and "fc._packed_params._packed_params"
+        if postfix == "_packed_params":
+            match_string = "".join(key_str.split(".")[0:-2])
+            if len(match_string) == 0:
+                return None
+            for s2 in str_list:
+                pattern1 = "".join(s2.split(".")[0:-1])
+                pattern2 = "".join(s2.split(".")[0:-2])
+                if match_string == pattern1:
+                    return s2
+                if match_string == pattern2:
+                    return s2
     else:
         return None
 
@@ -51,6 +89,35 @@ def compare_weights(float_dict, quantized_dict):
             weight_dict[key] = {}
             weight_dict[key]["float"] = float_dict[match_key]
             weight_dict[key]["quantized"] = quantized_dict[key]
+            continue
+
+        # For matching "fc.weight" and "fc._packed_params._packed_params"
+        match_key = _find_match(float_dict, key, "_packed_params")
+        if match_key is not None:
+            weight_dict[key] = {}
+            weight_dict[key]["float"] = float_dict[match_key]
+            weight_dict[key]["quantized"] = quantized_dict[key][0]
+
+        # For LSTM
+        split_str = key.split(".")
+        if split_str[-1] == "param" and split_str[-3] == "_all_weight_values":
+            layer = split_str[-2]
+            module_name = ".".join(split_str[:-3])
+            float_weight_ih_key = module_name + ".weight_ih_l" + layer
+            float_weight_hh_key = module_name + ".weight_hh_l" + layer
+            print("lstm float ih key is: ", float_weight_ih_key)
+            print("lstm float hh key is: ", float_weight_hh_key)
+            if float_weight_ih_key in float_dict and float_weight_hh_key in float_dict:
+                weight_dict[key] = {}
+                weight_dict[key]["float"] = float_dict[float_weight_ih_key]
+                weight_dict[key]["quantized"] = (
+                    quantized_dict[key].__getstate__()[0][4][0].__getstate__()[0][0]
+                )
+                weight_dict[key]["float"] = float_dict[float_weight_hh_key]
+                weight_dict[key]["quantized"] = (
+                    quantized_dict[key].__getstate__()[0][4][1].__getstate__()[0][0]
+                )
+
     return weight_dict
 
 
@@ -123,6 +190,10 @@ class ShadowLogger(Logger):
         self.stats["quantized"] = None
 
     def forward(self, x, y):
+        if len(x) > 1:
+            x = x[0]
+        if len(y) > 1:
+            y = y[0]
         if self.stats["quantized"] is None:
             self.stats["quantized"] = x.detach()
         else:
@@ -150,6 +221,20 @@ class OutputLogger(Logger):
         return x
 
 
+def _convert_tuple_to_list(t):
+    return list(_convert_tuple_to_list(x) for x in t) if type(t) is tuple else t
+
+
+def _dequantize_tensor_list(t):
+    return (
+        list(_dequantize_tensor_list(x) for x in t)
+        if type(t) is list
+        else t.dequantize()
+        if t.is_quantized
+        else t
+    )
+
+
 class Shadow(nn.Module):
     r"""Shadow module attaches the float module to its matching quantized module
     as the shadow. Then it uses Logger module to process the outputs of both
@@ -169,10 +254,11 @@ class Shadow(nn.Module):
         self.dequant = nnq.DeQuantize()
         self.logger = Logger()
 
-    def forward(self, x):
-        output = self.orig_module(x)
-        x = x.dequantize()
-        shadow_output = self.shadow_module(x)
+    def forward(self, *x):
+        xl = _convert_tuple_to_list(x)
+        output = self.orig_module(*xl)
+        xl_float = _dequantize_tensor_list(xl)
+        shadow_output = self.shadow_module(*xl_float)
         self.logger(output, shadow_output)
         return output
 
@@ -261,7 +347,7 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
 
 
 def compare_model_stub(
-    float_model, q_model, module_swap_list, data, Logger=ShadowLogger
+    float_model, q_model, module_swap_list, *data, Logger=ShadowLogger
 ):
     r"""Compare quantized module in a model with its floating point counterpart,
     feeding both of them the same input. Return a dict with key corresponding to
@@ -287,14 +373,14 @@ def compare_model_stub(
     Args:
         float_model: float model used to generate the q_model
         q_model: model quantized from float_model
-        data: input data used to run the prepared q_model
         module_swap_list: list of float module types at which shadow modules will
             be attached.
+        data: input data used to run the prepared q_model
         Logger: type of logger to be used in shadow module to process the outputs of
             quantized module and its float shadow module
     """
     prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
-    q_model(data)
+    q_model(*data)
     ob_dict = get_logger_dict(q_model, Logger)
     return ob_dict
 
@@ -343,13 +429,18 @@ def prepare_model_outputs(
     float_module.qconfig = qconfig_debug
     prepare(float_module, inplace=True, white_list=white_list)
     q_module.qconfig = qconfig_debug
-    prepare(q_module, inplace=True, white_list=white_list)
+    prepare(
+        q_module,
+        inplace=True,
+        white_list=white_list,
+        observer_non_leaf_module_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST,
+    )
 
 
 def compare_model_outputs(
     float_model,
     q_model,
-    data,
+    *data,
     Logger=OutputLogger,
     white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
 ):
@@ -378,7 +469,7 @@ def compare_model_outputs(
         containing the matching float and quantized activations
     """
     prepare_model_outputs(float_model, q_model, Logger, white_list)
-    float_model(data)
-    q_model(data)
+    float_model(*data)
+    q_model(*data)
     act_compare_dict = get_matching_activations(float_model, q_model, Logger)
     return act_compare_dict
