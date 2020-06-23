@@ -69,7 +69,7 @@ DynamicLibrary::DynamicLibrary(const char* name) {
     char buf[256];
     DWORD dw = GetLastError();
     FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                  NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), 
+                  NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                   buf, (sizeof(buf) / sizeof(char)), NULL);
     AT_ERROR("error in LoadLibrary for ", name, ". WinError ", dw, ": ", buf);
   }
