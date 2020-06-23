@@ -70,6 +70,7 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 
 # Standard library
 from collections import defaultdict, namedtuple, OrderedDict
+import copy
 from copy import deepcopy
 from itertools import product, chain
 import itertools
@@ -9190,7 +9191,8 @@ a")
 
         m = torch.jit.script(M())
         # test copy
-        m_c = m.copy()
+        copy.copy(m)
+        copy.deepcopy(m)
 
     def test_script_forward_method_replacement(self):
         # We want to support the use case of attaching a different `forward` method
