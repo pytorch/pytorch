@@ -455,16 +455,13 @@ def threshold(input, threshold, value):
 
 def elu(input, scale, zero_point, alpha=1.):
     # type: (Tensor, float, int, float) -> Tensor
-    r"""
-    Applies the quantized ELU function element-wise:
-
-    .. math::
-        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
+    r"""This is the quantized version of :func:`~torch.nn.functional.elu`.
 
     Args:
         input: quantized input
-        scale, zero_point: Scale and zero point of the output tensor.
-        alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+        alpha: the alpha constant
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.elu' must be quantized!")
