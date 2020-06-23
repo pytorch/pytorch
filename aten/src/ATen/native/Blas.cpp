@@ -105,6 +105,13 @@ Tensor dot(const Tensor &self, const Tensor &other){
       " tensors");
 
   TORCH_CHECK(
+      self.scalar_type() == other.scalar_type(),
+      "dot : expected both vectors to have same dtype, but found ",
+      self.scalar_type(),
+      " and ",
+      other.scalar_type());
+
+  TORCH_CHECK(
       self.numel() == other.numel(),
       "inconsistent tensor size, expected tensor [",
       self.numel(),
