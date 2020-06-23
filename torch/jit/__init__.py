@@ -14,6 +14,7 @@ from torch.serialization import validate_cuda_device
 from torch._six import PY37, with_metaclass, string_classes, get_function_from_type
 from torch.utils import set_module
 from torch.autograd.grad_mode import _DecoratorContextManager
+from typing import Optional, List
 
 import collections
 import contextlib
@@ -1118,6 +1119,43 @@ def trace_module(mod,
 
     return module
 
+def freeze(mod, preserved_attrs : Optional[List[str]] = None):
+    r"""
+    Freezing a :class:`ScriptModule` will clone it and attempt to inline the cloned
+    modules' submodules, parameters, and attributes.
+    ::
+    Example (Freezing a simple module with a Parameter):
+    .. testcode::
+    import torch
+    class MyModule(torch.nn.Module):
+    def __init__(self, N, M):
+        super(MyModule, self).__init__()
+        self.weight = torch.nn.Parameter(torch.rand(N, M))
+        self.linear = torch.nn.Linear(N, M)
+        def forward(self, input):
+        output = self.weight.mv(input)
+        output = self.linear(output)
+        return output
+    scripted_module = torch.jit.script(MyModule(2, 3))
+    frozen_module = torch.jit.freeze(scripted_module)
+    # See the compiled graph as Python code
+    print(frozen_module.code)
+    """
+    if not isinstance(mod, ScriptModule):
+        raise RuntimeError("Freezing expects a ScriptModule as input. "
+                           "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
+
+    if mod.training:
+        raise RuntimeError("Freezing is currently only implemented for modules in eval mode. "
+                    "Please call .eval() on your module before freezing.")
+
+    preserved_attrs = preserved_attrs if not None else []
+
+    out = RecursiveScriptModule(torch._C._freeze_module(mod._c, preserved_attrs))
+    RecursiveScriptModule._finalize_scriptmodule(out)
+
+    return out
+
 
 class CompilationUnit(object):
     def __init__(self, lang=None, _frames_up=0):
@@ -1737,11 +1775,16 @@ if _enabled:
 
             # Finalize the ScriptModule: replace the nn.Module state with our
             # custom implementations and flip the _initializing bit.
+            RecursiveScriptModule._finalize_scriptmodule(script_module)
+
+            return script_module
+
+        @staticmethod
+        def _finalize_scriptmodule(script_module):
             script_module._parameters = OrderedDictWrapper(torch._C.ParameterDict(script_module._c))
             script_module._buffers = OrderedDictWrapper(torch._C.BufferDict(script_module._c))
             script_module._modules = OrderedModuleDict(script_module._c, script_module._modules)
             script_module._initializing = False
-            return script_module
 
         @property
         def graph(self):
