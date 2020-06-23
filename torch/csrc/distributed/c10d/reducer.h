@@ -10,6 +10,7 @@
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 
 namespace c10d {
 
@@ -96,6 +97,10 @@ class Reducer {
   // Work handle for allreduce on local_used_maps_
   std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
+  void verify_replicas_within_process();
+
+  void verify_replica0_across_processes();
+
   void mark_variable_ready_dense(VariableIndex index);
 
   void mark_variable_ready_sparse(VariableIndex index);
@@ -107,8 +112,6 @@ class Reducer {
   void mark_bucket_ready(size_t bucket_index);
 
   void finalize_bucket_dense(Bucket& replica);
-
-  void finalize_bucket_sparse(Bucket& replica);
 
   void finalize_backward();
 
@@ -126,6 +129,12 @@ class Reducer {
   // the performance cost is negligible.
   std::vector<std::vector<size_t>> rebuildBuckets();
 
+  using GradCallback =
+      torch::distributed::autograd::DistAutogradContext::GradCallback;
+  void runGradCallbackForVariable(
+      torch::autograd::Variable& variable,
+      GradCallback&& cb);
+
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
   //
@@ -140,6 +149,14 @@ class Reducer {
   struct BucketReplica {
     // Flattened (1 dimensional) contents of bucket.
     at::Tensor contents;
+
+    // Views into contents for each grad.  Each view will be created with
+    // layout (sizes + strides) matching the grad's expected layout
+    // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
+    // grad.copy_(bucket_views[i]) and
+    // bucket_views[i].copy_(grad)
+    // provide convenient ways to move grad data in/out of contents.
+    std::vector<at::Tensor> bucket_views;
 
     // Variables that contribute to this bucket replica. Use refcounted value
     // here so that we can easily unflatten the bucket contents into the
@@ -210,6 +227,16 @@ class Reducer {
   std::vector<at::Tensor> rebuilt_params_;
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
+
+  struct RpcContext {
+    using ContextPtr = torch::distributed::autograd::ContextPtr;
+    // The shared_ptr is to hold the context instance.
+    ContextPtr context_ptr_holder;
+    std::atomic<ContextPtr::element_type*> context_ptr{nullptr};
+
+    void set(ContextPtr&& new_context_ptr);
+  };
+  RpcContext rpc_context_;
 };
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(

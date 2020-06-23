@@ -404,6 +404,8 @@ Other Operations
     einsum
     flatten
     flip
+    fliplr
+    flipud
     rot90
     histc
     meshgrid
@@ -419,6 +421,8 @@ Other Operations
     triu
     triu_indices
     vander
+    view_as_real
+    view_as_complex
 
 
 BLAS and LAPACK Operations

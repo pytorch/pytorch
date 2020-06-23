@@ -331,6 +331,8 @@ _(aten, fft) \
 _(aten, fill) \
 _(aten, flatten) \
 _(aten, flip) \
+_(aten, fliplr) \
+_(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
 _(aten, fmod_) \
@@ -728,6 +730,10 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
+_(aten, real) \
+_(aten, imag) \
+_(aten, view_as_real) \
+_(aten, view_as_complex) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

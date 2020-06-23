@@ -1698,7 +1698,7 @@ class TestCuda(TestCase):
     def _test_multinomial_invalid_probs_cuda(probs):
         try:
             with torch.random.fork_rng(devices=[0]):
-                torch.multinomial(probs.to('cuda'), 2)
+                torch.multinomial(probs.to('cuda'), 2, replacement=True)
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
@@ -1714,7 +1714,6 @@ class TestCuda(TestCase):
         self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
-        self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -2645,7 +2644,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op_with_args in self.autocast_lists.torch_fp16:
                 skip_test = False
                 op, args = op_with_args[0], op_with_args[1]
@@ -2672,7 +2671,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp16(self):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
@@ -2683,7 +2682,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp16(self):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.methods_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=None)
 

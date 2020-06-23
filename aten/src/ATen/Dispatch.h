@@ -100,7 +100,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 // AT_DISPATCH_ALL_TYPES) are floating point types (float, double),
 // and integral types (int32_t, int64_t, int16_t, int8_t, uint8_t),
 // but NOT booleans (bool), half-precision floats (Half) or
-// complex number (std::complex<float>, std::complex<double>).
+// complex number (c10::complex<float>, c10::complex<double>).
 // This "cut" is somewhat historical (the default types are the
 // ones that TH historically supported), but it also reflects the
 // fact that the non-default types are "poorly" behaved (booleans
@@ -207,9 +207,9 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)     \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)       \
       AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__) \
+          at::ScalarType::ComplexDouble, c10::complex<double>, __VA_ARGS__) \
       AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)   \
+          at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__)   \
       default:                                                              \
         AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");      \
     }                                                                       \
@@ -321,9 +321,9 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     at::ScalarType _st = ::detail::scalar_type(the_type);                   \
     switch (_st) {                                                          \
       AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)   \
+          at::ScalarType::ComplexFloat, c10::complex<float>, __VA_ARGS__)   \
       AT_PRIVATE_CASE_TYPE(                                                 \
-          at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__) \
+          at::ScalarType::ComplexDouble, c10::complex<double>, __VA_ARGS__) \
       default:                                                              \
         AT_ERROR(#NAME, " not implemented for '", toString(_st), "'");      \
     }                                                                       \

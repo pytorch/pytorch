@@ -29,7 +29,6 @@ import textwrap
 import warnings
 import weakref
 
-
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
@@ -728,11 +727,8 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance, strict,
                     all_ok = False
 
             return all_ok
-
         traced_outs = run_mod_and_filter_tensor_outputs(traced_func, inputs, 'trace')
         fn_outs = run_mod_and_filter_tensor_outputs(func, inputs, 'Python function')
-        print("traced_outs:" + str(traced_outs))
-        print("fn_outs:" + str(fn_outs))
         if compare_outputs(traced_outs, fn_outs, 'Python function'):
             check_outs = run_mod_and_filter_tensor_outputs(check_mod_func, inputs, 'repeated trace')
             compare_outputs(traced_outs, check_outs, 'repeated trace')
@@ -1396,6 +1392,10 @@ def interface(obj):
     if not _is_new_style_class(obj):
         raise RuntimeError("TorchScript interfaces must inherit from 'object'")
 
+    # Expected MRO is:
+    #   User module
+    #   torch.nn.modules.module.Module
+    #   object
     is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
 
     if not is_module_interface and len(obj.mro()) > 2:
@@ -1557,7 +1557,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 #     parameters are initialized _before_ the script compiler resolve references to
 #     `self.param` or `self.module`.
 class ScriptMeta(type):
-    def __init__(cls, name, bases, attrs):
+    def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods = {}
         cls._constants_set = set(getattr(cls, '__constants__', ()))
@@ -1643,8 +1643,12 @@ if _enabled:
                 # This ensures that if we use the attr again in `__init__`, it
                 # will look like the actual value, not an instance of Attribute.
                 if isinstance(value, Attribute):
-                    if not hasattr(self, "__annotations__"):
-                        self.__annotations__ = {}
+                    # NB: Ensure that we set __annotations__ on the specific
+                    # class in question, and not on a superclass (which would
+                    # be wrong wrong wrong!).
+                    # See also https://github.com/pytorch/pytorch/issues/39463
+                    if "__annotations__" not in self.__class__.__dict__:
+                        self.__class__.__annotations__ = {}
                     self.__annotations__[attr] = value.type
                     value = value.value
                 return super(ScriptModule, self).__setattr__(attr, value)
