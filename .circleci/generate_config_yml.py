@@ -117,14 +117,6 @@ def gen_build_workflows_tree():
             },
             "docker_build": OrderedDict(
                 {
-                    "triggers": [
-                        {
-                            "schedule": {
-                                "cron": miniutils.quote("0 15 * * 0"),
-                                "filters": {"branches": {"only": ["master"]}},
-                            }
-                        }
-                    ],
                     "jobs": [f() for f in docker_builder_functions],
                 }
             ),
