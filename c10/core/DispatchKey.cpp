@@ -56,6 +56,8 @@ const char* toString(DispatchKey t) {
       return "Named";
     case DispatchKey::Tracer:
       return "Tracer";
+    case DispatchKey::Meta:
+      return "Meta";
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }
