@@ -477,17 +477,7 @@ def elu(input, scale, zero_point, alpha=1.):
 
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor
-    r"""
-    Applies the quantized element-wise function
-
-    .. math::
-        \text{Hardsigmoid}(x) = \begin{cases}
-            0 & \text{if~} x \le -3, \\
-            1 & \text{if~} x \ge +3, \\
-            x / 6 & \text{otherwise}
-        \end{cases}
-
-    See :class:`~torch.nn.Hardsigmoid` for more details.
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardsigmoid`.
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")
