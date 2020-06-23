@@ -354,6 +354,7 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
   quantized representation of 6
 * :class:`~torch.nn.quantized.Hardswish` — Hardswish
+* :class:`~torch.nn.quantized.LayerNorm` — LayerNorm. *Note: performance on ARM is not optimized*.
 
 ``torch.nn.quantized.dynamic``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -785,6 +786,11 @@ DeQuantize
 Linear
 ~~~~~~~~~~~~~~~
 .. autoclass:: Linear
+    :members:
+
+LayerNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: LayerNorm
     :members:
 
 torch.nn.quantized.dynamic
