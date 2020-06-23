@@ -699,9 +699,11 @@ def main():
         ]
         sys.path.remove('test')
 
+    fail = False
     for test in selected_tests:
 
         test_module = parse_test_module(test)
+        
 
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
@@ -711,12 +713,17 @@ def main():
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
             message = '{} failed!'.format(test)
+            fail = True
             if return_code < 0:
                 # subprocess.Popen returns the child process' exit signal as
                 # return code -N, where N is the signal number.
                 signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
                 message += ' Received signal: {}'.format(signal_name)
-            raise RuntimeError(message)
+        
+    if fail:
+        raise RuntimeError(message)
+
+    
     if options.coverage:
         shell(['coverage', 'combine'])
         shell(['coverage', 'html'])
