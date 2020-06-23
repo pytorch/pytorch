@@ -35,7 +35,7 @@ class TestProfiler_cuda(TestCase):
 
         max_diff = -1
         for idx in range(1, len(last_rss)):
-            max_diff = max(max_diff, last_rss[idx] - last_rss[idx-1])
+            max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
 
         # with CUDA events leaking the increase in memory was ~7 MB,
         # using much smaller threshold but not zero to reduce flakiness
