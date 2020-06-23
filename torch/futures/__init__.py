@@ -14,9 +14,6 @@ class PyFuture(torch._C.Future):
     also exposes a set of APIs to add callback functions and set results.
     """
 
-    def __new__(cls):
-        return super(Future, cls).__new__(cls)
-
     def wait(self):
         r"""
         Block until the value of this ``Future`` is ready.
@@ -26,7 +23,7 @@ class PyFuture(torch._C.Future):
             creating the value has thrown an error, this ``wait`` method will
             also throw an error.
         """
-        return super(Future, self).wait()
+        return super().wait()
 
     def then(self, callback):
         r"""
@@ -65,7 +62,7 @@ class PyFuture(torch._C.Future):
             >>> # RPC return value is 5.
             >>> # Chained cb done. None
         """
-        return super(Future, self).then(callback)
+        return super().then(callback)
 
     def set_result(self, result):
         r"""
@@ -95,7 +92,7 @@ class PyFuture(torch._C.Future):
             >>> print(fut.wait())  # tensor([3., 3.])
             >>> t.join()
         """
-        super(Future, self).set_result(result)
+        super().set_result(result)
 
 
 def collect_all(futures):
