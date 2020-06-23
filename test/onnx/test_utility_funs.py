@@ -675,6 +675,29 @@ class TestUtilityFuns(TestCase):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
+    def test_flatten_dynamic_axes(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.flatten(x, start_dim=2, end_dim=3)
+
+        batch_size = 3
+        x = torch.randn(batch_size, 5, 4, 5)
+        model = MyModule()
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f, input_names=['input'], output_names=['output'],
+                          dynamic_axes={'input' : {0 : 'batch_size'},
+                                        'output' : {0 : 'batch_size'}})
+
+        x_ort = torch.randn(5, 5, 4, 5)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name : x_ort.cpu().numpy()}
+        ort_outs = ort_sess.run(None, ort_inputs)[0]
+
+        y = model(x_ort)
+        pytorch_outs = y.cpu().numpy()
+
+        [np.testing.assert_allclose(out, ort_out, rtol=1e-3, atol=1e-7) for out, ort_out in zip(pytorch_outs, ort_outs)]
+
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
