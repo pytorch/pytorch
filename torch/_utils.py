@@ -373,6 +373,7 @@ class KeyErrorMessage(str):
 class RemoteTraceback(Exception):
     def __init__(self, traceback):
         self.traceback = traceback
+
     def __str__(self):
         return self.traceback
 
@@ -391,7 +392,6 @@ class ExceptionWrapper(object):
             self.exc_type.__name__, where, self.exc_msg)
         self.exc_msg = '\n"""\n%s"""' % self.exc_msg
         self.exc = RemoteTraceback(self.exc_msg)
-
 
     def reraise(self):
         r"""Reraises the wrapped exception in the current thread"""
