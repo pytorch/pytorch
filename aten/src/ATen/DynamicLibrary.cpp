@@ -47,14 +47,21 @@ DynamicLibrary::~DynamicLibrary() {
 DynamicLibrary::DynamicLibrary(const char* name) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   HMODULE theModule;
+  bool reload = true;
   if (GetProcAddress(GetModuleHandle("KERNEL32.DLL"), "AddDllDirectory") != NULL) {
     theModule = LoadLibraryExA(
         name,
         NULL,
         LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-  } else {
+    if (theModule != NULL || (GetLastError() == ERROR_MOD_NOT_FOUND)) {
+      reload = false;
+    }
+  }
+
+  if (reload) {
     theModule = LoadLibraryA(name);
   }
+
   if (theModule) {
     handle = theModule;
   } else {
