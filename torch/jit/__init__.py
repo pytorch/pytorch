@@ -2183,6 +2183,7 @@ def _unwrap_optional(x):
 
 _register_builtin(_unwrap_optional, 'aten::_unwrap_optional')
 _register_builtin(_wait, 'aten::wait')
+_register_builtin(wait, 'aten::wait')
 _register_builtin(is_scripting, 'aten::is_scripting')
 
 

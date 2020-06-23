@@ -72,9 +72,9 @@ class TestAsync(JitTestCase):
 
         @torch.jit.script
         def wait_script(x):
-            fut = torch.jit._fork(foo, x)
+            fut = torch.jit.fork(foo, x)
             y_hat = foo(x)
-            y = torch.jit._wait(fut)
+            y = torch.jit.wait(fut)
             return y, y_hat
 
         y, y_hat = wait_script(x)
@@ -96,9 +96,9 @@ class TestAsync(JitTestCase):
 
             @torch.jit.script_method
             def forward(self, x1, x2):
-                fut = torch.jit._fork(self.foo, x1, x2)
+                fut = torch.jit.fork(self.foo, x1, x2)
                 y_hat = self.foo(x1, x2)
-                y = torch.jit._wait(fut)
+                y = torch.jit.wait(fut)
                 return y, y_hat
 
         x1 = torch.rand(3, 4)
