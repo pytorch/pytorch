@@ -51,7 +51,7 @@ DynamicLibrary::DynamicLibrary(const char* name) {
     theModule = LoadLibraryExA(
         name,
         NULL,
-        LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
+        LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
   } else {
     theModule = LoadLibraryA(name);
   }
