@@ -86,7 +86,7 @@ task sourcesJar(type: Jar) {
 
 def getLibtorchHeadersDir() {
   def abi = ABI_FILTERS.split(",")[0]
-  return "$rootDir/../build_android_$abi/include";
+  return "$rootDir/../build_android_$abi/install/include";
 }
 
 afterEvaluate {
@@ -102,6 +102,18 @@ afterEvaluate {
               "headers")
         }
       }
+    }
+  }
+}
+
+tasks.whenTaskAdded { task ->
+  if (task.name.startsWith("bundle") && task.name.endsWith("Aar")) {
+    task.doLast {
+      addFolderToAarTask(
+        "addHeadersTo" + task.name,
+        task.archivePath,
+        getLibtorchHeadersDir(),
+        "headers").execute()
     }
   }
 }
