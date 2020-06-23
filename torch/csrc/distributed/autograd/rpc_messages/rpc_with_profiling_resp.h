@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
+#include <torch/csrc/distributed/rpc/types.h>
 
 namespace torch {
 namespace distributed {
@@ -14,7 +15,8 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
   RpcWithProfilingResp(
       rpc::MessageType messageType,
       rpc::Message&& wrappedMessage,
-      std::vector<torch::autograd::profiler::Event> profiledEvents);
+      std::vector<torch::autograd::profiler::Event> profiledEvents,
+      rpc::ProfilingId profilingId);
 
   // For receving RPCs. Used in from message when converting a message received
   // over the wire.
@@ -23,12 +25,15 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
       std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
       rpc::MessageType wrappedMessageType,
       std::vector<torch::Tensor> tensors,
-      std::vector<torch::autograd::profiler::Event> profiledEvents);
+      std::vector<torch::autograd::profiler::Event> profiledEvents,
+      rpc::ProfilingId profilingId);
   rpc::Message toMessageImpl() && override;
   static std::unique_ptr<RpcWithProfilingResp> fromMessage(
       const rpc::Message& message);
   // Retrieve remote Events
   std::vector<torch::autograd::profiler::Event> getProfiledEvents() const;
+  // Retrieve the globally unique profiling ID corresponding to this command.
+  const rpc::ProfilingId& getProfilingId() const;
   // Retrieve the original RPC which this ProfilingRPC wraps.
   RpcCommandBase& wrappedRpc();
   // Destructively move the wrapped RPC.
@@ -47,6 +52,7 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
   rpc::MessageType wrappedMessageType_;
   std::vector<torch::Tensor> tensors_;
   const std::vector<torch::autograd::profiler::Event> profiledEvents_;
+  const rpc::ProfilingId profilingId_;
 };
 } // namespace autograd
 } // namespace distributed

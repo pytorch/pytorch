@@ -161,8 +161,10 @@ class Tensor(torch._C._TensorBase):
         It should be a tensor of matching type and location, that contains
         the gradient of the differentiated function w.r.t. ``self``.
 
-        This function accumulates gradients in the leaves - you might need to
-        zero them before calling it.
+        This function accumulates gradients in the leaves - you might need to zero
+        ``.grad`` attributes or set them to ``None`` before calling it.
+        See :ref:`Default gradient layouts<default-grad-layouts>`
+        for details on the memory layout of accumulated gradients.
 
         Arguments:
             gradient (Tensor or None): Gradient w.r.t. the
@@ -393,11 +395,14 @@ class Tensor(torch._C._TensorBase):
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)
 
-    def __rtruediv__(self, other):
+    def __rdiv__(self, other):
         if self.dtype.is_floating_point or self.dtype.is_complex:
             return self.reciprocal() * other
         else:
             return (self.double().reciprocal() * other).type_as(self)
+
+    __rtruediv__ = __rdiv__
+    __itruediv__ = _C._TensorBase.__idiv__
 
     __pow__ = _C._TensorBase.pow
 

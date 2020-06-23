@@ -25,6 +25,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
       {"Int8FC", "Int8FCFakeAcc32NNPI"},
       {"Int8Quantize", "Int8QuantizeNNPI"},
       {"Int8Dequantize", "Int8DequantizeNNPI"},
+      {"LayerNorm", "LayerNormFakeFP16NNPI"},
       {"FbFCPacked", "Fp16FCAcc32NNPI"},
       {"SparseLengthsSum", "SparseLengthsSumFakeFP16AccFP16"},
       {"SparseLengthsWeightedSum", "SparseLengthsWeightedSumFakeFP16AccFP16"},
