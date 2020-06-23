@@ -7065,6 +7065,28 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.cat((x, y), out=z)
         self.assertEqual(res1, res2)
 
+    @onlyCPU
+    def test_cat_in_channels_last(self, device):
+        for dim in range(4):
+            x = torch.randn((4, 15, 8, 8), device=device)
+            y = torch.randn(x.shape, device=device)
+            res1 = torch.cat((x, y), dim=dim)
+            x = x.clone().contiguous(memory_format=torch.channels_last)
+            y = y.clone().contiguous(memory_format=torch.channels_last)
+            res2 = torch.cat((x, y), dim=dim)
+            self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(res1, res2)
+
+            # Size larger than grain size.
+            x = torch.randn((4, 15, 256, 256), device=device)
+            y = torch.randn(x.shape, device=device)
+            res1 = torch.cat((x, y), dim=dim)
+            x = x.clone().contiguous(memory_format=torch.channels_last)
+            y = y.clone().contiguous(memory_format=torch.channels_last)
+            res2 = torch.cat((x, y), dim=dim)
+            self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(res1, res2)
+
     @onlyCUDA
     def test_cat_preserve_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8), device=device)

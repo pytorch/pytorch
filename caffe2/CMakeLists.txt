@@ -820,7 +820,7 @@ if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_compile_options(torch_cpu INTERFACE ${OpenMP_CXX_FLAGS})
+  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_FLAGS})
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 

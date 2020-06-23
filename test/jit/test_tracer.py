@@ -2,6 +2,7 @@ import unittest
 import io
 import os
 import sys
+import copy
 
 import torch
 import torch.nn as nn
@@ -1143,7 +1144,8 @@ class TestTracer(JitTestCase):
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
         # should work
-        loaded.copy()
+        copy.copy(loaded)
+        copy.deepcopy(loaded)
 
     def test_trace_export_fns(self):
         class Foo(torch.nn.Module):

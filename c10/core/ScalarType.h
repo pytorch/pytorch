@@ -187,6 +187,13 @@ static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
       "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
 }
 
+inline optional<at::ScalarType> optTypeMetaToScalarType(optional<caffe2::TypeMeta> type_meta) {
+  if (!type_meta.has_value()) {
+    return c10::nullopt;
+  }
+  return typeMetaToScalarType(*type_meta);
+}
+
 static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
   if (auto mt = tryTypeMetaToScalarType(m)) {
     return (*mt) == t;
