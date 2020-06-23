@@ -80,12 +80,12 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                 dispatch_key_init = gen_dispatch_key_init('_dk', option['formals_list'])
 
                 if option['use_c10_dispatcher'] == 'full':
-                    function_cpp_signature=option['schema_order_cpp_signature']
-                    function_actuals=option['schema_order_actuals']
+                    function_cpp_signature = option['schema_order_cpp_signature']
+                    function_actuals = option['schema_order_actuals']
                 else:
                     assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                    function_cpp_signature=option['cpp_signature']
-                    function_actuals=option['actuals']
+                    function_cpp_signature = option['cpp_signature']
+                    function_actuals = option['actuals']
                 method_def = FUNCTION_DEFINITION.substitute(function_name=name,
                                                             schema_string=option['schema_string'],
                                                             method_formals=option['formals_with_defaults'],
