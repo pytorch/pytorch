@@ -190,7 +190,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
 
     auto iter = TensorIteratorConfig()
-      .dont_resize_outputs()
+      .resize_outputs(false)
       .add_output(result_slice)
       .add_input(source_slice)
       .enforce_safe_casting_to_output(true)
@@ -216,7 +216,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       auto result_slice = result.narrow(dim, offset, slice_dim_size);
 
       auto iter = TensorIteratorConfig()
-        .dont_resize_outputs()
+        .resize_outputs(false)
         .add_output(result_slice)
         .add_input(tensor)
         .promote_inputs_to_common_dtype(true)

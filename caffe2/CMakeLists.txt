@@ -566,6 +566,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/vision.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/adamw.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
@@ -819,7 +820,7 @@ if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_compile_options(torch_cpu INTERFACE ${OpenMP_CXX_FLAGS})
+  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_FLAGS})
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
