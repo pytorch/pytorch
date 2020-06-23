@@ -716,7 +716,7 @@ TensorIterator TensorIterator::nullary_op(Tensor& out) {
     .check_all_same_dtype(false)
     .add_output(out)
     // FIXME: workaround for bug: https://github.com/pytorch/pytorch/issues/20342
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .build();
 }
 
@@ -725,7 +725,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   return TensorIteratorConfig()
     .add_output(out)
     .add_input(a)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .is_reduction(true)
     // TODO: not supporting casting to outputs is only really necessary for arg{min,max}
     .promote_inputs_to_common_dtype(true)
@@ -748,7 +748,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
     .add_output(out1)
     .add_output(out2)
     .add_input(a)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .is_reduction(true)
     .check_all_same_dtype(false)
     .build();
