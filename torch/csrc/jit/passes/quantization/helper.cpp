@@ -402,7 +402,7 @@ bool isPropagateQuantBinaryOp(Node* n) {
   return isAtenFunc(n, _propagate_quant_binary_ops);
 }
 
-bool isPropagateQuantNode(Node* n) {
+bool isPropagateQuantOp(Node* n) {
   return isPropagateQuantSingleInputOp(n) || isPropagateQuantBinaryOp(n);
 }
 
