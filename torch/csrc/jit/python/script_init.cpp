@@ -1015,6 +1015,9 @@ void initJitScriptBindings(PyObject* module) {
             return std::make_tuple(pp.str(), consts);
           })
       .def("apply", &Module::apply)
+      // TODO: remove after the use in TestJit.test_module_copy_with_attributes
+      // is addressed
+      .def("copy", &Module::copy)
       .def("__copy__", &Module::copy)
       .def(
           "__deepcopy__",
