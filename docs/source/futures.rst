@@ -22,7 +22,3 @@ on :class:`~torch.futures.Future` objects. Currently, the
 
 .. autofunction:: collect_all
 .. autofunction:: wait_all
-
-.. This is to silent the error, "Undocumented Python objects".
-
-.. autoclass:: _PyFuture

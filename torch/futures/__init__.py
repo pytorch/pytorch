@@ -4,12 +4,6 @@ import torch
 
 
 class _PyFuture(torch._C.Future):
-    r"""
-    Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
-    execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
-    also exposes a set of APIs to add callback functions and set results.
-    """
-
     def wait(self):
         r"""
         Block until the value of this ``Future`` is ready.
@@ -147,8 +141,13 @@ GenericWithOneTypeVar = Generic[T]
 
 try:
 
+    # Combine the implementation class and the type class.
     class Future(_PyFuture, GenericWithOneTypeVar):
-        # Combine the implementation class and the type class.
+        r"""
+        Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
+        execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
+        also exposes a set of APIs to add callback functions and set results.
+        """
         pass
 
 
@@ -158,6 +157,11 @@ except TypeError as exc:
     class FutureMeta(_PyFuture.__class__, GenericWithOneTypeVar.__class__):
         pass
 
+    # Combine the implementation class and the type class.
     class Future(_PyFuture, GenericWithOneTypeVar, metaclass=FutureMeta):
-        # Combine the implementation class and the type class.
+        r"""
+        Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
+        execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
+        also exposes a set of APIs to add callback functions and set results.
+        """
         pass
