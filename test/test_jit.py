@@ -10469,17 +10469,9 @@ a")
                     x = layer.forward(x)
                 return x
 
-        input = torch.tensor([-2, 1, -1, 2])
         seq = seq_mod()
         with torch.jit._disable_emit_hooks():
-            traced = torch.jit.script(seq, input)
-        o = traced(input)
-        graph = traced.graph
-        FileCheck().check("ReLU") \
-            .check("ReLU") \
-            .check("ReLU") \
-            .run(graph)
-        self.assertEqual(o, torch.tensor([0, 1, 0, 2]))
+            self.checkModule(seq, [torch.tensor([-2, 1, -1, 2])])
 
     def test_script_sequential_orderdict(self):
         class M(torch.jit.ScriptModule):
