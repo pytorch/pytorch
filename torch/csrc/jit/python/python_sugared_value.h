@@ -114,7 +114,7 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
       Function& f,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) {
+      size_t n_binders) override {
     if (inputs.size() || attributes.size()) {
       throw ErrorReport(loc)
           << name_ << " method does not accept any arguments";
