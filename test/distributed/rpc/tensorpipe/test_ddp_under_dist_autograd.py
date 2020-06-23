@@ -24,5 +24,18 @@ class TestDdpUnderDistAutogradTensorPipe(TensorPipeRpcAgentTestFixture, ddp_unde
     def test_verify_backend_options(self):
         self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.TENSORPIPE)
 
+@unittest.skipIf(
+    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
+)
+class TestDdpComparisonTensorPipe(TensorPipeRpcAgentTestFixture, ddp_under_dist_autograd_test.TestDdpComparison):
+
+    @property
+    def world_size(self) -> int:
+        return ddp_under_dist_autograd_test.WORLD_SIZE
+
+    @dist_init
+    def test_verify_backend_options(self):
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.TENSORPIPE)
+
 if __name__ == "__main__":
     run_tests()
