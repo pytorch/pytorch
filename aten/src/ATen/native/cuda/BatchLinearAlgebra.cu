@@ -901,6 +901,66 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   }
 }
 
+template <typename scalar_t>
+static void apply_cholesky_mod(const Tensor& self, Tensor& out, Tensor& err, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_MAGMA
+AT_ERROR("cholesky: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
+  Tensor outTag =  out;
+  Tensor selfTag = self;
+
+  auto self_matrix_stride = matrixStride(self);
+  auto batch_size = batchCount(self);
+  auto n = self.size(-2);
+  auto m = self.size(-1);
+
+  if (batch_size > 1) {
+    outTag =  out.flatten(0, -3);
+    selfTag = self.flatten(0, -3);
+  }
+  
+  scalar_t* self_data = selfTag.data_ptr<scalar_t>();
+  scalar_t* out_data = outTag.data_ptr<scalar_t>();
+  int info;
+  /* TODO: do this in parallel */
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* out_working_ptr = &out_data[i * self_matrix_stride];
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    double err_val = 1e-8;
+    magma_int_t info = 0;
+    magmaCholesky<scalar_t>(uplo, n, out_working_ptr, n, &info);
+    for (int64_t j=0; j<8; j++)
+    {
+      if (info == 0) {
+        break;
+      }
+      // lapackChelesky failed.
+      // Copy current 2D matrix to out, add err_value to diagnal
+      if (batch_size > 1) {
+        outTag[i].copy_(selfTag[i]);
+        for (int64_t mm=0; mm<m; mm++)
+        {
+            outTag[i][mm][mm] += err_val;
+        }
+        err[i] = err_val;
+      } else {
+        outTag.copy_(selfTag);
+        for (int64_t mm=0; mm<m; mm++)
+        {
+            outTag[mm][mm] += err_val;
+        }
+        at::fill_(err, err_val);
+      }
+      err_val *= 100.0;
+      magmaCholesky<scalar_t>(uplo, n, out_working_ptr, n, &info);
+    }
+    infos[0] = info;
+  }
+#endif
+}
+
 std::tuple<Tensor, Tensor> _cholesky_mod_helper_cuda(const Tensor& self, bool upper) {
   std::vector<int64_t> infos(batchCount(self), 0);
   Tensor self_working_copy;
@@ -915,7 +975,7 @@ std::tuple<Tensor, Tensor> _cholesky_mod_helper_cuda(const Tensor& self, bool up
   auto err = at::zeros(req_size, self.options().dtype(ScalarType::Double));
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_mod_cuda", [&]{
-    apply_cholesky<scalar_t>(self_working_copy, false, infos);
+    apply_cholesky_mod<scalar_t>(self, self_working_copy, err, false, infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "cholesky_mod_cuda");

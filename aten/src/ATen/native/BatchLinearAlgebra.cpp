@@ -578,30 +578,43 @@ static void  apply_cholesky_mod(const Tensor& self, Tensor & out, Tensor & err, 
 #else
   char uplo = upper ? 'U' : 'L';
 
-  auto self_data = self.data_ptr<scalar_t>();
-  auto out_data = out.data_ptr<scalar_t>();
-  auto err_data = err.data_ptr<double>();
+  Tensor outTag =  out;
+  Tensor selfTag = self;
+
+  double* err_data = err.data_ptr<double>();
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
   auto m = self.size(-1);
 
-  int info;
+  if (batch_size > 1) {
+    outTag =  out.flatten(0, -3);
+    selfTag = self.flatten(0, -3);
+  }
+  
+  scalar_t* self_data = selfTag.data_ptr<scalar_t>();
+  scalar_t* out_data = outTag.data_ptr<scalar_t>();
+  /* TODO: do this in parallel */
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* out_working_ptr = &out_data[i * self_matrix_stride];
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     double err_val = 1e-8;
+    int info;
     lapackCholesky<scalar_t>(uplo, n, out_working_ptr, n, &info);
-    for (int64_t j=0; j<6; j++)
+    for (int64_t j=0; j<8; j++)
     {
       if (info == 0) {
         break;
       }
-      // lapackChelesky failed.
-      // Copy current 2D matrix to out, add err_value to diagnal
-      memcpy(out_working_ptr, self_working_ptr, n * m * sizeof(scalar_t));
+      // lapackChelesky failed. Copy current 2D matrix to out
+      if (batch_size > 1) {
+        outTag[i].copy_(selfTag[i]);
+      } else {
+        outTag.copy_(selfTag);
+      }
       for (int64_t mm=0; mm<m; mm++)
       {
+        // Add err_val to the diagonal
         out_working_ptr[(mm * m) + mm] += err_val;
       }
       err_data[i] = err_val;
