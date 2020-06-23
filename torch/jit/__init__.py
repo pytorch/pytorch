@@ -4,7 +4,7 @@ import torch.jit.annotations
 import torch.testing
 import torch.jit._recursive
 
-from torch.jit._recursive import ScriptMethodStub
+from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
 from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin  # noqa
 from torch._jit_internal import Future, _qualified_name
 from torch.autograd import Variable, function
@@ -1119,6 +1119,78 @@ def trace_module(mod,
     return module
 
 
+def fork(func, *args, **kwargs):
+    """
+    Creates an asynchronous task executing `func` and a reference to the value
+    of the result of this execution. `fork` will return immediately,
+    so the return value of `func` may not have been computed yet. To force completion
+    of the task and access the return value invoke `torch.jit.wait` on the Future. `fork` invoked
+    with a `func` which returns `T` is typed as `torch.jit.Future[T]`. `fork` calls can be arbitrarily
+    nested, and may be invoked with positional and keyword arguments.
+    Asynchronous execution will only occur when run in TorchScript. If run in pure python,
+    `fork` will not execute in parallel. `fork` will also not execute in parallel when invoked
+    while tracing, however the `fork` and `wait` calls will be captured in the exported IR Graph.
+    Warning:
+        `fork` tasks will execute non-deterministicly. We recommend only spawning
+        parallel fork tasks for pure functions that do not modify their inputs,
+        module attributes, or global state.
+    Arguments:
+        func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
+            that will be invoked. If executed in TorchScript, it will execute asynchronously,
+            otherwise it will not. Traced invocations of fork will be captured in the IR.
+        *args, **kwargs: arguments to invoke `func` with.
+    Returns:
+        `torch.jit.Future[T]`: a reference to the execution of `func`. The value `T`
+        can only be accessed by forcing completion of `func` through `torch.jit.wait`.
+    Example (fork a free function):
+    .. testcode::
+        import torch
+        from torch import Tensor
+        def foo(a : Tensor, b : int) -> Tensor:
+            return a + b
+        def bar(a):
+            fut : torch.jit.Future[Tensor] = torch.jit.fork(foo, a, b=2)
+            return torch.jit.wait(fut)
+        script_bar = torch.jit.script(bar)
+        input = torch.tensor(2)
+        # only the scripted version executes asynchronously
+        assert script_bar(input) == bar(input)
+        # trace is not run asynchronously, but fork is captured in IR
+        graph = torch.jit.trace(bar, (input,)).graph
+        assert "fork" in str(graph)
+    Example (fork a module method):
+    .. testcode::
+        import torch
+        from torch import Tensor
+        class SubMod(torch.nn.Module):
+            def forward(self, a: Tensor, b : int):
+                return a + b
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(self).__init__()
+                self.mod = SubMod()
+            def forward(self, input):
+                fut = torch.jit.fork(self.mod, a, b=2)
+                return torch.jit.wait(fut)
+        input = torch.tensor(2)
+        mod = Mod()
+        assert mod(input) == torch.jit.script(mod).forward(input)
+    """
+    return torch._C.fork(func, *args, **kwargs)
+
+
+def wait(future):
+    """
+    Forces completion of a `torch.jit.Future[T]` asynchronous task, returning the
+    result of the task. See :func:`~fork` for docs and examples.
+    Arguments:
+        func (torch.jit.Future[T]): an asynchronous task reference, created through `torch.jit.fork`
+    Returns:
+        `T`: the return value of the the completed task
+    """
+    return torch._C.wait(future)
+
+
 class CompilationUnit(object):
     def __init__(self, lang=None, _frames_up=0):
         self._c = torch._C.CompilationUnit()
@@ -1743,6 +1815,32 @@ if _enabled:
             script_module._initializing = False
             return script_module
 
+        def _reconstruct(self, cpp_module):
+            """
+            Re-construct an instance of RecursiveScriptModule using an instance of a C++ module.
+
+            Arguments:
+                cpp_module: The C++ module that this RecursiveScriptModule will be rebuilt around.
+            """
+            self.__init__(cpp_module)
+
+            # Copy the concrete type from the C++ module to this ScriptModule.
+            self._concrete_type = torch._C.ConcreteModuleType.from_jit_type(self._c._type())
+
+            # Copy submodules from the C++ module to this ScriptModule.
+            modules = {}
+            for name, cpp_module in torch._C.ModuleDict(self._c).items():
+                modules[name] = wrap_cpp_module(cpp_module)
+            self._modules = OrderedModuleDict(self._c, modules)
+
+            # Copy parameters and buffers.
+            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(self._c))
+            self._buffers = OrderedDictWrapper(torch._C.BufferDict(self._c))
+
+            # Get rid of the functions from the old C++ module.
+            self.__dict__ = {k: v for k, v in self.__dict__.items() if not isinstance(v, torch._C.ScriptMethod)}
+            self.__dict__['_initializing'] = False
+
         @property
         def graph(self):
             r"""
@@ -1894,6 +1992,12 @@ if _enabled:
                 "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. " +
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
+
+        def __copy__(self):
+            return torch.jit._recursive.wrap_cpp_module(copy.copy(self._c))
+
+        def __deepcopy__(self, memo):
+            return torch.jit._recursive.wrap_cpp_module(copy.deepcopy(self._c, memo))
 
         # Python magic methods do method lookups on an object's class type, instead of looking up
         # the method defines on the class instance. In order to continue to expose the magic methods
@@ -2070,6 +2174,16 @@ if _enabled:
     class TopLevelTracedModule(TracedModule):
         forward = _CachedForward()
 
+        def _reconstruct(self, cpp_module):
+            """
+            Re-construct an instance of TopLevelTracedModule using an instance of a C++ module.
+
+            Arguments:
+                cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
+            """
+            self.__dict__['_actual_script_module']._reconstruct(cpp_module)
+
+
 def is_scripting():
     r"""
     Function that returns True when in compilation and False otherwise. This
@@ -2105,6 +2219,7 @@ def _unwrap_optional(x):
 
 _register_builtin(_unwrap_optional, 'aten::_unwrap_optional')
 _register_builtin(_wait, 'aten::wait')
+_register_builtin(wait, 'aten::wait')
 _register_builtin(is_scripting, 'aten::is_scripting')
 
 
