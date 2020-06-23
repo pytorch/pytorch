@@ -205,11 +205,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
-    // If we use the work to do barrier, we should block here
-    if (!barrierTensors_.empty()) {
-      at::cuda::CUDAGuard gpuGuard(devices_[i]);
-      AT_CUDA_CHECK(cudaDeviceSynchronize());
-    }
   }
 
   // In case of blocking, wait for the operation to complete.
@@ -243,6 +238,15 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
           std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
     checkAndThrowException();
+  }
+
+  // Device synchronize only after we've completed timeout checks.
+  if (!barrierTensors_.empty()) {
+    // If we use the work to do barrier, we should block here
+    for (size_t i = 0; i < devices_.size(); ++i) {
+      at::cuda::CUDAGuard gpuGuard(devices_[i]);
+      AT_CUDA_CHECK(cudaDeviceSynchronize());
+    }
   }
 }
 
@@ -564,8 +568,11 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
     if (t.sizes() != first.sizes()) {
       throw std::runtime_error("Tensors must have identical size");
     }
-    if (!t.is_contiguous()) {
-      throw std::runtime_error("Tensors must be contiguous");
+    if (t.strides() != first.strides()) {
+      throw std::runtime_error("Tensors must have identical strides");
+    }
+    if (!t.is_non_overlapping_and_dense()) {
+      throw std::runtime_error("Tensors must be non-overlapping and dense");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
@@ -605,9 +612,13 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     }
 
     for (const auto& t : tensor_lists[i]) {
-      if (t.numel() != other[i].numel()) {
+      if (t.sizes() != other[i].sizes()) {
         throw std::runtime_error(
             "All tensor operands to scatter/gather must have the same size");
+      }
+      if (t.strides() != other[i].strides()) {
+        throw std::runtime_error(
+            "All tensor operands to scatter/gather must have the same layout (strides)");
       }
     }
     // Flatten the tensors (from all ranks) into a single big tensor.

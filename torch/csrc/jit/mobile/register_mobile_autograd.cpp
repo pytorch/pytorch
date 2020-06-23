@@ -102,11 +102,11 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 // NB! This is _aten, not aten!!!
 TORCH_LIBRARY_IMPL(_aten, Autograd, m) {
-  m.impl("add.Scalar", torch::autograd::VariableType::add_Scalar);
-  m.impl("mul.Tensor", torch::autograd::VariableType::mul_Tensor);
+  m.impl("add.Scalar", TORCH_FN(torch::autograd::VariableType::add_Scalar));
+  m.impl("mul.Tensor", TORCH_FN(torch::autograd::VariableType::mul_Tensor));
   m.impl("conv2d", torch::CppFunction::makeFromBoxedFunction<conv2d_kernel>());
-  m.impl("dropout", VariableType::dropout);
-  m.impl("feature_dropout", VariableType::feature_dropout);
+  m.impl("dropout", TORCH_FN(VariableType::dropout));
+  m.impl("feature_dropout", TORCH_FN(VariableType::feature_dropout));
   m.impl(
       "log_softmax.int",
       torch::CppFunction::makeFromBoxedFunction<log_softmax_kernel>());
@@ -126,9 +126,9 @@ TORCH_LIBRARY_IMPL(_aten, Autograd, m) {
             dilation.vec(),
             ceil_mode);
       });
-  m.impl("relu", VariableType::relu);
+  m.impl("relu", TORCH_FN(VariableType::relu));
   m.impl("view", torch::CppFunction::makeFromBoxedFunction<view_kernel>());
-  m.impl("t", VariableType::t);
-  m.impl("addmm", VariableType::addmm);
+  m.impl("t", TORCH_FN(VariableType::t));
+  m.impl("addmm", TORCH_FN(VariableType::addmm));
 }
 } // anonymous namespace

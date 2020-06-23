@@ -135,14 +135,14 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 #endif
 
-  auto iter = TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(self);
-  iter.add_input(src);
-  iter.dont_resize_outputs();
-  iter.check_all_same_dtype(false);
-  iter.check_all_same_device(false);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(self)
+    .add_input(src)
+    .resize_outputs(false)
+    .check_all_same_dtype(false)
+    .check_all_same_device(false)
+    .build();
 
   if (iter.numel() == 0) {
     return self;

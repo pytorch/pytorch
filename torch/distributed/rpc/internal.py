@@ -1,23 +1,27 @@
 import collections
 import copyreg
-from enum import Enum
 import io
 import pickle
 import threading
 import traceback
+from enum import Enum
 
 import torch
 import torch.distributed as dist
+
+from . import _get_current_rpc_agent
 
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects
 _thread_local_tensor_tables = threading.local()
 
+
 class RPCExecMode(Enum):
     SYNC = "sync"
     ASYNC = "async"
     REMOTE = "remote"
+
 
 class _InternalRPCPickler:
     r"""
@@ -51,7 +55,7 @@ class _InternalRPCPickler:
 
     def _rref_reducer(self, rref):
         rref_fork_data = rref._serialize()
-        return (_InternalRPCPickler._rref_receiver, (rref_fork_data, ))
+        return (_InternalRPCPickler._rref_receiver, (rref_fork_data,))
 
     def serialize(self, obj):
         r"""
@@ -68,6 +72,11 @@ class _InternalRPCPickler:
         # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
         # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
         # so puting rref's dispatch table here
+        #
+        # The return value of a `rpc.remote(..)` call is type of `rpc.PyRRef`.
+        # The deserialized RRef object on an RPC receiver side is type of `rpc.PyRRef`.
+        p.dispatch_table[dist.rpc.PyRRef] = self._rref_reducer
+        # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
@@ -107,9 +116,12 @@ class _InternalRPCPickler:
         except AttributeError as e:
             # Occurs when function is not found on module/class during
             # unpickling.
-            except_str = str(e) + """ Default RPC pickler does not serialize
+            except_str = (
+                str(e)
+                + """ Default RPC pickler does not serialize
             function code. Ensure that UDFs are defined on both caller and
             callee modules."""
+            )
             ret = AttributeError(except_str)
 
         # restore _thread_local_tensor_tables.recv_tables if return
@@ -148,7 +160,10 @@ def _run_function(python_udf):
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
     except Exception as e:
         # except str = exception info + traceback string
-        except_str = "{}\n{}".format(repr(e), traceback.format_exc())
+        except_str = (
+            f"On {_get_current_rpc_agent().get_worker_info()}:\n"
+            f"{repr(e)}\n{traceback.format_exc()}"
+        )
         result = RemoteException(except_str, type(e))
     return result
 
@@ -157,7 +172,10 @@ def _handle_exception(result):
     if isinstance(result, RemoteException):
         raise result.exception_type(result.msg)
 
-def _build_rpc_profiling_key(exec_type, func_name, current_worker_name, dst_worker_name):
+
+def _build_rpc_profiling_key(
+    exec_type, func_name, current_worker_name, dst_worker_name
+):
     """
     Builds the key that RPC calls are profiled with using the autograd profiler.
     This will be the name of the corresponding Event recorded in the profiler.

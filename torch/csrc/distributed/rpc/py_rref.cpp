@@ -182,11 +182,16 @@ py::object PyRRef::toHere(const float timeoutSeconds) const {
 py::object PyRRef::localValue() const {
   TORCH_CHECK(
       rref_->isOwner(),
-      "Cannot call localValue() on a non-local reference. Call it on ",
-      owner().name_);
+      "For ",
+      *rref_,
+      ", can't call localValue() on user ",
+      RRefContext::getInstance().agent()->getWorkerInfo(),
+      ". Call it on owner ",
+      owner());
 
   py::object res;
-  auto value = c10::static_intrusive_pointer_cast<OwnerRRef>(rref_)->getValue();
+  auto value =
+      c10::static_intrusive_pointer_cast<const OwnerRRef>(rref_)->getValue();
   auto& rpcHandler = PythonRpcHandler::getInstance();
   {
     // acquiring GIL as torch::jit::toPyObject creates new py::object without

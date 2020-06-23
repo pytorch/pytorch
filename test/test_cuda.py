@@ -64,6 +64,7 @@ types = [
     torch.HalfTensor,
 ]
 
+
 def make_sparse_tensor(t, n, *sizes):
     assert t.is_sparse
     tensor = t()
@@ -75,6 +76,7 @@ def make_sparse_tensor(t, n, *sizes):
     return t(i, v, torch.Size(sizes))
 
 _cycles_per_ms = None
+
 
 def get_cycles_per_ms():
     """Approximate number of cycles per millisecond for torch.cuda._sleep"""
@@ -1698,7 +1700,7 @@ class TestCuda(TestCase):
     def _test_multinomial_invalid_probs_cuda(probs):
         try:
             with torch.random.fork_rng(devices=[0]):
-                torch.multinomial(probs.to('cuda'), 2)
+                torch.multinomial(probs.to('cuda'), 2, replacement=True)
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
@@ -1714,7 +1716,6 @@ class TestCuda(TestCase):
         self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
         self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
-        self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -2645,7 +2646,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op_with_args in self.autocast_lists.torch_fp16:
                 skip_test = False
                 op, args = op_with_args[0], op_with_args[1]
@@ -2672,7 +2673,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp16(self):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
@@ -2683,7 +2684,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp16(self):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.methods_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=None)
 
@@ -2765,14 +2766,14 @@ t2.start()
             loss = output.sum()
         loss.backward()
 
-    def test_autocast_custom_disabled(self):
+    def test_autocast_custom_cast_inputs(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
             @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
-            def forward(ctx, a, container):
+            def forward(ctx, a, container, expect_type):
                 b = container[1][0]
-                self.assertTrue(a.dtype is torch.float32)
-                self.assertTrue(b.dtype is torch.float32)
+                self.assertTrue(a.dtype is expect_type)
+                self.assertTrue(b.dtype is expect_type)
                 self.assertFalse(torch.is_autocast_enabled())
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
@@ -2782,7 +2783,7 @@ t2.start()
             def backward(ctx, grad):
                 self.assertFalse(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
-                return grad.mm(b.t()), None
+                return grad.mm(b.t()), None, None
 
         mymm = MyMM.apply
 
@@ -2793,9 +2794,15 @@ t2.start()
         y = (0, {0: torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=False)})
 
         with torch.cuda.amp.autocast():
-            output = mymm(x, y)
+            output = mymm(x, y, torch.float32)
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
+        loss.backward()
+
+        # Tests if custom_fwd becomes a no-op when mymm runs outside an autocast-enabled region.
+        output = mymm(x, y, torch.float16)
+        self.assertTrue(output.dtype is torch.float16)
+        loss = output.sum()
         loss.backward()
 
     def test_autocast_cat_jit(self):
