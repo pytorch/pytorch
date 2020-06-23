@@ -6,6 +6,7 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc.internal import _build_rpc_profiling_key, RPCExecMode
 from torch import Tensor
+from torch.distributed.rpc import RRef
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -24,8 +25,7 @@ def rpc_return_rref(dst):
     return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
 
 @torch.jit.script
-def rref_local_value(rref):
-    # type: (RRef[Tensor]) -> Tensor
+def rref_local_value(rref: RRef[Tensor]) -> Tensor:
     return rref.local_value()
 
 @torch.jit.script

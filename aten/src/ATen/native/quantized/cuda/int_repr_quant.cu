@@ -11,11 +11,11 @@ Tensor int_repr_quant_cuda(const Tensor& self) {
         self.sizes(),
         self.options().dtype(UNDERLYING_TYPE),
         self.suggest_memory_format());
-    auto iter = TensorIterator();
-    iter.check_all_same_dtype(false);
-    iter.add_output(dst);
-    iter.add_input(self);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(dst)
+      .add_input(self)
+      .build();
     gpu_kernel(iter, [] GPU_LAMBDA(scalar_t value) -> underlying_t {
       return value.val_;
     });
