@@ -27,11 +27,13 @@ if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
 IS_WINDOWS = sys.platform == "win32"
 
 
-# This effectively allows re-using the same extension (compiled once) in
-# multiple tests, just to split up the tested properties.
-def dont_wipe_extensions_build_folder(func):
-    func.dont_wipe = True
-    return func
+def remove_build_path():
+    if sys.platform == "win32":
+        print("Not wiping extensions build folder because Windows")
+        return
+    default_build_root = torch.utils.cpp_extension.get_default_build_root()
+    if os.path.exists(default_build_root):
+        shutil.rmtree(default_build_root)
 
 
 class TestCppExtensionJIT(common.TestCase):
@@ -45,33 +47,17 @@ class TestCppExtensionJIT(common.TestCase):
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-        test_name = self.id().split(".")[-1]
-        dont_wipe = hasattr(getattr(self, test_name), "dont_wipe")
-        if dont_wipe:
-            print(
-                "Test case {} has 'dont_wipe' attribute set, ".format(test_name)
-                + "therefore not wiping extensions build folder before running the test"
-            )
-            return
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
-
     def tearDown(self):
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
     @classmethod
+    def setUpClass(cls):
+        remove_build_path()
+
+    @classmethod
     def tearDownClass(cls):
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
+        remove_build_path()
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
@@ -430,7 +416,6 @@ class TestCppExtensionJIT(common.TestCase):
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
 
-    @dont_wipe_extensions_build_folder
     @common.skipIfRocm
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
@@ -463,7 +448,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(cpp_parameters["fc.weight"].grad, python_linear.weight.grad)
         self.assertEqual(cpp_parameters["fc.bias"].grad, python_linear.bias.grad)
 
-    @dont_wipe_extensions_build_folder
     @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op(self):
         extension = torch.utils.cpp_extension.load(
@@ -562,7 +546,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertIn("buf", nb)
         self.assertEqual(nb[0][1], torch.eye(5))
 
-    @dont_wipe_extensions_build_folder
     @common.skipIfRocm
     def test_cpp_frontend_module_has_up_to_date_attributes(self):
         extension = torch.utils.cpp_extension.load(
@@ -585,7 +568,6 @@ class TestCppExtensionJIT(common.TestCase):
         net.add_new_submodule("fc2")
         self.assertEqual(len(net._modules), 2)
 
-    @dont_wipe_extensions_build_folder
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op_with_cuda(self):
