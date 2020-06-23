@@ -354,6 +354,8 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
   quantized representation of 6
 * :class:`~torch.nn.quantized.Hardswish` — Hardswish
+* :class:`~torch.nn.quantized.BatchNorm2d` — BatchNorm2d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.BatchNorm3d` — BatchNorm3d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
 * :class:`~torch.nn.quantized.LayerNorm` — LayerNorm. *Note: performance on ARM is not optimized*.
 * :class:`~torch.nn.quantized.GroupNorm` — GroupNorm. *Note: performance on ARM is not optimized*.
 * :class:`~torch.nn.quantized.InstanceNorm1d` — InstanceNorm1d. *Note: performance on ARM is not optimized*.
@@ -790,6 +792,16 @@ DeQuantize
 Linear
 ~~~~~~~~~~~~~~~
 .. autoclass:: Linear
+    :members:
+
+BatchNorm2d
+~~~~~~~~~~~~~~~
+.. autoclass:: BatchNorm2d
+    :members:
+
+BatchNorm3d
+~~~~~~~~~~~~~~~
+.. autoclass:: BatchNorm3d
     :members:
 
 LayerNorm
