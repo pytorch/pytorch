@@ -281,7 +281,7 @@ script::Module optimizeForMobile(
   cloned_module.eval();
 
   if (!optimization_blacklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
-    cloned_module = FoldConvBatchNorm2d(cloned_module);
+    cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
   if (!optimization_blacklist.count(

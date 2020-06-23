@@ -25,7 +25,7 @@ will still share storage after :func:`torch.load`.
     >>> loaded_1[0] # loaded tensors still share storage
     tensor(1.)
 
-Note that saving storage instead of tensor itself indicates the serialized file size might not match tensor size.
+Note that saving storage instead of tensor itself means the serialized file size might not match tensor size.
 In the example above the whole `tensor`'s storage (of size 1000000) is serialized instead of only slices.
 When tensor is expanded from a smaller storage, serialized file size might be smaller than tensor size as well.
 
@@ -49,11 +49,11 @@ When tensor is expanded from a smaller storage, serialized file size might be sm
      0.0
     [torch.FloatStorage of size 4]
 
-If you prefer to save only the slices without preserving storage sharing, call :meth:`~torch.Tensor.clone` before saving::
+If you prefer to not preserve storage sharing (might produce different results before/after serialization),
+call :meth:`~torch.Tensor.clone` before saving::
 
     torch.save(slice.clone())
 
-but users should use it with caution as it might produce different results before/after serialization.
 
 Best practices
 --------------
