@@ -521,24 +521,6 @@ class ActivationsTestModel(torch.nn.Module):
         x = self.dequant(x)
         return x
 
-class ActivationsQATTestModel(torch.nn.Module):
-    def __init__(self, qengine):
-        super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
-        self.quant = torch.quantization.QuantStub()
-        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
-        self.elu = torch.nn.ELU().to(dtype=torch.float)
-        self.dequant = torch.quantization.DeQuantStub()
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.hardswish(x)
-        x = self.elu(x)
-        x = self.dequant(x)
-        return x
-
 class LinearReluModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -568,30 +550,6 @@ class NormalizationTestModel(torch.nn.Module):
         x = self.instance_norm1d(x)
         x = self.instance_norm2d(x.unsqueeze(-1))
         x = self.instance_norm3d(x.unsqueeze(-1))
-        return x
-
-class NormalizationQATTestModel(torch.nn.Module):
-    def __init__(self, qengine):
-        super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
-        self.quant = torch.quantization.QuantStub()
-        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.layer_norm = torch.nn.LayerNorm((8))
-        self.group_norm = torch.nn.GroupNorm(2, 8)
-        self.instance_norm1d = torch.nn.InstanceNorm1d(4)
-        self.instance_norm2d = torch.nn.InstanceNorm2d(4)
-        self.instance_norm3d = torch.nn.InstanceNorm3d(4)
-        self.fc2 = torch.nn.Linear(8, 2)
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.layer_norm(x)
-        x = self.group_norm(x.unsqueeze(-1))
-        x = self.instance_norm1d(x.reshape((2, 4, 2)))
-        x = self.instance_norm2d(x.unsqueeze(-1))
-        x = self.instance_norm3d(x.unsqueeze(-1))
-        x = self.fc2(x.reshape((2, 8)))
         return x
 
 class NestedModel(torch.nn.Module):
