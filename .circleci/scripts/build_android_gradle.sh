@@ -47,7 +47,7 @@ fi
 env
 echo "BUILD_ENVIRONMENT:$BUILD_ENVIRONMENT"
 
-GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace"
+GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace -PLIBTORCH_HEADERS=${BUILD_ANDROID_INCLUDE_DIR_x86}"
 if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
     GRADLE_PARAMS+=" -PABI_FILTERS=x86"
 fi

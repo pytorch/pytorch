@@ -39,6 +39,7 @@ else
 
   echo "signing.keyId=${ANDROID_SIGN_KEY}" >> $GRADLE_PROPERTIES
   echo "signing.password=${ANDROID_SIGN_PASS}" >> $GRADLE_PROPERTIES
+  echo "LIBTORCH_HEADERS=~/workspace/build_android/install/include" >> $GRADLE_PROPERTIES
 
   $GRADLE_PATH -p ~/workspace/android/ uploadArchives
 fi
