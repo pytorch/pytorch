@@ -98,6 +98,25 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  // NB: unsqueeze has some special handling of its `dim` argument so we can't call
+  // self_physical.getPhysicalDim. Semantically speaking `dim` is the dimension
+  // index on the NEW tensor where the new dimension appears.
+  auto dim_physical =
+      self_physical.numBatchDims() + maybe_wrap_dim(dim, /*logical_dim*/self.dim() + 1);
+  auto result = self_physical.tensor().unsqueeze(dim_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim0_physical = self_physical.getPhysicalDim(dim0);
+  auto dim1_physical = self_physical.getPhysicalDim(dim1);
+  auto result = self_physical.tensor().transpose(dim0_physical, dim1_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 void batchedTensorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_CHECK(false, "NYI: Calling ", op.schema().name(), " inside of vmap");
 }
@@ -118,6 +137,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl_UNBOXED("mul.Tensor", mul_batching_rule);
   m.impl("expand", expand_batching_rule);
+  m.impl("transpose.int", transpose_int_batching_rule);
+  m.impl("unsqueeze", unsqueeze_batching_rule);
 }
 
 } // namespace at
