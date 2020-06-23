@@ -35,14 +35,20 @@ def script_qconfig_dict(qconfig_dict):
     """
     return {k: script_qconfig(v) if v else None for k, v in qconfig_dict.items()}
 
-def fuse_conv_bn_jit(model):
+def fuse_conv_bn_jit(model, inplace=False):
     r""" Fuse conv - bn module
     Works for eval model only.
 
     Args:
         model: TorchScript model from scripting or tracing
     """
-    return torch.jit._recursive.wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+    model_c = model._c
+    model_c = torch._C._jit_pass_fold_convbn(model_c)
+    if inplace:
+        model._reconstruct(model_c)
+    else:
+        model = wrap_cpp_module(model_c)
+    return model
 
 def _prepare_jit(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC):
     _check_is_script_module(model)
@@ -50,7 +56,7 @@ def _prepare_jit(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC
     if not all(isinstance(x, str) for x in qconfig_dict.keys()):
         raise ValueError('qconfig_dict should only contain names(str) as keys.')
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
-    model = fuse_conv_bn_jit(model)
+    model = fuse_conv_bn_jit(model, inplace)
     model_c = torch._C._jit_pass_insert_observers(model._c,
                                                   'forward',
                                                   scripted_qconfig_dict,
