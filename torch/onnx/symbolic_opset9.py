@@ -849,7 +849,7 @@ def constant_pad_nd(g, input, padding, value):
     mode = "constant"
     try:
         value = sym_help._get_const(value, 'f', 'value')
-    except:
+    except Exception:
         return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The value for the padding must be constant')
 
     padding = _convert_padding_node(padding)
