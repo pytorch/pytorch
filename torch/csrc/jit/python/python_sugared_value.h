@@ -366,8 +366,8 @@ struct VISIBILITY_HIDDEN ModuleDictMethodRecursive : public SugaredValue {
           std::vector<SugaredValuePtr> iterKeys;
 
           auto lambda = [&](std::shared_ptr<ModuleValue> module,
-                            SugaredValuePtr value,
-                            SugaredValuePtr key) -> void {
+                            SugaredValuePtr k,
+                            SugaredValuePtr v) -> void {
             std::vector<std::string> names;
             const auto& selfType =
                 module->getConcreteType()->getJitType()->expect<ClassType>();

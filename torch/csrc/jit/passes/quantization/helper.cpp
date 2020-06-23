@@ -610,8 +610,6 @@ bool is_conv3d_module(
       match, vmap, "conv", "__torch__.torch.nn.modules.conv.Conv3d");
 }
 
-<<<<<<< HEAD
-=======
 bool is_batchnorm2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap) {
@@ -622,6 +620,5 @@ bool is_batchnorm2d_module(
       "__torch__.torch.nn.modules.batchnorm.BatchNorm2d");
 }
 
->>>>>>> b803b4ce099ce38a7fdd1822ff6b0ebf5ce78b27
 } // namespace jit
 } // namespace torch

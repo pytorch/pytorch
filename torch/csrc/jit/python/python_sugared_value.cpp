@@ -250,13 +250,13 @@ void recurseThroughNestedModules(
     const std::string& field,
     std::function<void(
         std::shared_ptr<ModuleValue> module,
-        SugaredValuePtr value,
-        SugaredValuePtr key)> const& onModuleCallback) {
+        SugaredValuePtr key,
+        SugaredValuePtr value)> const& onModuleCallback) {
   auto prefix_value =
       std::make_shared<SimpleValue>(insertConstant(*m.graph(), prefix));
 
   if (onModuleCallback) {
-    onModuleCallback(self, self, prefix_value);
+    onModuleCallback(self, prefix_value, self);
   }
 
   checkInterface(loc, m, self, field);
@@ -395,8 +395,8 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
     std::vector<SugaredValuePtr> values;
     auto lambda = [&keys, &values](
                       const std::shared_ptr<ModuleValue>& module,
-                      const SugaredValuePtr& value,
-                      const SugaredValuePtr& key) -> void {
+                      const SugaredValuePtr& key,
+                      const SugaredValuePtr& value) -> void {
       keys.emplace_back(key);
       values.emplace_back(value);
     };
