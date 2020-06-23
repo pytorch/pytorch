@@ -76,7 +76,12 @@ class GroupNorm(torch.nn.GroupNorm):
         return new_mod
 
 class InstanceNorm1d(torch.nn.InstanceNorm1d):
-    r"""This is the quantized version of `torch.nn.InstanceNorm1d`.
+    r"""This is the quantized version of :class:`~torch.nn.InstanceNorm1d`.
+
+    Additional args:
+        * **scale** - quantization scale of the output, type: double.
+        * **zero_point** - quantization zero point of the output, type: long.
+
     """
     def __init__(self, num_features, weight, bias, scale, zero_point,
                  eps=1e-5, momentum=0.1, affine=False,
@@ -106,7 +111,12 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
         return new_mod
 
 class InstanceNorm2d(torch.nn.InstanceNorm2d):
-    r"""This is the quantized version of `torch.nn.InstanceNorm2d`.
+    r"""This is the quantized version of :class:`~torch.nn.InstanceNorm2d`.
+
+    Additional args:
+        * **scale** - quantization scale of the output, type: double.
+        * **zero_point** - quantization zero point of the output, type: long.
+
     """
     def __init__(self, num_features, weight, bias, scale, zero_point,
                  eps=1e-5, momentum=0.1, affine=False,
@@ -136,7 +146,12 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
         return new_mod
 
 class InstanceNorm3d(torch.nn.InstanceNorm3d):
-    r"""This is the quantized version of `torch.nn.InstanceNorm2d`.
+    r"""This is the quantized version of :class:`~torch.nn.InstanceNorm3d`.
+
+    Additional args:
+        * **scale** - quantization scale of the output, type: double.
+        * **zero_point** - quantization zero point of the output, type: long.
+
     """
     def __init__(self, num_features, weight, bias, scale, zero_point,
                  eps=1e-5, momentum=0.1, affine=False,
