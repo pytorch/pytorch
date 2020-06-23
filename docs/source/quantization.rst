@@ -189,6 +189,7 @@ Basic activations are supported.
 
 * :meth:`~torch.nn.functional.relu` — Rectified linear unit (copy)
 * :meth:`~torch.nn.functional.relu_` — Rectified linear unit (inplace)
+* :meth:`~torch.nn.functional.elu` - ELU
 * :meth:`~torch.nn.functional.max_pool2d` - Maximum pooling
 * :meth:`~torch.nn.functional.adaptive_avg_pool2d` - Adaptive average pooling
 * :meth:`~torch.nn.functional.avg_pool2d` - Average pooling
@@ -353,6 +354,7 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.ReLU` — Rectified linear unit
 * :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
   quantized representation of 6
+* :class:`~torch.nn.quantized.ELU` — ELU
 * :class:`~torch.nn.quantized.Hardswish` — Hardswish
 * :class:`~torch.nn.quantized.BatchNorm2d` — BatchNorm2d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
 * :class:`~torch.nn.quantized.BatchNorm3d` — BatchNorm3d. *Note: this module is usually fused with Conv or Linear. Performance on ARM is not optimized*.
@@ -386,6 +388,7 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
 * :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
 * :func:`~torch.nn.quantized.functional.relu` — Rectified linear unit
+* :func:`~torch.nn.quantized.functional.elu` — ELU
 * :func:`~torch.nn.quantized.functional.hardsigmoid` — Hardsigmoid
 * :func:`~torch.nn.quantized.functional.hardswish` — Hardswish
 * :func:`~torch.nn.quantized.functional.hardtanh` — Hardtanh
@@ -747,6 +750,11 @@ ReLU
 ReLU6
 ~~~~~~~~~~~~~~~
 .. autoclass:: ReLU6
+    :members:
+
+ELU
+~~~~~~~~~~~~~~~
+.. autoclass:: ELU
     :members:
 
 Hardswish
