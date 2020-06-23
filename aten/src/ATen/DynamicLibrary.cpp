@@ -53,7 +53,7 @@ DynamicLibrary::DynamicLibrary(const char* name) {
         name,
         NULL,
         LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    if (theModule != NULL || (GetLastError() == ERROR_MOD_NOT_FOUND)) {
+    if (theModule != NULL || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
       reload = false;
     }
   }
