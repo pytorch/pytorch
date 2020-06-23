@@ -362,6 +362,23 @@ def parse_return_arguments(return_decl, inplace, func_decl):
     return arguments
 
 
+def parse_dispatch(name, dispatch):
+    """
+    Parse a dictionary like {"CPU, CUDA": "blah"}
+    into {"CPU": "blah", "CUDA": "blah"}
+    """
+    if not isinstance(dispatch, dict):
+        return dispatch
+    r = {}
+    for old_k, v in dispatch.items():
+        ks = old_k.split(',')
+        for k in ks:
+            k = k.strip()
+            assert k not in r, "{}, {}".format(name, k)
+            r[k] = v
+    return r
+
+
 def parse_native_yaml(path):
     with open(path, 'r') as f:
         return yaml.load(f, Loader=Loader)
@@ -419,7 +436,8 @@ def run(paths):
                 declaration['manual_kernel_registration'] = func.get('manual_kernel_registration', False)
                 declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
-                declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
+                declaration['type_method_definition_dispatch'] = \
+                    parse_dispatch(fn_name, func.get('dispatch', declaration['name']))
                 declaration['python_module'] = func.get('python_module', '')
                 declarations.append(declaration)
             except Exception as e:
