@@ -861,7 +861,7 @@ def freeze(mod, preserved_attrs : Optional[List[str]] = None):
     Note:
         If you're not sure why an attribute is not being inlined as a constant, you can run
         `dump_alias_db` on frozen_module.forward.graph to try to investigate if freezing has
-        detected that is being modified in the forward.
+        detected has detected the attribute is being modified.
     """
     if not isinstance(mod, ScriptModule):
         raise RuntimeError("Freezing expects a ScriptModule as input. "
