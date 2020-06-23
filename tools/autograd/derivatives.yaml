@@ -502,9 +502,6 @@
 - name: hardswish(Tensor self) -> Tensor
   self: hardswish_backward(grad, self)
 
-- name: imag(Tensor self) -> Tensor
-  self: Scalar(std::complex<double>{0.0, 1.0})*grad.to(self.scalar_type())
-
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
@@ -829,9 +826,6 @@
 - name: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
-- name: real(Tensor self) -> Tensor
-  self: at::real(grad)
-
 - name: reciprocal(Tensor self) -> Tensor
   self: -grad * result * result
 
@@ -1054,6 +1048,12 @@
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
+
+- name: view_as_real(Tensor(a) self) -> Tensor(a)
+  self: at::view_as_complex(grad.contiguous()).conj() # gx0 - i gx1
+
+- name: view_as_complex(Tensor(a) self) -> Tensor(a)
+  self: at::view_as_real(grad.contiguous().conj()) # [gx, -gy]
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable

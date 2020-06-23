@@ -20,7 +20,7 @@ class TestAsync(JitTestCase):
             return torch.neg(x)
 
         x = torch.rand(3, 4)
-        fut = torch.jit._fork(foo, x)
+        fut = torch.jit.fork(foo, x)
         y_hat = foo(x)
         y = torch.jit._wait(fut)
         # assert nothing; only to make sure the fake python path works
@@ -32,7 +32,7 @@ class TestAsync(JitTestCase):
                 futures.append(torch.jit._fork(lambda x: x, inp))
             all_outputs = []
             for future in futures:
-                all_outputs.append(torch.jit._wait(future))
+                all_outputs.append(torch.jit.wait(future))
             return all_outputs
 
         # assert nothing, just to make sure python type parsing works
