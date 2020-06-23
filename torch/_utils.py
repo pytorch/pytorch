@@ -377,11 +377,6 @@ class RemoteTraceback(Exception):
         return self.traceback
 
 
-# def _rebuild_exc(exc, traceback):
-#     exc.__cause__ = RemoteTraceback(traceback)
-#     return exc
-
-
 class ExceptionWrapper(object):
     r"""Wraps an exception plus traceback to communicate across threads"""
     def __init__(self, exc_info=None, where="in background"):
@@ -404,9 +399,6 @@ class ExceptionWrapper(object):
         # process 2. Original Traceback:", followed by the traceback.
         msg = "Caught {} {}.\nOriginal {}".format(
             self.exc_type.__name__, self.where, self.exc_msg)
-        # print("reraise msg:")
-        # print(msg)
-        # print("reraise check:", self.exc_type == KeyError)
         if self.exc_type == KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
@@ -414,6 +406,3 @@ class ExceptionWrapper(object):
             msg = KeyErrorMessage(msg)
         
         raise self.exc
-
-    # def __reduce__(self):
-    #     return _rebuild_exc, (self.exc, self.tb)
