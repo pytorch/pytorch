@@ -43,9 +43,14 @@ build_android
 if [ "$CUSTOM_ABIS_LIST" = true ]; then
   # Skipping clean task here as android gradle plugin 3.3.2 exteralNativeBuild has problems
   # with it when abiFilters are specified.
-  $GRADLE_PATH -PABI_FILTERS=$ABIS_LIST -p $PYTORCH_ANDROID_DIR assembleRelease
+  $GRADLE_PATH -PLIBTORCH_HEADERS=$ANDROID_BUILD_ROOT/install/include \
+    -PABI_FILTERS=$ABIS_LIST \
+    -p $PYTORCH_ANDROID_DIR \
+    assembleRelease
 else
-  $GRADLE_PATH -p $PYTORCH_ANDROID_DIR clean assembleRelease
+  $GRADLE_PATH  -PLIBTORCH_HEADERS=$ANDROID_BUILD_ROOT/install/include \
+    -p $PYTORCH_ANDROID_DIR \
+    clean assembleRelease
 fi
 
 find $PYTORCH_ANDROID_DIR -type f -name *aar | xargs ls -lah

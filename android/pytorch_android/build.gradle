@@ -85,14 +85,7 @@ task sourcesJar(type: Jar) {
 }
 
 def getLibtorchHeadersDir() {
-  println("hasProperty(LIBTORCH_HEADERS):" + project.hasProperty('LIBTORCH_HEADERS'))
-  if (project.hasProperty('LIBTORCH_HEADERS')) {
-    println("LIBTORCH_HEADERS:" + property('LIBTORCH_HEADERS'))
-    return property('LIBTORCH_HEADERS')
-  }
-
-  def abi = ABI_FILTERS.split(",")[0]
-  return "$rootDir/../build_android_$abi/install/include";
+  return property('LIBTORCH_HEADERS')
 }
 
 afterEvaluate {
