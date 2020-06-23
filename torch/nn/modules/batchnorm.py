@@ -46,8 +46,6 @@ class _NormBase(Module):
                 self.weight = Parameter(torch.Tensor(num_features))
             else:
                 self.register_buffer('weight', None)
-                # self.register_buffer('weight', torch.ones(num_features))
-                # self.weight = Parameter(torch.Tensor(num_features), requires_grad=True)
             self.bias = Parameter(torch.Tensor(num_features))
         else:
             self.register_parameter('weight', None)

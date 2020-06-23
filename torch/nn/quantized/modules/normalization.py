@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import torch
 import torch.nn.quantized.functional
 
+
 class LayerNorm(torch.nn.LayerNorm):
     r"""Applies Layer Normalization over a mini-batch of inputs as described in
     the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
@@ -88,6 +89,7 @@ class LayerNorm(torch.nn.LayerNorm):
             int(zero_point), mod.eps, mod.elementwise_affine)
         return new_mod
 
+
 class GroupNorm(torch.nn.GroupNorm):
     r"""This is the quantized version of `torch.nn.GroupNorm`.
     """
@@ -117,14 +119,16 @@ class GroupNorm(torch.nn.GroupNorm):
             mod.eps, mod.affine)
         return new_mod
 
+
 class InstanceNorm1d(torch.nn.InstanceNorm1d):
     r"""This is the quantized version of `torch.nn.InstanceNorm1d`.
     """
+
     def __init__(self, num_features, weight, bias, scale, zero_point,
                  eps=1e-5, momentum=0.1, affine=False,
-                 track_running_stats=False):
+                 track_running_stats=False, use_scale=True):
         super(InstanceNorm1d, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, track_running_stats, use_scale)
         self.weight = weight
         self.bias = bias
         self.scale = scale
@@ -147,14 +151,16 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
             mod.eps, mod.affine)
         return new_mod
 
+
 class InstanceNorm2d(torch.nn.InstanceNorm2d):
     r"""This is the quantized version of `torch.nn.InstanceNorm2d`.
     """
+
     def __init__(self, num_features, weight, bias, scale, zero_point,
                  eps=1e-5, momentum=0.1, affine=False,
-                 track_running_stats=False):
+                 track_running_stats=False, use_scale=True):
         super(InstanceNorm2d, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, track_running_stats, use_scale)
         self.weight = weight
         self.bias = bias
         self.scale = scale
@@ -177,14 +183,16 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
             mod.eps, mod.affine)
         return new_mod
 
+
 class InstanceNorm3d(torch.nn.InstanceNorm3d):
     r"""This is the quantized version of `torch.nn.InstanceNorm2d`.
     """
+
     def __init__(self, num_features, weight, bias, scale, zero_point,
                  eps=1e-5, momentum=0.1, affine=False,
-                 track_running_stats=False):
+                 track_running_stats=False, use_scale=True):
         super(InstanceNorm3d, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, track_running_stats, use_scale)
         self.weight = weight
         self.bias = bias
         self.scale = scale
