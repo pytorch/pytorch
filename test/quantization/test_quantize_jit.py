@@ -1541,7 +1541,8 @@ class TestQuantizeJitOps(QuantizationTestCase):
                              (NonQuantizedInplaceAddScalar(), False)]:
             for tracing in [True, False]:
                 op = "quantized::add_scalar" if quantized else "aten::add"
-                # TODO: fix debug=True numerics
+                # we don't check the numerical consistency for add_scalar
+                # since it's not supported
                 m = self.checkGraphModeOp(m, data, op, tracing, check=False)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
@@ -1923,7 +1924,8 @@ class TestQuantizeJitOps(QuantizationTestCase):
                              (NonQuantizedInplaceMulScalar(), False)]:
             for tracing in [True, False]:
                 op = "quantized::mul_scalar" if quantized else "aten::mul"
-                # TODO: fix debug=True numerics
+                # we don't check the numerical consistency for add_scalar
+                # since it's not supported
                 m = self.checkGraphModeOp(m, data, op, tracing, check=False)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
