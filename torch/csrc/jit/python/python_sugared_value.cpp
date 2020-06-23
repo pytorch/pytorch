@@ -223,9 +223,13 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
     const SourceRange& loc,
     Function& m,
     const c10::optional<size_t>& size_hint) {
-  auto dict = getSugaredDict(loc, m);
-  auto mods = dict->getModules();
-  return mods->asTuple(loc, m);
+  if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
+    auto dict = getSugaredDict(loc, m);
+    auto mods = dict->getModules();
+    return mods->asTuple(loc, m);
+  }
+  throw ErrorReport(loc)
+      << "Only ModuleList, Sequential, and ModuleDict modules are valid as Tuple";
 }
 
 SugaredValuePtr ModuleValue::getitem(
