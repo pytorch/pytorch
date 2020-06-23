@@ -28,7 +28,7 @@ class Dataset(Generic[T_co]):
       dataset with non-integral indices/keys, a custom sampler must be provided.
     """
 
-    def __getitem__(self, index: int) -> T_co:
+    def __getitem__(self, index) -> T_co:
         raise NotImplementedError
 
     def __add__(self, other: 'Dataset[T_co]') -> 'ConcatDataset[T_co]':
