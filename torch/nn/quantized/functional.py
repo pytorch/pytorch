@@ -427,26 +427,12 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
 
 def hardswish(input, scale, zero_point):
     # type: (Tensor, float, int) -> Tensor
-    r"""Applies the quantized version of the hardswish function, element-wise,
-    as described in the paper:
-
-    `Searching for MobileNetV3`_.
-
-    .. math::
-        \text{Hardswish}(x) = \begin{cases}
-            0 & \text{if~} x \le -3, \\
-            x & \text{if~} x \ge +3, \\
-            x^2/6 & \text{otherwise}
-        \end{cases}
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardswish`.
 
     Args:
         input: quantized input
-        scale, zero_point: Scale and zero point of the output tensor.
-
-    See :class:`~torch.nn.Hardswish` for more details.
-
-    .. _`Searching for MobileNetV3`:
-        https://arxiv.org/abs/1905.02244
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
