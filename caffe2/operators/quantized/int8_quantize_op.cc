@@ -13,9 +13,14 @@ OPERATOR_SCHEMA(Int8Quantize)
     .Input(0, "X", "FP32 Tensor X.")
     .Input(
         1,
-        "Qparam",
-        "Optional Qparam blob that constans quant param computed on activation histogram data"
-        "Will overwrite Y_scale and Y_zero_point argument if specified")
+        "Scale qparam",
+        "Optional scale quantization param computed on activation histogram data"
+        "Will overwrite Y_scale argument if specified")
+    .Input(
+        2,
+        "Zero-point qparam",
+        "Optionsl zero-point quantization param computed on activation data"
+        "Will overwrite Y_zero_point argument if specified")
     .Output(0, "Y", "Int8 Tensor qX representing X with linear quantization.");
 
 } // namespace caffe2

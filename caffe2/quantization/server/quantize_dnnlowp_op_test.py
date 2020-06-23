@@ -4,7 +4,6 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
-from caffe2.quantization.server import dnnlowp_pybind11
 from hypothesis import given
 
 
@@ -35,23 +34,17 @@ class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
                 op_type, ["X"], ["X_q"], engine=engine, device_option=gc
             )
             net.Proto().op.extend([quantize])
-
-            dnnlowp_pybind11.CreateInt8QuantParamsBlob(
-                "quant_param", float(X_scale), int(X_zero)
-            )
             quantize_2 = core.CreateOperator(
-                op_type,
-                ["X", "quant_param"],
-                ["X_q_2"],
-                engine=engine,
-                device_option=gc,
+                op_type, ["X", "scale", "zero"], ["X_q_2"], engine=engine, device_option=gc
             )
             net.Proto().op.extend([quantize_2])
 
-            workspace.FeedBlob("X", X, device_option=gc)
-            workspace.RunNetOnce(net)
-            X_q = workspace.FetchInt8Blob("X_q")[0]
-            X_q_2 = workspace.FetchInt8Blob("X_q_2")[0]
+            self.ws.create_blob("X").feed(X, device_option=gc)
+            self.ws.create_blob("scale").feed(np.array([X_scale]).astype(np.float32), device_option=gc)
+            self.ws.create_blob("zero").feed(np.array([X_zero]).astype(np.int32), device_option=gc)
+            self.ws.run(net)
+            X_q = self.ws.blobs["X_q"].fetch()[0]
+            X_q_2 = self.ws.blobs["X_q_2"].fetch()[0]
 
             # Dequantize results and measure quantization error against inputs
             X_dq = X_scale * (X_q - X_zero)
