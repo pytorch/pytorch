@@ -1019,7 +1019,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
           propagateQParams(output, *inputs, /* is_scalar */ false, qparams_opt);
         }
       }
-    } else if (isPropagateQuantNode(n)) {
+    } else if (isPropagateQuantBinaryOp(n)) {
       // Print warning for add_scalar/mul_scalar when debug is enabled
       // since the quantization parameter for these ops depends on
       // input and it's too complicated to encode the equations in
