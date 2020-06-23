@@ -16,6 +16,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
 import java.nio.FloatBuffer;
 import org.pytorch.IValue;
 import org.pytorch.Module;
@@ -114,26 +115,42 @@ public static String assetFilePath(Context context, String assetName) {
     }
   }
 
+  private Tensor makeTensor(final long[] shape, float value) {
+    long numElements = 1;
+    for (int i = 0; i < shape.length; i++) {
+      numElements *= shape[i];
+    }
+    FloatBuffer buffer = Tensor.allocateFloatBuffer((int) numElements);
+    for(int i = 0; i < numElements; i++) {
+      buffer.put(i, value);
+    }
+    return Tensor.fromBlob(buffer, shape);
+  }
+
   @WorkerThread
   @Nullable
   protected Result doModuleForward() {
     if (mModule == null) {
-      final long[] shape = BuildConfig.INPUT_TENSOR_SHAPE;
-      long numElements = 1;
-      for (int i = 0; i < shape.length; i++) {
-        numElements *= shape[i];
-      }
-      mInputTensorBuffer = Tensor.allocateFloatBuffer((int) numElements);
-      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE);
       PyTorchAndroid.setNumThreads(1);
       mModule = PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
     }
 
+    final long[] shape = new long[] {2, 2};
+    Tensor t0 = makeTensor(shape, 1);
+    Tensor t1 = makeTensor(shape, 2);
+    Tensor t2 = makeTensor(shape, 3);
+
+    IValue ivalue = IValue.listFrom(
+      makeTensor(shape, 1),
+      makeTensor(shape, 2),
+      makeTensor(shape, 3));
+
     final long startTime = SystemClock.elapsedRealtime();
     final long moduleForwardStartTime = SystemClock.elapsedRealtime();
-    final Tensor outputTensor = mModule.forward(IValue.from(mInputTensor)).toTensor();
+    final Tensor outputTensor = mModule.runMethod("sumTensorsList", ivalue).toTensor();
     final long moduleForwardDuration = SystemClock.elapsedRealtime() - moduleForwardStartTime;
     final float[] scores = outputTensor.getDataAsFloatArray();
+    Log.d("XXX", "output: " + Arrays.toString(scores));
     final long analysisDuration = SystemClock.elapsedRealtime() - startTime;
     return new Result(scores, moduleForwardDuration, analysisDuration);
   }

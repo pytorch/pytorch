@@ -62,9 +62,10 @@ android {
         mbq {
             dimension "model"
             applicationIdSuffix ".mbq"
-            buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"sum_tensors_list.pt\"")
             addManifestPlaceholders([APP_NAME: "MBQ"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mbq\"")
+            buildConfigField("boolean", "TEST", "true")
         }
         resnet18 {
             dimension "model"
