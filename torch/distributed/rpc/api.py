@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import functools
+import inspect
 import logging
 import numbers
 import threading
@@ -358,19 +359,37 @@ T = TypeVar("T")
 GenericWithOneTypeVar = Generic[T]
 
 
-try:
-    class RRef(PyRRef, GenericWithOneTypeVar):
-        # Combine the implementation class and the type class.
-        pass
-except TypeError as exc:
-    # TypeError: metaclass conflict: the metaclass of a derived class
-    # must be a (non-strict) subclass of the metaclasses of all its bases
-    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):
-        pass
+class RRef(GenericWithOneTypeVar):
+    def __init__(self, *args, **kwargs):
+        self._c = PyRRef(*args, **kwargs)
 
-    class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta):
-        # Combine the implementation class and the type class.
-        pass
+    def __repr__(self):
+        return self._c.__repr__()
+
+
+# Install docstrings from `PyRRef` to `RRef`.
+#
+# This is for the fact that `:inherited-members:` does not work.
+# See https://github.com/sphinx-doc/sphinx/issues/7867.
+#
+def method_factory(method_name, docstring):
+    def method(self, *args, **kwargs):
+        return getattr(self._c, method_name)(*args, **kwargs)
+
+    method.__doc__ = docstring
+    return method
+
+
+for method_name, method in inspect.getmembers(PyRRef):
+    # Ignore magic methods from baseclasses.
+    if method_name.startswith("_"):
+        continue
+
+    docstring = getattr(method, "__doc__", None)
+    assert docstring is not None, "RRef user-facing methods should all have docstrings."
+
+    new_method = method_factory(method_name, docstring)
+    setattr(RRef, method_name, new_method)
 
 
 @_require_initialized
