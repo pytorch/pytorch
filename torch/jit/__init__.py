@@ -2163,8 +2163,6 @@ if _enabled:
     class TopLevelTracedModule(TracedModule):
         forward = _CachedForward()
 
-
-
 def is_scripting():
     r"""
     Function that returns True when in compilation and False otherwise. This
