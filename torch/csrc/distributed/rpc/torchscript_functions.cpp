@@ -54,15 +54,18 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
   auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
-  futMessage->addCallbackWithTLSState([futPtr](
-                                          const FutureMessage& futMessage) {
-    if (futMessage.hasError()) {
-      c10::ivalue::Future::FutureError jitFutErr(futMessage.error()->what());
-      futPtr->setError(std::move(jitFutErr));
-    } else {
-      futPtr->markCompleted(deserializeRespToIValue(futMessage.constValue()));
-    }
-  });
+  futMessage->addCallback(
+      [futPtr](const FutureMessage& futMessage) {
+        if (futMessage.hasError()) {
+          c10::ivalue::Future::FutureError jitFutErr(
+              futMessage.error()->what());
+          futPtr->setError(std::move(jitFutErr));
+        } else {
+          futPtr->markCompleted(
+              deserializeRespToIValue(futMessage.constValue()));
+        }
+      },
+      /* propagateTLSState */ true);
   return futPtr;
 }
 
@@ -107,10 +110,11 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     userRRefPtr->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    fm->addCallbackWithTLSState(
+    fm->addCallback(
         [forkId{userRRefPtr->forkId()}](const FutureMessage& fm) {
           callback::confirmPendingUser(fm, forkId);
-        });
+        },
+        /* propagateTLSState */ true);
 
     return userRRefPtr;
   } else {
@@ -133,10 +137,11 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         rpcTimeoutSeconds /* timeout */);
 
     ownerRRefPtr->registerOwnerCreationFuture(fm);
-    fm->addCallbackWithTLSState(
+    fm->addCallback(
         [ownerRRefId = ownerRRefPtr->rrefId()](const FutureMessage& fm) {
           callback::finishCreatingOwnerRRef(fm, ownerRRefId);
-        });
+        },
+        /* propagateTLSState */ true);
     return ownerRRefPtr;
   }
 }

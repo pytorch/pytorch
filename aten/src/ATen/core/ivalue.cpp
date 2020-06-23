@@ -631,16 +631,28 @@ getClassConverter() {
   return classConverter;
 }
 
-void ivalue::Future::addCallbackWithTLSState(std::function<void(void)> callback) {
-    // Wrap cb into a function that runs with the current thread's TLS state.
+void ivalue::Future::addCallback(
+    std::function<void(void)> callback,
+    bool propagateTLSState) {
+  std::function<void(void)> cb;
+  if (propagateTLSState) {
+    // Save thread local state and restore it in the callback.
     at::ThreadLocalState tls_state;
-    std::function<void(void)> cbWithTlsState =
-        [tls_state = std::move(tls_state), callback = std::move(callback)] {
-          at::ThreadLocalStateGuard g(tls_state);
-          callback();
-        };
-    addCallback(cbWithTlsState);
+    cb = [tls_state = std::move(tls_state), callback = std::move(callback)] {
+      at::ThreadLocalStateGuard g(tls_state);
+      callback();
+    };
+  } else {
+    cb = std::move(callback);
   }
+  std::unique_lock<std::mutex> lock(mutex_);
+  if (completed()) {
+    lock.unlock();
+    cb();
+    return;
+  }
+  callbacks_.emplace_back(std::move(cb));
+}
 
 CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {

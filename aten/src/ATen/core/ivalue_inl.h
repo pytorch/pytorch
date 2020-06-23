@@ -328,22 +328,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * If the future has already completed,
    * this function will execute the callback immediately.
    */
-  void addCallback(std::function<void(void)> callback) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (completed()) {
-      lock.unlock();
-      callback();
-      return;
-    }
-    callbacks_.emplace_back(std::move(callback));
-  }
-
-  /**
-  * Add a callback to the future that that runs with the thread local state of
-  * the caller of this function. This is essentially a wrapper around
-  * at::ThreadLocalStateGuard.
-  */
-  void addCallbackWithTLSState(std::function<void(void)> callback);
+  void addCallback(
+      std::function<void(void)> callback,
+      bool propagateTLSState = false);
 
   /**
    * Add a callback to the future, and return another Future to hold the return
@@ -352,24 +339,23 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback,
-      TypePtr type, bool propagateTLSState = false) {
+      TypePtr type,
+      bool propagateTLSState = false) {
     auto fut = c10::make_intrusive<Future>(type);
-    // Pick callback function based on propagateTLSState
-    void (ivalue::Future::*addCallbackFn)(std::function<void(void)>) =
-        propagateTLSState ? &ivalue::Future::addCallbackWithTLSState
-                          : &ivalue::Future::addCallback;
     // Cannot move capture std::function in lambda, because it cannot deduce
     // the template type for std::function. Hence use std::bind to explicitly
     // specify types.
-    (this->*addCallbackFn)(std::bind(
-        [fut](std::function<IValue(void)> cb) {
-          try {
-            fut->markCompleted(cb());
-          } catch (std::exception& e) {
-            fut->setError(e.what());
-          }
-        },
-        std::move(callback)));
+    addCallback(
+        std::bind(
+            [fut](std::function<IValue(void)> cb) {
+              try {
+                fut->markCompleted(cb());
+              } catch (std::exception& e) {
+                fut->setError(e.what());
+              }
+            },
+            std::move(callback)),
+        propagateTLSState);
     return fut;
   }
 

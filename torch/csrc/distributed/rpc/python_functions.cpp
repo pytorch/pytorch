@@ -122,7 +122,7 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
   if (hasValue) {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(PyObjectType::get());
-    futureResponseMessage->addCallbackWithTLSState(
+    futureResponseMessage->addCallback(
         [jitFuture](const FutureMessage& futureResponseMessage) {
           if (futureResponseMessage.hasError()) {
             jitFuture->setError(futureResponseMessage.error()->what());
@@ -130,20 +130,22 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
             jitFuture->markCompleted(
                 toIValue(futureResponseMessage.constValue()));
           }
-        });
+        },
+        /* propagateTLSState */ true);
 
     return jitFuture;
   } else {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(NoneType::get());
-    futureResponseMessage->addCallbackWithTLSState(
+    futureResponseMessage->addCallback(
         [jitFuture](const FutureMessage& futureResponseMessage) {
           if (futureResponseMessage.hasError()) {
             jitFuture->setError(futureResponseMessage.error()->what());
           } else {
             jitFuture->markCompleted(IValue());
           }
-        });
+        },
+        /* propagateTLSState */ true);
 
     return jitFuture;
   }
@@ -260,10 +262,11 @@ PyRRef pyRemoteBuiltin(
 
     userRRef->registerOwnerCreationFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallbackWithTLSState(
+    fm->addCallback(
         [forkId{userRRef->forkId()}](const FutureMessage& fm) {
           callback::confirmPendingUser(fm, forkId);
-        });
+        },
+        /* propagateTLSState */ true);
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(returnType);
@@ -283,10 +286,11 @@ PyRRef pyRemoteBuiltin(
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    fm->addCallbackWithTLSState(
+    fm->addCallback(
         [ownerRRefId = ownerRRef->rrefId()](const FutureMessage& fm) {
           callback::finishCreatingOwnerRRef(fm, ownerRRefId);
-        });
+        },
+        /* propagateTLSState */ true);
     return PyRRef(ownerRRef);
   }
 }
@@ -315,10 +319,11 @@ PyRRef pyRemotePythonUdf(
     userRRef->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallbackWithTLSState(
+    fm->addCallback(
         [forkId{userRRef->forkId()}](const FutureMessage& fm) {
           callback::confirmPendingUser(fm, forkId);
-        });
+        },
+        /* propagateTLSState */ true);
     return PyRRef(userRRef);
   } else {
     // Sending remote message to self
@@ -335,14 +340,15 @@ PyRRef pyRemotePythonUdf(
 
     ownerRRef->registerOwnerCreationFuture(fm);
 
-    fm->addCallbackWithTLSState(
+    fm->addCallback(
         [ownerRRefId = ownerRRef->rrefId()](const FutureMessage& fm) {
           auto deletedRRef = callback::finishCreatingOwnerRRef(fm, ownerRRefId);
           if (deletedRRef && deletedRRef->isPyObj()) {
             py::gil_scoped_acquire ag;
             deletedRRef.reset();
           }
-        });
+        },
+        /* propagateTLSState */ true);
     return PyRRef(ownerRRef);
   }
 }
