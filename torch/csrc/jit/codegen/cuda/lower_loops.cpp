@@ -54,7 +54,10 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
         (tv->memory_type_ == MemoryType::Local && dim->isThread()) ||
         // If we're reducing this dimension, don't use it in the allocation
         // computation
-        dim->isReduction())
+        dim->isReduction() ||
+        // If this is a broadcast dimension, don't use it in the allocation
+        // computation
+        dim->isBroadcast())
       continue;
     alloc_dims.push_back(dim->extent());
   }

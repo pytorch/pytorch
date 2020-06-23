@@ -3368,6 +3368,58 @@ void testGPU_FusionNonRedAxisBind() {
       aten_output.sub(cg_output).abs().max());
 }
 
+void testGPU_FusionSplitBCast() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* input_tv0 = makeDummyTensor(3);
+  TensorView* input_tv1 = makeDummyTensor(3);
+  fusion.addInput(input_tv0);
+  fusion.addInput(input_tv1);
+
+  TensorView* sum_tv2 =
+      reductionOp(BinaryOpType::Add, {2}, new Float(0), input_tv0);
+  TensorView* bcast_tv3 = broadcast(sum_tv2, {false, false, true});
+  TensorView* output_tv4 = div(input_tv1, bcast_tv3);
+
+  sum_tv2->split(-1, 32);
+  TensorView* sum_rf_tv5 = sum_tv2->rFactor({-2});
+
+  bcast_tv3->split(-1, 32);
+  output_tv4->split(-1, 32);
+
+  sum_rf_tv5->axis(0)->parallelize(ParallelType::BIDx);
+  sum_tv2->axis(0)->parallelize(ParallelType::BIDx);
+  bcast_tv3->axis(0)->parallelize(ParallelType::BIDx);
+  output_tv4->axis(0)->parallelize(ParallelType::BIDx);
+
+  sum_rf_tv5->axis(1)->parallelize(ParallelType::BIDy);
+  sum_tv2->axis(1)->parallelize(ParallelType::BIDy);
+  bcast_tv3->axis(1)->parallelize(ParallelType::BIDy);
+  output_tv4->axis(1)->parallelize(ParallelType::BIDy);
+
+  sum_rf_tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  sum_tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  bcast_tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  output_tv4->axis(-1)->parallelize(ParallelType::TIDx);
+
+  fusion.addOutput(output_tv4);
+
+  fusion.printMath();
+
+  prog.device_ = 0;
+  prog.grid(32, 32);
+  prog.block(32);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({32, 32, 128}, options);
+  at::Tensor t1 = at::randn({32, 32, 128}, options);
+  at::Tensor cg_output = at::empty({32, 32, 128}, options);
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {cg_output});
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
