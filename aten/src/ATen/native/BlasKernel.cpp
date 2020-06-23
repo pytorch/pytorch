@@ -253,17 +253,10 @@ double dot_impl(int64_t n, double* x, int64_t incx, double* y, int64_t incy) {
   return dot_impl_floating(n, x, incx, y, incy);
 }
 
-#define INSTANTIATE_DOT_IMPL(scalar_t)  \
+#define INSTANTIATE_DOT_IMPL(scalar_t, _)  \
   template scalar_t dot_impl<scalar_t>( \
       int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy);
-INSTANTIATE_DOT_IMPL(uint8_t);
-INSTANTIATE_DOT_IMPL(int8_t);
-INSTANTIATE_DOT_IMPL(int16_t);
-INSTANTIATE_DOT_IMPL(int);
-INSTANTIATE_DOT_IMPL(int64_t);
-INSTANTIATE_DOT_IMPL(float);
-INSTANTIATE_DOT_IMPL(double);
-INSTANTIATE_DOT_IMPL(c10::Half);
+AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, INSTANTIATE_DOT_IMPL);
 #undef INSTANTIATE_DOT_IMPL
 
 }} // namespace at::native
