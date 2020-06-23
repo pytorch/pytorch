@@ -549,11 +549,11 @@ class CAFFE2_API Tensor {
   // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
   // So, for example std(0) would select the std(unbiased=False) overload
 
-  Tensor var(int dim) {
+  Tensor var(int dim) const {
     return var(IntArrayRef{dim});
   }
 
-  Tensor std(int dim) {
+  Tensor std(int dim) const {
     return std(IntArrayRef{dim});
   }
 
