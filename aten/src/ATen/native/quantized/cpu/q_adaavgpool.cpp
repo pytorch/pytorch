@@ -52,7 +52,7 @@ static void adaptive_avg_pool_single_out_frame(
     int64_t osizeH,
     int64_t osizeW,
     int64_t istrideC,
-    int64_t istrideD,  // Set to 0 for 2D
+    int64_t istrideD,  // Set to 1 for 2D
     int64_t istrideH,
     int64_t istrideW) {
   at::parallel_for(0, sizeC, 0, [&](int64_t start, int64_t end) {
@@ -156,144 +156,36 @@ std::vector<int64_t> get_output_shape(
 
 }
 
-template <typename scalar_t>
-Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
-  Tensor output;
-  const auto output_shape = get_output_shape<2>(input, output_size);
+template <int32_t kSpatialDim, typename scalar_t>
+Tensor _adaptive_avg_pool(const Tensor& input,
+                          IntArrayRef output_size,
+                          Tensor& output) {
+  const auto output_shape = get_output_shape<kSpatialDim>(input, output_size);
   /* sizes */
-  int64_t sizeC = input.size(-3);
+  int64_t sizeC = input.size(-(kSpatialDim + 1));
+  int64_t isizeD = kSpatialDim == 2 ? 1 : input.size(-3);
   int64_t isizeH = input.size(-2);
   int64_t isizeW = input.size(-1);
   /* strides */
+  int64_t istrideD = kSpatialDim == 2 ? 1 : input.stride(-4);
   int64_t istrideC = input.stride(-3);
   int64_t istrideH = input.stride(-2);
   int64_t istrideW = input.stride(-1);
 
+  auto osizeD = kSpatialDim == 2 ? 1 : output_shape[output_shape.size() - 3];
   auto osizeH = output_shape[output_shape.size() - 2];
   auto osizeW = output_shape[output_shape.size() - 1];
-  int64_t sizeB = output_shape.size() == 3 ? 0 : output_shape[0];
 
-  if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
-    // Fast path for NHWC
-    Tensor output = at::_empty_affine_quantized(
-        output_shape,
-        input.options().memory_format(input.suggest_memory_format()),
-        input.q_scale(),
-        input.q_zero_point(),
-        c10::nullopt);
-    if (input.dim() == 3 || input.size(0) == 1) {
-      qadaptive_avg_pool2d_nhwc_stub(
-          input.device().type(),
-          input,
-          output,
-          0,
-          sizeC,
-          isizeH,
-          isizeW,
-          osizeH,
-          osizeW,
-          0,
-          istrideC,
-          istrideH,
-          istrideW);
-    } else {
-      int64_t istrideB = input.stride(-4);
-      at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
-        for (auto b = start; b < end; b++) {
-          qadaptive_avg_pool2d_nhwc_stub(
-              input.device().type(),
-              input,
-              output,
-              b,
-              sizeC,
-              isizeH,
-              isizeW,
-              osizeH,
-              osizeW,
-              istrideB,
-              istrideC,
-              istrideH,
-              istrideW);
-        }
-      });
-    }
-    return output;
-  } else {
-    Tensor output = at::_empty_affine_quantized(
-        output_shape, input.options(), input.q_scale(), input.q_zero_point());
-    auto input_contig = input.contiguous();
-    auto input_data = input_contig.data_ptr<scalar_t>();
-    auto output_data = output.data_ptr<scalar_t>();
-
-    if (input.dim() == 3 || input.size(0) == 1) {
-      adaptive_avg_pool_single_out_frame<scalar_t>(
-          input_data,
-          output_data,
-          sizeC,
-          /*isizeD=*/1,
-          isizeH,
-          isizeW,
-          /*osizeD=*/1,
-          osizeH,
-          osizeW,
-          istrideC,
-          /*istrideD=*/0,
-          istrideH,
-          istrideW);
-    } else {
-      int64_t istrideB = input.stride(-4);
-      at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
-        for (auto b = start; b < end; b++) {
-          adaptive_avg_pool_single_out_frame<scalar_t>(
-              input_data + b * istrideB,
-              output_data + b * sizeC * osizeH * osizeW,
-              sizeC,
-              /*isizeD=*/1,
-              isizeH,
-              isizeW,
-              /*osizeD=*/1,
-              osizeH,
-              osizeW,
-              istrideC,
-              /*istrideD=*/0,
-              istrideH,
-              istrideW);
-        }
-      });
-    }
-    return output;
-  }
-}
-
-template <typename scalar_t>
-Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
-                             IntArrayRef output_size) {
-  const auto output_shape = get_output_shape<3>(input, output_size);
-  /* sizes */
-  int64_t sizeC = input.size(-4);
-  int64_t isizeD = input.size(-3);
-  int64_t isizeH = input.size(-2);
-  int64_t isizeW = input.size(-1);
-  /* strides */
-  int64_t istrideD = input.stride(-4);
-  int64_t istrideC = input.stride(-3);
-  int64_t istrideH = input.stride(-2);
-  int64_t istrideW = input.stride(-1);
-
-  auto osizeD = output_shape[output_shape.size() - 3];
-  auto osizeH = output_shape[output_shape.size() - 2];
-  auto osizeW = output_shape[output_shape.size() - 1];
-  int64_t sizeB = output_shape.size() == 4 ? 0 : output_shape[0];
-
+  int64_t sizeB = output_shape.size() ==(kSpatialDim + 1) ? 0 : output_shape[0];
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
     // Fast path for NDHWC
-    Tensor output = at::_empty_affine_quantized(
+    output = at::_empty_affine_quantized(
         output_shape,
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
         c10::nullopt);
-    if (input.dim() == 4 || input.size(0) == 1) {
+    if (input.dim() == kSpatialDim + 1 || input.size(0) == 1) {
       qadaptive_avg_pool3d_ndhwc_stub(
           input.device().type(),
           input,
@@ -312,7 +204,7 @@ Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
           istrideH,
           istrideW);
     } else {
-      int64_t istrideB = input.stride(-5);
+      int64_t istrideB = input.stride(-(kSpatialDim + 2));
       at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
         for (auto b = start; b < end; b++) {
           qadaptive_avg_pool3d_ndhwc_stub(
@@ -337,13 +229,13 @@ Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
     }
     return output;
   } else {
-    Tensor output = at::_empty_affine_quantized(
+    output = at::_empty_affine_quantized(
         output_shape, input.options(), input.q_scale(), input.q_zero_point());
     auto input_contig = input.contiguous();
     auto input_data = input_contig.data_ptr<scalar_t>();
     auto output_data = output.data_ptr<scalar_t>();
 
-    if (input.dim() == 4 || input.size(0) == 1) {
+    if (input.dim() ==( kSpatialDim + 1) || input.size(0) == 1) {
       adaptive_avg_pool_single_out_frame<scalar_t>(
           input_data,
           output_data,
@@ -359,7 +251,7 @@ Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
           istrideH,
           istrideW);
     } else {
-      int64_t istrideB = input.stride(-4);
+      int64_t istrideB = input.stride(-(kSpatialDim + 2));
       at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
         for (auto b = start; b < end; b++) {
           adaptive_avg_pool_single_out_frame<scalar_t>(
@@ -381,6 +273,19 @@ Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
     }
     return output;
   }
+}
+
+template <typename scalar_t>
+Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
+  Tensor output;
+  return _adaptive_avg_pool<2, scalar_t>(input, output_size, output);
+}
+
+template <typename scalar_t>
+Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
+                             IntArrayRef output_size) {
+
+  return _adaptive_avg_pool<3, scalar_t>(input, output_size, output);
 }
 
 #ifdef USE_PYTORCH_QNNPACK
