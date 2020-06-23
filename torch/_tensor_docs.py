@@ -3181,7 +3181,7 @@ In-place version of :meth:`~Tensor.tanh`
 """)
 
 add_docstr_all('tolist',
-               r""""
+               r"""
 tolist() -> list or number
 
 Returns the tensor as a (nested) list. For scalars, a standard
@@ -3808,6 +3808,12 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('is_quantized',
                r"""
 Is ``True`` if the Tensor is quantized, ``False`` otherwise.
+""")
+
+add_docstr_all('is_meta',
+               r"""
+Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
+are like normal tensors, but they carry no data.
 """)
 
 add_docstr_all('device',
