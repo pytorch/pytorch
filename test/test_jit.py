@@ -2858,19 +2858,19 @@ def foo(x):
             return x + 1
 
         @torch.jit._script_if_tracing
-        def fee():
-            return foo(1)
+        def fee(x: int = 2):
+            return foo(1) + x
 
         # test directly compiling function
         fee_compiled = torch.jit.script(fee)
-        self.assertEqual(fee_compiled(), 2)
+        self.assertEqual(fee_compiled(), fee())
 
         # test compiling it within another function
         @torch.jit.script
         def hum():
-            return fee()
+            return fee(x=3)
 
-        self.assertEqual(hum(), 2)
+        self.assertEqual(hum(), 5)
 
     def test_big_int_literals(self):
         def ok():
