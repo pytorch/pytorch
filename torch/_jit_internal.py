@@ -654,9 +654,9 @@ def is_optional(ann):
 def is_future(ann):
     if ann is Future:
         raise RuntimeError(
-            "Attempted to use torch.jit.Future without a "
+            "Attempted to use Future without a "
             "contained type. Please add a contained type, e.g. "
-            "torch.jit.Future[int]"
+            "Future[int]"
         )
     return getattr(ann, "__origin__", None) is Future
 
@@ -666,9 +666,9 @@ if torch.distributed.rpc.is_available():
     def is_rref(ann):
         if ann is RRef:
             raise RuntimeError(
-                "Attempted to use torch.jit.RRef without a "
+                "Attempted to use RRef without a "
                 "contained type. Please add a contained type, e.g. "
-                "torch.jit.RRef[int]"
+                "RRef[int]"
             )
         return getattr(ann, "__origin__", None) is RRef
 
