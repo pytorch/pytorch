@@ -1114,22 +1114,101 @@ Example::
 
 add_docstr(torch.real,
            r"""
-real(input, out=None) -> Tensor
+real(input) -> Tensor
 
-Returns the real part of the :attr:`input` tensor. If
-:attr:`input` is a real (non-complex) tensor, this function just
-returns it.
+Returns a new tensor containing real values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
 
 .. warning::
-    Not yet implemented for complex tensors.
+    :func:`real` is only supported for tensors with complex dtypes.
 
-.. math::
-    \text{out}_{i} = real(\text{input}_{i})
-""" + r"""
 Args:
     {input}
-    {out}
-""".format(**common_args))
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.real
+    tensor([ 0.3100, -0.5445, -1.6492, -0.0638])
+
+""")
+
+add_docstr(torch.imag,
+           r"""
+imag(input) -> Tensor
+
+Returns a new tensor containing imaginary values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`imag` is only supported for tensors with complex dtypes.
+
+Args:
+    {input}
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.imag
+    tensor([ 0.3553, -0.7896, -0.0633, -0.8119])
+
+""")
+
+add_docstr(torch.view_as_real,
+           r"""
+view_as_real(input) -> Tensor
+
+Returns a view of :attr:`input` as a real tensor. For an input complex tensor of
+:attr:`size` :math:`m1, m2, \dots, mi`, this function returns a new
+real tensor of size :math:`m1, m2, \dots, mi, 2`, where the last dimension of size 2
+represents the real and imaginary components of complex numbers.
+
+.. warning::
+    :func:`view_as_real` is only supported for tensors with ``complex dtypes``.
+
+Args:
+    {input}
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.4737-0.3839j), (-0.2098-0.6699j), (0.3470-0.9451j), (-0.5174-1.3136j)])
+    >>> torch.view_as_real(x)
+    tensor([[ 0.4737, -0.3839],
+            [-0.2098, -0.6699],
+            [ 0.3470, -0.9451],
+            [-0.5174, -1.3136]])
+""")
+
+add_docstr(torch.view_as_complex,
+           r"""
+view_as_complex(input) -> Tensor
+
+Returns a view of :attr:`input` as a complex tensor. For an input complex tensor of
+:attr:`size` :math:`m1, m2, \dots, mi, 2`, this function returns a new
+complex tensor of :attr:`size` :math:`m1, m2, \dots, mi` where the last dimension of
+the input tensor is expected to represent the real and imaginary components of complex numbers.
+
+.. warning::
+    :func:`view_as_complex` is only supported for tensors with :class:`torch.dtype` ``torch.float64`` and ``torch.float32`.
+    The input is expected to have the last dimension of :attr:`size` 2. In addition, the tensor must have a `stride` of 1
+    for its last dimension. The strides of all other dimensions must be even numbers.
+
+Args:
+    {input}
+
+Example::
+    >>> x=torch.randn(4, 2)
+    >>> x
+    tensor([[ 1.6116, -0.5772],
+            [-1.4606, -0.9120],
+            [ 0.0786, -1.7497],
+            [-0.6561, -1.6623]])
+    >>> torch.view_as_complex(x)
+    tensor([(1.6116-0.5772j), (-1.4606-0.9120j), (0.0786-1.7497j), (-0.6561-1.6623j)])
+""")
 
 add_docstr(torch.reciprocal,
            r"""
@@ -2600,23 +2679,6 @@ Example::
 
     >>> torch.histc(torch.tensor([1., 2, 1]), bins=4, min=0, max=3)
     tensor([ 0.,  2.,  1.,  0.])
-""".format(**common_args))
-
-add_docstr(torch.imag,
-           r"""
-imag(input, out=None) -> Tensor
-
-Returns the imaginary part of the :attr:`input` tensor.
-
-.. warning::
-    Not yet implemented.
-
-.. math::
-    \text{out}_{i} = imag(\text{input}_{i})
-""" + r"""
-Args:
-    {input}
-    {out}
 """.format(**common_args))
 
 add_docstr(torch.index_select,
@@ -5636,8 +5698,8 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
 
-.. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)` 
-          will also remove the batch dimension, which can lead to unexpected 
+.. warning:: If the tensor has a batch dimension of size 1, then `squeeze(input)`
+          will also remove the batch dimension, which can lead to unexpected
           errors.
 
 Args:
@@ -6028,7 +6090,7 @@ fliplr(input) -> Tensor
 
 Flip array in the left/right direction, returning a new tensor.
 
-Flip the entries in each row in the left/right direction. 
+Flip the entries in each row in the left/right direction.
 Columns are preserved, but appear in a different order than before.
 
 Note:
