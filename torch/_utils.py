@@ -370,6 +370,13 @@ class KeyErrorMessage(str):
         return self
 
 
+class RemoteTraceback(Exception):
+    def __init__(self, traceback):
+        self.traceback = traceback
+    def __str__(self):
+        return self.traceback
+
+
 class ExceptionWrapper(object):
     r"""Wraps an exception plus traceback to communicate across threads"""
     def __init__(self, exc_info=None, where="in background"):
@@ -378,8 +385,13 @@ class ExceptionWrapper(object):
         if exc_info is None:
             exc_info = sys.exc_info()
         self.exc_type = exc_info[0]
-        self.exc_msg = "".join(traceback.format_exception(*exc_info))
         self.where = where
+        self.exc_msg = "".join(traceback.format_exception(*exc_info))
+        self.exc_msg = "Caught {} {}.\nOriginal {}".format(
+            self.exc_type.__name__, where, self.exc_msg)
+        self.exc_msg = '\n"""\n%s"""' % self.exc_msg
+        self.exc = RemoteTraceback(self.exc_msg)
+
 
     def reraise(self):
         r"""Reraises the wrapped exception in the current thread"""
@@ -392,4 +404,4 @@ class ExceptionWrapper(object):
             # makes stack traces unreadable. It will not be changed in Python
             # (https://bugs.python.org/issue2651), so we work around it.
             msg = KeyErrorMessage(msg)
-        raise self.exc_type(msg)
+        raise self.exc
