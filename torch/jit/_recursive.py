@@ -576,10 +576,6 @@ def try_compile_fn(fn, loc):
                            "Python functions or methods currently.\n"
                            "Consider manually annotating `{}` with @torch.jit.script.".format(fn, fn))
 
-    # need to access wrapped fn before creating rcb
-    if hasattr(fn, "__script_if_tracing_wrapper"):
-        fn = fn.__original_fn
-
     # We don't have the actual scope where the function was defined, but we can
     # extract the necessary info from the closed over variables on the function
     # object
