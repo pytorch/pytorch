@@ -584,16 +584,12 @@ endif()
 # END formerly-libtorch sources
 # ==========================================================
 
-VARIABLE_WATCH(Caffe2_CPU_SRCS)
-VARIABLE_WATCH(Caffe2_CPU_SRCS_NON_AVX)
-VARIABLE_WATCH(Caffe2_CPU_SRCS_AVX)
-VARIABLE_WATCH(Caffe2_CPU_SRCS_AVX2)
 set(Caffe2_CPU_SRCS_NON_AVX ${Caffe2_CPU_SRCS})
-list(FILTER Caffe2_CPU_SRCS_NON_AVX EXCLUDE REGEX "cpp\\.AVX2?\\.cpp")
+list(FILTER Caffe2_CPU_SRCS_NON_AVX EXCLUDE REGEX "AVX2?\\.cpp")
 set(Caffe2_CPU_SRCS_AVX ${Caffe2_CPU_SRCS})
-list(FILTER Caffe2_CPU_SRCS_AVX INCLUDE REGEX "cpp\\.AVX\\.cpp")
+list(FILTER Caffe2_CPU_SRCS_AVX INCLUDE REGEX "AVX\\.cpp")
 set(Caffe2_CPU_SRCS_AVX2 ${Caffe2_CPU_SRCS})
-list(FILTER Caffe2_CPU_SRCS_AVX2 INCLUDE REGEX "cpp\\.AVX2\\.cpp")
+list(FILTER Caffe2_CPU_SRCS_AVX2 INCLUDE REGEX "AVX2\\.cpp")
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX} ${Caffe2_CPU_SRCS_AVX2})
 
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
