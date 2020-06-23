@@ -803,7 +803,10 @@ class FunctionEventAvg(FormattedTimesMixin):
 
 class StringTable(defaultdict):
     def __missing__(self, key):
-        self[key] = torch._C._demangle(key)
+        # manage cases like 't' (demangled to 'unsigned short') separately,
+        # for now simply check the length to avoid unexpected results for
+        # the short sequences
+        self[key] = torch._C._demangle(key) if len(key) > 1 else key
         return self[key]
 
 
