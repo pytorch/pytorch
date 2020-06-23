@@ -497,7 +497,6 @@
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
 
 - func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
-  requires_tensor: True
   dispatch:
     QuantizedCPU: quantized_batch_norm
 
@@ -1694,13 +1693,11 @@
 
 - func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: full
-  requires_tensor: True
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d
 
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: full
-  requires_tensor: True
   dispatch:
     QuantizedCPU: quantized_max_pool2d
 
@@ -2236,7 +2233,6 @@
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   use_c10_dispatcher: full
   device_guard: False
-  requires_tensor: True
   dispatch:
     MkldnnCPU: mkldnn_reshape
 
@@ -2660,7 +2656,6 @@
 - func: _mkldnn_transpose(Tensor self, int dim0, int dim1) -> Tensor
   use_c10_dispatcher: full
   device_guard: False
-  requires_tensor: True
   dispatch:
     MkldnnCPU: mkldnn_transpose
 
@@ -2670,7 +2665,6 @@
 
 - func: _mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   device_guard: False
-  requires_tensor: True
   dispatch:
     MkldnnCPU: mkldnn_transpose_
 
@@ -3158,12 +3152,6 @@
 # using **Tensor** type, and thus lose autograd tracking on the actual method
 # they dispatch to, e.g., `sparse_coo_tensor_with_dims_and_tensors`.
 #
-# The actual ctors `sparse_coo_tensor_with_dims` and `sparse_coo_tensor_with_dims_and_tensors`,
-# on the other hand, need to create `SparseTensorImpl` and know nothing about
-# how `VariableType`s work. So they need to be dispatched using Tensor types.
-# We thus put `requires_tensor=True` to ensure that `VariableType` will unwrap
-# the given variables and call with the Tensor type.
-#
 #
 # Sparse Methods API Design
 # ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3267,24 +3255,20 @@
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_sparse
-  requires_tensor: True
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_and_tensor_sparse
-  requires_tensor: True
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_resize_
-  requires_tensor: True
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_resize_and_clear_
-  requires_tensor: True
 
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   use_c10_dispatcher: full
@@ -3292,7 +3276,6 @@
   dispatch:
     SparseCPU: sparse_mask_cpu
     SparseCUDA: sparse_mask_cuda
-  requires_tensor: True
 
 - func: to_dense(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3300,7 +3283,6 @@
   dispatch:
     SparseCPU, SparseCUDA: sparse_to_dense
     MkldnnCPU: mkldnn_to_dense
-  requires_tensor: True
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
   use_c10_dispatcher: full
@@ -3310,7 +3292,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dim_sparse
-  requires_tensor: True
   device_guard: False
 
 # legacy method
@@ -3319,7 +3300,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dim_sparse
-  requires_tensor: True
   device_guard: False
 
 - func: dense_dim(Tensor self) -> int
@@ -3327,7 +3307,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: dense_dim_sparse
-  requires_tensor: True
   device_guard: False
 
 # legacy method
@@ -3336,7 +3315,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: dense_dim_sparse
-  requires_tensor: True
   device_guard: False
 
 - func: _nnz(Tensor self) -> int
@@ -3344,7 +3322,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _nnz_sparse
-  requires_tensor: True
   device_guard: False
 
 - func: coalesce(Tensor self) -> Tensor
@@ -3353,14 +3330,12 @@
   dispatch:
     SparseCPU: coalesce_sparse_cpu
     SparseCUDA: coalesce_sparse_cuda
-  requires_tensor: True
 
 - func: is_coalesced(Tensor self) -> bool
   use_c10_dispatcher: full
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: is_coalesced_sparse
-  requires_tensor: True
   device_guard: False
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
@@ -3368,7 +3343,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _indices_sparse
-  requires_tensor: True
   device_guard: False
 
 - func: _values(Tensor(a) self) -> Tensor(a)
@@ -3376,7 +3350,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _values_sparse
-  requires_tensor: True
   device_guard: False
 
 # This method doesn't do any check but only directly sets the flag. So it can be
@@ -3386,7 +3359,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _coalesced_sparse_
-  requires_tensor: True
   device_guard: False
 
 - func: indices(Tensor(a) self) -> Tensor(a)
@@ -3394,7 +3366,6 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: indices_sparse
-  requires_tensor: True
   device_guard: False
 
 - func: values(Tensor(a) self) -> Tensor(a)
@@ -3402,27 +3373,23 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: values_sparse
-  requires_tensor: True
   device_guard: False
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     SparseCPU: hspmm_out_sparse_cpu
     SparseCUDA: hspmm_out_sparse_cuda
-  requires_tensor: True
 
 - func: hspmm(Tensor mat1, Tensor mat2) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     SparseCPU: hspmm_sparse_cpu
     SparseCUDA: hspmm_sparse_cuda
-  requires_tensor: True
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: copy_sparse_
-  requires_tensor: True
 
 - func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -5510,7 +5477,6 @@
   use_c10_dispatcher: full
   dispatch:
     MkldnnCPU: mkldnn_adaptive_avg_pool2d
-  requires_tensor: True
 
 - func: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   use_c10_dispatcher: full

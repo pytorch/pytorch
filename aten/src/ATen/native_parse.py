@@ -422,7 +422,6 @@ def run(paths):
                 propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
-                declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['cpu_bfloat16'] = func.get('cpu_bfloat16', False)
