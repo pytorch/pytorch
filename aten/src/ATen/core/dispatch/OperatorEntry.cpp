@@ -79,10 +79,23 @@ void OperatorEntry::deregisterSchema() {
 std::list<OperatorEntry::KernelEntry>::iterator OperatorEntry::registerKernel(
   c10::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
+  c10::optional<CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
+
+  if (cpp_signature.has_value()) {
+    if (cpp_signature_.has_value()) {
+      TORCH_INTERNAL_ASSERT(*cpp_signature == *cpp_signature_,
+        "Tried to register a kernel (", debug, ") for operator ", name_," for dispatch key ", toString(dispatch_key),
+        ", but the C++ function signature ", cpp_signature->name(), " mismatched with a previous kernel that had the signature ",
+        cpp_signature_->name()
+      );
+    } else {
+      cpp_signature_ = *cpp_signature;
+    }
+  }
 
   if (schema_ && inferred_function_schema) {
     checkSchema(name_, *schema_, *debug_, *inferred_function_schema, debug);
