@@ -338,14 +338,13 @@ void GraphTaskGuard::restore_current_graph_task() {
 //         needed.
 auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
   // When graph_task is nullptr, this is a long running thread that processes
-  // tasks (ex: device threads). When graph_task is non-null, this function
-  // is expected to exit once that graph_task complete.
+  // tasks (ex: device threads). When graph_task is non-null (ex: reentrant
+  // backwards, user thread), this function is expected to exit once that
+  // graph_task complete.
 
   // local_ready_queue should already been initialized when we get into thread_main
   TORCH_INTERNAL_ASSERT(local_ready_queue != nullptr);
-  // Why the test on graph_task->outstanding_tasks_?  See
-  // Note [Reentrant backwards]
-  while (graph_task == nullptr || graph_task->outstanding_tasks_ > 0) {
+  while (graph_task == nullptr || !graph_task->future_result_->completed()) {
     // local_graph_task represents the graph_task we retrieve from the queue.
     // The outer graph_task represents the overall graph_task we need to execute
     // for reentrant execution.
