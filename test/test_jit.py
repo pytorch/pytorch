@@ -4545,7 +4545,7 @@ a")
                 return result
 
         v = Vocabulary(list('uabcdefg'))
-        v.copy()
+        v.__copy__()
 
     def test_tuple_to_opt_list(self):
         @torch.jit.script
