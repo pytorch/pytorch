@@ -1288,8 +1288,11 @@ void _qadaptive_avg_pool_kernel(
         int kH = iendH - istartH;
         for (int64_t ow = 0; ow < osizeW; ow++) {
           auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
-              odata + b * osizeD * osizeH * osizeW * sizeC +
-              (od * osizeH * osizeW + oh * osizeW + ow) * sizeC);
+              odata +
+              b * osizeD * osizeH * osizeW * sizeC +
+              od * osizeH * osizeW * sizeC +
+              oh * osizeW * sizeC +
+              ow * sizeC);
           int istartW = (int)std::floor((float)(ow * isizeW) / osizeW);
           int iendW = (int)std::ceil((float)((ow + 1) * isizeW) / osizeW);
           int kW = iendW - istartW;
@@ -1300,9 +1303,12 @@ void _qadaptive_avg_pool_kernel(
           // For int8 or uint8quantization, we implicitly use int32 as
           // accumulation Or else, it will go to the slow path
           // TODO: support 16bit, 32bit, and etc.
-          auto* internal_i_p = i_p + istartH * istrideH + istartW * istrideW;
+          auto* internal_i_p = i_p +
+                               istartD * istrideD +
+                               istartH * istrideH +
+                               istartW * istrideW;
 
-          // Note: If AVX is not availabele, `do_avg_pool_on_AVX2 is a noop.
+          // Note: If AVX is not available, `do_avg_pool_on_AVX2 is a noop.
           //       In that case, the following loop takes over
           // TODO: more vectorization with loop interleaving
           do_avg_pool_on_AVX2<scalar_t>(
@@ -1324,15 +1330,18 @@ void _qadaptive_avg_pool_kernel(
               istrideD,
               istrideH,
               istrideW);
+
           // 1) The following loop handles the remaining channels
           // 2) It also handles the Non-AVX2 path
           for (; c < sizeC; ++c) {
             int32_t acc_int32 = input_zero_point_m_size;
             int64_t tcntr = 0;
-            for (int64_t id = 0; id < kD; id++) {
-              for (int64_t ih = 0; ih < kH; ih++) {
-                for (int64_t iw = 0; iw < kW; iw++) {
-                  tcntr = id * istrideD + ih * istrideH + iw * istrideW;
+            for (int64_t id = 0; id < kD; ++id) {
+              for (int64_t ih = 0; ih < kH; ++ih) {
+                for (int64_t iw = 0; iw < kW; ++iw) {
+                  tcntr = id * istrideD +
+                          ih * istrideH +
+                          iw * istrideW;
                   auto val = *(internal_i_p + tcntr + c * istrideC);
                   acc_int32 += val;
                 }

@@ -167,8 +167,8 @@ Tensor _adaptive_avg_pool(const Tensor& input,
   int64_t isizeH = input.size(-2);
   int64_t isizeW = input.size(-1);
   /* strides */
-  int64_t istrideD = kSpatialDim == 2 ? 1 : input.stride(-4);
-  int64_t istrideC = input.stride(-3);
+  int64_t istrideC = input.stride(-(kSpatialDim + 1));
+  int64_t istrideD = kSpatialDim == 2 ? 1 : input.stride(-3);
   int64_t istrideH = input.stride(-2);
   int64_t istrideW = input.stride(-1);
 
@@ -185,7 +185,7 @@ Tensor _adaptive_avg_pool(const Tensor& input,
         input.q_scale(),
         input.q_zero_point(),
         c10::nullopt);
-    if (input.dim() == kSpatialDim + 1 || input.size(0) == 1) {
+    if (input.dim() == (kSpatialDim + 1) || input.size(0) == 1) {
       qadaptive_avg_pool3d_ndhwc_stub(
           input.device().type(),
           input,
@@ -235,7 +235,7 @@ Tensor _adaptive_avg_pool(const Tensor& input,
     auto input_data = input_contig.data_ptr<scalar_t>();
     auto output_data = output.data_ptr<scalar_t>();
 
-    if (input.dim() ==( kSpatialDim + 1) || input.size(0) == 1) {
+    if (input.dim() ==(kSpatialDim + 1) || input.size(0) == 1) {
       adaptive_avg_pool_single_out_frame<scalar_t>(
           input_data,
           output_data,
@@ -284,7 +284,6 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
 template <typename scalar_t>
 Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
                              IntArrayRef output_size) {
-
   return _adaptive_avg_pool<3, scalar_t>(input, output_size, output);
 }
 
