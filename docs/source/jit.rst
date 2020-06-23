@@ -48,6 +48,7 @@ Creating TorchScript Code
     trace_module
     ScriptModule
     ScriptFunction
+    freeze
     save
     load
     ignore
