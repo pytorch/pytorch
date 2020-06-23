@@ -104,6 +104,9 @@ enum pytorch_qnnp_status qnnpackLinear(
       .ukernel = pytorch_qnnp_params.q8conv.gemm,
   };
 
+  const pytorch_qnnp_fpu_state saved_fpu_state = pytorch_qnnp_get_fpu_state();
+  pytorch_qnnp_disable_fpu_denormals();
+
   pthreadpool_compute_4d_tiled(
       threadpool,
       (pthreadpool_function_4d_tiled_t) compute_q8gemm,
@@ -116,6 +119,8 @@ enum pytorch_qnnp_status qnnpackLinear(
       output_size,
       mr,
       nr);
+
+  pytorch_qnnp_set_fpu_state(saved_fpu_state);
 
   return pytorch_qnnp_status_success;
 }
