@@ -8,10 +8,6 @@ cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
 
-VARIABLE_WATCH(ATen_CPU_SRCS)
-VARIABLE_WATCH(all_cpu_cpp)
-VARIABLE_WATCH(cpu_kernel_cpp)
-
 # Suppress warning flags in default MSVC configuration.  It's not
 # mandatory that we do this (and we don't if cmake is old), but it's
 # nice when it's possible, and it's possible on our Windows configs.
