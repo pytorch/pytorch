@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/quantization/helper.h>
 
 #include <stack>
 
@@ -25,11 +26,11 @@ static bool hastensor(Module& m, const char* name) {
   return m.hasattr(name) && m.attr(name).isTensor();
 }
 
-void replaceConv2dBiasWithGetAttr(Module& module) {
+void replaceConvBiasWithGetAttr(Module& module) {
   auto graph = module.get_method("forward").graph();
   // Only looks fors _convolution pattern.
-  // Thus assumes that tracing will have always gotten rid of aten::conv2d.
-  // If it did not, BN folding will fail.
+  // Thus assumes that tracing will have always gotten rid of aten::conv2d or
+  // aten::conv3d. If it did not, BN folding will fail.
   const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
@@ -56,10 +57,9 @@ void replaceConv2dBiasWithGetAttr(Module& module) {
   }
 }
 
-void addBiasForConv2dIfNone(Module& module) {
+void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
   auto t = module.type()->expect<ClassType>();
   auto real_typename = t->name()->qualifiedName();
-  const std::string pattern_name("Conv2d");
   if (real_typename.size() >= pattern_name.size() &&
       (0 ==
        real_typename.compare(
@@ -71,23 +71,23 @@ void addBiasForConv2dIfNone(Module& module) {
       t->addAttribute("bias", optional_tensor_type, true);
       auto optional_tensor = c10::optional<at::Tensor>();
       module.setattr("bias", optional_tensor);
-      replaceConv2dBiasWithGetAttr(module);
+      replaceConvBiasWithGetAttr(module);
     }
   }
   for (Module m : module.children()) {
-    addBiasForConv2dIfNone(m);
+    addBiasForConvIfNone(m, pattern_name);
   }
 }
 
-class FoldConvBatchNorm2dHelper {
+class FoldConvBatchNormHelper {
  public:
   /**
-   * In this step we find all Conv2d - BatchNorm2d patterns in the graph
+   * In this step we find all Conv - BatchNorm patterns in the graph
    * and extract the corresponding parameters for these two modules,
    * and record informations for the modifications of the graph without
    * actually performing these modifications.
    */
-  void analyze(Module& module);
+  void analyze(Module& module, const PatternInfo& pattern);
   /**
    * In this step we perform all the modifications including
    * setting the attributes for conv module, rewriting values
@@ -102,8 +102,8 @@ class FoldConvBatchNorm2dHelper {
       ConvBNParameters& r);
 
   /**
-   * Given the current weight and bias tensors of a Conv2d module and parameters
-   * of the BatchNorm2d module we're folding with, compute the updated values
+   * Given the current weight and bias tensors of a Conv module and parameters
+   * of the BatchNorm module we're folding with, compute the updated values
    * for the weight and bias.
    *
    * The function is basically copied from torch/nn/utils/fusion.py
@@ -120,10 +120,13 @@ class FoldConvBatchNorm2dHelper {
   std::unordered_set<Node*> nodes_to_delete_;
 };
 
-std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::
+std::tuple<at::Tensor, at::Tensor> FoldConvBatchNormHelper::
     computeUpdatedConvWeightAndBias(const ConvBNParameters& p) {
   at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
-  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape({-1, 1, 1, 1});
+  const int64_t ndim = p.conv_w.dim();
+  at::DimVector sizes(ndim, 1);
+  sizes.at(0) = -1;
+  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape(sizes);
   at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
   return std::make_tuple(new_w, new_b);
 }
@@ -189,7 +192,7 @@ bool extractOptionalBNParams(const script::Module& bn, ConvBNParameters& r) {
   return true;
 }
 
-bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
+bool FoldConvBatchNormHelper::tryExtractingConvBNParameters(
     Module& conv,
     Module& bn,
     ConvBNParameters& r) {
@@ -214,24 +217,15 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
   return true;
 }
 
-void FoldConvBatchNorm2dHelper::analyze(Module& module) {
-  // Dot in the ".Conv2d" and ".BatchNorm2d" is an attempt to
-  // prevent matching module's whose name might end with Conv2d
-  // But are user defined modules.
-  const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
-graph(%self, %x):
-    %conv_submodule = match::module[name=".Conv2d"](%self)
-    %conv_out = prim::CallMethod[name="forward"](%conv_submodule, %x)
-    %bn_submodule = match::module[name=".BatchNorm2d"](%self)
-    %bn_out = prim::CallMethod[name="forward"](%bn_submodule, %conv_out)
-    return (%bn_out))IR");
-
+void FoldConvBatchNormHelper::analyze(
+    Module& module,
+    const PatternInfo& pattern) {
   const Graph& pattern_graph = *pattern.pattern_graph;
   const auto& vmap = pattern.vmap;
   Value* pattern_conv_out = vmap.at("conv_out");
   Value* pattern_bn_out = vmap.at("bn_out");
-  Value* pattern_conv_submodule = vmap.at("conv_submodule");
-  Value* pattern_bn_submodule = vmap.at("bn_submodule");
+  Value* pattern_conv_submodule = vmap.at("conv");
+  Value* pattern_bn_submodule = vmap.at("batchnorm");
   Node* pattern_conv = pattern_conv_out->node();
   Node* pattern_bn = pattern_bn_out->node();
 
@@ -251,11 +245,11 @@ graph(%self, %x):
     for (auto& method : current.get_methods()) {
       GRAPH_DUMP(
           current.type()->name()->name() + "::" + method.name() +
-              "() before Conv2d-BatchNorm2d folding",
+              "() before Conv-BatchNorm folding",
           method.graph());
       const auto& matches = findPatternMatches(pattern_graph, *method.graph());
 
-      GRAPH_DEBUG("number of Conv2d-BatchNorm2d matches: ", matches.size());
+      GRAPH_DEBUG("number of Conv-BatchNorm matches: ", matches.size());
       Graph* g = method.graph().get();
       if (!conv_bn_names_.count(g)) {
         // This is to make sure we don't visit one graph multiple times
@@ -329,7 +323,7 @@ graph(%self, %x):
   } // while
 }
 
-void FoldConvBatchNorm2dHelper::transform() {
+void FoldConvBatchNormHelper::transform() {
   for (const auto& item : conv_module_and_params_) {
     Module conv(item.first);
     auto w_b = item.second;
@@ -353,12 +347,35 @@ void FoldConvBatchNorm2dHelper::transform() {
 
 } // namespace
 
-Module FoldConvBatchNorm2d(const Module& module) {
-  FoldConvBatchNorm2dHelper h;
+Module FoldConvBatchNorm(const Module& module) {
   Module m = module.clone();
-  addBiasForConv2dIfNone(m);
-  h.analyze(m);
-  h.transform();
+
+  addBiasForConvIfNone(m, "Conv2d");
+  addBiasForConvIfNone(m, "Conv3d");
+  // Conv2d + BatchNorm2d
+  const PatternInfo pattern2d = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %batchnorm):
+    %conv_out = prim::CallMethod[name="forward"](%conv, %input)
+    %bn_out = prim::CallMethod[name="forward"](%batchnorm, %conv_out)
+    return (%bn_out))",
+      {is_conv2d_module, is_batchnorm2d_module});
+  // Conv3d + BatchNorm3d
+  const PatternInfo pattern3d = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %batchnorm):
+    %conv_out = prim::CallMethod[name="forward"](%conv, %input)
+    %bn_out = prim::CallMethod[name="forward"](%batchnorm, %conv_out)
+    return (%bn_out))",
+      {is_conv3d_module, is_batchnorm3d_module});
+
+  const std::vector<std::reference_wrapper<const PatternInfo>> patterns = {
+      pattern2d, pattern3d};
+  for (const auto& pattern : patterns) {
+    FoldConvBatchNormHelper h;
+    h.analyze(m, pattern);
+    h.transform();
+  }
   return m;
 }
 
