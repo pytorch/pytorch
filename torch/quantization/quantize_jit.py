@@ -71,7 +71,7 @@ def prepare_dynamic_jit(model, qconfig_dict, inplace=False):
 def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC):
     _check_is_script_module(model)
     model.eval()
-    model_c = mode._c
+    model_c = model._c
     model_c = torch._C._jit_pass_insert_quant_dequant(model_c, 'forward', inplace, debug, quant_type)
     if not debug:
         # Moving model parameters to CPU since quantized operators
