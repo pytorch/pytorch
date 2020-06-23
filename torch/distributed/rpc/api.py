@@ -369,8 +369,8 @@ class RRef(GenericWithOneTypeVar):
 
 # Install docstrings from `PyRRef` to `RRef`.
 #
-# This is for the fact that `:inherited-members:` does not work.
-# See https://github.com/sphinx-doc/sphinx/issues/7867.
+# This is for the fact that pybind11 generates the parameter types
+# for us.
 #
 def method_factory(method_name, docstring):
     def method(self, *args, **kwargs):
