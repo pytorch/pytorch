@@ -47,7 +47,7 @@ fi
 env
 echo "BUILD_ENVIRONMENT:$BUILD_ENVIRONMENT"
 
-GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace"
+GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace -PLIBTORCH_HEADERS=${BUILD_ANDROID_INCLUDE_DIR_x86}"
 if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
     GRADLE_PARAMS+=" -PABI_FILTERS=x86"
 fi
@@ -69,7 +69,6 @@ rm -f $GRADLE_LOCAL_PROPERTIES
 echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
 echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
 echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
-echo "LIBTORCH_HEADERS=$BUILD_ANDROID_INCLUDE_DIR_x86" >> $GRADLE_LOCAL_PROPERTIES
 
 $GRADLE_PATH $GRADLE_PARAMS
 
