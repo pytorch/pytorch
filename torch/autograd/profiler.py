@@ -1052,7 +1052,7 @@ def build_table(
         [event.input_shapes is not None for event in events])
     name_column_width = max([len(evt.key) for evt in events]) + 4
     DEFAULT_COLUMN_WIDTH = 15
-    SHAPES_COLUMN_WIDTH = 35
+    SHAPES_COLUMN_WIDTH = 45
 
     headers = [
         'Name',
