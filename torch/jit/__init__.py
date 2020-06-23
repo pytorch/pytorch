@@ -1246,7 +1246,6 @@ def freeze(mod, preserved_attrs : Optional[List[str]] = None):
                 self.modified_tensor += 1
                 return input + self.modified_tensor
 
-
         scripted_module = torch.jit.script(MyModule2().eval())
         frozen_module = torch.jit.freeze(scripted_module, preserved_attrs=["version"])
         # we've manually preserved `version`, so it still exists on the frozen module and can be modified
