@@ -5,6 +5,7 @@ import sys
 import time
 import subprocess
 import unittest
+import copy
 from sys import platform
 
 import torch
@@ -35,6 +36,21 @@ class SubProcess(mp.Process):
 
     def run(self):
         self.tensor.add_(3)
+
+
+def _test_cuda_ipc_deadlock_actor(queue, iterations):
+    for i in range(iterations):
+        if not queue.empty():
+            queue.get()
+        time.sleep(.01)
+
+
+def _test_cuda_ipc_deadlock_learner(queue, iterations):
+    net = torch.nn.LSTM(1, 1).cuda()
+    for i in range(iterations):
+        if not queue.full():
+            queue.put(copy.deepcopy(net.state_dict()))
+        time.sleep(.01)
 
 
 def simple_fill(queue, event):
@@ -394,6 +410,26 @@ class TestMultiprocessing(TestCase):
         del t
         e.set()
         p.join(1)
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_cuda_ipc_deadlock(self):
+        ctx = mp.get_context('spawn')
+        queue = ctx.Queue(1)
+        processes = dict(
+            a=ctx.Process(target=_test_cuda_ipc_deadlock_actor, args=(queue, 100)),
+            l=ctx.Process(target=_test_cuda_ipc_deadlock_learner, args=(queue, 100)))
+
+        for p in processes.values():
+            p.start()
+
+        for p in processes.values():
+            p.join(10)
+
+        for p in processes.values():
+            self.assertFalse(p.is_alive())
+
 
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
