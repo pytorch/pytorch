@@ -261,8 +261,11 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  // TODO: fallbacks clobber each other completely unsafely, unlike regular
-  // kernels
+  // TODO: preserve debug for old fallback
+  TORCH_CHECK(
+    !backendFallbackKernels_[dispatchKey].isValid(),
+    "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, " (", debug, ")"
+  );
   backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
   if (kernel.isFallthrough()) {
     backendsWithoutFallthrough_ = backendsWithoutFallthrough_.remove(dispatchKey);
