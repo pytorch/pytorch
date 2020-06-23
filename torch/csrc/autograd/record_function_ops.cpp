@@ -73,7 +73,9 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
       };
   // Define a future that completes after the profiling callbacks are run.
   auto profiledFut = fut->then(
-      futureProfilingFunc, fut->elementType(), /* propagate TLS state */ true);
+      futureProfilingFunc,
+      fut->elementType(),
+      /* propagate TLS state */ true);
   return profiledFut;
 }
 

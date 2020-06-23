@@ -337,7 +337,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * value of the callback. This is necessary when the callback provider needs
    * to know for sure when the callback has finished.
    */
-   c10::intrusive_ptr<Future> then(
+  c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback,
       TypePtr type,
       bool propagateTLSState = false) {
