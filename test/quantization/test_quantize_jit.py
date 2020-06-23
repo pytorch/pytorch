@@ -233,8 +233,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         for tracing, dim, bias in options:
             eager = TestModule(dim, bias).eval()
             x = data[dim]
-            scripted_or_traced = get_script_module(eager, tracing, x).copy()
-            torch._C._jit_pass_dedup_module_uses(scripted_or_traced ._c)
+            scripted_or_traced = get_script_module(eager, tracing, x)
             folded = fuse_conv_bn_jit(scripted_or_traced)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
