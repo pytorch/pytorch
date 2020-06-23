@@ -1043,8 +1043,8 @@ endif()
 # ---[ CUDA library.
 if(USE_CUDA)
 
-  target_link_libraries(torch_cuda INTERFACE torch::cudart)
-  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+  target_link_libraries(torch_cuda PUBLIC c10_cuda)
+  target_link_libraries(torch_cuda PRIVATE torch::cudart torch::nvtoolsext)
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1053,10 +1053,11 @@ if(USE_CUDA)
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
 
-  # These public dependencies must go after the previous dependencies, as the
+  # These dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  target_link_libraries(torch_cuda PUBLIC torch_cpu_library)
+  target_link_libraries(torch_cuda PRIVATE  ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
 
 endif()
@@ -1148,7 +1149,7 @@ if(BUILD_TEST)
     foreach(test_src ${Caffe2_GPU_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       cuda_add_executable(${test_name} "${test_src}")
-      target_link_libraries(${test_name} torch_library gtest_main)
+      target_link_libraries(${test_name} torch_library gtest_main ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
