@@ -48,6 +48,7 @@ DynamicLibrary::DynamicLibrary(const char* name) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   HMODULE theModule;
   bool reload = true;
+  // Check if LOAD_LIBRARY_SEARCH_DEFAULT_DIRS is supported
   if (GetProcAddress(GetModuleHandle("KERNEL32.DLL"), "AddDllDirectory") != NULL) {
     theModule = LoadLibraryExA(
         name,
