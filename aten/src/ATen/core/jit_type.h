@@ -1517,12 +1517,9 @@ namespace detail {
 template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
-    TORCH_CHECK(
-        isCustomClassRegistered<T>(),
-        "Type ",
-        c10::util::get_fully_qualified_type_name<T>(),
-        " could not be converted to any of the known types."
-    );
+    if (!isCustomClassRegistered<T>()) {
+      throw c10::Error("Type could not be converted to any of the known types.", "");
+    }
     auto res = getCustomClassType<T>();
     return std::dynamic_pointer_cast<Type>(std::move(res));
   }
@@ -1555,24 +1552,6 @@ struct getTypePtr_<int64_t> final {
 };
 template <>
 struct getTypePtr_<c10::ScalarType> final {
-  static TypePtr call() {
-    return IntType::get();
-  }
-};
-template <>
-struct getTypePtr_<c10::Device> final {
-  static TypePtr call() {
-    return DeviceObjType::get();
-  }
-};
-template <>
-struct getTypePtr_<c10::Layout> final {
-  static TypePtr call() {
-    return IntType::get();
-  }
-};
-template <>
-struct getTypePtr_<c10::MemoryFormat> final {
   static TypePtr call() {
     return IntType::get();
   }
