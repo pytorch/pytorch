@@ -2854,6 +2854,24 @@ def foo(x):
 
         FileCheck().check("goodbye").run(traced.graph)
 
+        def foo(x: int):
+            return x + 1
+
+        @torch.jit._script_if_tracing
+        def fee():
+            return foo(1)
+
+        # test directly compiling function
+        fee_compiled = torch.jit.script(fee)
+        self.assertEqual(fee_compiled(), 2)
+
+        # test compiling it within another function
+        @torch.jit.script
+        def hum():
+            return fee()
+
+        self.assertEqual(hum(), 2)
+
     def test_big_int_literals(self):
         def ok():
             # signed 64 bit max
