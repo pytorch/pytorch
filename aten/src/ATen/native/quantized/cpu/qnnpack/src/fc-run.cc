@@ -21,41 +21,6 @@ struct q8gemm_context {
   const pytorch_q8gemm_ukernel_function ukernel;
 };
 
-static void compute_q8gemm(
-    const struct q8gemm_context context[1],
-    size_t group_index,
-    size_t pixel_index,
-    size_t mr_block_start,
-    size_t nr_block_start,
-    size_t group_range /* always 1 */,
-    size_t pixel_range,
-    size_t mr_block_size,
-    size_t nr_block_size)
-{
-  const size_t k = context->k;
-  const size_t k_stride = context->k_stride;
-  const size_t n = context->n;
-  const size_t n_stride = context->n_stride;
-  const uint8_t* a = context->a;
-  const size_t a_stride = context->a_stride;
-  const void* packed_w = context->packed_w;
-  uint8_t* c = context->c;
-  const size_t c_stride = context->c_stride;
-
-  size_t output_channel_index = nr_block_start;
-  context->ukernel(
-      mr_block_size,
-      nr_block_size,
-      k,
-      a + (pixel_index + mr_block_start) * a_stride + group_index * k,
-      a_stride,
-      (const void*) ((uintptr_t) packed_w + (nr_block_start + group_index * n_stride) * (k_stride * sizeof(uint8_t) + sizeof(int32_t))),
-      c + (pixel_index + mr_block_start) * c_stride + nr_block_start + group_index * n,
-      c_stride,
-      output_channel_index,
-      &context->quantization_params);
-}
-
 struct fpu_state {
 #if defined(__SSE__) || defined(__x86_64__)
   uint32_t mxcsr;
@@ -111,6 +76,46 @@ static inline void disable_fpu_denormals() {
 #endif
 }
 
+static void compute_q8gemm(
+    const struct q8gemm_context context[1],
+    size_t group_index,
+    size_t pixel_index,
+    size_t mr_block_start,
+    size_t nr_block_start,
+    size_t group_range /* always 1 */,
+    size_t pixel_range,
+    size_t mr_block_size,
+    size_t nr_block_size)
+{
+  const size_t k = context->k;
+  const size_t k_stride = context->k_stride;
+  const size_t n = context->n;
+  const size_t n_stride = context->n_stride;
+  const uint8_t* a = context->a;
+  const size_t a_stride = context->a_stride;
+  const void* packed_w = context->packed_w;
+  uint8_t* c = context->c;
+  const size_t c_stride = context->c_stride;
+
+  const fpu_state saved_fpu_state = get_fpu_state();
+  disable_fpu_denormals();
+
+  size_t output_channel_index = nr_block_start;
+  context->ukernel(
+      mr_block_size,
+      nr_block_size,
+      k,
+      a + (pixel_index + mr_block_start) * a_stride + group_index * k,
+      a_stride,
+      (const void*) ((uintptr_t) packed_w + (nr_block_start + group_index * n_stride) * (k_stride * sizeof(uint8_t) + sizeof(int32_t))),
+      c + (pixel_index + mr_block_start) * c_stride + nr_block_start + group_index * n,
+      c_stride,
+      output_channel_index,
+      &context->quantization_params);
+
+  set_fpu_state(saved_fpu_state);
+}
+
 enum pytorch_qnnp_status qnnpackLinear(
     const size_t batch_size,
     const size_t input_channels,
@@ -157,9 +162,6 @@ enum pytorch_qnnp_status qnnpackLinear(
       .ukernel = pytorch_qnnp_params.q8conv.gemm,
   };
 
-  const fpu_state saved_fpu_state = get_fpu_state();
-  disable_fpu_denormals();
-
   pthreadpool_compute_4d_tiled(
       threadpool,
       (pthreadpool_function_4d_tiled_t) compute_q8gemm,
@@ -172,8 +174,6 @@ enum pytorch_qnnp_status qnnpackLinear(
       output_size,
       mr,
       nr);
-
-  set_fpu_state(saved_fpu_state);
 
   return pytorch_qnnp_status_success;
 }
