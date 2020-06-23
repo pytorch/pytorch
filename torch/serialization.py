@@ -342,6 +342,10 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
     .. note::
         A common PyTorch convention is to save tensors using .pt file extension.
 
+    .. note::
+        PyTorch preserves storage sharing across serialization. See :ref:`preserve-storage-sharing`
+        for more details.
+
     .. warning::
         If you are using Python 2, :func:`torch.save` does NOT support :class:`StringIO.StringIO`
         as a valid file-like object. This is because the write method should return
