@@ -101,8 +101,9 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
 Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   // NB: unsqueeze has some special handling of its `dim` argument so we can't call
-  // self_physical.getPhysicalDim. Semantically speaking `dim` is the dimension
-  // index on the NEW tensor where the new dimension appears.
+  // self_physical.getPhysicalDim directly. In particular, native::unsqueeze
+  // wraps the dim to (the logical dimension) + 1, so we need to do that here too.
+  // https://github.com/pytorch/pytorch/blob/b623bdeabb0aa8da44285d303246e7f8ac06c2a9/aten/src/ATen/native/TensorShape.cpp#L1413
   auto dim_physical =
       self_physical.numBatchDims() + maybe_wrap_dim(dim, /*logical_dim*/self.dim() + 1);
   auto result = self_physical.tensor().unsqueeze(dim_physical);
