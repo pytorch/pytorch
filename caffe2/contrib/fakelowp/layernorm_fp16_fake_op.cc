@@ -20,31 +20,25 @@ void LayerNormFakeFp16Op<CPUContext>::calcY(
   EigenArrayMap<T> Y_arr(Y, N, M);
   T tmp = T(0);
 
+  for (int i = 0; i < M; ++i) {
+    T normFactor = T(T(1) / std_arr[i]);
+    fp16_wrap(&normFactor);
+    for (int j = 0; j < N; ++j) {
+      T normalized = T(X_arr.col(i)[j] - mean[i]);
+      fp16_wrap(&normalized);
+      normalized *= normFactor;
+      fp16_wrap(&normalized);
+      Y_arr.col(i)[j] = normalized;
+    }
+  }
+
   if (gamma != nullptr && beta != nullptr) {
     ConstEigenVectorArrayMap<T> gamma_arr(gamma, N);
     ConstEigenVectorArrayMap<T> beta_arr(beta, N);
 
     for (int i = 0; i < M; ++i) {
-      T normFactor = T(T(1) / std_arr[i]);
-      fp16_wrap(&normFactor);
       for (int j = 0; j < N; ++j) {
-        tmp = T(X_arr.col(i)[j] - mean[i]);
-        fp16_wrap(&tmp);
-        T normalized = tmp * normFactor;
-        fp16_wrap(&normalized);
-        tmp = normalized * gamma_arr[j] + beta_arr[j];
-        fp16_wrap(&tmp);
-        Y_arr.col(i)[j] = tmp;
-      }
-    }
-  } else {
-    for (int i = 0; i < M; ++i) {
-      T normFactor = T(T(1) / std_arr[i]);
-      fp16_wrap(&normFactor);
-      for (int j = 0; j < N; ++j) {
-        tmp = T(X_arr.col(i)[j] - mean[i]);
-        fp16_wrap(&tmp);
-        tmp *= normFactor;
+        tmp = Y_arr.col(i)[j] * gamma_arr[j] + beta_arr[j];
         fp16_wrap(&tmp);
         Y_arr.col(i)[j] = tmp;
       }
@@ -129,7 +123,12 @@ void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
     // compute variance and std deviation
     var[i] = -mean[i] * mean[i] + sqr[i];
     fp16_wrap(&var[i]);
-    tmp = var[i] + eps;
+    // reset the variance to zero if it is negative.
+    if (var[i] < 0)
+      var[i] = T(0);
+    T tmp2 = eps;
+    fp16_wrap(&tmp2);
+    tmp = var[i] + tmp2;
     fp16_wrap(&tmp);
     std[i] = std::sqrt(tmp);
     fp16_wrap(&std[i]);
