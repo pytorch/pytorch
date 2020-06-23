@@ -10471,7 +10471,8 @@ a")
 
         input = torch.tensor([-2, 1, -1, 2])
         seq = seq_mod()
-        traced = torch.jit.script(seq, input)
+        with torch.jit._disable_emit_hooks():
+            traced = torch.jit.script(seq, input)
         o = traced(input)
         graph = traced.graph
         FileCheck().check("ReLU") \
