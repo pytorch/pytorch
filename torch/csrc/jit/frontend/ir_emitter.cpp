@@ -3546,7 +3546,7 @@ struct to_ir {
           range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      if(sv->kind() == "module") {
+      if (sv->kind() == "module") {
         auto vec_sv_ptr = sv->asTuple(val_range, method);
         auto vals = fmap(vec_sv_ptr, [&](const SugaredValuePtr& svptr) {
           return svptr->asValue(val_range, method);
