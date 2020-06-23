@@ -339,7 +339,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
    c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback,
-      TypePtr type) {
+      TypePtr type,
+      bool propagateTLSState = false) {
     auto fut = c10::make_intrusive<Future>(type);
     // Cannot move capture std::function in lambda, because it cannot deduce
     // the template type for std::function. Hence use std::bind to explicitly
