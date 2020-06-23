@@ -195,6 +195,7 @@ Basic activations are supported.
 * :meth:`~torch.nn.functional.interpolate` - Interpolation
 * :meth:`~torch.nn.functional.hardsigmoid` - Hardsigmoid
 * :meth:`~torch.nn.functional.hardswish` - Hardswish
+* :meth:`~torch.nn.functional.hardtanh` - Hardtanh
 * :meth:`~torch.nn.functional.upsample` - Upsampling
 * :meth:`~torch.nn.functional.upsample_bilinear` - Bilinear Upsampling
 * :meth:`~torch.nn.functional.upsample_nearest` - Upsampling Nearest
@@ -380,6 +381,7 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.relu` — Rectified linear unit
 * :func:`~torch.nn.quantized.functional.hardsigmoid` — Hardsigmoid
 * :func:`~torch.nn.quantized.functional.hardswish` — Hardswish
+* :func:`~torch.nn.quantized.functional.hardtanh` — Hardtanh
 * :func:`~torch.nn.quantized.functional.upsample` — Upsampler. Will be
   deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
 * :func:`~torch.nn.quantized.functional.upsample_bilinear` — Bilenear
