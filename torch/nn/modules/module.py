@@ -46,6 +46,118 @@ def _addindent(s_, numSpaces):
     return s
 
 
+r"""This tracks hooks common to all modules that are executed before/after
+calling forward and backward. This is global state used for debugging/profiling
+purposes"""
+_global_backward_hooks = OrderedDict()
+_global_forward_pre_hooks = OrderedDict()
+_global_forward_hooks = OrderedDict()
+
+
+def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Registers a forward pre-hook common to all modules.
+
+    .. warning ::
+
+        This adds global state to the `nn.module` module
+        and it is only intended for debugging/profiling purposes. 
+
+    The hook will be called every time before :func:`forward` is invoked.
+    It should have the following signature::
+
+        hook(module, input) -> None or modified input
+
+    The input contains only the positional arguments given to the module.
+    Keyword arguments won't be passed to the hooks and only to the ``forward``.
+    The hook can modify the input. User can either return a tuple or a
+    single modified value in the hook. We will wrap the value into a tuple
+    if a single value is returned(unless that value is already a tuple).
+
+    This hook has precedence over the specific module hooks registered with
+    ``register_forward_pre_hook``.
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+    """
+    handle = hooks.RemovableHandle(_global_forward_pre_hooks)
+    _global_forward_pre_hooks[handle.id] = hook
+    return handle
+
+
+def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Registers a global forward hook for all the modules
+
+    .. warning ::
+
+        This adds global state to the `nn.module` module
+        and it is only intended for debugging/profiling purposes. 
+
+    The hook will be called every time after :func:`forward` has computed an output.
+    It should have the following signature::
+
+        hook(module, input, output) -> None or modified output
+
+    The input contains only the positional arguments given to the module.
+    Keyword arguments won't be passed to the hooks and only to the ``forward``.
+    The hook can modify the output. It can modify the input inplace but
+    it will not have effect on forward since this is called after
+    :func:`forward` is called.
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+
+    This hook will be executed before specific module hooks registered with
+    ``register_forward_hook``.
+    """
+    handle = hooks.RemovableHandle(_global_forward_hooks)
+    _global_forward_hooks[handle.id] = hook
+    return handle
+
+def register_module_backward_hook(
+    hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+) -> RemovableHandle:
+    r"""Registers a backward hook common to all the modules.
+
+    .. warning ::
+        This adds global state to the `nn.module` module
+        and it is only intended for debugging/profiling purposes. 
+
+        The current implementation will not have the presented behavior
+        for complex :class:`Module` that perform many operations.
+        In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
+        contain the gradients for a subset of the inputs and outputs.
+        For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
+        directly on a specific input or output to get the required gradients.
+
+    The hook will be called every time the gradients with respect to module
+    inputs are computed. The hook should have the following signature::
+
+        hook(module, grad_input, grad_output) -> Tensor or None
+
+    The :attr:`grad_input` and :attr:`grad_output` may be tuples if the
+    module has multiple inputs or outputs. The hook should not modify its
+    arguments, but it can optionally return a new gradient with respect to
+    input that will be used in place of :attr:`grad_input` in subsequent
+    computations. :attr:`grad_input` will only correspond to the inputs given
+    as positional arguments.
+
+    Global hooks are called before hooks registered with `register_backward_hook`
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+
+    """
+    handle = hooks.RemovableHandle(_global_backward_hooks)
+    _global_backward_hooks[handle.id] = hook
+    return handle
+
+
 class Module:
     r"""Base class for all neural network modules.
 
@@ -87,7 +199,7 @@ class Module:
 
     training: bool
 
-    def __init__(self) -> None:
+    def __init__(self):
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
@@ -576,7 +688,6 @@ class Module:
         self._forward_hooks[handle.id] = hook
         return handle
 
-
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
         if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
@@ -597,7 +708,9 @@ class Module:
         return result
 
     def _call_impl(self, *input, **kwargs):
-        for hook in self._forward_pre_hooks.values():
+        for hook in itertools.chain(
+                _global_forward_pre_hooks.values(),
+                self._forward_pre_hooks.values()):
             result = hook(self, input)
             if result is not None:
                 if not isinstance(result, tuple):
@@ -607,11 +720,13 @@ class Module:
             result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)
-        for hook in self._forward_hooks.values():
+        for hook in itertools.chain(
+                _global_forward_hooks.values(),
+                self._forward_hooks.values()):
             hook_result = hook(self, input, result)
             if hook_result is not None:
                 result = hook_result
-        if len(self._backward_hooks) > 0:
+        if (len(self._backward_hooks) > 0) or (len(_global_backward_hooks) > 0):
             var = result
             while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
@@ -620,7 +735,9 @@ class Module:
                     var = var[0]
             grad_fn = var.grad_fn
             if grad_fn is not None:
-                for hook in self._backward_hooks.values():
+                for hook in itertools.chain(
+                        _global_backward_hooks.values(),
+                        self._backward_hooks.values()):
                     wrapper = functools.partial(hook, self)
                     functools.update_wrapper(wrapper, hook)
                     grad_fn.register_hook(wrapper)

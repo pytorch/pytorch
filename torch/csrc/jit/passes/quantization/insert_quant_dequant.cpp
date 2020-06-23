@@ -456,11 +456,11 @@ class SubGraphCloneHelper {
 
 class InsertQuantDeQuantHelper {
  public:
+  InsertQuantDeQuantHelper(QuantType quant_type, bool debug)
+      : quant_type_(quant_type), debug_(debug) {}
+
   void run(Module& module, const std::string& method_name);
 
-  void setQuantType(QuantType quant_type) {
-    quant_type_ = quant_type;
-  }
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
   void cleanup(Module& module);
@@ -561,12 +561,13 @@ class InsertQuantDeQuantHelper {
   // once
   std::unordered_set<Value*> quantized_values_;
 
-  QuantType quant_type_ = QuantType::STATIC;
-
   // Map from original weight value to GraphFunction corresponding to the
   // subgraph that includes the weight observer and dependent nodes.
   std::unordered_map<Value*, std::unique_ptr<GraphFunction>>
       weight_to_graph_fn_;
+
+  QuantType quant_type_ = QuantType::STATIC;
+  bool debug_ = false;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -1018,6 +1019,16 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
           propagateQParams(output, *inputs, /* is_scalar */ false, qparams_opt);
         }
       }
+    } else if (isPropagateQuantBinaryOp(n)) {
+      // Print warning for add_scalar/mul_scalar when debug is enabled
+      // since the quantization parameter for these ops depends on
+      // input and it's too complicated to encode the equations in
+      // the IR:
+      // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/quantized/cpu/qadd.cpp#L64-L74
+      if (debug_ && isScalar(n->input(1))) {
+        TORCH_WARN_ONCE(
+            "debug option for add_scalar and mul_scalar is not supported");
+      }
     } else {
       // For ops that are quantized by propagating dequantize ops,
       // e.g. flatten we need to
@@ -1059,6 +1070,10 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
 void InsertQuantDeQuantHelper::runWeightObserver(
     Module& module,
     const std::string& method_name) {
+  if (quant_type_ != QuantType::DYNAMIC) {
+    return;
+  }
+
   for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_methods);
     const auto& invoked_method_name = std::get<1>(invoked_methods);
@@ -1181,9 +1196,10 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
-  RemoveRedundantDequantize(graph);
+  // TODO: add filter to the clamp patterns and remove this pass
   ReplicateClampScalarArgs(graph);
   propagateQuantizationOps(graph->block());
+  RemoveRedundantDequantize(graph);
 }
 
 } // namespace
@@ -1309,13 +1325,11 @@ Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
     bool inplace,
+    bool debug,
     QuantType quant_type) {
   Module module = input_module.clone(inplace);
-  InsertQuantDeQuantHelper h;
-  h.setQuantType(quant_type);
-  if (quant_type == QuantType::DYNAMIC) {
-    h.runWeightObserver(module, method_name);
-  }
+  InsertQuantDeQuantHelper h(quant_type, debug);
+  h.runWeightObserver(module, method_name);
   h.run(module, method_name);
   h.cleanup(module);
   h.propagateQuantizationOps(module);
