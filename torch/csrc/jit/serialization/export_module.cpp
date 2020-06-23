@@ -242,6 +242,11 @@ class ScriptModuleSerializer {
     if (hook) {
       ExtraFilesMap hook_files = hook(module);
       for (const auto& kv : hook_files) {
+        // Verifies hook files not in extra files
+        for (const auto& ef_kv : extra_files) {
+          TORCH_CHECK(kv.first != ef_kv.first, "Trying to write the same extra ",
+            "file twice! Hook is writing ", kv.first, " and ", ef_kv.first, " was in existing extra_files");
+        }
         const std::string key = "extra/" + kv.first;
         writer_.writeRecord(key, kv.second.data(), kv.second.size());
       }
