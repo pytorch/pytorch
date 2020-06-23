@@ -504,9 +504,16 @@ class TestSaveLoad(JitTestCase):
         self._verify_count("aten::full", current_module, 2)
 
         # Verifies historic integer type inference is float
+        # NOTE: only verifies floating point, not exact dtype, due to
+        #   https://github.com/pytorch/pytorch/issues/40470
         results = v4_module(2)
         for result in results:
             self.assertTrue(result.is_floating_point())
+
+        # Verifies values are correct
+        a, b = results
+        self.assertTrue((a == 2.).all())
+        self.assertTrue((b == 1.).all())
 
         with self.assertRaisesRegex(RuntimeError, ".+is currently unsupported.+"):
             current_module(2)
