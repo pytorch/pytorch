@@ -4,7 +4,7 @@ import torch.jit.annotations
 import torch.testing
 import torch.jit._recursive
 
-from torch.jit._recursive import ScriptMethodStub
+from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
 from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin  # noqa
 from torch._jit_internal import Future, _qualified_name
 from torch.autograd import Variable, function
@@ -1815,6 +1815,32 @@ if _enabled:
             script_module._initializing = False
             return script_module
 
+        def _reconstruct(self, cpp_module):
+            """
+            Re-construct an instance of RecursiveScriptModule using an instance of a C++ module.
+
+            Arguments:
+                cpp_module: The C++ module that this RecursiveScriptModule will be rebuilt around.
+            """
+            self.__init__(cpp_module)
+
+            # Copy the concrete type from the C++ module to this ScriptModule.
+            self._concrete_type = torch._C.ConcreteModuleType.from_jit_type(self._c._type())
+
+            # Copy submodules from the C++ module to this ScriptModule.
+            modules = {}
+            for name, cpp_module in torch._C.ModuleDict(self._c).items():
+                modules[name] = wrap_cpp_module(cpp_module)
+            self._modules = OrderedModuleDict(self._c, modules)
+
+            # Copy parameters and buffers.
+            self._parameters = OrderedDictWrapper(torch._C.ParameterDict(self._c))
+            self._buffers = OrderedDictWrapper(torch._C.BufferDict(self._c))
+
+            # Get rid of the functions from the old C++ module.
+            self.__dict__ = {k: v for k, v in self.__dict__.items() if not isinstance(v, torch._C.ScriptMethod)}
+            self.__dict__['_initializing'] = False
+
         @property
         def graph(self):
             r"""
@@ -2147,6 +2173,16 @@ class TracedModule(ScriptModule):
 if _enabled:
     class TopLevelTracedModule(TracedModule):
         forward = _CachedForward()
+
+        def _reconstruct(self, cpp_module):
+            """
+            Re-construct an instance of TopLevelTracedModule using an instance of a C++ module.
+
+            Arguments:
+                cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
+            """
+            self.__dict__['_actual_script_module']._reconstruct(cpp_module)
+
 
 def is_scripting():
     r"""
