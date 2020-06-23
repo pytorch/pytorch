@@ -4192,7 +4192,7 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
       c10::str(BatchNorm1d(
           BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false)
           .track_running_stats(true))),
-      "torch::nn::BatchNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+      "torch::nn::BatchNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true, use_scale=True)");
 }
 
 TEST_F(ModulesTest, PrettyPrintBatchNorm2d) {
@@ -4200,7 +4200,7 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm2d) {
       c10::str(BatchNorm2d(
           BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false)
           .track_running_stats(true))),
-      "torch::nn::BatchNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+      "torch::nn::BatchNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true, use_scale=True)");
 }
 
 TEST_F(ModulesTest, PrettyPrintBatchNorm3d) {
@@ -4208,7 +4208,7 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm3d) {
       c10::str(BatchNorm3d(
           BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false)
           .track_running_stats(true))),
-      "torch::nn::BatchNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+      "torch::nn::BatchNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true, use_scale=True)");
 }
 
 TEST_F(ModulesTest, PrettyPrintInstanceNorm1d) {
@@ -4216,7 +4216,7 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm1d) {
       c10::str(InstanceNorm1d(
           InstanceNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false)
           .track_running_stats(true))),
-      "torch::nn::InstanceNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+      "torch::nn::InstanceNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true, use_scale=True)");
 }
 
 TEST_F(ModulesTest, PrettyPrintInstanceNorm2d) {
@@ -4224,7 +4224,7 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm2d) {
       c10::str(InstanceNorm2d(
           InstanceNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false)
           .track_running_stats(true))),
-      "torch::nn::InstanceNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+      "torch::nn::InstanceNorm2d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true, use_scale=True)");
 }
 
 TEST_F(ModulesTest, PrettyPrintInstanceNorm3d) {
@@ -4232,7 +4232,7 @@ TEST_F(ModulesTest, PrettyPrintInstanceNorm3d) {
       c10::str(InstanceNorm3d(
           InstanceNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false)
           .track_running_stats(true))),
-      "torch::nn::InstanceNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+      "torch::nn::InstanceNorm3d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true, use_scale=True)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {

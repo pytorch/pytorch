@@ -408,7 +408,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       "  (0): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (1): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
       "  (2): torch::nn::Dropout(p=0.5, inplace=false)\n"
-      "  (3): torch::nn::BatchNorm2d(5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
+      "  (3): torch::nn::BatchNorm2d(5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true, use_scale=True)\n"
       "  (4): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
       "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, num_layers=1, bias=true, batch_first=false, dropout=0, bidirectional=false)\n"
       ")");
@@ -427,7 +427,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       "  (linear): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (conv2d): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
       "  (dropout): torch::nn::Dropout(p=0.5, inplace=false)\n"
-      "  (batchnorm2d): torch::nn::BatchNorm2d(5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
+      "  (batchnorm2d): torch::nn::BatchNorm2d(5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true, use_scale=True)\n"
       "  (embedding): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
       "  (lstm): torch::nn::LSTM(input_size=4, hidden_size=5, num_layers=1, bias=true, batch_first=false, dropout=0, bidirectional=false)\n"
       ")");
