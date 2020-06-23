@@ -12,8 +12,9 @@ import time
 import unittest
 from datetime import timedelta
 from sys import platform
+from contextlib import contextmanager
 
-from itertools import groupby
+from itertools import groupby, product
 from functools import reduce
 import operator
 
@@ -1367,7 +1368,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                                     "Invalid function argument.*output_tensor_lists"):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 
-
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
@@ -1888,6 +1888,32 @@ class QuadraGpuNet(nn.Module):
         return F.softmax(x, dim=1).to(dev0)
 
 
+class ConvNet(nn.Module):
+    def __init__(self, gpus, layouts, dtypes):
+        super(ConvNet, self).__init__()
+        self.dtypes = dtypes
+        if isinstance(gpus, list):
+            self.layer_gpus = gpus
+        else:
+            gpus = [gpus] * 4
+        self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(device=gpus[0], memory_format=layouts[0], dtype=dtypes[0])
+        self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(device=gpus[1], memory_format=layouts[1], dtype=dtypes[1])
+        self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(device=gpus[2], memory_format=layouts[2], dtype=dtypes[2])
+        self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(device=gpus[3], memory_format=layouts[3], dtype=dtypes[3])
+
+    def forward(self, x):
+        x = x.to(self.dtypes[0])
+        # Could say
+        # x = self.conv0(x).to(device=self.conv1.weight.device, dtype=self.dtypes[1])
+        # etc.  But I don't want to appeal to the weights' devices directly, because part of this test's purpose
+        # is to verify weights are where expected if the model gets replicated.
+        gpus = self.layer_gpus if hasattr(self, "layer_gpus") else [x.device] * 4
+        x = self.conv0(x).to(device=gpus[1], dtype=self.dtypes[1])
+        x = self.conv1(x).to(device=gpus[2], dtype=self.dtypes[2])
+        x = self.conv2(x).to(device=gpus[3], dtype=self.dtypes[3])
+        return self.conv3(x)
+
+
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
@@ -2342,7 +2368,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             self.assertIsNotNone(t1_p.grad)
             self.assertIsNone(task_unused_p.grad)
 
-
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
@@ -2552,15 +2577,15 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 # Skip gradients sync without calling prepare_for_backward
                 step_model(
                     ddp_model.module,
-                    input[self.rank : (self.rank + 1)],
-                    target[self.rank : (self.rank + 1)])
+                    input[self.rank:(self.rank + 1)],
+                    target[self.rank:(self.rank + 1)])
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     self.assertNotEqual(i.grad, j.grad)
             else:
                 step_model(
                     ddp_model,
-                    input[self.rank : (self.rank + 1)],
-                    target[self.rank : (self.rank + 1)])
+                    input[self.rank:(self.rank + 1)],
+                    target[self.rank:(self.rank + 1)])
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                     self.assertEqualIgnoreType(i.grad, j.grad)
@@ -2762,6 +2787,153 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         ddp_parameter = next(ddp_model.parameters())
         self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
 
+    def _test_grad_layout(self, replica_devices, layer_devs, local_batch_size):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        global_batch_size = local_batch_size * self.world_size
+
+        # Carry out some trials with small buckets and some with big buckets.
+        bucketsizes = (0.000001, 25)
+        # Tuples of lists.  Each list describes per-layer characteristics for one trial.
+        layer_formats = ([torch.contiguous_format] * 4,
+                         [torch.channels_last] * 2 + [torch.contiguous_format] * 2,
+                         [torch.channels_last] * 4)
+        layer_dtypes = ([torch.float] * 4,
+                        [torch.float] * 2 + [torch.half] * 2,
+                        [torch.half] * 4)
+
+        input_dev = layer_devs[0] if isinstance(layer_devs, list) else layer_devs
+        target_dev = layer_devs[-1] if isinstance(layer_devs, list) else layer_devs
+        input = torch.randn((global_batch_size, 8, 8, 8), device=input_dev, dtype=torch.float)
+        target = torch.randn((global_batch_size, 8, 4, 4), device=target_dev, dtype=torch.float)
+        local_batch_start = self.rank * local_batch_size
+        local_batch_end = (self.rank + 1) * local_batch_size
+
+        # Reducer.cpp sneakily creates one "initial bucket" that ignores the "bucket_cap_mb"
+        # argument.  The following makes sure the initial bucket also complies.
+        @contextmanager
+        def first_bucket_size(ddp_bucket_mb):
+            old_DEFAULT_FIRST_BUCKET_BYTES = dist._DEFAULT_FIRST_BUCKET_BYTES
+            dist._DEFAULT_FIRST_BUCKET_BYTES = int(ddp_bucket_mb * 1.e6)
+            try:
+                yield
+            finally:
+                dist._DEFAULT_FIRST_BUCKET_BYTES = old_DEFAULT_FIRST_BUCKET_BYTES
+
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
+            for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
+                with first_bucket_size(bucketsize):
+                    model_msg = "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(self.rank, formats,
+                                                                                             dtypes, bucketsize)
+                    try:
+                        m = ConvNet(layer_devs, formats, dtypes)
+                        m_ddp = DistributedDataParallel(copy.deepcopy(m),
+                                                        device_ids=replica_devices,
+                                                        process_group=process_group,
+                                                        bucket_cap_mb=bucketsize)
+                        opt = torch.optim.SGD(m.parameters(), lr=0.1)
+                        opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
+                        has_half = any(p.dtype is torch.half for p in m.parameters())
+                        tol = 1.e-3 if has_half else 1.e-5
+                    except BaseException:
+                        # Prints case-specific debugging info to narrow down failing case.
+                        print("Caught exception during model creation for " + model_msg, flush=True)
+                        raise
+                    # 3 iters:  First iter creates grads, second iter retests after rebucketing,
+                    # third iter tries zeroed grads.
+                    for it in range(3):
+                        iter_msg = "iter = {} ".format(it) + model_msg
+                        named_msg = iter_msg
+                        try:
+                            F.mse_loss(m(input).float(), target).backward()
+                            F.mse_loss(m_ddp(input[local_batch_start: local_batch_end]).float(),
+                                       target[local_batch_start: local_batch_end]).backward()
+                            for i, ((layer_name, m_child), m_ddp_child) in enumerate(zip(m.named_children(),
+                                                                                         m_ddp.module.children())):
+                                named_msg = layer_name + ".weight" + " " + iter_msg
+                                self.assertTrue(m_child.weight.grad.is_contiguous(memory_format=formats[i]),
+                                                named_msg)
+                                self.assertTrue(m_ddp_child.weight.grad.is_contiguous(memory_format=formats[i]),
+                                                named_msg)
+                                for j, ((param_name, p), p_ddp) in enumerate(zip(m_child.named_parameters(),
+                                                                                 m_ddp_child.parameters())):
+                                    named_msg = layer_name + "." + param_name + " " + iter_msg
+                                    self.assertEqual(p.grad, p_ddp.grad, rtol=tol, atol=tol)
+                            opt.step()
+                            opt_ddp.step()
+                            if it == 0:
+                                for p, p_ddp in zip(m.parameters(), m_ddp.parameters()):
+                                    p.grad = None
+                                    p_ddp.grad = None
+                            else:
+                                m.zero_grad()
+                                m_ddp.zero_grad()
+                        except BaseException:
+                            # Makes sure we still get info if an error occurred somewhere other than the asserts.
+                            print("Caught exception during iterations at " + named_msg, flush=True)
+                            raise
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    @skip_if_rocm
+    def test_grad_layout_1devicemodule_1replicaperprocess(self):
+        dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
+        # Tells DDP to use just one device.
+        replica_devices = [dev0]
+        # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
+        layer_devs = dev0
+        local_batch_size = 8
+        self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
+
+    @unittest.skipIf(True, "Reenable when DDP with multiple GPUs per process is confirmed to work")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
+    def test_grad_layout_1devicemodule_2replicaperprocess(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        dev0 = torch.device("cuda:" + str(int_devices[0]))
+        dev1 = torch.device("cuda:" + str(int_devices[1]))
+        # Tells DDP to replicate the model to both of this process's devices.
+        replica_devices = [dev0, dev1]
+        # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
+        layer_devs = dev0
+        local_batch_size = 16
+        self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
+    def test_grad_layout_2devicemodule(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        dev0 = torch.device("cuda:" + str(int_devices[0]))
+        dev1 = torch.device("cuda:" + str(int_devices[1]))
+        # DDP's default behavior for a multi-device module is "don't replicate."
+        replica_devices = None
+        # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
+        layer_devs = [dev0] * 2 + [dev1] * 2
+        local_batch_size = 8
+        self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    @skip_if_rocm
+    def test_param_layout_mismatch_error(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
+        layer_devs = dev0
+        layer_formats = [torch.contiguous_format] * 4 if self.rank == 0 else [torch.channels_last] * 4
+        layer_dtypes = [torch.float] * 4
+
+        m = ConvNet(layer_devs, layer_formats, layer_dtypes)
+        if self.rank == 0:
+            m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
+        else:
+            with self.assertRaisesRegex(RuntimeError, ".* appears not to match strides of the same param in process 0"):
+                m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
@@ -2943,6 +3115,7 @@ class ComputeBucketAssignmentTest(TestCase):
         result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
 
+
 @skip_if_rocm
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class NcclErrorHandlingTest(MultiProcessTestCase):
@@ -3029,31 +3202,31 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_clean_exit(self):
-        self._test_nccl_errors_blocking(lambda : sys.exit(0))
+        self._test_nccl_errors_blocking(lambda: sys.exit(0))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_nonzero_exit(self):
-        self._test_nccl_errors_blocking(lambda : sys.exit(1))
+        self._test_nccl_errors_blocking(lambda: sys.exit(1))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_abort(self):
-        self._test_nccl_errors_blocking(lambda : os.abort())
+        self._test_nccl_errors_blocking(lambda: os.abort())
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_sigkill(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGKILL))
+        self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGKILL))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_sigterm(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGTERM))
+        self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGTERM))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
@@ -3071,7 +3244,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
                 # This should timeout
                 process_group.barrier().wait()
-
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["NCCL_BLOCKING_WAIT"] = val
