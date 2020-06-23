@@ -262,7 +262,7 @@ namespace detail {
 
   template<class TypeList, size_t offset, size_t... Indices>
   struct take_elements<TypeList, offset, std::index_sequence<Indices...>> final {
-    using type = typelist<element_t<offset + Indices, TypeList>...>;
+    using type = typelist<typename element<offset + Indices, TypeList>::type...>;
   };
 }
 

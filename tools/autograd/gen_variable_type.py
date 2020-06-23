@@ -348,17 +348,16 @@ ${return_type} ${api_name}(${declaration_formals}); // {"schema": "${schema_stri
 UNBOXED_PROFILE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-    .typed<${return_type} (${arg_types})>();
+    .typed<${return_type} (${profiled_arg_types})>();
 RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
-return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
+return c10::Dispatcher::singleton().redispatch<${profiled_ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 PROFILE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
-    .findSchema({"aten::${operator_name}", "${overload_name}"})
-    .value()
-    .typed<${return_type} (${schema_order_arg_types})>();
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${return_type} (${profiled_arg_types})>();
 RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
-return c10::Dispatcher::singleton().redispatch<${schema_order_ret_and_arg_types}>(${schema_order_profiled_dispatch_args});
+return c10::Dispatcher::singleton().redispatch<${profiled_ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
 
@@ -741,26 +740,24 @@ def emit_profiled_body(declaration):
     schema_order_profiled_dispatch_args = ['op', 'c10::DispatchKey::Profiler'] + declaration['schema_order_args']
 
     if declaration['use_c10_dispatcher'] == 'full':
-        call = PROFILE_DISPATCH.substitute(
-            declaration,
-            name=name,
-            input_names=record_function_input_names(),
-            return_type=declaration['return_type'],
-            schema_order_arg_types=schema_order_arg_types,
-            schema_order_ret_and_arg_types=schema_order_ret_and_arg_types,
-            schema_order_profiled_dispatch_args=schema_order_profiled_dispatch_args,
-        )
+        profiled_arg_types = schema_order_arg_types
+        profiled_ret_and_arg_types = schema_order_ret_and_arg_types
+        profiled_dispatch_args = schema_order_profiled_dispatch_args
     else:
         assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-        call = UNBOXED_PROFILE_DISPATCH.substitute(
-            declaration,
-            name=name,
-            input_names=record_function_input_names(),
-            return_type=declaration['return_type'],
-            arg_types=arg_types,
-            ret_and_arg_types=ret_and_arg_types,
-            profiled_dispatch_args=profiled_dispatch_args,
-        )
+        profiled_arg_types = arg_types
+        profiled_ret_and_arg_types = ret_and_arg_types
+        profiled_dispatch_args = profiled_dispatch_args
+
+    call = PROFILE_DISPATCH.substitute(
+        declaration,
+        name=name,
+        input_names=record_function_input_names(),
+        return_type=declaration['return_type'],
+        profiled_arg_types=profiled_arg_types,
+        profiled_ret_and_arg_types=profiled_ret_and_arg_types,
+        profiled_dispatch_args=profiled_dispatch_args,
+    )
 
     return [call]
 

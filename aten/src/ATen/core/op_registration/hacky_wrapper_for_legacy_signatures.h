@@ -46,6 +46,7 @@ inline constexpr bool has_tensoroptions_arg() {
     return num_tensoroptions_args > 0;
 }
 
+// sanity checks
 static_assert(has_tensoroptions_arg<int (int64_t, const TensorOptions&)>(), "");
 static_assert(has_tensoroptions_arg<int (int64_t, TensorOptions)>(), "");
 static_assert(!has_tensoroptions_arg<int (int64_t, std::string)>(), "");

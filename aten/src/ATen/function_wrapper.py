@@ -1127,18 +1127,18 @@ def create_generic(top_env, declarations):
                     option, actuals=option['method_actuals'])
 
             if option['use_c10_dispatcher'] == 'full':
-                method_definition = TENSOR_METHOD_DEFINITION.substitute(
-                    option, static_dispatch_method_body=static_dispatch_method_body,
-                    tensor_method_actuals=option['schema_order_method_actuals'],
-                    tensor_method_cpp_signature=option['schema_order_cpp_signature']
-                )
+                tensor_method_actuals=option['schema_order_method_actuals']
+                tensor_method_cpp_signature=option['schema_order_cpp_signature']
             else:
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                method_definition = TENSOR_METHOD_DEFINITION.substitute(
-                    option, static_dispatch_method_body=static_dispatch_method_body,
-                    tensor_method_actuals=option['method_actuals'],
-                    tensor_method_cpp_signature=option['cpp_signature']
-                )
+                tensor_method_actuals=option['method_actuals']
+                tensor_method_cpp_signature=option['cpp_signature']
+
+            method_definition = TENSOR_METHOD_DEFINITION.substitute(
+                option, static_dispatch_method_body=static_dispatch_method_body,
+                tensor_method_actuals=tensor_method_actuals,
+                tensor_method_cpp_signature=tensor_method_cpp_signature
+            )
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body),
@@ -1179,16 +1179,17 @@ def create_generic(top_env, declarations):
                     option, actuals=option['actuals'])
 
             if option['use_c10_dispatcher'] == 'full':
-                fn_definition = FUNCTION_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body,
-                    function_actuals=option['schema_order_actuals'],
-                    function_cpp_signature=option['schema_order_cpp_signature'])
+                function_actuals=option['schema_order_actuals']
+                function_cpp_signature=option['schema_order_cpp_signature']
             else:
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                fn_definition = FUNCTION_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body,
-                    function_actuals=option['actuals'],
-                    function_cpp_signature=option['cpp_signature'])
+                function_actuals=option['actuals']
+                function_cpp_signature=option['cpp_signature']
+
+            fn_definition = FUNCTION_DEFINITION.substitute(
+                option, static_dispatch_function_body=static_dispatch_function_body,
+                function_actuals=function_actuals,
+                function_cpp_signature=function_cpp_signature)
 
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
