@@ -307,6 +307,8 @@ class QuantizationTestCase(TestCase):
         else:
             *inputs, target = data[0]
         model = get_script_module(module, tracing, inputs).eval()
+        if debug:
+            print('input graph:', model.graph)
         models = {}
         outputs = {}
         for d in [True, False]:
