@@ -1251,7 +1251,7 @@ void do_avg_pool_on_AVX2(
 }
 
 void _qadaptive_avg_pool_kernel(
-    const std::string fn_name,
+    const std::string& fn_name,
     const Tensor& qx,
     Tensor& qy,
     int64_t b,
