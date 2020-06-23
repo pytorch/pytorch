@@ -1374,9 +1374,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
+        # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
             obj = obj.__original_fn
-            # rcb must be from the wrapped function, not the wrapper
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
 
         _check_directly_compile_overloaded(obj)
