@@ -62,16 +62,6 @@ namespace jit {
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
 
-TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
-  if (!t.defined()) {
-    return TensorType::get()->withUndefined();
-  }
-  auto r = TensorType::create(t);
-  if (!at::GradMode::is_enabled()) {
-    return r->withRequiresGrad(false);
-  }
-  return r;
-}
 
 namespace {
 

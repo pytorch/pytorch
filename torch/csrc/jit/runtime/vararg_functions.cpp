@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <c10/util/Exception.h>
+#include <ATen/core/grad_mode.h>
 
 namespace torch {
 namespace jit {
@@ -99,9 +100,21 @@ void createObject(Stack& stack, at::ClassTypePtr type) {
   push(stack, std::move(userObj));
 }
 
+c10::TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
+  if (!t.defined()) {
+    return c10::TensorType::get()->withUndefined();
+  }
+  auto r = c10::TensorType::create(t);
+  if (!at::GradMode::is_enabled()) {
+    return r->withRequiresGrad(false);
+  }
+  return r;
+}
+
 void checkTensor(Stack& stack, at::TensorTypePtr type) {
   at::Tensor ten = pop(stack).toTensor();
-  TORCH_CHECK(type->matchTensor(ten), "Tensor did not match type");
+  auto actual_type = tensorTypeInCurrentExecutionContext(ten);
+  TORCH_CHECK(actual_type->isSubtypeOf(type), "Tensor did not match type");
   push(stack, IValue());
 }
 
