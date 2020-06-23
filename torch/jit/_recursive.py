@@ -230,14 +230,6 @@ def infer_concrete_type_builder(nn_module):
         # If we got here, this is a regular "data" attribute, Add it to the concrete type
         attr_type = infer_type(name, value)
         if attr_type is not None:
-            # If the attribute is a Class type and its name begins with "torch.jit.backends",
-            # it must be an instance of a lowered module.
-            if isinstance(attr_type, torch._C.ClassType):
-                prefix = (".").join(attr_type.str().split(".")[:3])
-                if prefix == "torch.jit.backends":
-                    sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
-                    concrete_type_builder.add_module(name, sub_concrete_type)
-                    continue
             concrete_type_builder.add_attribute(name, attr_type, False, False)
         else:
             # TODO: could add more detail here. For example, what the user should do
@@ -349,12 +341,12 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         #    recursively scripting them.
         for name, sub_concrete_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
-            assert isinstance(orig_value, Module) or isinstance(orig_value, torch._C.ScriptModule), "Expected Module but got {}".format(type(orig_value))
+            assert isinstance(orig_value, Module), "Expected Module but got {}".format(type(orig_value))
             module_type = sub_concrete_type.jit_type
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
                 scripted = interface_script(module_type, orig_value)
-            elif isinstance(orig_value, torch.jit.ScriptModule) or isinstance(orig_value, torch._C.ScriptModule):
+            elif isinstance(orig_value, torch.jit.ScriptModule):
                 scripted = orig_value
             else:
                 # use the default recursive rule to compile the module
