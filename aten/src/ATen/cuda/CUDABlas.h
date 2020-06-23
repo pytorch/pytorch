@@ -69,6 +69,9 @@ template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
 #endif
 
+template<typename Dtype>
+void ger(int64_t m, int64_t n, Dtype alpha, Dtype *x, int64_t incx, Dtype *y, int64_t incy, Dtype *a, int64_t lda);
+
 } // namespace blas
 } // namespace cuda
 } // namespace at

@@ -154,7 +154,7 @@ static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyOb
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
-    throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+    throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   return THPVariable_NewWithVar((PyTypeObject*)cls, self->cdata.alias());
   END_HANDLE_TH_ERRORS
@@ -169,7 +169,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
-    throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
+    throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   auto data = r.tensor(1).detach();
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to

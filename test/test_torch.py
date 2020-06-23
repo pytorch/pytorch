@@ -18122,7 +18122,6 @@ class TestViewOps(TestCase):
                 other._base is not base or
                 base.device != other.device):
             return False
-
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'cpu' or base.device.type == 'cuda':
@@ -18130,6 +18129,89 @@ class TestViewOps(TestCase):
                 return False
 
         return True
+
+    # Performs transpose if contiguous=True, else returns the input tensor as is
+    def _do_transpose(self, x, contiguous=False, dim0=0, dim1=1):
+        if contiguous:
+            return x
+        else:
+            return x.transpose(dim0, dim1)
+
+    @onlyOnCPUAndCUDA
+    def test_view_as_complex(self, device):
+        def fn(contiguous_input=True, dim0=0, dim1=1):
+            t = torch.randn(3, 2, 2, device=device)
+            c_t = t[:, :, 0] + 1j * t[:, :, 1]
+
+            input = self._do_transpose(t, contiguous_input, dim0, dim1)
+
+            if input.size()[-1] != 2:
+                self.assertRaisesRegex(
+                    RuntimeError, "Tensor must have a last dimension of size 2",
+                    lambda: torch.view_as_complex(input))
+                return
+
+            if input.stride()[-1] != 1:
+                self.assertRaisesRegex(
+                    RuntimeError, "Tensor must have a last dimension with stride 1",
+                    lambda: torch.view_as_complex(input))
+                return
+
+            res = torch.view_as_complex(input)
+            self.assertEqual(res, self._do_transpose(c_t, contiguous_input, dim0, dim1))
+            self.assertTrue(self.is_view_of(t, res))
+
+        fn()
+        fn(contiguous_input=False)
+        # RuntimeError since in this case the last dim of input would not be of size 2
+        fn(contiguous_input=False, dim0=0, dim1=2)
+        # RuntimeError since in this case the last dim of input would not have stride 1
+        fn(contiguous_input=False, dim0=1, dim1=2)
+
+
+        # RuntimeError since in this case the stride of non-last dim of input would not be of size 2
+        x = torch.randn(3, 3, device=device)
+        t = torch.as_strided(x, (2, 2), (1, 1))
+        self.assertRaisesRegex(
+            RuntimeError, "Tensor must have a stride divisible by 2 for all but last dimension",
+            lambda: torch.view_as_complex(t))
+
+        # tensor with zero elements
+        x = torch.tensor([], device=device)  # torch.Size([0])
+        self.assertRaisesRegex(
+            RuntimeError, "Tensor must have a last dimension of size 2",
+            lambda: torch.view_as_complex(x))
+
+        y = x.reshape(0, 2)  # torch.Size([0, 2])
+        res = torch.view_as_complex(y)
+        self.assertTrue(self.is_view_of(x, res))
+        self.assertEqual(res.shape, torch.Size([0]))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_complex_dtypes())
+    def test_view_as_real(self, device, dtype):
+        def fn(contiguous_input=True):
+            t = torch.randn(3, 4, dtype=dtype, device=device)
+            input = self._do_transpose(t, contiguous_input)
+            res = torch.view_as_real(input)
+            self.assertEqual(res[:, :, 0], input.real)
+            self.assertEqual(res[:, :, 1], input.imag)
+            self.assertTrue(self.is_view_of(t, res))
+
+        fn()
+        fn(contiguous_input=False)
+
+        # tensor with zero elements
+        x = torch.tensor([], dtype=dtype, device=device)
+        res = torch.view_as_real(x)
+        self.assertTrue(self.is_view_of(x, res))
+        self.assertEqual(res.shape, torch.Size([0, 2]))
+
+        # tensor with zero dim
+        x = torch.tensor(2 + 3j, dtype=dtype, device=device)
+        res = torch.view_as_real(x)
+        self.assertTrue(self.is_view_of(x, res))
+        self.assertEqual(res.shape, torch.Size([2]))
 
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
@@ -18149,21 +18231,22 @@ class TestViewOps(TestCase):
         def compare_with_numpy(contiguous_input=True):
             t = torch.randn(3, 3, dtype=dtype, device=device)
             if not contiguous_input:
-                t = t.T
+                u = t.T
+            else:
+                u = t
 
-            re = t.real
-            exp = torch.from_numpy(t.cpu().numpy().real).to(device=device)
+            re = u.real
+            exp = torch.from_numpy(u.cpu().numpy().real).to(device=device)
             self.assertEqual(re, exp)
-            # TODO: update this to use is_view_of() when the autograd code is modified to
-            # correctly handle .real
-            self.assertTrue(t.storage().data_ptr() == re.storage().data_ptr())
+            # for the case of contiguous_input, t=u
+            # for the case of non contiguous_input, the base still remains
+            # t since we are performing a view operation to make the input non-contiguous
+            self.assertTrue(self.is_view_of(t, re))
 
-            im = t.imag
-            exp = torch.from_numpy(t.cpu().numpy().imag).to(device=device)
+            im = u.imag
+            exp = torch.from_numpy(u.cpu().numpy().imag).to(device=device)
             self.assertEqual(im, exp)
-            # TODO: update this to use is_view_of() when the autograd code is modified to
-            # correctly handle .imag
-            self.assertTrue(t.storage().data_ptr() == im.storage().data_ptr())
+            self.assertTrue(self.is_view_of(t, im))
 
         compare_with_numpy()
         compare_with_numpy(contiguous_input=False)
