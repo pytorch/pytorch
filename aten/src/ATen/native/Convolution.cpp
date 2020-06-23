@@ -659,11 +659,11 @@ at::Tensor _convolution(
     return out.view(o);
   }
 
-  if (k == 3) {
+  // mkldnn can access NCW, so if input is MKLDNN Tensor,
+  // not need convert 4d Tensor
+  if (k == 3 && !input_is_mkldnn) {
     // avoid accidentally going through NHWC for permuted 3d input.
-    if (!input_is_mkldnn) {
-      input = input.contiguous();
-    }
+    input = input.contiguous();
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -817,7 +817,7 @@ at::Tensor _convolution(
     output = at::convolution_overrideable(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
 
-  if (k == 3) {
+  if (k == 3 && !input_is_mkldnn) {
     output = view3d(output);
   }
 

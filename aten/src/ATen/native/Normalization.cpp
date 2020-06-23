@@ -463,6 +463,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
              std::make_tuple(2));
   }
 
+  if (input.is_mkldnn()) {
+    TORCH_CHECK(at::globalContext().userEnabledMkldnn(),
+        "MKLDNN batch_norm module can't run when mkldnn is disabled");
+  }
+
   return std::tuple_cat(
            at::native_batch_norm(
              input, weight, bias, running_mean, running_var, training, momentum, eps),

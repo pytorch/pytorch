@@ -28,7 +28,7 @@ class MkldnnLinear(torch.jit.ScriptModule):
     @torch.jit.script_method
     def forward(self, x):
         x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
-        y_mkldnn = torch._C._nn.mkldnn_linear(x_mkldnn, self.weight, self.bias)
+        y_mkldnn = torch._C._nn.linear(x_mkldnn, self.weight, self.bias)
         y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
         return y
 
@@ -59,13 +59,15 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        return torch.mkldnn_convolution(
+        return torch.convolution(
             x,
             self.weight,
             self.bias,
-            self.padding,
             self.stride,
+            self.padding,
             self.dilation,
+            False,
+            [0],
             self.groups)
 
 

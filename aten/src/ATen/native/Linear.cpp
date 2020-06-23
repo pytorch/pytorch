@@ -15,6 +15,8 @@ namespace at { namespace native {
 
 Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
   if (input.is_mkldnn()) {
+    TORCH_CHECK(at::globalContext().userEnabledMkldnn(),
+        "MKLDNN linear module can't run when mkldnn disabled");
     return at::mkldnn_linear(input, weight, bias);
   }
 // Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
