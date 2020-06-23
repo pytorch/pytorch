@@ -16172,8 +16172,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2, atol=prec, rtol=0)
 
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmm_sizes(self, device, dtype):
+        # addmm on CPU is not supported for complex yet
+        if dtype.is_complex and self.device_type == 'cpu':
+            return
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
                 for k in [0, 1, 8]:
