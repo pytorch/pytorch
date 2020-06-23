@@ -355,6 +355,7 @@ Quantized version of standard NN layers.
   quantized representation of 6
 * :class:`~torch.nn.quantized.Hardswish` — Hardswish
 * :class:`~torch.nn.quantized.LayerNorm` — LayerNorm. *Note: performance on ARM is not optimized*.
+* :class:`~torch.nn.quantized.GroupNorm` — GroupNorm. *Note: performance on ARM is not optimized*.
 
 ``torch.nn.quantized.dynamic``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -791,6 +792,11 @@ Linear
 LayerNorm
 ~~~~~~~~~~~~~~~
 .. autoclass:: LayerNorm
+    :members:
+
+GroupNorm
+~~~~~~~~~~~~~~~
+.. autoclass:: GroupNorm
     :members:
 
 torch.nn.quantized.dynamic

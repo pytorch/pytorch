@@ -42,7 +42,12 @@ class LayerNorm(torch.nn.LayerNorm):
         return new_mod
 
 class GroupNorm(torch.nn.GroupNorm):
-    r"""This is the quantized version of `torch.nn.GroupNorm`.
+    r"""This is the quantized version of :class:`~torch.nn.GroupNorm`.
+
+    Additional args:
+        * **scale** - quantization scale of the output, type: double.
+        * **zero_point** - quantization zero point of the output, type: long.
+
     """
     __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
 
