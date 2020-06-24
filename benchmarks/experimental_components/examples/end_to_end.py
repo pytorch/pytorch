@@ -226,10 +226,10 @@ def process_results(results):
 
 def construct_table(results, device_str):
     print(f"{'=' * 40}\n== {device_str} {'=' * 33}\n{'=' * 40}\n")
-    results = sorted([
+    results = sorted((
         (key, (r_ref, r_pr), r_pr.median / r_ref.median - 1)
         for key, (r_ref, r_pr) in results
-    ], key=lambda i: i[2])
+    ), key=lambda i: i[2])
 
     n = len(results)
     n_regressed = len([i for i in results if i[2] > 0.05])
@@ -244,11 +244,11 @@ def construct_table(results, device_str):
         {i[0] for i in results[int(n // 2 - 5):int(n // 2 + 5)]} |
         {i[0] for i in results[-10:]}
     )
-    ellipsis_after = {results[9][0], results[int(n//2+4)][0]}
+    ellipsis_after = {results[9][0], results[int(n // 2 + 4)][0]}
 
     column_labels = (
         f"Improvement    Absolute Δ      |      numel{'':>8}dtype{'':>14}"
-        f"shape{'':>10}steps{'':>10}layout{'':>7}task specific\n{'=' * 114}"
+        f"shape{'':>10}steps{'':>10}layout{'':>7}task specific\n{'=' * 126}"
     )
 
     _, result_log_file = tempfile.mkstemp(suffix=".log")
