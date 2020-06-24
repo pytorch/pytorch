@@ -7,10 +7,12 @@
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
+#include <torch/csrc/jit/mobile/observer.h>
 
 #include <fstream>
 #include <string>
 #include <vector>
+#include <exception>
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
@@ -113,7 +115,8 @@ void parseMethods(
       auto ins_item = ins.toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
-          "There should be three parts in an instruction.");
+          "There should be three parts in an instruction. The function name is ",
+          function_name);
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
@@ -297,9 +300,30 @@ mobile::Module _load_for_mobile(
 mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
-  return deserializer.deserialize(device);
+  auto observer = torch::observerConfig().getModuleObserver();
+  if (observer) {
+    observer->onEnterLoadModel();
+  }
+  try {
+    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+    BytecodeDeserializer deserializer(std::move(reader));
+    mobile::Module result = deserializer.deserialize(device);
+    std::string name = result.name();
+    if (observer) {
+      observer->onExitLoadModel(name);
+    }
+    return result;
+  } catch (const std::exception & ex) {
+    if (observer) {
+      observer->onFailLoadModel( "Error occured during loading model: " + (std::string)ex.what());
+    }
+    TORCH_CHECK(false, ex.what());
+  } catch (...) {
+    if (observer) {
+      observer->onFailLoadModel("unknown exception");
+    }
+    TORCH_CHECK(false, "unknown exception");
+  }
 }
 
 } // namespace jit
