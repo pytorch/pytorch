@@ -4186,6 +4186,49 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
+    def test_nanprod_with_nans(self):
+        a = torch.randn(2, 2, 2, 2)
+        with torch.no_grad():
+            a[a < 0.2] = float('nan')
+        a.requires_grad = True
+
+        # No args
+        print(a)
+        print(a.nanprod())
+        gradcheck(lambda x: x.nanprod(), a)
+        gradgradcheck(lambda x: x.nanprod(), a)
+
+        # Single dim
+        gradcheck(lambda x: x.nanprod((0)), a)
+        gradgradcheck(lambda x: x.nanprod((0)), a)
+
+        # Multi dim
+        gradcheck(lambda x: x.nanprod((0, 2)), a)
+        gradgradcheck(lambda x: x.nanprod((0, 2)), a)
+
+        gradcheck(lambda x: x.nanprod((0, -1)), a)
+        gradgradcheck(lambda x: x.nanprod((0, -1)), a)
+
+        # With keep-dim
+        gradcheck(lambda x: x.nanprod((0, -1), True), a)
+        gradgradcheck(lambda x: x.nanprod((0, -1), True), a)
+
+    def test_nanprod_dtype(self):
+        inp = torch.randn(2, 2, 2, 2)
+        with torch.no_grad():
+            inp[inp < 0.2] = float('nan')
+
+        def test(inp, inp_dtype, out_dtype):
+            with torch.no_grad():
+                a = inp.to(inp_dtype)
+            a.requires_grad = True
+            b = torch.nanprod(a, dtype=out_dtype)
+            b.backward()
+            self.assertEqual(a.dtype, a.grad.dtype)
+
+        test(inp, torch.float, torch.double)
+        test(inp, torch.double, torch.float)
+
     def test_custom_function_error(self):
         class BadFw(Function):
             @staticmethod
@@ -4402,8 +4445,6 @@ def add_test(
                             return output_process_fn(output)
 
                         if not is_inplace and name not in EXCLUDE_GRADCHECK:
-                            print(name)
-                            print("Self, self_variable: ", self, self_variable)
                             run_grad_and_gradgrad_checks(self, name, test_name, fn,
                                                          output_variable, (self_variable,) + args_variable)
 

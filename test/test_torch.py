@@ -6367,7 +6367,8 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_nanprod(self, device, dtype):
-        x = torch.tensor([[float('nan'), 1.23], [2.06, float('nan')]], dtype=dtype, device=device)
+        x = ([ [float('nan'), 1.23], [2.06, float('nan')] ], [ [float('nan'), float('nan')], [float('nan'),
+            float('nan')] ])
 
         torch_fn_with_axis = partial(torch.nanprod, axis=0)
         np_fn_with_axis = partial(np.nanprod, axis=0)
@@ -6375,11 +6376,8 @@ class TestTorchDeviceType(TestCase):
         torch_fn_without_axis = partial(torch.nanprod)
         np_fn_without_axis = partial(np.nanprod)
 
-        torch_fn_keep_dims = partial(torch.nanprod, keepdims=True)
-        np_fn_keep_dims = partial(np.nanprod, keepdims=True)
-
-        torch_fns = [torch_fn_with_axis, torch_fn_without_axis, torch_fn_keep_dims]
-        np_fns = [np_fn_with_axis, np_fn_without_axis, np_fn_keep_dims]
+        torch_fns = [torch_fn_with_axis, torch_fn_without_axis]
+        np_fns = [np_fn_with_axis, np_fn_without_axis]
 
         for torch_fn, np_fn in zip(torch_fns, np_fns):
             self.compare_with_numpy(torch_fn, np_fn, x, device, dtype)

@@ -275,8 +275,6 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
 }
 
 Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& result) {
-  // at::Tensor input_copy = at::where(at::isnan(input), at::ones_like(input), input);
-  // at::Tensor result_copy = at::where(at::isnan(result), at::ones_like(result), result);
   if (input.dim() == 0) {
     return grad * input.isnan().logical_not();
   }
