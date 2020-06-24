@@ -10,7 +10,7 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 template <int kSpatialDim = 2>
 bool ConvDimChecks(
@@ -603,7 +603,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       output_min,
       output_max,
       reinterpret_cast<uint8_t*>(output.template data_ptr<c10::quint8>()),
-      caffe2::pthreadpool_());
+      caffe2::mobile_pthreadpool());
 
   TORCH_INTERNAL_ASSERT(
       run_status == pytorch_qnnp_status_success,
