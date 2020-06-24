@@ -351,6 +351,13 @@ RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::pee
 return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
 
+PROFILE_DISPATCH_UNBOXED_DONT_PROFILE = CodeTemplate("""\
+static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${return_type} (${arg_types})>();
+return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
+""")
+
 
 # TraceType templates
 # TODO: change `redispatch` to `NoTracerDispatchMode` + regular `call`.
@@ -690,6 +697,7 @@ def emit_profiled_body(declaration):
     modifies_arguments = inplace or is_out_fn
     returns_void = len(returns) == 0
 
+    base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     processed_args = []
     for a in arguments:
         processed_args.append('{}'.format(a['name']))
@@ -707,7 +715,9 @@ def emit_profiled_body(declaration):
 
     profiled_dispatch_args = ['op', 'c10::DispatchKey::Profiler'] + declaration['args']
 
-    call = PROFILE_DISPATCH_UNBOXED.substitute(
+
+    template = PROFILE_DISPATCH_UNBOXED if base_name not in DONT_PROFILE and not declaration['manual_kernel_registration'] else PROFILE_DISPATCH_UNBOXED_DONT_PROFILE
+    call = template.substitute(
         declaration,
         name=name,
         input_names=record_function_input_names(),
