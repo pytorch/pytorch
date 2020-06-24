@@ -496,7 +496,7 @@ struct CAFFE2_API SymbolicShape {
   // preserved.
   // If either of two shapes are of unknown rank or they have unmatching rank,
   // result will be unranked.
-  SymbolicShape merge(const SymbolicShape& other) const;
+  SymbolicShape merge(const SymbolicShape& other, bool match_check = false) const;
 
   private:
     c10::optional<std::vector<ShapeSymbol>> dims_;

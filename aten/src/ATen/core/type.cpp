@@ -40,6 +40,13 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << ")";
     }
 
+    static auto const PT_PRINT = std::getenv("PT_PRINT");
+    if (PT_PRINT) {
+      out << (value->requiresGrad().has_value() ? *value->requiresGrad() ? "[R]" : "[!R]" : "[R?]");
+      out << (value->undefined().has_value() ? *value->undefined() ? "[U]" : "[!U]" : "[U?]");
+      out << (value->device() ? value->device()->str() : "[n/a]");
+    }
+
     if (value->undefined() && *value->undefined()) {
       out << "[Undefined]";
     }
@@ -513,10 +520,11 @@ TensorTypePtr TensorType::merge(TensorTypePtr other, bool merge_sizes) const {
   auto sprops = stride_properties().merge(other->stride_properties());
   auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
   auto undef = merge_primitive(undefined(), other->undefined());
+  auto merged_sym_shapes = symbolic_sizes().merge(other->symbolic_sizes());
   return TensorType::create(
       scalar_type,
       dev,
-      merge_sizes ? symbolic_sizes().merge(other->symbolic_sizes())
+      merge_sizes ? merged_sym_shapes
                   : symbolic_sizes(),
       sprops,
       gr,
@@ -599,7 +607,7 @@ std::ostream& operator<<(
   // TODO: Unranked SymbolicShape printing is ambiguous with that of
   // dynamic-shaped vector.
   if(!ss.rank()) {
-    os << "(*)";
+    os << "(...)";
     return os;
   }
 
@@ -1342,13 +1350,21 @@ void checkNoAny(const Type& base, const char* what, const std::string& attrname,
       "' but it contains an Any type. Any types cannot be members of modules, classes, or named tuples.");
 }
 
-SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
+SymbolicShape SymbolicShape::merge(const SymbolicShape& other, bool match_check) const {
   if (!dims_ || !other.dims_ || dims_->size() != other.dims_->size()) {
     return SymbolicShape();
   }
   std::vector<ShapeSymbol> dims;
   for (size_t i = 0, n = dims_->size(); i < n; i++) {
-    dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
+    if (!(*other.dims_)[i].is_static() && match_check) {
+      dims.push_back((*other.dims_)[i]);
+    }
+    else if ((*dims_)[i] == (*other.dims_)[i]) {
+      dims.push_back((*dims_)[i]);
+    }
+    else {
+      dims.push_back(ShapeSymbol::newSymbol());
+    }
   }
   return SymbolicShape(std::move(dims));
 }

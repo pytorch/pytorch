@@ -114,7 +114,16 @@ c10::TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
 void checkTensor(Stack& stack, at::TensorTypePtr type) {
   at::Tensor ten = pop(stack).toTensor();
   auto actual_type = tensorTypeInCurrentExecutionContext(ten);
-  TORCH_CHECK(actual_type->isSubtypeOf(type), "Tensor did not match type");
+  // turn true into c10::nullopt
+  if (type->requires_grad()) {
+    type = type->withRequiresGrad({});
+  }
+  auto merged_sym_sizes = actual_type->symbolic_sizes().merge(type->symbolic_sizes());
+  type = type->withSymbolicShapes(merged_sym_sizes);
+  if (!actual_type->isSubtypeOf(type)) {
+    std::cerr << "actual type :" << *actual_type << " didn't match " << *type << std::endl;
+  }
+  TORCH_CHECK(actual_type->isSubtypeOf(type), "Tensor did not match type ");
   push(stack, IValue());
 }
 
