@@ -5,6 +5,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
