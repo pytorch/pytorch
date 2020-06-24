@@ -85,7 +85,7 @@ class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext> {
           setupStatus == qnnp_status_success,
           "failed to setup QNNPACK Global Average Pooling operator");
 
-#ifdef FBCODE_CAFFE2
+#if defined(FBCODE_CAFFE2) || !defined(USE_INTERNAL_PTHREADPOOL_IMPL)
       const qnnp_status runStatus = qnnp_run_operator(
           this->qnnpackGlobalOperator_, nullptr /* thread pool */);
 #else
@@ -137,7 +137,7 @@ class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext> {
           setupStatus == qnnp_status_success,
           "failed to setup QNNPACK Average Pooling operator");
 
-#ifdef FBCODE_CAFFE2
+#if defined(FBCODE_CAFFE2) || !defined(USE_INTERNAL_PTHREADPOOL_IMPL)
       const qnnp_status runStatus =
           qnnp_run_operator(this->qnnpackOperator_, nullptr /* thread pool */);
 #else

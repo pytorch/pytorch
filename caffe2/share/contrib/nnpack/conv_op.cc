@@ -195,7 +195,12 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   const nnp_size output_subsample = {.width = static_cast<size_t>(stride_w()),
                                      .height = static_cast<size_t>(stride_h())};
   initNNPACK();
+
+#if !defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+  pthreadpool_t pool = nullptr;
+#else
   pthreadpool_t pool = reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
+#endif
 
   runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
     if (transformStrategy_ == nnp_convolution_transform_strategy_precompute) {
