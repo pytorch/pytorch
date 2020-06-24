@@ -40,7 +40,7 @@ class TestProfiler_cuda(TestCase):
         max_diff = -1
         for idx in range(1, len(last_rss)):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
-        self.assertTrue(not (is_increasing and max_diff < 100 * 1024),
+        self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
 
 if __name__ == '__main__':
