@@ -362,7 +362,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
 
-def celu(input, alpha=1.):
+def celu(input, scale, zero_point, alpha=1.):
     # type: (Tensor, Optional[float], Optional[bool]) -> Tensor
     r"""celu(input, alpha=1.) -> Tensor
 
@@ -376,7 +376,7 @@ def celu(input, alpha=1.):
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.celu' must be quantized!")
-    return torch.ops.quantized.celu(input, alpha)
+    return torch.ops.quantized.celu(input, scale, zero_point, alpha)
 
 
 def relu(input, inplace=False):
