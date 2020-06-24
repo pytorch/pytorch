@@ -1,8 +1,3 @@
-:orphan:
-
-.. contents:: :local:
-    :depth: 2
-
 .. _distributed-rpc-framework:
 
 Distributed RPC Framework

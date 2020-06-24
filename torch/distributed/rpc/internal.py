@@ -58,7 +58,7 @@ class _InternalRPCPickler:
         return (_InternalRPCPickler._py_rref_receiver, (rref_fork_data,))
 
     def _rref_reducer(self, rref):
-        return self._py_rref_reducer(rref._c)
+        return self._py_rref_reducer(rref)
 
     def serialize(self, obj):
         r"""
