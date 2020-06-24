@@ -359,9 +359,19 @@ T = TypeVar("T")
 GenericWithOneTypeVar = Generic[T]
 
 
-class RRef(GenericWithOneTypeVar):
-    def __init__(self, *args, **kwargs):
-        self._c = PyRRef(*args, **kwargs)
+try:
+    # Combine the implementation class and the type class.
+    class RRef(PyRRef, GenericWithOneTypeVar):
+        pass
+except TypeError as exc:
+    # TypeError: metaclass conflict: the metaclass of a derived class
+    # must be a (non-strict) subclass of the metaclasses of all its bases
+    class RRefMeta(PyRRef.__class__, GenericWithOneTypeVar.__class__):
+        pass
+
+    # Combine the implementation class and the type class.
+    class RRef(PyRRef, GenericWithOneTypeVar, metaclass=RRefMeta):
+        pass
 
 
 # Install docstrings from `PyRRef` to `RRef`.
@@ -373,7 +383,7 @@ class RRef(GenericWithOneTypeVar):
 #
 def method_factory(method_name, docstring):
     def method(self, *args, **kwargs):
-        return getattr(self._c, method_name)(*args, **kwargs)
+        return getattr(super(RRef, self), method_name)(*args, **kwargs)
 
     method.__doc__ = docstring
     return method
