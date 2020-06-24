@@ -37,8 +37,8 @@ struct AnnotatedKernel final {
   KernelFunction kernel;
   std::unique_ptr<FunctionSchema> inferred_function_schema;
   // A little debug string to help us identify the kernel in question.
-  // Mostly used in testing but it might be possible to augment
-  // regular registrations with some more info here too
+  // Most importantly it records the TORCH_LIBRARY block that did the
+  // registration.
   std::string debug;
 };
 
@@ -137,6 +137,7 @@ public:
     schema_->schema.setAliasAnalysis(a);
   }
 
+  std::string dumpComputedTable() const;
   std::string dumpState() const;
   void checkInvariants() const;
 
@@ -222,6 +223,7 @@ private:
   ska::flat_hash_map<DispatchKey, std::list<AnnotatedKernel>> kernels_;
 
   std::list<AnnotatedKernel> catchAllKernel_;
+  AnnotatedKernel missingKernel_;
 
   // signature_hash_ is set to the hash of the function signature if any of
   // the kernels was created in a way that allowed us to know the function
@@ -230,7 +232,10 @@ private:
   // to verify their arguments against the known function signature.
   c10::optional<CppSignature> cpp_signature_;
 
-  KernelFunction computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
+  const KernelFunction& computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
+  std::pair<const AnnotatedKernel&, const char*> computeDispatchTableEntryWithDebug(
+    const c10::Dispatcher& dispatcher, DispatchKey dispatch_key
+  ) const;
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.
   void updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);

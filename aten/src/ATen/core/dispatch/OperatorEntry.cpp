@@ -6,25 +6,12 @@ namespace c10 {
 namespace impl {
 
 namespace {
-
   std::string toString(c10::optional<DispatchKey> k) {
     if (k.has_value()) {
       return toString(*k);
     } else {
       return "(catch all)";
     }
-  }
-
-  std::string listAllDispatchKeys(const ska::flat_hash_map<c10::optional<DispatchKey>, std::list<AnnotatedKernel>>& kernels) {
-    if (kernels.size() == 0) {
-      return "";
-    }
-    std::ostringstream str;
-    str << toString(kernels.begin()->first);
-    for (auto iter = ++kernels.begin(); iter != kernels.end(); ++iter) {
-      str << ", " << toString(iter->first);
-    }
-    return str.str();
   }
 }
 
@@ -37,7 +24,11 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , kernels_()
 , catchAllKernel_()
 , cpp_signature_()
-{}
+{
+  // Pick up any backend fallbacks that were registered prior to this
+  // OperatorEntry being created
+  updateDispatchTableFull_(c10::Dispatcher::singleton());
+}
 
 namespace {
   void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const std::string& from_def_debug, const FunctionSchema& inferred, const std::string& inferred_debug) {
@@ -152,26 +143,32 @@ void OperatorEntry::updateFallback(const c10::Dispatcher& dispatcher, DispatchKe
   updateDispatchTable_(dispatcher, dispatch_key);
 }
 
-KernelFunction OperatorEntry::computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
+const KernelFunction& OperatorEntry::computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
+  return computeDispatchTableEntryWithDebug(dispatcher, dispatch_key).first.kernel;
+}
+
+std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
   auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
 
   // 1. Operator registration
   auto kern_it = kernels_.find(dispatch_key);
   if (kern_it != kernels_.end()) {
     TORCH_INTERNAL_ASSERT(!kern_it->second.empty());
-    return kern_it->second.front().kernel;
+    TORCH_INTERNAL_ASSERT(kern_it->second.front().kernel.isValid());
+    return {kern_it->second.front(), "kernel"};
 
   // 2. Backend fallback
   } else if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
-    return dispatcher.backendFallbackKernels_[dispatch_ix].kernel;
+    return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
 
   // 3. Catch all
   } else if (!catchAllKernel_.empty()) {
-    return catchAllKernel_.front().kernel;
+    TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
+    return {catchAllKernel_.front(), "catch all"};
 
   // 4. Default to error
   } else {
-    return KernelFunction();
+    return {missingKernel_, "missing"};
   }
 }
 
@@ -206,16 +203,18 @@ void OperatorEntry::setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, K
 
 void OperatorEntry::checkInvariants() const {
   if (schema_) {
-    TORCH_INTERNAL_ASSERT(schema_->schema.operator_name() == name_);
+    TORCH_INTERNAL_ASSERT(schema_->schema.operator_name() == name_, dumpState());
     dispatchKeyExtractor().checkInvariants(schema_->schema);
   }
-  TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
+  TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end(), dumpState());
   for (const auto& kv : kernels_) {
-    TORCH_INTERNAL_ASSERT(kv.second.size() > 0);
+    TORCH_INTERNAL_ASSERT(kv.second.size() > 0, dumpState());
   }
   for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
     auto expected_k = computeDispatchTableEntry(c10::Dispatcher::singleton(), static_cast<DispatchKey>(iter));
-    expected_k._equalsBoxedAndUnboxed(dispatchTable_[iter]);
+    TORCH_INTERNAL_ASSERT(expected_k._equalsBoxedAndUnboxed(dispatchTable_[iter]),
+      "Canonical state\n~~~~~~~~~~~\n", dumpState(), "\n\n"
+      "Computed table:\n~~~~~~~~~~~\n", dumpComputedTable());
   }
 }
 
@@ -239,20 +238,48 @@ std::string OperatorEntry::listAllDispatchKeys() const {
 }
 
 void OperatorEntry::reportError(DispatchKey dispatchKey) const {
+  // If there is an invariant problem, report it now.
+  checkInvariants();
+
   if (dispatchKey == DispatchKey::Undefined) {
     TORCH_CHECK(false,
           "There were no tensor arguments to this function (e.g., you passed an "
           "empty list of Tensors), but no fallback function is registered for schema ", name_,
           ".  This usually means that this function requires a non-empty list of Tensors.  "
-          "Available functions are ", listAllDispatchKeys())
+          "Available functions are ", listAllDispatchKeys(), ".\n\n", dumpComputedTable())
   }
 
   TORCH_CHECK(false, "Could not run '", name_, "' with arguments",
           " from the '", toString(dispatchKey), "' backend. '",
           name_, "' is only available for these backends: ",
-          listAllDispatchKeys(), ".");
+          listAllDispatchKeys(), ".\n\n", dumpComputedTable());
 }
 
+// INSPECTING DISPATCHER STATE
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// The dumper functions purposely do not check invariants, as you might be using
+// them to debug situations where the invariants are violated.
+
+// Inspect what the computed dispatch table would be (e.g., what
+// updateDispatchTableFull_ would update the dispatch table to be)
+std::string OperatorEntry::dumpComputedTable() const {
+  std::ostringstream oss;
+  for (uint8_t i = 0; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+    auto k = static_cast<DispatchKey>(i);
+    auto kernel_prov = computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
+    if (kernel_prov.first.kernel.isValid()) {
+      oss << toString(k) << ": "
+          << (kernel_prov.first.kernel.isFallthrough() ? "fallthrough " : "")
+          << kernel_prov.first.debug << " [" << kernel_prov.second << "]\n";
+    }
+  }
+  return oss.str();
+}
+
+// Inspect the "canonical" information in OperatorEntry.  This only prints out
+// *non-derived* information; i.e., what the source of truth says about the
+// operator.  This dumping function is appropriate for expect tests.
+// This WON'T report backend fallbacks.
 std::string OperatorEntry::dumpState() const {
   std::ostringstream oss;
   oss << "name: " << name_ << "\n";
@@ -264,7 +291,7 @@ std::string OperatorEntry::dumpState() const {
   } else {
     oss << "schema: (none)\n";
   }
-  // Iterate over DispatchKey, not the flat hash map, so we have a stable order
+
   auto print_kernel = [&](const char* k_desc, const std::list<AnnotatedKernel>& jts) {
     int64_t i = 0;
     for (const auto& jt : jts) {
@@ -272,11 +299,13 @@ std::string OperatorEntry::dumpState() const {
           << (i > 0 ? " (inactive)" : "")
           << ": "
           << jt.debug << " :: "
-          << toString(*jt.inferred_function_schema) << " [ " << jt.kernel.dumpState() << "]\n";
+          << (jt.inferred_function_schema ? toString(*jt.inferred_function_schema) : "(none)")
+          << " [ " << jt.kernel.dumpState() << "]\n";
       i++;
     }
   };
 
+  // Iterate over DispatchKey, not the flat hash map, so we have a stable order
   for (uint8_t i = 0; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
     auto k = static_cast<DispatchKey>(i);
     auto it = kernels_.find(k);
@@ -285,7 +314,6 @@ std::string OperatorEntry::dumpState() const {
     }
   }
   print_kernel("catchall", catchAllKernel_);
-  // TODO: some invariants about manual boxing
   return oss.str();
 }
 
