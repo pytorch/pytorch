@@ -196,9 +196,9 @@ def process_results(results):
     paired_results = {}
     for (seed, env, _, use_gpu, _), result_batch in results:
         for r in result_batch:
-            key = (r.label, r.description, r.num_threads, use_gpu)
+            key = (r.label, r.description, r.num_threads, use_gpu, seed)
             paired_results.setdefault(key, [None, None])
-            index = 0 if r.env.startswith("ref") else 1
+            index = 0 if env.startswith("ref") else 1
 
             assert paired_results[key][index] is None
             paired_results[key][index] = r
