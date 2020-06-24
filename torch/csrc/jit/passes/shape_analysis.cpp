@@ -9,10 +9,12 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 
+#include <c10/core/ScalarType.h>
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -419,8 +421,8 @@ class ShapePropagator {
     AT_ASSERT(stack.size() == node->outputs().size());
     for (size_t i = 0; i < stack.size(); ++i) {
       // some ops may have mixed tensor/primitive outputs
-      // for primitives, we don't need to change the type because it is already
-      // its most constrained form.
+      // for primitives, we don't need to change the type because it is
+      // already its most constrained form.
       if (stack[i].isTensor())
         node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
     }
@@ -1425,10 +1427,19 @@ class ShapePropagator {
       at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
       if (!maybe_dtype_option)
         return {};
-      auto dtype =
-          (maybe_dtype_option->isNone() ? at::kDouble
-                                        : maybe_dtype_option->toScalarType());
 
+      c10::optional<c10::ScalarType> in_dtype;
+      if (auto in_tt = node->input(0)->type()->cast<TensorType>()) {
+        in_dtype = in_tt->scalarType();
+      } else {
+        in_dtype = c10::kDouble;
+      }
+
+      auto dtype =
+          (maybe_dtype_option->isNone()
+               ? in_dtype
+               : c10::optional<c10::ScalarType>{
+                     maybe_dtype_option->toScalarType()});
       return {TensorType::create(
           dtype, device, dim, /*requires_grad=*/c10::nullopt)};
     };

@@ -39,7 +39,8 @@ class TestProfiler_cuda(TestCase):
 
         # with CUDA events leaking the increase in memory was ~7 MB,
         # using much smaller threshold but not zero to reduce flakiness
-        self.assertTrue(max_diff < 100 * 1024)
+        print(max_diff)
+        self.assertLess(max_diff, 100 * 1024)
 
 if __name__ == '__main__':
     run_tests()
