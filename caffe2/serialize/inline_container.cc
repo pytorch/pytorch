@@ -4,6 +4,7 @@
 #include <istream>
 #include <ostream>
 #include <fstream>
+#include <algorithm>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Backend.h>
@@ -303,10 +304,10 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
+}
 
-  std::string version = c10::to_string(kProducedFileFormatVersion);
-  version.push_back('\n');
-  writeRecord("version", version.c_str(), version.size());
+void PyTorchStreamWriter::setMinVersion(const uint64_t version) {
+  version_ = std::max(version, version_);
 }
 
 void PyTorchStreamWriter::writeRecord(
@@ -339,6 +340,11 @@ void PyTorchStreamWriter::writeRecord(
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
+  // Writes version info
+  std::string version = c10::to_string(version_);
+  version.push_back('\n');
+  writeRecord("version", version.c_str(), version.size());
+
   AT_ASSERT(!finalized_);
   finalized_ = true;
   mz_zip_writer_finalize_archive(ar_.get());
