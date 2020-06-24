@@ -1,12 +1,11 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
-#include <c10/util/complex_type.h>
 
 #include <complex>
 #include <cstdint>
@@ -185,13 +184,6 @@ static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
   }
   AT_ERROR(
       "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
-}
-
-inline optional<at::ScalarType> optTypeMetaToScalarType(optional<caffe2::TypeMeta> type_meta) {
-  if (!type_meta.has_value()) {
-    return c10::nullopt;
-  }
-  return typeMetaToScalarType(*type_meta);
 }
 
 static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {

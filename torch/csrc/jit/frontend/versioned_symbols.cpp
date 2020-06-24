@@ -72,6 +72,8 @@ static std::unordered_map<Symbol, SymbolRange> symbol_range_map({
      {0, 3, Symbol::fromQualString("upgraders::div_0_3")}},
     {Symbol::fromQualString("aten::div_"),
      {0, 3, Symbol::fromQualString("upgraders::div__0_3")}},
+    {Symbol::fromQualString("aten::full"),
+     {0, 4, Symbol::fromQualString("upgraders::full_0_4")}},
 });
 
 Symbol get_symbol_for_version(const Symbol name, const uint64_t version) {

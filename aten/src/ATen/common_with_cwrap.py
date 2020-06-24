@@ -1,7 +1,6 @@
 # this code should be common among cwrap and ATen preprocessing
 # for now, I have put it in one place but right now is copied out of cwrap
 
-import copy
 
 def parse_arguments(args):
     new_args = []
@@ -51,16 +50,11 @@ def set_declaration_defaults(declaration):
         declaration['unqual_operator_name_with_overload'] = ''
     # Simulate multiple dispatch, even if it's not necessary
     if 'options' not in declaration:
-        declaration['options'] = [{
-            'arguments': copy.deepcopy(declaration['arguments']),
-            'schema_order_arguments': copy.deepcopy(declaration['schema_order_arguments']),
-        }]
+        declaration['options'] = [{'arguments': declaration['arguments']}]
         del declaration['arguments']
-        del declaration['schema_order_arguments']
     # Parse arguments (some of them can be strings)
     for option in declaration['options']:
         option['arguments'] = parse_arguments(option['arguments'])
-        option['schema_order_arguments'] = parse_arguments(option['schema_order_arguments'])
     # Propagate defaults from declaration to options
     for option in declaration['options']:
         for k, v in declaration.items():
