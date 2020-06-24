@@ -749,6 +749,39 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
     ASSERT_TRUE(at::allclose(out, tensor.unsqueeze(-1)));
   }
 }
+// Basic test for BatchedTensor::squeeze(dim)
+TEST(VmapTest, TestBatchedTensorSqueeze) {
+  {
+    // Basic test
+    auto tensor = at::randn({2, 1, 5});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+
+    auto batched_out = batched.squeeze(0);
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.squeeze(1)));
+  }
+  {
+    // Test with multiple levels
+    auto tensor = at::randn({2, 3, 1});
+    auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
+
+    auto batched_out = batched.squeeze(0);
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.squeeze(2)));
+  }
+  {
+    // Negative dim
+    auto tensor = at::randn({2, 3, 1});
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+
+    auto batched_out = batched.squeeze(-1);
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.squeeze(-1)));
+  }
+}
 // Basic test for BatchedTensor::transpose
 TEST(VmapTest, TestBatchedTensorTranspose) {
   {

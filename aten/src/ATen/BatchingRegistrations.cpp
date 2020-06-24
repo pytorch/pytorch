@@ -110,6 +110,13 @@ Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = self_physical.tensor().squeeze(dim_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim0_physical = self_physical.getPhysicalDim(dim0);
@@ -140,6 +147,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("expand", expand_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unsqueeze", unsqueeze_batching_rule);
+  m.impl("squeeze.dim", squeeze_dim_batching_rule);
 }
 
 } // namespace at

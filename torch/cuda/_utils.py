@@ -1,5 +1,4 @@
 import torch
-import torch._six
 from typing import Optional, Union
 from torch.types import Device
 
@@ -18,7 +17,7 @@ def _get_device_index(device: Union[Device, int], optional=False) -> int:
     If :attr:`device` is ``None``, this will return the current default CUDA
     device if :attr:`optional` is ``True``.
     """
-    if isinstance(device, torch._six.string_classes):
+    if isinstance(device, str):
         device = torch.device(device)
     device_idx: Optional[int]
     if isinstance(device, torch.device):

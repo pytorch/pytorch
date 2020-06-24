@@ -211,6 +211,36 @@
     - bool sorted
 ]]
 [[
+  name: _th_var
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants: function
+  options:
+    - cname: var_all
+      return: accreal
+      arguments:
+        - THTensor* self
+        - bool unbiased
+]]
+[[
+  name: _th_std
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants: function
+  options:
+    - cname: std_all
+      return: accreal
+      arguments:
+        - THTensor* self
+        - bool unbiased
+]]
+[[
   name: _th_renorm
   cname: renorm
   types:

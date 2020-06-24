@@ -835,9 +835,7 @@ Tensor var(const Tensor& self, bool unbiased) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  if (trivial_return.has_value())
-    return trivial_return.value();
-  return at::var(self, IntArrayRef{}, unbiased, false);
+  return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
 }
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -857,9 +855,7 @@ Tensor std(const Tensor& self, bool unbiased) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  if (trivial_return.has_value())
-    return trivial_return.value();
-  return at::std(self, IntArrayRef{}, unbiased, false);
+  return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
 }
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -872,7 +868,7 @@ Tensor &std_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbias
 }
 
 Tensor std(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  return at::std(self, dimnames_to_positions(self, dim), unbiased, keepdim);
+  return  at::std(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 Tensor& std_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {

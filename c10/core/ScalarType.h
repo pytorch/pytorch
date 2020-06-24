@@ -1,12 +1,11 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
-#include <c10/util/complex_type.h>
 
 #include <complex>
 #include <cstdint>
@@ -317,6 +316,17 @@ static inline ScalarType toValueType(ScalarType t) {
       return ScalarType::Double;
     default:
       return t;
+  }
+}
+
+static inline ScalarType toComplexType(ScalarType t) {
+  switch (t) {
+    case ScalarType::Float:
+      return ScalarType::ComplexFloat;
+    case ScalarType::Double:
+      return ScalarType::ComplexDouble;
+    default:
+      TORCH_CHECK(false, "Unknown Complex ScalarType");
   }
 }
 

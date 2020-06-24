@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.jit
 import torch.jit.quantized
-from torch._C import parse_ir
 
 # torch.quantization
 from torch.quantization import (
@@ -234,8 +233,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         for tracing, dim, bias in options:
             eager = TestModule(dim, bias).eval()
             x = data[dim]
-            scripted_or_traced = get_script_module(eager, tracing, x).copy()
-            torch._C._jit_pass_dedup_module_uses(scripted_or_traced ._c)
+            scripted_or_traced = get_script_module(eager, tracing, x)
             folded = fuse_conv_bn_jit(scripted_or_traced)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
@@ -295,34 +293,32 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         torch.set_default_dtype(torch.float)
 
     def test_fuse_linear(self):
-        input_strs = ["""
-graph(%input, %weight, %bias, %4):
-    # CHECK-NOT: aten::t
-    # CHECK-NOT: aten::addmm
-    # CHECK: aten::linear
-    %weight_t = aten::t(%weight)
-    %res = aten::addmm(%bias, %input, %weight_t, %4, %4)
-    return (%res)""", """
-graph(%input, %weight, %bias, %4):
-    # CHECK-NOT: aten::t
-    # CHECK-NOT: aten::matmul
-    # CHECK-NOT: aten::add_
-    # CHECK: aten::linear
-    %weight_t = aten::t(%weight)
-    %output = aten::matmul(%input, %weight_t)
-    %res = aten::add_(%output, %bias, %4)
-    return (%res)""", """
-graph(%input, %weight):
-    # CHECK-NOT: aten::t
-    # CHECK-NOT: aten::matmul
-    # CHECK: aten::linear
-    %weight_t = aten::t(%weight)
-    %output = aten::matmul(%input, %weight_t)
-    return (%output)"""]
-        for input_str in input_strs:
-            graph = parse_ir(input_str)
-            torch._C._jit_pass_fuse_linear(graph)
-            FileCheck().run(input_str, graph)
+        class FunctionalLinear(torch.nn.Module):
+            def __init__(self, weight, bias):
+                super(FunctionalLinear, self).__init__()
+                self.weight = weight
+                self.bias = bias
+
+            def forward(self, x):
+                return F.linear(x, self.weight, self.bias)
+
+        x1 = torch.rand(3)
+        w1 = torch.rand(5, 3)
+        b1 = torch.rand(5)
+
+        x2 = torch.rand(5, 5)
+        w2 = torch.rand(5, 5)
+        b2 = torch.rand(5)
+        for has_bias, (x, weight, b) in itertools.product([True, False], [(x1, w1, b1), (x2, w2, b2)]):
+            bias = b if has_bias else None
+            model = torch.jit.trace(FunctionalLinear(weight, bias), [x])
+            torch._C._jit_pass_fuse_linear(model.graph)
+            FileCheck().check("aten::linear") \
+                       .run(model.graph)
+            check_not = ["aten::matmul", "aten::addmm", "aten::add_", "aten::t("]
+            for cn in check_not:
+                FileCheck().check_not(cn) \
+                           .run(model.graph)
 
     def test_insert_observers(self):
         class M(torch.nn.Module):
@@ -1041,6 +1037,19 @@ graph(%input, %weight):
                    .check("quantized::linear") \
                    .run(model.graph)
 
+    def test_inplace_option(self):
+        for tracing in [True, False]:
+            model = get_script_module(torch.nn.Conv2d(3, 3, 3), tracing, self.img_data[0][0])
+            qconfig_dict = {'': default_qconfig}
+            quantize_jit(
+                model, qconfig_dict, test_only_eval_fn, [self.img_data], inplace=True)
+            FileCheck().check("quantized::conv2d") \
+                       .run(model.graph)
+
+            FileCheck().check_not("aten::conv2d") \
+                       .run(model.graph)
+
+
     def test_finalize_debug(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1208,22 +1217,23 @@ class TestQuantizeJitOps(QuantizationTestCase):
         data = [(torch.rand((1, 30), dtype=torch.float),
                  torch.randint(0, 1, (1,), dtype=torch.long)) for _ in range(2)]
 
-        for model in [ModuleLinear(has_relu=False),
-                      FuncLinear(has_relu=False)]:
+        for model, tracing in itertools.product([ModuleLinear(has_relu=False),
+                                                 FuncLinear(has_relu=False)],
+                                                [True, False]):
             model = self.checkGraphModeOp(model, data, "quantized::linear",
-                                          tracing=False)
+                                          tracing)
             FileCheck() \
                 .check_count("aten::quantize_per_tensor", 1, exactly=True) \
                 .run(model.graph)
             FileCheck().check_not("quantized::linear_prepack") \
                        .run(model.graph)
 
-        for f_relu in [True, False]:
+        for f_relu, tracing in itertools.product([True, False], [True, False]):
             for model in [ModuleLinear(has_relu=True, f_relu=f_relu),
                           FuncLinear(has_relu=True, f_relu=f_relu)]:
                 model = self.checkGraphModeOp(model, data,
                                               "quantized::linear_relu",
-                                              tracing=False)
+                                              tracing)
                 checker = FileCheck().check_not("aten::linear") \
                                      .check_not("aten::relu") \
                                      .check_not("quantized::linear(") \
@@ -1543,7 +1553,8 @@ class TestQuantizeJitOps(QuantizationTestCase):
                              (NonQuantizedInplaceAddScalar(), False)]:
             for tracing in [True, False]:
                 op = "quantized::add_scalar" if quantized else "aten::add"
-                # TODO: fix debug=True numerics
+                # we don't check the numerical consistency for add_scalar
+                # since it's not supported
                 m = self.checkGraphModeOp(m, data, op, tracing, check=False)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
@@ -1925,7 +1936,8 @@ class TestQuantizeJitOps(QuantizationTestCase):
                              (NonQuantizedInplaceMulScalar(), False)]:
             for tracing in [True, False]:
                 op = "quantized::mul_scalar" if quantized else "aten::mul"
-                # TODO: fix debug=True numerics
+                # we don't check the numerical consistency for add_scalar
+                # since it's not supported
                 m = self.checkGraphModeOp(m, data, op, tracing, check=False)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
@@ -2652,10 +2664,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             model = quantize_dynamic_jit(model, qconfig_dict, debug=True)
             graph_params = []
             for x, obs in model._modules._c.items():
-                if tracing:
-                    graph_params.append((obs.getattr('4_scale_0'), obs.getattr('4_zero_point_0')))
-                else:
-                    graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
+                graph_params.append((obs.getattr('3_scale_0'), obs.getattr('3_zero_point_0')))
             self.assertEqual(ref_qparams, graph_params)
 
 class TestQuantizeDynamicJitOps(QuantizationTestCase):
@@ -2664,17 +2673,27 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
     """
     @override_qengines
     def test_quantized_linear_dynamic(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.fc = torch.nn.Linear(5, 5).float()
+        class FunctionalLinear(torch.nn.Module):
+            def __init__(self, weight, bias):
+                super(FunctionalLinear, self).__init__()
+                self.weight = weight
+                self.bias = bias
 
             def forward(self, x):
-                return self.fc(x)
+                return F.linear(x, self.weight, self.bias)
 
         x = torch.rand(5, 5)
         for tracing in [True, False]:
-            model = self.checkGraphModeOp(M(), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+            model = self.checkGraphModeOp(
+                torch.nn.Linear(5, 5), x, "quantized::linear_dynamic", tracing=tracing, dynamic=True)
+
+        weight = torch.rand(5, 5)
+        b = torch.rand(5)
+        for tracing, has_bias in itertools.product([True, False], [True, False]):
+            bias = b if has_bias else None
+            model = self.checkGraphModeOp(
+                FunctionalLinear(weight, bias), x,
+                "quantized::linear_dynamic", tracing=tracing, dynamic=True)
 
 class TestQuantizeJit(QuantizationTestCase):
     @override_qengines

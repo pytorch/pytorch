@@ -120,7 +120,6 @@ an error is raised. This ensures that if you're using in-place
 functions and not seeing any errors, you can be sure that the computed
 gradients are correct.
 
-
 Multithreaded Autograd
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 The autograd engine is responsible for running all the backward operations
@@ -142,7 +141,7 @@ does not block on the concurrent backward computations, example code could be:
         y.sum().backward()
         # potential optimizer update
 
-    
+
     # User write their own threading code to drive the train_fn
     threads = []
     for _ in range(10):
