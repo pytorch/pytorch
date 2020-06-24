@@ -20,13 +20,13 @@ import os
 import pickle
 import queue
 import subprocess
-import sys
 import tempfile
+import textwrap
 
 import numpy as np
 import torch
 from op_fuzzers import unary
-from utils import Timer, FuzzedParameter, ParameterAlias, Fuzzer
+from utils import Timer
 
 
 _MAIN, _SUBPROCESS = "main", "subprocess"
@@ -241,7 +241,7 @@ def construct_table(results, device_str):
 
     keys_to_print = (
         {i[0] for i in results[:10]} |
-        {i[0] for i in results[int(n//2 - 5):int(n//2 + 5)]} |
+        {i[0] for i in results[int(n // 2 - 5):int(n // 2 + 5)]} |
         {i[0] for i in results[-10:]}
     )
     ellipsis_after = {results[9][0], results[int(n//2+4)][0]}
@@ -262,6 +262,20 @@ def construct_table(results, device_str):
                 print(row)
             if key in ellipsis_after:
                 print("...")
+
+    print(textwrap.dedent("""
+        steps:
+            Indicates that `x` is sliced from a larger Tensor. For instance, if
+            shape is [12, 4] and steps are [2, 1], then a larger Tensor of size
+            [24, 4] was created, and then x = base_tensor[::2, ::1]. Omitted if
+            all elements are ones.
+
+        layout:
+            Indicates that `x` is not contiguous due to permutation. Invoking
+            `x.permute(steps)` (e.g. x.permute((2, 0, 1)) if steps = [2, 0, 1])
+            would produce a Tensor whose shape matches memory order. (Though still
+            not contiguous if `steps` contains non-one elements.)
+        """))
 
     print(f"\nComplete results in: {result_log_file}")
 
