@@ -13,7 +13,7 @@ _POW_TWO_SIZES = tuple(2 ** i for i in range(
 
 
 class BinaryOpFuzzer(Fuzzer):
-    def __init__(self, seed, dtype=torch.float32):
+    def __init__(self, seed, dtype=torch.float32, cuda=False):
         super().__init__(
             parameters=[
                 # Dimensionality of x and y. (e.g. 1D, 2D, or 3D.)
@@ -74,6 +74,9 @@ class BinaryOpFuzzer(Fuzzer):
                     for i in range(3)
                     for name in ("x", "y")
                 ],
+
+                # Repeatable entropy for downstream applications.
+                FuzzedParameter(name="random_value", minval=0, maxval=2 ** 32 - 1, distribution="uniform"),
             ],
             tensors=[
                 FuzzedTensor(
@@ -85,6 +88,8 @@ class BinaryOpFuzzer(Fuzzer):
                     max_elements=32 * 1024 ** 2,
                     max_allocation_bytes=2 * 1024**3,  # 2 GB
                     dim_parameter="dim",
+                    dtype=dtype,
+                    cuda=cuda,
                 ),
                 FuzzedTensor(
                     name="y",
@@ -93,6 +98,8 @@ class BinaryOpFuzzer(Fuzzer):
                     probability_contiguous=0.75,
                     max_allocation_bytes=2 * 1024**3,  # 2 GB
                     dim_parameter="dim",
+                    dtype=dtype,
+                    cuda=cuda,
                 ),
             ],
             seed=seed,

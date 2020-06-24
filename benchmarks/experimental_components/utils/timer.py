@@ -11,7 +11,7 @@ import utils.common as common
 __all__ = ["Timer"]
 
 
-if torch.has_cuda:
+if torch.has_cuda and torch.cuda.is_available():
     def timer():
         torch.cuda.synchronize()
         return timeit.default_timer()

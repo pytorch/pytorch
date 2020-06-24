@@ -45,16 +45,16 @@ class FuzzedParameter(object):
                 Specifies the distribution from which this parameter should
                 be drawn. There are three possibilities:
                     - "loguniform"
-                        Samples between `minval` and `maxval` such that the
-                        probabilities are uniform in log space. As a concrete
-                        example, if minval=1 and maxval=100, a sample is as
-                        likely to fall in [1, 10) as it is [10, 100].
+                        Samples between `minval` and `maxval` (inclusive) such
+                        that the probabilities are uniform in log space. As a
+                        concrete example, if minval=1 and maxval=100, a sample
+                        is as likely to fall in [1, 10) as it is [10, 100].
                     - "uniform"
                         Samples are chosen with uniform probability between
-                        `minval` and `maxval`. If either `minval` or `maxval`
-                        is a float then the distribution is the continuous
-                        uniform distribution; otherwise samples are constrained
-                        to the integers.
+                        `minval` and `maxval` (inclusive). If either `minval`
+                        or `maxval` is a float then the distribution is the
+                        continuous uniform distribution; otherwise samples
+                        are constrained to the integers.
                     - dict:
                         If a dict is passed, the keys are taken to be choices
                         for the variables and the values are interpreted as
@@ -66,7 +66,7 @@ class FuzzedParameter(object):
                 iterative resampling process which Fuzzer uses to find a
                 valid parameter configuration. This allows an author to
                 prevent skew from resampling for a given parameter (for
-                instance, a low size limit could inadvertantly bias towards
+                instance, a low size limit could inadvertently bias towards
                 Tensors with fewer dimensions) at the cost of more iterations
                 when generating parameters.
         """
@@ -94,6 +94,7 @@ class FuzzedParameter(object):
         if not isinstance(distribution, dict):
             assert distribution in _DISTRIBUTIONS
         else:
+            assert not any(i < 0 for i in distribution.values()), "Probabilities cannot be negative"
             assert abs(sum(distribution.values()) - 1) <= 1e-5, "Distribution is not normalized"
             assert self._minval is None
             assert self._maxval is None
@@ -117,7 +118,12 @@ class FuzzedParameter(object):
         return state.uniform(low=self._minval, high=self._maxval)
 
     def _custom_distribution(self, state):
-        return state.choice(tuple(self._distribution.keys()), p=tuple(self._distribution.values()))
+        # If we directly pass the keys to `choice`, numpy will convert
+        # them to numpy dtypes.
+        index = state.choice(
+            np.arange(len(self._distribution)),
+            p=tuple(self._distribution.values()))
+        return list(self._distribution.keys())[index]
 
 
 class ParameterAlias(object):
@@ -152,9 +158,12 @@ class ParameterAlias(object):
         return f"ParameterAlias[alias_to: {self.alias_to}]"
 
 
-@functools.lru_cache(64)
 def dtype_size(dtype):
-    return torch.empty((0,), dtype=dtype).element_size()
+    if dtype == torch.bool:
+        return 1
+    if dtype.is_floating_point:
+        return int(torch.finfo(dtype).bits / 8)
+    return int(torch.iinfo(dtype).bits / 8)
 
 
 def prod(values, base=1):
@@ -215,6 +224,8 @@ class FuzzedTensor(object):
                 Fuzzer.
             dtype:
                 The PyTorch dtype of the generated Tensor.
+            cuda:
+                Whether to place the Tensor on a GPU.
             tensor_constructor:
                 Callable which will be used instead of the default Tensor
                 construction method. This allows the author to enforce properties
@@ -234,6 +245,7 @@ class FuzzedTensor(object):
         self._max_allocation_bytes = max_allocation_bytes
         self._dim_parameter = dim_parameter
         self._dtype = dtype
+        self._cuda = cuda
         self._tensor_constructor = tensor_constructor
 
     @property
@@ -255,6 +267,8 @@ class FuzzedTensor(object):
         )
 
         raw_tensor = constructor(size=allocation_size, dtype=self._dtype, **params)
+        if self._cuda:
+            raw_tensor = raw_tensor.cuda()
 
         # Randomly permute the Tensor and call `.contiguous()` to force re-ordering
         # of the memory, and then permute it back to the original shape.
@@ -267,7 +281,7 @@ class FuzzedTensor(object):
             raw_tensor = raw_tensor.permute(tuple(order)).contiguous()
             raw_tensor = raw_tensor.permute(tuple(np.argsort(order)))
 
-        slices = [slice(0, size, step) for size, step in zip(size, steps)]
+        slices = [slice(0, size * step, step) for size, step in zip(size, steps)]
         tensor = raw_tensor[slices]
 
         properties = {
@@ -305,9 +319,6 @@ class FuzzedTensor(object):
         size, _, allocation_size = self._get_size_and_steps(params)
         # Product is computed in Python to avoid integer overflow.
         num_elements = prod(size)
-        if num_elements < 0:
-            import pdb
-            pdb.set_trace()
         assert num_elements >= 0
 
         allocation_bytes = prod(allocation_size, base=dtype_size(self._dtype))
