@@ -247,7 +247,7 @@ def construct_table(results, device_str):
     ellipsis_after = {results[9][0], results[int(n // 2 + 4)][0]}
 
     column_labels = (
-        f"Improvement    Absolute Δ      |      numel{'':>8}dtype{'':>14}"
+        f"Relative Δ     Absolute Δ      |      numel{'':>8}dtype{'':>14}"
         f"shape{'':>10}steps{'':>10}layout{'':>7}task specific\n{'=' * 126}"
     )
 
@@ -300,7 +300,7 @@ def row_str(rel_diff, diff_seconds, measurement):
         task_specific = measurement.stmt[:-1].replace("torch.sort(x, ", "")
 
     return (
-        f"{rel_diff * 100:>5.0f}%   {abs(diff_seconds) * 1e6:>11.1f} us{'':>8}|"
+        f"{rel_diff * 100:>5.0f}%     {abs(diff_seconds) * 1e6:>11.1f} us{'':>6}|"
         f"{x_numel:>12}   {params['dtype_str']:>10}   "
         f"{str([params[f'k{i}'] for i in range(dim)]):>17}  "
         f"{str(steps) if not all(i == 1 for i in steps) else '':>12}  {order:>12}"
