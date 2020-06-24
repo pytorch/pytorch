@@ -10,7 +10,7 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 template <int kSpatialDim = 2>
 bool ConvDimChecks(
@@ -485,11 +485,6 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   const int W = act.size(3);
   const int M = out_ch; // output channels
 
-  TORCH_CHECK( M == orig_weight.size(0),
-      "Output channel size of weight and bias must match.");
-  TORCH_CHECK( C == groups_ * orig_weight.size(1),
-      "Output channel size of weight and bias must match.");
-
   const at::Tensor act_nhwc = act.contiguous(c10::MemoryFormat::ChannelsLast);
 
   auto output_min = kReluFused
@@ -505,6 +500,11 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 
   // Re-quantizing the bias based on input scale and weight scale.
   if (!input_scale.has_value() || input_scale.value() != act_input_scale) {
+    TORCH_CHECK( M == orig_weight.size(0),
+        "Output channel size of weight and bias must match.");
+    TORCH_CHECK( C == groups_ * orig_weight.size(1),
+        "Output channel size of weight and bias must match.");
+
     // Get the original weight and adjust it to uint8 from int8
     auto weight_contig =
         orig_weight.contiguous(c10::MemoryFormat::ChannelsLast);
@@ -603,7 +603,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       output_min,
       output_max,
       reinterpret_cast<uint8_t*>(output.template data_ptr<c10::quint8>()),
-      caffe2::mobile_pthreadpool());
+      caffe2::pthreadpool_());
 
   TORCH_INTERNAL_ASSERT(
       run_status == pytorch_qnnp_status_success,

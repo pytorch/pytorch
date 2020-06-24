@@ -671,7 +671,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
     TORCH_CHECK(
         type->isSubtypeOf(tt),
         "Can't to redefine NamedTuple: ",
-        tt->python_str());
+        tt->repr_str());
     return type;
   }
   get_python_cu()->register_type(tt);
@@ -740,7 +740,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
-  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
+      obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {

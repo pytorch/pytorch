@@ -155,9 +155,15 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
 void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug) {
   TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " (", debug, ") vs ", op.schema(), " (", op.debug(), ")");
   if (schema.isDefaultAliasAnalysisKind()) {
-    TORCH_CHECK(false, toString(op.operator_name()), " can not be defined more than once; function schema is: ", toString(schema));
+    // [BACKWARDS COMPAT] If the *new* schema is the default alias analysis
+    // kind, for BC, we will accept it.  If we don't accept it, most extensions
+    // that override existing operators will stop working (as they generally did
+    // not specify alias information).
   } else if (op.schema().isDefaultAliasAnalysisKind()) {
-    TORCH_CHECK(false, toString(op.operator_name()), " can not be defined more than once; function schema is: ", toString(schema));
+    // [BACKWARDS COMPAT] If you POST-FACTO specify a non-default alias analysis
+    // kind after we already have a schema for a function, bong it in for BC
+    // reasons.
+    op.operatorIterator_->op.updateSchemaAliasAnalysis(schema.aliasAnalysis());
   } else {
     TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
       "Tried to define the schema for ", toString(op.operator_name()), " with different alias analysis kinds: ",
@@ -192,6 +198,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   OperatorName op_name,
   c10::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
+  c10::optional<impl::CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
@@ -199,7 +206,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   auto op = findOrRegisterName_(op_name);
 
-  auto handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(inferred_function_schema), std::move(debug));
+  auto handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(cpp_signature), std::move(inferred_function_schema), std::move(debug));
 
   ++op.operatorIterator_->def_and_impl_count;
 
