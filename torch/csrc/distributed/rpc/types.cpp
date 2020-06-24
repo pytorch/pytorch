@@ -49,6 +49,9 @@ at::IValue GloballyUniqueId::toIValue() const {
 }
 
 GloballyUniqueId GloballyUniqueId::fromIValue(const at::IValue& ivalue) {
+  TORCH_INTERNAL_ASSERT(
+      ivalue.isTuple(),
+      "GloballyUniqueId::fromIValue expected ivalue to be a tuple.");
   auto ivalues = ivalue.toTuple()->elements();
   TORCH_CHECK(
       ivalues.size() == 2,

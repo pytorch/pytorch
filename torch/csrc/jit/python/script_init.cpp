@@ -691,6 +691,20 @@ static constexpr const char* magic_method_names[] = {
     "__ixor__",    "__str__",     "__len__",
 };
 
+struct DeepCopyMemoTable {
+  std::shared_ptr<IValue::HashAliasedIValueMap> map;
+};
+
+IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
+  if (!memo.contains(py::str("__torch_script_memo_table"))) {
+    memo["__torch_script_memo_table"] =
+        DeepCopyMemoTable{std::make_shared<IValue::HashAliasedIValueMap>()};
+  }
+  auto& ivalue_memo =
+      *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;
+  return ivalue.deepcopy(ivalue_memo);
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -758,6 +772,7 @@ void initJitScriptBindings(PyObject* module) {
                   return method.name();
                 });
               })
+          .def("__copy__", &Object::copy)
           .def(py::pickle(
               [](const Object& self)
                   -> std::tuple<py::object, std::string> { // __getstate__
@@ -846,21 +861,13 @@ void initJitScriptBindings(PyObject* module) {
     }
   }
 
-  struct DeepCopyMemoTable {
-    std::shared_ptr<IValue::HashAliasedIValueMap> map;
-  };
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
 
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
-        if (!memo.contains(py::str("__torch_script_memo_table"))) {
-          memo["__torch_script_memo_table"] = DeepCopyMemoTable{
-              std::make_shared<IValue::HashAliasedIValueMap>()};
-        }
-        auto& ivalue_memo =
-            *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;
-        return Object(IValue(self._ivalue()).deepcopy(ivalue_memo).toObject());
+        return Object(
+            pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
       });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
@@ -1008,6 +1015,7 @@ void initJitScriptBindings(PyObject* module) {
             return std::make_tuple(pp.str(), consts);
           })
       .def("apply", &Module::apply)
+      .def("__copy__", &Module::copy)
       .def(
           "_clone",
           [](Module& self, bool inplace) { return self.clone(inplace); },
@@ -1015,6 +1023,12 @@ void initJitScriptBindings(PyObject* module) {
       .def("_clone_instance", &Module::clone_instance)
       .def("copy", &Module::copy)
       .def("deepcopy", &Module::deepcopy)
+      .def(
+          "__deepcopy__",
+          [](const Module& self, const py::dict& memo) {
+            return Module(
+                pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
+          })
       .def_property_readonly("qualified_name", [](const Module& self) {
         return self.type()->name()->qualifiedName();
       });

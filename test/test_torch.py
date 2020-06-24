@@ -528,6 +528,8 @@ class AbstractTestCases:
             _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int32), torch.randint(0, 100, (100, ), dtype=torch.int32))
             _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int64), torch.randint(0, 100, (100, ), dtype=torch.int64))
             _test_mv(torch.randn(100, 100, dtype=torch.float32).bfloat16(), torch.randn(100, dtype=torch.float32).bfloat16())
+            _test_mv(torch.randn(100, 100, dtype=torch.cfloat), torch.randn(100, dtype=torch.cfloat))
+            _test_mv(torch.randn(100, 100, dtype=torch.cdouble), torch.randn(100, dtype=torch.cdouble))
 
         def test_numpy_args(self):
             x1 = torch.randn(10)
@@ -13861,11 +13863,11 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipCUDAIfRocm
-    @dtypesIfCUDA(*(torch.float, torch.double) +
+    @dtypesIfCUDA(*(torch.float, torch.double, torch.cfloat, torch.cdouble) +
                   # This test is disabled on CUDA 9, due to:
                   # See: https://github.com/pytorch/pytorch/issues/31006
                   ((torch.half,) if torch.version.cuda and not torch.version.cuda.startswith('9.') else ()))
-    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool, torch.complex64, torch.complex128}))
+    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool}))
     def test_blas_alpha_beta_empty(self, device, dtype):
         if dtype is torch.bfloat16 and self.device_type == 'xla':
             # TODO (@zasdfgbnm): this causes the following error on test
@@ -13885,6 +13887,10 @@ class TestTorchDeviceType(TestCase):
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta))
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
+
+        # TODO: update this once torch.addmm is supported for complex
+        if dtype.is_complex:
+            return
 
         # torch.addmm
         input = torch.full((2, 3), value, dtype=dtype, device=device)
@@ -14618,17 +14624,17 @@ class TestTorchDeviceType(TestCase):
             x.is_contiguous(memory_format=torch.channels_last_3d), x_rep.is_contiguous(memory_format=torch.channels_last_3d))
 
     def test_memory_format_operators(self, device):
-        def chunk_op(x, y):
+        def _chunk_op(x, y):
             x1, x2 = x.chunk(2, dim=1)
             return x1 + x2
 
-        def unsqueeze_op_add(x, y):
+        def _unsqueeze_op_add(x, y):
             return x[0].unsqueeze(0) + 3
 
-        def unsqueeze_op_clone(x, y):
+        def _unsqueeze_op_clone(x, y):
             return x[0].unsqueeze(0).clone()
 
-        def test_helper(x, y, bias, memory_format):
+        def _test_helper(x, y, bias, memory_format):
             return_contig_fns = [
                 lambda x, y: y + x,
                 lambda x, y: y * x,
@@ -14704,9 +14710,9 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.neg_(),
                 lambda x, y: x.pow(3),
                 lambda x, y: x.pow_(3),
-                # lambda x, y: x.pow(0.0), # Need to make resize_as_ memory format aware
-                # lambda x, y: x.pow(1.0), # Need to make resize_as_ memory format aware
-                # lambda x, y: x.reciprocal(), # Not migrated for CUDA
+                lambda x, y: x.pow(0.0),
+                lambda x, y: x.pow(1.0),
+                lambda x, y: x.reciprocal(),
                 lambda x, y: x.remainder(2),
                 lambda x, y: x.round(),
                 lambda x, y: x.round_(),
@@ -14726,9 +14732,9 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.tanh(),
                 lambda x, y: x.trunc(),
                 lambda x, y: x.trunc_(),
-                chunk_op,
-                unsqueeze_op_add,
-                # unsqueeze_op_clone,
+                _chunk_op,
+                _unsqueeze_op_add,
+                _unsqueeze_op_clone,
             ]
             for fn in fns:
                 x_c = x.contiguous()
@@ -14760,12 +14766,12 @@ class TestTorchDeviceType(TestCase):
                     result.is_contiguous(memory_format=torch.contiguous_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), torch.contiguous_format))
 
-        test_helper(
+        _test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
             abs(torch.randn((4, 3, 8, 8), device=device)) + 1,
             torch.randn((1, 3, 1, 1), device=device).contiguous(memory_format=torch.channels_last),
             torch.channels_last)
-        test_helper(
+        _test_helper(
             torch.randn((4, 3, 8, 8, 8), device=device).contiguous(memory_format=torch.channels_last_3d),
             abs(torch.randn((4, 3, 8, 8, 8), device=device)) + 1,
             torch.randn((1, 3, 1, 1, 1), device=device).contiguous(memory_format=torch.channels_last_3d),
@@ -18251,28 +18257,24 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].imag, a.imag[5:])
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_complex_dtypes())
-    def test_set_real_imag(self, device, dtype):
-        x = torch.randn(10, dtype=dtype)
+    @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
+    @suppress_warnings
+    def test_set_real_imag(self, device, dtypes):
+        x = torch.randn(10, dtype=dtypes[0], device=device)
 
-        for d in torch.testing.get_all_dtypes():
-            new_real = _make_tensor((10,), d, device)
-            new_imag = _make_tensor((10,), d, device)
+        new_real = _make_tensor((10,), dtypes[1], device)
+        new_imag = _make_tensor((10,), dtypes[1], device)
 
-            if d.is_complex:
-                regex = "Casting complex values to real discards the imaginary part"
-                with self.assertWarnsRegex(UserWarning, regex):
-                    x.real = new_real
-                with self.assertWarnsRegex(UserWarning, regex):
-                    x.imag = new_imag
-                self.assertEqualIgnoreType(x.real, new_real.real)
-                self.assertEqualIgnoreType(x.imag, new_imag.real)
+        x.real = new_real
+        x.imag = new_imag
 
-            else:
-                x.real = new_real
-                x.imag = new_imag
-                self.assertEqualIgnoreType(x.real, new_real)
-                self.assertEqualIgnoreType(x.imag, new_imag)
+        if dtypes[1].is_complex:
+            self.assertEqual(x.real, new_real.real, exact_dtype=False)
+            self.assertEqual(x.imag, new_imag.real, exact_dtype=False)
+
+        else:
+            self.assertEqual(x.real, new_real, exact_dtype=False)
+            self.assertEqual(x.imag, new_imag, exact_dtype=False)
 
     def test_diagonal_view(self, device) -> None:
         t = torch.ones((5, 5), device=device)
@@ -18539,6 +18541,8 @@ _float_types = [torch.half, torch.float, torch.double]
 
 _complex_types = [torch.cfloat, torch.cdouble]
 
+_complex_types_skip_rocm = [] if TEST_WITH_ROCM else _complex_types
+
 _float_types_no_half = [torch.float, torch.double]
 
 _complex_types = [torch.cfloat, torch.cdouble]
@@ -18596,7 +18600,7 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
         return torch.ones(*shape, dtype=_convert_t(dtype, device), device=device)
 
     # Returns a tensor with random integer values
-    if not dtype.is_floating_point or not dtype.is_complex:
+    if not (dtype.is_floating_point or dtype.is_complex):
         t = torch.randint(0, 10, shape, device=device)
         if dtype != torch.uint8:
             t = t - 5  # generate negative values also
@@ -18758,14 +18762,14 @@ tensor_op_tests = [
         1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2),
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
