@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from collections import namedtuple
 from .observer import *
 from .fake_quantize import *
+from .fake_quantize_backward import *
 import torch.nn as nn
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -75,6 +76,9 @@ default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
                                       weight=default_weight_fake_quant)
 default_activation_only_qconfig = QConfig(activation=default_fake_quant,
                                           weight=torch.nn.Identity)
+
+_default_qat_backward_qconfig = QConfig(activation=default_fake_quant_backward,
+                                        weight=default_weight_fake_quant_backward)
 
 def get_default_qconfig(backend='fbgemm'):
     if backend == 'fbgemm':
