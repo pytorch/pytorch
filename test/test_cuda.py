@@ -2057,6 +2057,66 @@ t2.start()
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 2.0)
 
+    def test_grad_scaling_unscale_sparse(self, device="cuda", dtype=torch.float):
+        scaler = torch.cuda.amp.GradScaler()
+
+        inv_scale = torch.tensor([0.25], dtype=dtype, device=device)
+        found_inf = torch.empty((1,), dtype=dtype, device=device)
+        cur = found_inf.device
+
+        # As of d0c925f (4/16/20), docs are unclear about best API for sparse cuda tensor construction.
+        # https://pytorch.org/docs/master/tensors.html shows torch.sparse_coo_tensor(...), but it has no docstring.
+        # The same page shows several tensors with layout=torch.sparse_coo, but no constructors using that layout.
+        # Meanwhile, https://pytorch.org/docs/master/sparse.html shows torch.sparse.FloatTensor(...), which looks
+        # legacy and does not accept a device="cuda" kwarg.  Going with torch.sparse_coo_tensor.
+        i = torch.tensor([[0, 1, 1],
+                          [2, 0, 2]], device="cuda", dtype=torch.int64)
+        v = torch.tensor([16., 32., 64.], device="cuda", dtype=torch.float)
+        s = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
+
+        p = s.clone()
+        assert p.is_sparse
+        opt = torch.optim.SGD([p], lr=1.)
+
+        p.grad = s.clone()
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
+        self.assertEqual(found_inf, 0.0)
+        self.assertTrue(torch.allclose(p.grad.to_dense(), (s / 4).to_dense()))
+
+        v = torch.FloatTensor([16., 32., float('inf')])
+        p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
+        self.assertEqual(found_inf, 1.0)
+
+        v = torch.FloatTensor([16., 32., float('nan')])
+        p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
+        self.assertEqual(found_inf, 1.0)
+
+        p = s.clone().half()
+        assert p.is_sparse
+        opt = torch.optim.SGD([p], lr=1.)
+
+        p.grad = s.clone().half()
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
+        self.assertEqual(found_inf, 0.0)
+        self.assertTrue(torch.allclose(p.grad.to_dense(), (s.half() / 4).to_dense()))
+
+        # Creates fp16 sparse tensor with duplicated indices (uncoalesced).  The uncoalesced representation
+        # does not overflow in fp16, but the coalesced representation would, because 64000 + 64000 > fp16 max.
+        # _amp_non_finite_check_and_unscale_ should report an overflow here.
+        i = torch.LongTensor([[0, 1, 0],
+                              [2, 0, 2]])
+        v = torch.FloatTensor([64000., 32., 64000.])
+        p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=torch.float16)
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
+        self.assertEqual(found_inf, 1.0)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_device_as_key(self):
         # Ensure that different instances of "device" objects that point to the same device
