@@ -3,8 +3,7 @@ import torch
 from collections import OrderedDict
 
 class ParameterMode(enum.Enum):
-    Explicit = 1
-    Infer = 2
+    Infer = -1
 
 
 class Parameter(torch.Tensor):

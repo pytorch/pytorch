@@ -373,6 +373,8 @@ class Module:
 
         for key, param in self._parameters.items():
             if param is not None:
+                if isinstance(param, _UninitializedParameter):
+                    raise ValueError('Can\'t apply a function to an uninitialized parameter {}'.format(key))
                 # Tensors stored in modules are graph leaves, and we don't want to
                 # track autograd history of `param_applied`, so we have to use
                 # `with torch.no_grad():`
@@ -397,6 +399,8 @@ class Module:
                         self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
+            if isinstance(buf, _UninitializedBuffer):
+                raise ValueError('Can\'t apply a function to an uninitialized buffer {}'.format(key))
             if buf is not None:
                 self._buffers[key] = fn(buf)
 
@@ -1096,7 +1100,7 @@ class Module:
         """
         for name, param in self.named_parameters(recurse=recurse):
             if isinstance(param, _UninitializedParameter):
-                raise ValueError('Can\'t retrieve an unitialized parameter {}'.format(name))
+                raise ValueError('Can\'t retrieve an uninitialized parameter {}'.format(name))
             yield param
 
     def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
