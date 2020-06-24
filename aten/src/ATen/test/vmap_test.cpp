@@ -720,7 +720,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
 TEST(VmapTest, TestBatchedTensorUnsqueeze) {
   {
     // Basic test
-    auto tensor = at::randn({2, 3, 5});
+    auto tensor = at::randn({2, 3, 5});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.unsqueeze(0);
@@ -730,7 +730,7 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
   }
   {
     // Test with multiple levels
-    auto tensor = at::randn({2, 3, 5});
+    auto tensor = at::randn({2, 3, 5});  // NOLINT
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.unsqueeze(0);
@@ -740,7 +740,7 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
   }
   {
     // Negative dim
-    auto tensor = at::randn({2, 3, 5});
+    auto tensor = at::randn({2, 3, 5});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.unsqueeze(-1);
@@ -753,7 +753,7 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
 TEST(VmapTest, TestBatchedTensorSqueeze) {
   {
     // Basic test
-    auto tensor = at::randn({2, 1, 5});
+    auto tensor = at::randn({2, 1, 5});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.squeeze(0);
@@ -763,7 +763,7 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
   }
   {
     // Test with multiple levels
-    auto tensor = at::randn({2, 3, 1});
+    auto tensor = at::randn({2, 3, 1});  // NOLINT
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.squeeze(0);
@@ -773,7 +773,7 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
   }
   {
     // Negative dim
-    auto tensor = at::randn({2, 3, 1});
+    auto tensor = at::randn({2, 3, 1});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.squeeze(-1);
@@ -786,7 +786,7 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
 TEST(VmapTest, TestBatchedTensorTranspose) {
   {
     // Basic test
-    auto tensor = at::randn({2, 3, 5});
+    auto tensor = at::randn({2, 3, 5});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.transpose(0, 1);
@@ -796,7 +796,7 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
   }
   {
     // Test with multiple levels
-    auto tensor = at::randn({2, 3, 5, 7, 11});
+    auto tensor = at::randn({2, 3, 5, 7, 11});  // NOLINT
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.transpose(0, 2);
@@ -806,7 +806,7 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
   }
   {
     // Negative dims
-    auto tensor = at::randn({2, 3, 5, 7});
+    auto tensor = at::randn({2, 3, 5, 7});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.transpose(-2, -1);
@@ -820,7 +820,7 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
 TEST(VmapTest, TestBatchedTensorPermute) {
   {
     // Basic test
-    auto tensor = at::randn({2, 3, 5});
+    auto tensor = at::randn({2, 3, 5});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.permute({1, 0});
@@ -830,7 +830,7 @@ TEST(VmapTest, TestBatchedTensorPermute) {
   }
   {
     // Test with multiple levels
-    auto tensor = at::randn({2, 3, 5, 7, 11});
+    auto tensor = at::randn({2, 3, 5, 7, 11});  // NOLINT
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.permute({2, 1, 0});
@@ -840,7 +840,7 @@ TEST(VmapTest, TestBatchedTensorPermute) {
   }
   {
     // Negative dims
-    auto tensor = at::randn({2, 3, 5, 7});
+    auto tensor = at::randn({2, 3, 5, 7});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.permute({-1, -2, -3});
