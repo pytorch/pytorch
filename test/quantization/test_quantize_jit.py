@@ -233,8 +233,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         for tracing, dim, bias in options:
             eager = TestModule(dim, bias).eval()
             x = data[dim]
-            scripted_or_traced = get_script_module(eager, tracing, x).copy()
-            torch._C._jit_pass_dedup_module_uses(scripted_or_traced ._c)
+            scripted_or_traced = get_script_module(eager, tracing, x)
             folded = fuse_conv_bn_jit(scripted_or_traced)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
@@ -1037,6 +1036,19 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .check_not("quantized::linear_prepack") \
                    .check("quantized::linear") \
                    .run(model.graph)
+
+    def test_inplace_option(self):
+        for tracing in [True, False]:
+            model = get_script_module(torch.nn.Conv2d(3, 3, 3), tracing, self.img_data[0][0])
+            qconfig_dict = {'': default_qconfig}
+            quantize_jit(
+                model, qconfig_dict, test_only_eval_fn, [self.img_data], inplace=True)
+            FileCheck().check("quantized::conv2d") \
+                       .run(model.graph)
+
+            FileCheck().check_not("aten::conv2d") \
+                       .run(model.graph)
+
 
     def test_finalize_debug(self):
         class M(torch.nn.Module):

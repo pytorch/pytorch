@@ -390,7 +390,7 @@ class TestTracer(JitTestCase):
     # Test that a trace of torch.full(x.shape) doesn't store the shape as a constant
     def test_trace_full_dynamic_shape(self):
         def full_with_shape_like(x):
-            return torch.full(x.shape, 2)
+            return torch.full(x.shape, 2.)
 
         x = torch.randn(3, 4)
         ge = torch.jit.trace(full_with_shape_like, example_inputs=x)
