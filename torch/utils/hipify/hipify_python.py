@@ -36,6 +36,12 @@ from . import constants
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
+# Allow hip files to exist in the same directory as cuda files.
+# This is useful when it is desired to avoid introducing a "hip" subdirectory
+# while there is no "cuda" subdirectory, which will affect the relationship
+# between device code and included header files.
+SUPPORT_SAME_DIR_HIPIFICATION = True
+
 # Hardcode the PyTorch template map
 """This dictionary provides the mapping from PyTorch kernel template types
 to their actual types."""
@@ -157,6 +163,7 @@ def preprocess(
         show_progress=True,
         hip_clang_launch=False,
         is_pytorch_extension=False,
+        allow_same_dir=False,
         clean_ctx=None):
     """
     Call preprocessor on selected files.
@@ -172,13 +179,13 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx)
+        result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, allow_same_dir, clean_ctx)
 
         # Show what happened
         if show_progress:
             print(
                 filepath, "->",
-                get_hip_file_path(filepath), result)
+                get_hip_file_path(filepath, allow_same_dir), result)
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
@@ -472,7 +479,7 @@ def replace_extern_shared(input_string):
     return output_string
 
 
-def get_hip_file_path(filepath):
+def get_hip_file_path(filepath, allow_same_dir=False):
     """
     Returns the new name of the hipified file
     """
@@ -504,8 +511,10 @@ def get_hip_file_path(filepath):
     #
     #   - If the file name contains "CUDA", replace it with "HIP", AND
     #
-    # If NONE of the above occurred, then insert "hip" in the file path
-    # as the direct parent folder of the file
+    #   - If the parent directory name did not change as a result of 
+    #     the above transformations, and if a same directory name is
+    #     not disallowed (the default), insert "hip" in the file path
+    #     as the direct parent folder of the file
     #
     # Furthermore, ALWAYS replace '.cu' with '.hip', because those files
     # contain CUDA kernels that needs to be hipified and processed with
@@ -528,7 +537,7 @@ def get_hip_file_path(filepath):
     if dirpath != "caffe2/core":
         root = root.replace('THC', 'THH')
 
-    if dirpath == orig_dirpath:
+    if allow_same_dir is False and dirpath == orig_dirpath:
         dirpath = os.path.join(dirpath, 'hip')
 
     return os.path.join(dirpath, root + ext)
@@ -647,13 +656,13 @@ RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')
 RE_THC_GENERIC_FILE = re.compile(r'#define THC_GENERIC_FILE "([^"]+)"')
 RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 
-def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx):
+def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, allow_same_dir, clean_ctx):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r', encoding='utf-8') as fin:
         output_source = fin.read()
 
-    fout_path = os.path.join(output_directory, get_hip_file_path(filepath))
+    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, allow_same_dir))
     if not os.path.exists(os.path.dirname(fout_path)):
         clean_ctx.makedirs(os.path.dirname(fout_path))
 
@@ -684,7 +693,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
                 or f.startswith("THCUNN/")
                 or (f.startswith("THC") and not f.startswith("THCP"))
             ):
-                return templ.format(get_hip_file_path(m.group(1)))
+                return templ.format(get_hip_file_path(m.group(1), False))
             return m.group(0)
         return repl
     output_source = RE_QUOTE_HEADER.sub(mk_repl('#include "{0}"'), output_source)
@@ -823,6 +832,7 @@ def hipify(
     show_progress=True,
     hip_clang_launch=False,
     is_pytorch_extension=False,
+    allow_same_dir=False,
     clean_ctx=None
 ):
     if project_directory == "":
@@ -856,4 +866,5 @@ def hipify(
         show_progress=show_progress,
         hip_clang_launch=hip_clang_launch,
         is_pytorch_extension=is_pytorch_extension,
+        allow_same_dir=allow_same_dir,
         clean_ctx=clean_ctx)
