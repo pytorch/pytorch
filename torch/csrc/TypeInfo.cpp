@@ -34,18 +34,6 @@ PyObject* THPIInfo_New(const at::ScalarType& type) {
   return self.release();
 }
 
-PyObject* THPFInfo_str(THPFInfo* self) {
-  std::ostringstream oss;
-  oss << "finfo(type=" << self->type << ")";
-  return THPUtils_packString(oss.str().c_str());
-}
-
-PyObject* THPIInfo_str(THPIInfo* self) {
-  std::ostringstream oss;
-  oss << "iinfo(type=" << self->type << ")";
-  return THPUtils_packString(oss.str().c_str());
-}
-
 PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
@@ -145,7 +133,7 @@ static PyObject* THPFInfo_min(THPFInfo* self, void*) {
   });
 }
 
-static PyObject* THPIInfo_max(THPFInfo* self, void*) {
+static PyObject* THPIInfo_max(THPIInfo* self, void*) {
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_INTEGRAL_TYPES(self->type, "max", [] {
       return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
@@ -157,7 +145,7 @@ static PyObject* THPIInfo_max(THPFInfo* self, void*) {
   });
 }
 
-static PyObject* THPIInfo_min(THPFInfo* self, void*) {
+static PyObject* THPIInfo_min(THPIInfo* self, void*) {
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_INTEGRAL_TYPES(self->type, "min", [] {
       return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
@@ -174,6 +162,24 @@ static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
     return PyFloat_FromDouble(
         std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min());
   });
+}
+
+PyObject* THPFInfo_str(THPFInfo* self) {
+  std::ostringstream oss;
+  oss << "finfo(type=torch.float" << PyFloat_AsDouble(THPDTypeInfo_bits(self, nullptr));
+  oss << ", eps=" << PyFloat_AsDouble(THPFInfo_eps(self, nullptr));
+  oss << ", max=" << PyFloat_AsDouble(THPFInfo_max(self, nullptr));
+  oss << ", min=" << PyFloat_AsDouble(THPFInfo_min(self, nullptr));
+  oss << ", tiny=" << PyFloat_AsDouble(THPFInfo_tiny(self, nullptr)) << ")";
+  return THPUtils_packString(oss.str().c_str());
+}
+
+PyObject* THPIInfo_str(THPIInfo* self) {
+  std::ostringstream oss;
+  oss << "iinfo(type=torch.int" << PyFloat_AsDouble(THPDTypeInfo_bits(self, nullptr));
+  oss << ", max=" << PyFloat_AsDouble(THPIInfo_max(self, nullptr));
+  oss << ", min=" << PyFloat_AsDouble(THPIInfo_min(self, nullptr)) << ")";
+  return THPUtils_packString(oss.str().c_str());
 }
 
 static struct PyGetSetDef THPFInfo_properties[] = {
