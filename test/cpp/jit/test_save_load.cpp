@@ -23,7 +23,8 @@ void testExtraFilesHookPreference() {
         return x
   )JIT";
 
-  auto module = std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
+  auto module =
+      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
   module->define(script);
   std::ostringstream oss;
   std::unordered_map<std::string, std::string> extra_files;

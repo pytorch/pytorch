@@ -191,7 +191,6 @@ class ScriptModuleSerializer {
     }
 
     // Acquires and sets minimum (dynamic) version
-    uint64_t version = caffe2::serialize::kProducedFileFormatVersion;
     for (auto& item : file_streams_) {
       writer_.setMinVersion(item.value().minVersion());
     }
@@ -242,15 +241,13 @@ class ScriptModuleSerializer {
       for (const auto& kv : hook_files) {
         // Checks if the hooked file is already written in extra files,
         //   if so, skips it and warns
-        bool is_duplicate = false;
-        auto it = extra_files.find(kv.first);
-        if (it != extra_files.end()) {
-          is_duplicate = true;
-          TORCH_WARN_ONCE("An extra files hook attempted to write ", kv.first, " but ",
-            "this is already written in extra files and so will be skipped. ",
-            "This warning will only appear once per process.");
-        }
-        if (is_duplicate) {
+        if (extra_files.find(kv.first) != extra_files.end()) {
+          TORCH_WARN_ONCE(
+              "An extra files hook attempted to write ",
+              kv.first,
+              " but ",
+              "this is already written in extra files and so will be skipped. ",
+              "This warning will only appear once per process.");
           continue;
         }
         const std::string key = "extra/" + kv.first;

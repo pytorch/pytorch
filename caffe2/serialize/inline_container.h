@@ -124,14 +124,13 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x5L;
 // and torch.loaded across PyTorch versions. From a technical perspective,
 // torch.save ignores dynamic versioning.
 
-
 // 1. Initial version
 // 2. Removed op_version_set version numbers
 // 3. Added type tags to pickle serialization of container types
 // 4. (Dynamic) Stopped integer division using torch.div
 //      (a versioned symbol preserves the historic behavior of versions 1--3)
-// 5. (Dynamic, Read-only) Stops torch.full inferring a floating point dtype
-//      when given integer fill values.
+// 5. (Dynamic) Stops torch.full inferring a floating point dtype
+//      when given bool or integer fill values.
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 
 // Writer-specific constants
