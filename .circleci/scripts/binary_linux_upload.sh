@@ -44,5 +44,5 @@ fi
 
 if [[ -n "${CIRCLE_TAG:-}" ]]; then
   s3_dir="${BACKUP_BUCKET}/${CIRCLE_TAG}/${BACKUP_DIR}"
-  retry aws s3 cp "$(ls)" "$s3_dir"
+  retry aws s3 cp --recursive . "$s3_dir"
 fi
