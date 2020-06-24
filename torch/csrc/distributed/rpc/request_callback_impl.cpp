@@ -738,6 +738,7 @@ void RequestCallbackImpl::processRpc(
       auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
       auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
       const auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
+      const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
       auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
       // Enable the profiler with the config from the sender.
       std::vector<torch::autograd::profiler::Event> profiledEvents;
@@ -841,7 +842,8 @@ void RequestCallbackImpl::processRpc(
       wrappedRpcResponseFuture->addCallback([wrappedRpcResponseFuture,
                                              responseFuture,
                                              profiledEvents =
-                                                 std::move(profiledEvents)] {
+                                                 std::move(profiledEvents),
+                                             profilingKeyId] {
         if (wrappedRpcResponseFuture->hasError()) {
           // Propagate error
           responseFuture->setError(wrappedRpcResponseFuture->error()->what());
@@ -849,7 +851,8 @@ void RequestCallbackImpl::processRpc(
           auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
               MessageType::RUN_WITH_PROFILING_RESP,
               std::move(*wrappedRpcResponseFuture).moveValue(),
-              profiledEvents);
+              profiledEvents,
+              profilingKeyId);
           responseFuture->markCompleted(
               std::move(*rpcWithProfilingResp).toMessage());
         }

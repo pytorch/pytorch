@@ -3817,6 +3817,12 @@ add_docstr_all('is_quantized',
 Is ``True`` if the Tensor is quantized, ``False`` otherwise.
 """)
 
+add_docstr_all('is_meta',
+               r"""
+Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
+are like normal tensors, but they carry no data.
+""")
+
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
