@@ -20,8 +20,11 @@ write_sccache_stub cc
 write_sccache_stub c++
 write_sccache_stub gcc
 write_sccache_stub g++
-write_sccache_stub clang
-write_sccache_stub clang++
+# do not wrap clang for rocm images, see note below
+if [[ "${BUILD_ENVIRONMENT}" != *-rocm* ]]; then
+  write_sccache_stub clang
+  write_sccache_stub clang++
+fi
 
 if [ -n "$CUDA_VERSION" ]; then
   # TODO: This is a workaround for the fact that PyTorch's FindCUDA
@@ -32,4 +35,22 @@ if [ -n "$CUDA_VERSION" ]; then
 
   printf "#!/bin/sh\nexec sccache $(which nvcc) \"\$@\"" > /opt/cache/lib/nvcc
   chmod a+x /opt/cache/lib/nvcc
+fi
+
+# ROCm compiler is clang. However, it is commonly invoked via hipcc wrapper.
+# hipcc will call either hcc or clang using an absolute path starting with /opt/rocm,
+# causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
+# directly under /opt/rocm.
+if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
+  if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then
+    HIPCOM_DEST_PATH="$(readlink -f /opt/rocm/hcc/bin/hcc )"
+  else
+    HIPCOM_DEST_PATH="$(readlink -f /opt/rocm/llvm/bin/clang )"
+  fi
+  HIPCOM_REAL_BINARY="$(dirname $HIPCOM_DEST_PATH)/hipcompiler_original"
+  mv "$HIPCOM_DEST_PATH" "$HIPCOM_REAL_BINARY"
+
+  # Create sccache wrapper.
+  printf "#!/bin/sh\nexec sccache $HIPCOM_REAL_BINARY \$*" > "$HIPCOM_DEST_PATH"
+  chmod a+x "$HIPCOM_DEST_PATH"
 fi
