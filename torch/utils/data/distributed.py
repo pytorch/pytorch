@@ -24,8 +24,8 @@ class DistributedSampler(Sampler):
         rank (int, optional): Rank of the current process within :attr:`num_replicas`.
             By default, :attr:`rank` is retrieved from the current distributed
             group.
-        shuffle (bool, optional): If ``True`` (default), sampler will shuffle the
-            indices.
+        shuffle (bool, optional): If ``True``, sampler will shuffle the indices.
+            A seed other than ``0`` should also be given. The default is ``False``.
         seed (int, optional): random seed used to shuffle the sampler if
             :attr:`shuffle=True`. This number should be identical across all
             processes in the distributed group. Default: ``0``.
@@ -47,7 +47,7 @@ class DistributedSampler(Sampler):
         ...     train(loader)
     """
 
-    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True, seed=0):
+    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=False, seed=0):
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
