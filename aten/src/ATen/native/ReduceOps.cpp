@@ -968,7 +968,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   if (!self.is_same_size(other)) {
     return false;
   }
-  bool result = true;
+  std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
     .add_input(self)
     .add_input(other)
@@ -993,7 +993,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       }
     });
   });
-  return result;
+  return result.load();
 }
 
 }} // namespace at::native
