@@ -20,8 +20,9 @@ write_sccache_stub cc
 write_sccache_stub c++
 write_sccache_stub gcc
 write_sccache_stub g++
-# do not wrap clang for rocm images, see note below
-if [[ "${BUILD_ENVIRONMENT}" != *-rocm* ]]; then
+if [ -n "$ROCM_VERSION" ]; then
+  echo "ROCm images do not use sccache for clang"
+else
   write_sccache_stub clang
   write_sccache_stub clang++
 fi
@@ -37,20 +38,26 @@ if [ -n "$CUDA_VERSION" ]; then
   chmod a+x /opt/cache/lib/nvcc
 fi
 
-# ROCm compiler is clang. However, it is commonly invoked via hipcc wrapper.
-# hipcc will call either hcc or clang using an absolute path starting with /opt/rocm,
-# causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
-# directly under /opt/rocm.
-if [[ "${BUILD_ENVIRONMENT}" == *-rocm* ]]; then
-  if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then
-    HIPCOM_DEST_PATH="$(readlink -f /opt/rocm/hcc/bin/hcc )"
-  else
-    HIPCOM_DEST_PATH="$(readlink -f /opt/rocm/llvm/bin/clang )"
-  fi
-  HIPCOM_REAL_BINARY="$(dirname $HIPCOM_DEST_PATH)/hipcompiler_original"
-  mv "$HIPCOM_DEST_PATH" "$HIPCOM_REAL_BINARY"
+if [ -n "$ROCM_VERSION" ]; then
+  # ROCm compiler is clang. However, it is commonly invoked via hipcc wrapper.
+  # hipcc will call either hcc or clang using an absolute path starting with /opt/rocm,
+  # causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
+  # directly under /opt/rocm.
 
-  # Create sccache wrapper.
-  printf "#!/bin/sh\nexec sccache $HIPCOM_REAL_BINARY \$*" > "$HIPCOM_DEST_PATH"
-  chmod a+x "$HIPCOM_DEST_PATH"
+  function write_sccache_stub_rocm() {
+    mv "$1" "$1_original"
+    printf "#!/bin/sh\nexec sccache $1_original \$*" > "$1"
+    chmod a+x "$1"
+  }
+
+  if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then
+    # ROCm 3.3 or earlier.
+    write_sccache_stub_rocm /opt/rocm/hcc/bin/hcc
+    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang
+    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang++
+  else
+    # ROCm 3.5 and beyond.
+    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang
+    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang++
+  fi
 fi
