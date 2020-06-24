@@ -94,7 +94,7 @@ class ProcessGroup {
 
     // Similar to finish, but throws an exception if one is already set or
     // provided by the user.
-    void finishAndThrow(std::exception_ptr exception = nullptr);
+    void finishAndThrow(std::exception_ptr exception);
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;
