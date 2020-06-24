@@ -1911,6 +1911,7 @@ class _DistTestBase(object):
         "Only NCCL and GLOO backend support DistributedDataParallel",
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_DistributedDataParallel_non_default_stream(self):
         stream = torch.cuda.Stream()
         rank = self.rank
@@ -1935,12 +1936,13 @@ class _DistTestBase(object):
                 # average. If not, then one of the workers has not correctly
                 # written back the averaged gradient before this all-reduce call.
                 dist.all_reduce(avg)
-                avg.div_(2)
-                expected_grad = 0.5
+                world_size = int(os.environ["WORLD_SIZE"])
+                avg.div_(world_size)
+                expected_grad = sum(i for i in range(world_size)) / world_size
                 self.assertEqual(
                     avg[0, 0],
                     expected_grad,
-                    msg=f"Expected gradient of {expected_grad} but {avg} on rank {self.rank}",
+                    msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                 )
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
