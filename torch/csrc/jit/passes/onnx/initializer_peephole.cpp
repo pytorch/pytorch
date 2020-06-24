@@ -45,13 +45,29 @@ static void fuseConvBachNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       auto epsilon = bnNode->f(attr::epsilon);
       auto w_conv_value = getValues(origconvNode, valsToParamsMap);
       auto bn_value = getValues(bnNode, valsToParamsMap);
-      auto bn_scale = bn_value[0].clone().to(torch::kFloat32);
-      auto bn_B = bn_value[1].clone().to(torch::kFloat32);
-      auto bn_mean = bn_value[2].clone().to(torch::kFloat32);
-      auto bn_var = bn_value[3].clone().to(torch::kFloat32);
-      auto w_conv = w_conv_value[0].clone().to(torch::kFloat32);
+      auto bn_scale = bn_value[0];
+      auto bn_B = bn_value[1];
+      auto bn_mean = bn_value[2];
+      auto bn_var = bn_value[3];
+      auto w_conv = w_conv_value[0];
       at::Tensor b_conv;
 
+      if (!bn_scale.is_floating_point() ||
+          !bn_B.is_floating_point() ||
+          !bn_mean.is_floating_point() ||
+          !bn_var.is_floating_point() ||
+          !w_conv.is_floating_point() ||
+          bn_scale.dim() != 1 ||
+          bn_B.dim() != 1 ||
+          bn_mean.dim() != 1 ||
+          bn_var.dim() != 1 ||
+          !(bn_scale.size(0) == bn_B.size(0)) ||
+          !(bn_B.size(0) == bn_mean.size(0)) ||
+          !(bn_mean.size(0) == bn_var.size(0)) ||
+          !(w_conv.dim() > 2) ||
+          !(w_conv.size(0) == bn_scale.size(0))){
+        return;
+      }
 
       bn_var = bn_var.add(epsilon);
       bn_var = bn_var.sqrt();
