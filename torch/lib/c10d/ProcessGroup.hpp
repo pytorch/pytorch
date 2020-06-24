@@ -92,6 +92,10 @@ class ProcessGroup {
     // thread-safe manner. Notifies all waiting condition variables as well.
     void finish(std::exception_ptr exception = nullptr);
 
+    // Similar to finish, but throws an exception if one is already set or
+    // provided by the user.
+    void finishAndThrow(std::exception_ptr exception);
+
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     bool completed_ = false;
