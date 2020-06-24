@@ -1021,7 +1021,7 @@ class TestClassType(JitTestCase):
         @torch.jit.script
         def foo():
             y = CompetitiveLinkingTokenReplacementUtils()
-            new_dict : Dict[int, int] = {1:1, 2:2}
+            new_dict : Dict[int, int] = {1: 1, 2: 2}
             y.my_dict = new_dict
 
             new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
