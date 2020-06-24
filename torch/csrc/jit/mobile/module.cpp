@@ -61,8 +61,7 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
     return result;
   } catch (const std::exception &ex) {
     if (observer) {
-      std::string failure_reason = "Error occured during model running entry point: " + (std::string) ex.what();
-      observer->onFailRunMethod(failure_reason);
+      observer->onFailRunMethod("Error occured during model running entry point: " + (std::string) ex.what(););
     }
     TORCH_CHECK(false, ex.what());
   } catch (...) {
