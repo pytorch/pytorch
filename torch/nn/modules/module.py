@@ -967,8 +967,8 @@ class Module:
             if key in state_dict:
                 input_param = state_dict[key]
                 # Detect Unitialized parameters or buffers
-                if isinstance(param, _UninitializedParameter):
-                    if not isinstance(input_param, _UninitializedParameter):
+                if not isinstance(param, _UninitializedParameter):
+                    if isinstance(input_param, _UninitializedParameter):
                         # We override the parameter with a new one if it was already 
                         # Initialized
                         self.register_parameter(name, torch.nn.Parameter(input_param))
