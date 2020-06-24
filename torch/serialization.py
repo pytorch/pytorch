@@ -349,6 +349,12 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
 
         Please use something like :class:`io.BytesIO` instead.
 
+    .. note::
+        The 1.6 release of PyTorch switched ``torch.save`` to use a new
+        zipfile-based file format. ``torch.load`` still retains the ability to
+        load files in the old format. If for any reason you want ``torch.save``
+        to use the old format, pass the kwarg ``_use_new_zipfile_serialization=False``.
+
     Example:
         >>> # Save to file
         >>> x = torch.tensor([0, 1, 2, 3, 4])
