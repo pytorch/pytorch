@@ -8,6 +8,7 @@ install_ubuntu() {
       # gpg-agent is not available by default on 18.04
       apt-get install -y --no-install-recommends gpg-agent
     fi
+    apt-get install -y kmod
     apt-get install -y wget
     apt-get install -y libopenblas-dev
 
@@ -52,6 +53,7 @@ install_ubuntu() {
 install_centos() {
 
   yum update -y
+  yum install -y kmod
   yum install -y wget
   yum install -y openblas-devel
 
