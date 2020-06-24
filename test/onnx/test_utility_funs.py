@@ -3,7 +3,7 @@ from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
-from torch.onnx import utils, OperatorExportTypes
+from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
 import torch.utils.cpp_extension
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
@@ -674,6 +674,25 @@ class TestUtilityFuns(TestCase):
         ratio_ort = np.sum(ort_mask) / nb_elements
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
+
+    def test_fuse_conv_bn(self):
+        class Fuse(torch.nn.Module):
+            def __init__(self):
+                super(Fuse, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=True)
+                self.bn = torch.nn.BatchNorm2d(2)
+
+            def forward(self, x):
+                out = self.conv(x)
+                return self.bn(out)
+
+        x = torch.randn(2, 3, 2, 2, requires_grad=True)
+        graph, _, __ = utils._model_to_graph(Fuse(), (x, ),
+                                             do_constant_folding=True,
+                                             training=TrainingMode.EVAL)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::BatchNormalization"
+            assert node.kind() == "onnx::Conv"
 
 
 # opset 10 tests
