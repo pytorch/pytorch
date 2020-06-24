@@ -463,6 +463,10 @@ def view(g, self, size):
         shape = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Reshape", self, shape)
 
+def view_as(g, self, other):
+    shape = g.op("Shape", other)
+    return g.op("Reshape", self, shape)
+
 
 def prim_ConstantSplit(g, self, split_size, dim):
     size = self.type().sizes()[dim]
