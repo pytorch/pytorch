@@ -36,7 +36,7 @@ class TestProfiler_cuda(TestCase):
         # with CUDA events leaking the increase in memory was ~7 MB between
         # profiler invocations above
         is_increasing = all(
-            [last_rss[idx] > last_rss[idx-1] for idx in range(1, len(last_rss))])
+            [last_rss[idx] > last_rss[idx - 1] for idx in range(1, len(last_rss))])
         max_diff = -1
         for idx in range(1, len(last_rss)):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
