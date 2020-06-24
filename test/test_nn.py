@@ -11526,6 +11526,50 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
 
+class TestLazyModules(TestCase):
+    def test_lazy_module(self):
+        module = torch.nn.Module()
+        module.register_parameter('test_param', torch.nn.parameter._UninitializedParameter())
+
+        with self.assertRaisesRegex(ValueError, 'uninitialized'):
+            list(module.parameters())
+
+        with self.assertRaisesRegex(ValueError, 'uninitialized'):
+            module._apply(lambda x: x)
+
+        state_dict = module.state_dict()
+        self.assertIsInstance(state_dict['test_param'], nn.parameter._UninitializedParameter)
+        new_module = torch.nn.Module()
+        # Uninitialized paramaters in a state dict are ignored when the module has a valid one.
+        new_module.register_parameter('test_param', nn.Parameter(torch.ones(5, 5)))
+        new_module.load_state_dict(state_dict) 
+        self.assertNotIsInstance(new_module.test_param, nn.parameter._UninitializedParameter)
+
+    def test_linear(self):
+        module = nn.Linear(nn.parameter.ParameterMode.Infer, 10)
+        self.assertIsInstance(module.weight, nn.parameter._UninitializedParameter)
+        # Do the forward pass
+        input = torch.ones(5, 5)
+        y = module(input)
+        self.assertTrue(module.weight.shape == (10, 5))
+        self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
+
+    def test_conv(self):
+        def conv_check(module, input, shape, check_fn):
+            self.assertIsInstance(module.weight, nn.parameter._UninitializedParameter)
+            y = module(input)
+            self.assertTrue(module.weight.shape == shape)
+            self.assertTrue(torch.equal(check_fn(input, module.weight, module.bias), y))
+
+        module = nn.Conv1d(nn.parameter.ParameterMode.Infer, 4, 2)
+        input = torch.ones(4, 4, 3)
+        conv_check(module, input, (4, 4, 2), torch.nn.functional.conv1d)
+        module = nn.ConvTranspose1d(nn.parameter.ParameterMode.Infer, 4, 2)
+        conv_check(module, input, (4, 4, 2), torch.nn.functional.conv_transpose1d)
+        module = nn.Conv2d(nn.parameter.ParameterMode.Infer, 4, 2)
+        input = torch.ones(4, 4, 4, 3)
+        conv_check(module, input, (4, 4, 4, 2), torch.nn.functional.conv2d)
+
 class TestModuleGlobalHooks(TestCase):
 
     def tearDown(self):
