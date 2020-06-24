@@ -24,8 +24,6 @@ namespace torch { namespace autograd { namespace profiler {
 
 namespace {
 
-  constexpr auto kProfilerConfigIValuesSize = 3;
-  constexpr auto kEventIValuesSize = 11;
   enum EventIValueIdx {
     KIND = 0,
     NAME,
@@ -37,13 +35,15 @@ namespace {
     CUDA_RECORDED,
     CUDA_MEM_USAGE,
     CUDA_DEVICE,
-    CUDA_US
+    CUDA_US,
+    kEventIValuesSize // must be last in list
   };
 
   enum ProfilerIValueIdx {
     STATE = 0,
     REPORT_INPUT_SHAPES,
     PROFILE_MEMORY,
+    kProfilerConfigIValuesSize // must be last in list
   };
 
 CUDAStubs default_stubs;
