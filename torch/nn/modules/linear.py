@@ -69,18 +69,16 @@ class Linear(Module):
     out_features: int
     weight: Tensor
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, param_mode: ParameterMode = ParameterMode.Explicit) -> None:
+    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
 
-        if param_mode == ParameterMode.Infer:
+        if self.in_features == ParameterMode.Infer:
             self.in_features = None
             self.weight = _UninitializedParameter()
-        elif param_mode == ParameterMode.Explicit:
-            self.weight = Parameter(torch.Tensor(out_features, in_features))
         else:
-            raise ValueError('Unknown parameter initialization mode')
+            self.weight = Parameter(torch.Tensor(out_features, in_features))
 
         if bias:
             self.bias = Parameter(torch.Tensor(out_features))
