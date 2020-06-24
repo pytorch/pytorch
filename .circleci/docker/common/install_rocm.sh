@@ -35,11 +35,13 @@ install_ubuntu() {
                    rocprofiler-dev \
                    roctracer-dev
 
-    # precompiled miopen kernels added in ROCm 3.5
-    if DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated miopenkernels-*${ROCM_VERSION}; then
-        echo "Installed miopenkernels"
+    # precompiled miopen kernels added in ROCm 3.5; search for all unversioned packages
+    # if search fails it will abort this script; use true to avoid case where search fails
+    MIOPENKERNELS=$(apt-cache search --names-only miopenkernels | awk '{print $1}' | grep -F -v . || true)
+    if [[ "x${MIOPENKERNELS}" = x ]]; then
+      echo "miopenkernels package not available"
     else
-        echo "miopenkernels package not available"
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
     fi
 
   # Cleanup
