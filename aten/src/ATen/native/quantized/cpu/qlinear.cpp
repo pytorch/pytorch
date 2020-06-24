@@ -4,7 +4,7 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
@@ -341,7 +341,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       packB->getPackedWeights(),
       (uint8_t*)output.data_ptr<c10::quint8>(),
       rows_w /* output_stride */,
-      caffe2::mobile_pthreadpool() /* threadpool */);
+      // TODO (Ashkan): Disabling temporarily.
+      // Throws a floating point exception with OSS pthreadpool.
+      nullptr);
 
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,
