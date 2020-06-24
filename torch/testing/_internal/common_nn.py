@@ -18,10 +18,10 @@ from torch.nn.functional import _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
     TEST_WITH_ROCM, _assertGradAndGradgradChecks
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import expectedAlertNondeterministic
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 from torch.autograd import Variable
 import torch.backends.cudnn
-
 
 # tarfile module tries to obtain a file object name in python 3.3
 if sys.version_info[:2] == (3, 3):
@@ -2219,6 +2219,17 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='mean',
+    ),
+    dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3),
+        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+        jacobian_input=False,
+        check_gradgrad=False,
+        desc='mean_alert_nondeterministic',
+        test_cpu=False,
+        decorator=expectedAlertNondeterministic('_embedding_bag_dense_backward_cuda', fn_has_device_arg=False)
     ),
     dict(
         module_name='EmbeddingBag',
@@ -4660,6 +4671,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         self.check_inplace = kwargs.get('check_inplace', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.skip_double = kwargs.get('skip_double', False)
+        self.test_cpu = kwargs.get('test_cpu', True)
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
