@@ -141,9 +141,9 @@ class TestAutograd(TestCase):
 
         x, y = self._function_test(MyFunction)
         self.assertEqual(graph_desc(x.grad.grad_fn),
-                         'CloneBackward(Error(AccumulateGrad(), None, AccumulateGrad()))')
+                         'CopyBackwards(None, Error(AccumulateGrad(), None, AccumulateGrad()))')
         self.assertEqual(graph_desc(y.grad.grad_fn),
-                         'CloneBackward(Error(AccumulateGrad(), None, AccumulateGrad()))')
+                         'CopyBackwards(None, Error(AccumulateGrad(), None, AccumulateGrad()))')
 
     def test_function_returns_input(self):
         class MyFunction(Function):
@@ -236,30 +236,36 @@ class TestAutograd(TestCase):
         self.assertEqual(x_grad, x_grad_clone)
 
     def test_accumulate_grad_tensor_reference(self):
-        def _test_grad_tensor(params_grad_tensor, backward_grad_tensor, should_preserve_reference):
+        def _test_grad_tensor(params_grad_tensor, backward_grad_tensor, should_preserve_reference, create_graph):
             params = torch.tensor([1.5, 1.5]).requires_grad_()
             params.grad = params_grad_tensor
             grad_saved = params.grad
-            params.backward(backward_grad_tensor)
+            params.backward(backward_grad_tensor, create_graph=create_graph)
             self.assertEqual(id(grad_saved) == id(params.grad), should_preserve_reference)
 
-        # Accumulate dense gradient to sparse gradient will change the `params.grad` reference
-        _test_grad_tensor(
-            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
-            torch.tensor([1.5, 1.5]),
-            False)
+        for create_graph in (False, True):
+            # Accumulate dense gradient to sparse gradient will change the `params.grad` reference
+            _test_grad_tensor(
+                torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+                torch.tensor([1.5, 1.5]),
+                False,  # never accumulates in-place
+                create_graph)
 
-        # Accumulate dense gradient to dense gradient will preserve the `params.grad` reference
-        _test_grad_tensor(
-            torch.tensor([1.5, 1.5]),
-            torch.tensor([1.5, 1.5]),
-            True)
+            # Accumulate dense gradient to dense gradient will preserve the `params.grad` reference,
+            # but only if create_graph=False.
+            _test_grad_tensor(
+                torch.tensor([1.5, 1.5]),
+                torch.tensor([1.5, 1.5]),
+                not create_graph,
+                create_graph)
 
-        # Accumulate sparse gradient to sparse gradient will preserve the `params.grad` reference
-        _test_grad_tensor(
-            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
-            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
-            True)
+            # Accumulate sparse gradient to sparse gradient will preserve the `params.grad` reference,
+            # but only if create_graph=False.
+            _test_grad_tensor(
+                torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+                torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+                not create_graph,
+                create_graph)
 
     @skipIfNoLapack
     def test_slogdet_sign(self):
@@ -6399,6 +6405,38 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
 
+    def test_strided_leaf_grad_layout(self, device):
+        # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.
+        for fmt_a in (torch.contiguous_format, torch.channels_last):
+            for fmt_b in (torch.contiguous_format, torch.channels_last):
+                a = torch.rand((2, 3, 4, 5), device=device).to(memory_format=fmt_a)
+                b = torch.rand((2, 3, 4, 5), device=device).to(memory_format=fmt_b)
+                a.requires_grad_()
+                b.requires_grad_()
+                # checks (1) for broadcasted gradients
+                a.sum().backward()
+                self.assertEqual(a.grad.stride(), a.stride())
+                b.sum().backward()
+                self.assertEqual(b.grad.stride(), b.stride())
+                # checks (1) for non-broadcasted gradients
+                a.grad = None
+                b.grad = None
+                (a * b).sum().backward()
+                self.assertEqual(a.grad.stride(), a.stride())
+                self.assertEqual(b.grad.stride(), b.stride())
+
+        # (2) If leaf isn't dense, checks that grads are rowmajor contiguous.
+        c = torch.empty_strided((2, 2), (4, 2), device=device).copy_(torch.rand((2, 2), device=device))
+        c.requires_grad_()
+        d = torch.rand((2, 2), device=device)
+        # checks (2) for broadcasted gradients
+        c.sum().backward()
+        self.assertEqual(c.grad.stride(), (2, 1))
+        # checks (2) for non-broadcasted gradients
+        c.grad = None
+        (c * d).sum().backward()
+        self.assertEqual(c.grad.stride(), (2, 1))
+
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
@@ -6421,7 +6459,6 @@ class TestMultithreadAutograd(TestCase):
             self.assertEqual(x.grad, x + 3.5)
 
         self._run_py_multithread_fn(train_fn)
-
 
     def test_simple_backward_same_input(self):
         # simple multithreaded backward with only shared inputs (i.e. This is common
@@ -6448,7 +6485,6 @@ class TestMultithreadAutograd(TestCase):
         # since we use functional grad() api, gradients will not
         # be accumulate to the same place and should be the same
         self._run_py_multithread_fn(train_fn_grad, (x,))
-
 
     def test_python_thread_in_middle(self):
         # User might write a network that starts on one CPU thread, then runs its second half
@@ -6488,7 +6524,6 @@ class TestMultithreadAutograd(TestCase):
         self._run_py_multithread_fn(train_fn_retain_graph, (y_retain,), num_threads=5)
         # result should equal to num_thread * gradients
         self.assertEqual(x_retain.grad, 5 * (4 * x_retain ** 3 + 6 * (x_retain ** 2) + 4 * x_retain + 1))
-
 
     def test_fork_join_in_middle(self):
         # multiple backward with jit threads (fork/join primitive)
@@ -6534,7 +6569,6 @@ class TestMultithreadAutograd(TestCase):
         grad, grad1, grad2 = train_fn_fork_join_calls_retain(torch.randn(5, 5, requires_grad=True))
         self.assertEqual(grad, grad1)
         self.assertEqual(grad, grad2)
-
 
 
 for test in method_tests():

@@ -197,6 +197,27 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_model_test_with_external_data(model, x, rtol=1e-3, atol=1e-5,
                                                ort_optim_on=False)
 
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    def test_attribute_with_external_data(self):
+        class LargeModel(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.ones(2, 1024)
+
+        x = torch.randn(2, 1)
+        self.run_model_test_with_external_data(LargeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    @unittest.skip("Enable this once large model with subgraph is supported in ORT")
+    def test_subgraph_with_external_data(self):
+        class LargeModel(torch.nn.Module):
+            def forward(self, x):
+                for i in range(x.size(0)):
+                    x = x + torch.ones(2, 1024)
+                return x
+
+        x = torch.randn(2, 1)
+        self.run_model_test_with_external_data(torch.jit.script(LargeModel()), x)
+
     # Export Torchvision models
 
     def test_alexnet(self):

@@ -645,4 +645,47 @@ X:
         "element-wise")
     .InheritOnnxSchema();
 
+struct SwishEmulatorFunctor {
+  bool operator()(
+      const int N,
+      const float* X,
+      float* Y,
+      CPUContext* /* unused */) const {
+    // TODO: replace with the linear interpolation function
+    // and re-enable the test
+    EigenVectorArrayMap<float>(Y, N) = ConstEigenVectorArrayMap<float>(X, N) /
+        (1.0 + (-ConstEigenVectorArrayMap<float>(X, N)).exp());
+
+    fbgemm::RoundToFloat16(Y, Y, N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(
+    SwishFakeFp16NNPI,
+    UnaryElementwiseOp<TensorTypes<float>, CPUContext, SwishEmulatorFunctor>);
+
+// Input: X, output: Y
+OPERATOR_SCHEMA(SwishFakeFp16NNPI)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShape()
+    .SetDoc(R"DOC(
+Apply the Swish function element-wise to the input tensor.
+
+$$Swish(x) = \frac{x}{1+\exp(-x)}$$
+
+The input and output of this operator are converted to fp16 precision.
+
+<details>
+</details>
+
+
+)DOC")
+    .Input(0, "X", "*(type: Tensor`<float>`)* Input tensor.")
+    .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
+    .InheritOnnxSchema();
+
 } // namespace caffe2
