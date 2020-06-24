@@ -16,6 +16,7 @@ namespace c10d {
 
 constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
 constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
+constexpr bool kDefaultFindUnusedParameters = false;
 
 class Reducer {
  public:
