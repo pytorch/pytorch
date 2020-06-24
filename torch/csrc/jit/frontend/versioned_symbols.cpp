@@ -79,7 +79,7 @@ static std::unordered_map<Symbol, SymbolRange> symbol_range_map({
 static std::unordered_map<NodeKind, uint64_t> kind_min_version_map({
     {aten::div, 4},
     {aten::div_, 4},
-    {aten::full, 5},
+    {aten::full, 5}, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 });
 
 Symbol get_symbol_for_version(const Symbol name, const uint64_t version) {
