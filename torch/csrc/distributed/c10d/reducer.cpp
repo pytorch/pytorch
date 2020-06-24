@@ -3,6 +3,7 @@
 #include <functional>
 
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
@@ -483,8 +484,17 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     }
     local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
 
+    // The autograd engine uses the default stream when running callbacks, so we
+    // pass in the current CUDA stream in case it is not the default.
+    c10::DeviceType deviceType = replica.contents.device().type();
+    const c10::impl::VirtualGuardImpl guard =
+        c10::impl::VirtualGuardImpl{deviceType};
+    const c10::Stream currentStream =
+        guard.getStream(replica.contents.device());
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::unique_lock<std::mutex> lock(this->mutex_);
+      // Run callback with the current stream
+      c10::OptionalStreamGuard currentStreamGuard{currentStream};
       this->finalize_backward();
       // Rebuild bucket if this is the first time to rebuild
       if (!rebuilt_params_.empty()) {
