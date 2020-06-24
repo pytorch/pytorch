@@ -636,9 +636,10 @@ def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 class expectedAlertNondeterministic(object):
-    def __init__(self, device_type, caller_name):
+    def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):
         self.device_type = device_type
         self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
+        self.fn_has_device_arg = fn_has_device_arg
 
     def __call__(self, fn):
         @wraps(fn)
@@ -647,7 +648,10 @@ class expectedAlertNondeterministic(object):
                 deterministic_restore = torch.is_deterministic()
                 torch.set_deterministic(True)
                 try:
-                    fn(slf, device, *args, **kwargs)
+                    if self.fn_has_device_arg:
+                        fn(slf, device, *args, **kwargs)
+                    else:
+                        fn(slf, *args, **kwargs)
                 except RuntimeError as e:
                     torch.set_deterministic(deterministic_restore)
                     if self.error_message not in str(e):
@@ -660,8 +664,19 @@ class expectedAlertNondeterministic(object):
                     torch.set_deterministic(deterministic_restore)
                     slf.fail('expected a non-deterministic error, but it was not raised')
 
-            return fn(slf, device, *args, **kwargs)
-        return efail_fn
+            if self.fn_has_device_arg:
+                return fn(slf, device, *args, **kwargs)
+            else:
+                return fn(slf, *args, **kwargs)
+
+        @wraps(fn)
+        def efail_fn_no_device(slf, *args, **kwargs):
+            return efail_fn(slf, None, *args, **kwargs)
+
+        if self.fn_has_device_arg:
+            return efail_fn
+        else:
+            return efail_fn_no_device
 
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
