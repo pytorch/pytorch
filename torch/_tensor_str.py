@@ -81,7 +81,7 @@ class _Formatter(object):
             tensor_view = tensor.reshape(-1)
 
         if not self.floating_dtype:
-           for value in tensor_view:
+            for value in tensor_view:
                 value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
