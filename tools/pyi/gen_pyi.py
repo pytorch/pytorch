@@ -645,6 +645,8 @@ def gen_pyi(declarations_path, out):
     # Generate __all__ directive
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    # Include only the functions that contain hints, to prevent undefined
+    # symbols to be included in the `__all__` directive.
     hinted_function_names = [name for name, hint in unsorted_function_hints.items() if hint]
     all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
     all_directive = pformat(all_symbols, width=100, compact=True).split('\n')
