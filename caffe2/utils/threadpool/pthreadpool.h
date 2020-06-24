@@ -5,16 +5,16 @@
 
 #include "ThreadPoolCommon.h"
 
+
 #include <stddef.h> // for size_t
-#include <stdint.h> // for uint32_t
 
-typedef struct pthreadpool* legacy_pthreadpool_t;
+typedef struct pthreadpool* pthreadpool_t;
 
-typedef void (*legacy_pthreadpool_function_1d_t)(void*, size_t);
-typedef void (*legacy_pthreadpool_function_1d_tiled_t)(void*, size_t, size_t);
-typedef void (*legacy_pthreadpool_function_2d_t)(void*, size_t, size_t);
-typedef void (*legacy_pthreadpool_function_2d_tiled_t)(void*, size_t, size_t, size_t, size_t);
-typedef void (*legacy_pthreadpool_function_3d_tiled_t)(
+typedef void (*pthreadpool_function_1d_t)(void*, size_t);
+typedef void (*pthreadpool_function_1d_tiled_t)(void*, size_t, size_t);
+typedef void (*pthreadpool_function_2d_t)(void*, size_t, size_t);
+typedef void (*pthreadpool_function_2d_tiled_t)(void*, size_t, size_t, size_t, size_t);
+typedef void (*pthreadpool_function_3d_tiled_t)(
     void*,
     size_t,
     size_t,
@@ -22,7 +22,49 @@ typedef void (*legacy_pthreadpool_function_3d_tiled_t)(
     size_t,
     size_t,
     size_t);
-typedef void (*legacy_pthreadpool_function_4d_tiled_t)(
+typedef void (*pthreadpool_function_4d_tiled_t)(
+    void*,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t);
+
+#include <stdint.h> // for uint32_t
+
+typedef void (*pthreadpool_task_1d_t)(void*, size_t);
+typedef void (*pthreadpool_task_1d_tile_1d_t)(void*, size_t, size_t);
+typedef void (*pthreadpool_task_2d_t)(void*, size_t, size_t);
+typedef void (*pthreadpool_task_2d_tile_1d_t)(void*, size_t, size_t, size_t);
+typedef void (*pthreadpool_task_2d_tile_2d_t)(void*, size_t, size_t, size_t, size_t);
+typedef void (*pthreadpool_task_3d_tile_2d_t)(
+    void*,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t);
+typedef void (*pthreadpool_task_4d_tile_2d_t)(
+    void*,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t);
+typedef void (*pthreadpool_task_5d_tile_2d_t)(
+    void*,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t,
+    size_t);
+typedef void (*pthreadpool_task_6d_tile_2d_t)(
     void*,
     size_t,
     size_t,
@@ -48,8 +90,8 @@ extern "C" {
  *    On error the function returns NULL and sets errno accordingly.
  */
 
-// Returns internal threadpool impl.
-legacy_pthreadpool_t legacy_pthreadpool_create(size_t threads_count);
+//Returns internal threadpool impl.
+pthreadpool_t pthreadpool_create(size_t threads_count);
 
 /**
  * Queries the number of threads in a thread pool.
@@ -58,7 +100,7 @@ legacy_pthreadpool_t legacy_pthreadpool_create(size_t threads_count);
  *
  * @returns  The number of threads in the thread pool.
  */
-size_t legacy_pthreadpool_get_threads_count(legacy_pthreadpool_t threadpool);
+size_t pthreadpool_get_threads_count(pthreadpool_t threadpool);
 
 /**
  * Processes items in parallel using threads from a thread pool.
@@ -75,45 +117,38 @@ size_t legacy_pthreadpool_get_threads_count(legacy_pthreadpool_t threadpool);
  * @param[in]  items       The number of items to process. The @a function
  *    will be called once for each item.
  */
-void legacy_pthreadpool_compute_1d(
-    legacy_pthreadpool_t threadpool,
-    legacy_pthreadpool_function_1d_t function,
+void pthreadpool_compute_1d(
+    pthreadpool_t threadpool,
+    pthreadpool_function_1d_t function,
     void* argument,
     size_t range);
 
-void legacy_pthreadpool_parallelize_1d(
-    legacy_pthreadpool_t threadpool,
-    legacy_pthreadpool_function_1d_t function,
-    void* argument,
-    size_t range,
-    uint32_t flags);
-
-void legacy_pthreadpool_compute_1d_tiled(
-    legacy_pthreadpool_t threadpool,
-    legacy_pthreadpool_function_1d_tiled_t function,
+void pthreadpool_compute_1d_tiled(
+    pthreadpool_t threadpool,
+    pthreadpool_function_1d_tiled_t function,
     void* argument,
     size_t range,
     size_t tile);
 
-void legacy_pthreadpool_compute_2d(
-    legacy_pthreadpool_t threadpool,
-    legacy_pthreadpool_function_2d_t function,
+void pthreadpool_compute_2d(
+    pthreadpool_t threadpool,
+    pthreadpool_function_2d_t function,
     void* argument,
     size_t range_i,
     size_t range_j);
 
-void legacy_pthreadpool_compute_2d_tiled(
-    legacy_pthreadpool_t threadpool,
-    legacy_pthreadpool_function_2d_tiled_t function,
+void pthreadpool_compute_2d_tiled(
+    pthreadpool_t threadpool,
+    pthreadpool_function_2d_tiled_t function,
     void* argument,
     size_t range_i,
     size_t range_j,
     size_t tile_i,
     size_t tile_j);
 
-void legacy_pthreadpool_compute_3d_tiled(
-    legacy_pthreadpool_t threadpool,
-    legacy_pthreadpool_function_3d_tiled_t function,
+void pthreadpool_compute_3d_tiled(
+    pthreadpool_t threadpool,
+    pthreadpool_function_3d_tiled_t function,
     void* argument,
     size_t range_i,
     size_t range_j,
@@ -122,9 +157,9 @@ void legacy_pthreadpool_compute_3d_tiled(
     size_t tile_j,
     size_t tile_k);
 
-void legacy_pthreadpool_compute_4d_tiled(
-    legacy_pthreadpool_t threadpool,
-    legacy_pthreadpool_function_4d_tiled_t function,
+void pthreadpool_compute_4d_tiled(
+    pthreadpool_t threadpool,
+    pthreadpool_function_4d_tiled_t function,
     void* argument,
     size_t range_i,
     size_t range_j,
@@ -143,29 +178,129 @@ void legacy_pthreadpool_compute_4d_tiled(
  *
  * @param[in,out]  threadpool  The thread pool to destroy.
  */
-void legacy_pthreadpool_destroy(legacy_pthreadpool_t threadpool);
+void pthreadpool_destroy(pthreadpool_t threadpool);
 
-#ifdef USE_INTERNAL_PTHREADPOOL_IMPL
+// New interface copy/pasted from pthreadpool.
+// We will merge the internal and third-party/pthreadpool eventually.
+// For now copy-paste to get past build issues.
 
-#define pthreadpool_t legacy_pthreadpool_t
-#define pthreadpool_function_1d_t legacy_pthreadpool_function_1d_t
-#define pthreadpool_function_1d_tiled_t legacy_pthreadpool_function_1d_tiled_t
-#define pthreadpool_function_2d_t legacy_pthreadpool_function_2d_t
-#define pthreadpool_function_2d_tiled_t legacy_pthreadpool_function_2d_tiled_t
-#define pthreadpool_function_3d_tiled_t legacy_pthreadpool_function_3d_tiled_t
-#define pthreadpool_function_4d_tiled_t legacy_pthreadpool_function_4d_tiled_t
-#define pthreadpool_create legacy_pthreadpool_create
-#define pthreadpool_destroy legacy_pthreadpool_destroy
-#define pthreadpool_get_threads_count legacy_pthreadpool_get_threads_count
-#define pthreadpool_compute_1d legacy_pthreadpool_compute_1d
-#define pthreadpool_parallelize_1d legacy_pthreadpool_parallelize_1d
-#define pthreadpool_compute_1d_tiled legacy_pthreadpool_compute_1d_tiled
-#define pthreadpool_compute_2d legacy_pthreadpool_compute_2d
-#define pthreadpool_compute_2d_tiled legacy_pthreadpool_compute_2d_tiled
-#define pthreadpool_compute_3d_tiled legacy_pthreadpool_compute_3d_tiled
-#define pthreadpool_compute_4d_tiled legacy_pthreadpool_compute_4d_tiled
+#define PTHREADPOOL_FLAG_DISABLE_DENORMALS 0x00000001
 
-#endif /* USE_INTERNAL_PTHREADPOOL_IMPL */
+// Returns the copied threadpool impl of third-party/pthreadpool
+pthreadpool_t pthreadpool_create_xnnpack(size_t threads_count);
+
+// Copied third-party impl.
+size_t pthreadpool_get_threads_count_xnnpack(pthreadpool_t threadpool);
+
+// Copied third-party impl.
+void pthreadpool_destroy_xnnpack(pthreadpool_t threadpool);
+
+/**
+ * Processes items in parallel using threads from a thread pool.
+ *
+ * When the call returns, all items have been processed and the thread pool is
+ * ready for a new task.
+ *
+ * @note If multiple threads call this function with the same thread pool, the
+ *    calls are serialized.
+ *
+ * @param[in]  threadpool  The thread pool to use for parallelisation.
+ * @param[in]  function    The function to call for each item.
+ * @param[in]  argument    The first argument passed to the @a function.
+ * @param[in]  items       The number of items to process. The @a function
+ *    will be called once for each item.
+ */
+void pthreadpool_parallelize_1d(
+    pthreadpool_t threadpool,
+    pthreadpool_task_1d_t function,
+    void* argument,
+    size_t range,
+    uint32_t flags);
+
+void pthreadpool_parallelize_1d_tile_1d(
+    pthreadpool_t threadpool,
+    pthreadpool_task_1d_tile_1d_t function,
+    void* argument,
+    size_t range,
+    size_t tile,
+    uint32_t flags);
+
+void pthreadpool_parallelize_2d(
+    pthreadpool_t threadpool,
+    pthreadpool_task_2d_t function,
+    void* argument,
+    size_t range_i,
+    size_t range_j,
+    uint32_t flags);
+
+void pthreadpool_parallelize_2d_tile_1d(
+    pthreadpool_t threadpool,
+    pthreadpool_task_2d_tile_1d_t function,
+    void* argument,
+    size_t range_i,
+    size_t range_j,
+    size_t tile_j,
+    uint32_t flags);
+
+void pthreadpool_parallelize_2d_tile_2d(
+    pthreadpool_t threadpool,
+    pthreadpool_task_2d_tile_2d_t function,
+    void* argument,
+    size_t range_i,
+    size_t range_j,
+    size_t tile_i,
+    size_t tile_j,
+    uint32_t flags);
+
+void pthreadpool_parallelize_3d_tile_2d(
+    pthreadpool_t threadpool,
+    pthreadpool_task_3d_tile_2d_t function,
+    void* argument,
+    size_t range_i,
+    size_t range_j,
+    size_t range_k,
+    size_t tile_j,
+    size_t tile_k,
+    uint32_t flags);
+
+void pthreadpool_parallelize_4d_tile_2d(
+    pthreadpool_t threadpool,
+    pthreadpool_task_4d_tile_2d_t function,
+    void* argument,
+    size_t range_i,
+    size_t range_j,
+    size_t range_k,
+    size_t range_l,
+    size_t tile_k,
+    size_t tile_l,
+    uint32_t flags);
+
+void pthreadpool_parallelize_5d_tile_2d(
+    pthreadpool_t threadpool,
+    pthreadpool_task_5d_tile_2d_t function,
+    void* argument,
+    size_t range_i,
+    size_t range_j,
+    size_t range_k,
+    size_t range_l,
+    size_t range_m,
+    size_t tile_l,
+    size_t tile_m,
+    uint32_t flags);
+
+void pthreadpool_parallelize_6d_tile_2d(
+    pthreadpool_t threadpool,
+    pthreadpool_task_6d_tile_2d_t function,
+    void* argument,
+    size_t range_i,
+    size_t range_j,
+    size_t range_k,
+    size_t range_l,
+    size_t range_m,
+    size_t range_n,
+    size_t tile_m,
+    size_t tile_n,
+    uint32_t flags);
 
 #ifdef __cplusplus
 } /* extern "C" */
