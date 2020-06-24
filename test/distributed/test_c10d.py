@@ -2989,13 +2989,14 @@ class ReducerTest(TestCase):
         buckets = [list(indices) for _, indices in group_by_dtype]
         dist.Reducer(parameters, buckets, self.process_group)
 
-    def _create_reducer_for_models(self, models):
+    def _create_reducer_for_models(self, models, find_unused_parameters=False):
         parameters = [list(model.parameters()) for model in models]
         group_by_dtype = groupby(
             range(len(parameters[0])),
             key=lambda i: parameters[0][i].dtype)
         buckets = [list(indices) for _, indices in group_by_dtype]
-        return dist.Reducer(parameters, buckets, self.process_group)
+        return dist.Reducer(parameters, buckets, self.process_group,
+                            find_unused_parameters=find_unused_parameters)
 
     def test_forward_backward_single_replica(self):
         batch_size = 10
@@ -3030,7 +3031,7 @@ class ReducerTest(TestCase):
     def test_forward_backward_unused_parameters(self):
         batch_size = 10
         model = self._create_mixed_precision_model()
-        reducer = self._create_reducer_for_models([model])
+        reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
         loss = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.double)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
