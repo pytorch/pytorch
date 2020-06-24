@@ -88,6 +88,8 @@ class ProcessGroup {
     virtual void abort();
 
    protected:
+    // Completes the work object and optionally sets the exception in a
+    // thread-safe manner. Notifies all waiting condition variables as well.
     void finish(std::exception_ptr exception = nullptr);
 
     mutable std::mutex mutex_;
