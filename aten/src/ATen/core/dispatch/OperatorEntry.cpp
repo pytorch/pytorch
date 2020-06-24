@@ -106,6 +106,10 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
     TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " for dispatch key ", toString(dispatch_key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
   }
 
+  if (manuallyBoxedKernel_.has_value()) {
+    kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_);
+  }
+
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
   std::list<AnnotatedKernel>::iterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
