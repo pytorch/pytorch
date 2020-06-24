@@ -6,7 +6,8 @@
 #ifndef C10_MOBILE
 #include <c10/core/thread_pool.h>
 #else
-#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <caffe2/utils/threadpool/ThreadPool.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #endif // C10_MOBILE
 
 #include <atomic>
@@ -87,15 +88,15 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
   // Run the first task on the current thread directly.
   fn(0, 0);
 #else
-  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
-  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
-
-  pool->run(
-    // PThreadPool::run() is blocking.  A std::function [const] reference to
-    // this lambda cannot go out of scope before PThreadPool::run() returns.
-    [&fn](const size_t task_id) {
-      fn(0 /* unused */, task_id);
-    }, range);
+  caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
+  if (pool) {
+    // caffe2::ThreadPool can utilize the current thread.
+    pool->run(fn, range);
+  } else {
+    for (size_t i = 0; i < range; ++i) {
+      fn(0, i);
+    }
+  }
 #endif // C10_MOBILE
 }
 
@@ -183,7 +184,7 @@ void init_num_threads() {
 #endif
 
 #ifdef C10_MOBILE
-  caffe2::pthreadpool();
+  caffe2::mobile_threadpool();
 #endif
 }
 
@@ -207,9 +208,7 @@ void set_num_threads(int nthreads) {
     }
   }
 #else
-  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
-  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
-  pool->set_thread_count(nthreads);
+  TORCH_CHECK(false, "set_num_threads is not supported for mobile.");
 #endif // C10_MOBILE
 }
 
@@ -227,9 +226,9 @@ int get_num_threads() {
     return _get_intraop_pool().size() + 1;
   }
 #else
-  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
-  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!")
-  return in_parallel_region() ? 1 /* current thread */ : pool->get_thread_count();
+  caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
+  // caffe2::ThreadPool::getNumThreads() counts the current thread.
+  return !pool || in_parallel_region() ? 1 /* current thread */ : pool->getNumThreads();
 #endif // C10_MOBILE
 }
 
@@ -258,8 +257,8 @@ void intraop_launch(std::function<void()> func) {
     func();
   }
 #else
-  // TODO: caffe2::PThreadPool only provides a data-parallel API.
-  // Task parallelism is not currently supported.
+  // TODO: caffe2::ThreadPool doesn't support submitting tasks separately and
+  // running in parallel. Should fix it when this API becomes popular.
   func();
 #endif // C10_MOBILE
 }
@@ -281,8 +280,8 @@ std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
   }
   return future;
 #else
-  // TODO: caffe2::PThreadPool only provides a data-parallel API.
-  // Task parallelism is not currently supported.
+  // TODO: caffe2::ThreadPool doesn't support submitting tasks separately and
+  // running in parallel. Should fix it when this API becomes popular.
   auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
   func();
   future->markCompleted();
