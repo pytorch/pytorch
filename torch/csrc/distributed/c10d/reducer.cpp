@@ -135,6 +135,10 @@ Reducer::Reducer(
     const auto variable_count = replicas_[0].size();
     local_used_maps_.resize(replica_count);
 
+    if (find_unused_parameters_) {
+      local_used_maps_dev_.resize(replica_count);
+    }
+
     for (size_t i = 0; i < replica_count; i++) {
       at::TensorOptions options;
       options = options.dtype(at::kInt);
@@ -149,7 +153,6 @@ Reducer::Reducer(
       }
 
       if (find_unused_parameters_) {
-        local_used_maps_dev_.resize(replica_count);
         // This tensor needs to be on the same device as replica because backend
         // such as NCCL may not support CPU tensors, and hence it might not work
         // if we always put it on CPU.
