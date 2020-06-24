@@ -404,6 +404,7 @@ def _model_to_graph(model, args, verbose=False,
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
+    params_dict = torch._C._jit_pass_onnx_initializer_peephole(graph, params_dict)
     if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)

@@ -30,6 +30,7 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
+#include <torch/csrc/jit/passes/onnx/initializer_peephole.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
@@ -141,6 +142,16 @@ void initJITBindings(PyObject* module) {
              bool fixed_batch_size) {
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
           })
+      .def(
+          "_jit_pass_onnx_initializer_peephole",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict) {
+            InitializerPeepholeONNX(
+                graph->block(),
+                paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_cast_all_constant_to_floating",
           CastAllConstantToFloating)

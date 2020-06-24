@@ -73,7 +73,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         torch.onnx._export(model, input_copy, f,
                            opset_version=self.opset_version,
-                           example_outputs=output,
+                           example_outputs=output, verbose=True,
                            do_constant_folding=do_constant_folding,
                            keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                            dynamic_axes=dynamic_axes,
@@ -298,6 +298,21 @@ class TestONNXRuntime(unittest.TestCase):
         model = torchvision.models.video.r2plus1d_18(pretrained=True)
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_fuse_conv_bn(self):
+        class Fuse(torch.nn.Module):
+            def __init__(self):
+                super(Fuse, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=True)
+                self.bn = torch.nn.BatchNorm2d(2)
+
+            def forward(self, x):
+                out = self.conv(x)
+                return self.bn(out)
+    
+        model = Fuse()
+        x = torch.randn(2, 3, 2, 2, requires_grad=True)
+        self.run_test(model, (x,))
 
     def test_reshape_constant_fold(self):
         class Reshape(torch.nn.Module):
