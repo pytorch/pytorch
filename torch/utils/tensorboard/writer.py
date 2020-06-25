@@ -301,11 +301,7 @@ class SummaryWriter(object):
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
         exp, ssi, sei = hparams(hparam_dict, metric_dict)
 
-        logdir = os.path.join(
-            self._get_file_writer().get_logdir(),
-            str(time.time())
-        )
-        with SummaryWriter(log_dir=logdir) as w_hp:
+        with SummaryWriter(log_dir=self._get_file_writer().get_logdir()) as w_hp:
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
             w_hp.file_writer.add_summary(sei)
