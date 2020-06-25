@@ -805,7 +805,7 @@ struct CodeImpl {
 
   void emitCheckTensor(Node* node) {
     emitLoadInputs(node->inputs());
-    insertInstruction(CHECK_TENSOR, emitType(node->input()->type()), emitDebugInfo(getHeader(node)));
+    insertInstruction(CHECK_TENSOR, emitType(node->input()->type()), emitDebugInfo(getHeader(node->input(0)->node())));
   }
 
   void emitIsinstance(Node* node) {
