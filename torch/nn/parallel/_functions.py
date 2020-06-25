@@ -78,7 +78,7 @@ class Scatter(Function):
         ctx.dim = dim
         ctx.input_device = input.device
         streams = None
-        if ctx.input_device == -1:
+        if ctx.input_device.type == 'cpu':
             # Perform CPU to GPU copies in a background stream
             streams = [_get_stream(device) for device in target_gpus]
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
