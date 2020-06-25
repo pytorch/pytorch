@@ -308,9 +308,13 @@
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: add
 
 - func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU, CUDA: add_
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
@@ -991,9 +995,13 @@
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: div
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU, CUDA: div_
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
   use_c10_dispatcher: full
@@ -1903,9 +1911,13 @@
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: mul_out
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU, CUDA: mul_
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
   use_c10_dispatcher: full
@@ -3088,18 +3100,26 @@
 - func: sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: sub
 
 - func: sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU, CUDA: sub_
 
 - func: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function
+  dispatch:
+    CPU, CUDA: rsub
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function
+  dispatch:
+    CPU, CUDA: rsub
 
 # Functionally the same as addmm, but we give it a different derivative formula
 # that doesn't propagate gradients to non-present entries on sparse.
@@ -3884,6 +3904,7 @@
   dispatch:
     CPU, CUDA: bitwise_and_out
 
+# TODO: Add lowering
 - func: bitwise_and.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
@@ -3927,6 +3948,7 @@
   dispatch:
     CPU, CUDA: bitwise_or_out
 
+# TODO: Add lowering
 - func: bitwise_or.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
@@ -3960,6 +3982,7 @@
   dispatch:
     CPU, CUDA: bitwise_xor_out
 
+# TODO: Add lowering
 - func: bitwise_xor.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
@@ -4706,10 +4729,14 @@
   variants: method, function
 
 - func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: atan2_out
 
 - func: atan2(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  dispatch:
+    CPU, CUDA: atan2
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
