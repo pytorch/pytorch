@@ -10,6 +10,7 @@
 namespace c10 {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
+  static auto const PT_PRINT = std::getenv("PT_PRINT");
   if (auto value = t.cast<TensorType>()) {
     if  (value->scalarType().has_value()) {
       out << toString(*value->scalarType());
@@ -28,23 +29,31 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         if (i > 0) {
           out << ", ";
         }
-        if (auto s = value->sizes()[i]) {
-          out << *s;
-        } else {
-          out << "*";
+        if (PT_PRINT) {
+          out << (*value->symbolic_sizes().sizes())[i];
         }
-        if (has_valid_strides_info) {
-          out << ":" << *value->strides()[i];
+        else {
+          if (auto s = value->sizes()[i]) {
+            out << *s;
+          } else {
+            out << "*";
+          }
+          if (has_valid_strides_info) {
+            out << ":" << *value->strides()[i];
+          }
         }
+
       }
       out << ")";
+    } else {
+      out << "(...)";
     }
 
-    static auto const PT_PRINT = std::getenv("PT_PRINT");
+    
     if (PT_PRINT) {
       out << (value->requiresGrad().has_value() ? *value->requiresGrad() ? "[R]" : "[!R]" : "[R?]");
       out << (value->undefined().has_value() ? *value->undefined() ? "[U]" : "[!U]" : "[U?]");
-      out << (value->device() ? value->device()->str() : "[n/a]");
+      out << (value->device() ? value->device()->str() : "[dev?]");
     }
 
     if (value->undefined() && *value->undefined()) {
@@ -630,7 +639,7 @@ std::ostream& operator<<(
 }
 
 std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
-  os << "SS(" << s.value_ << ')';
+  os <<  s.value_;
   return os;
 }
 

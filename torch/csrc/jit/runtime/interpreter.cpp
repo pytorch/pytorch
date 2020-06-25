@@ -415,6 +415,7 @@ struct CodeImpl {
   std::vector<Function*> function_table_;
   std::vector<std::unique_ptr<GraphFunction>> forked_functions_;
   std::vector<TypePtr> type_table_;
+  std::vector<std::string> debug_info_table_;
   std::vector<std::function<void(std::vector<IValue>&)>>
       profile_function_table_;
 
@@ -691,6 +692,12 @@ struct CodeImpl {
     return r;
   }
 
+  size_t emitDebugInfo(std::string s) {
+    size_t r = debug_info_table_.size();
+    debug_info_table_.emplace_back(std::move(s));
+    return r;
+  }
+
   size_t emitGuard(Node* node) {
     // unoptimized graph is at index 0
     // guarded input is at index 1
@@ -798,7 +805,7 @@ struct CodeImpl {
 
   void emitCheckTensor(Node* node) {
     emitLoadInputs(node->inputs());
-    insertInstruction(CHECK_TENSOR, emitType(node->input()->type()));
+    insertInstruction(CHECK_TENSOR, emitType(node->input()->type()), emitDebugInfo(getHeader(node)));
   }
 
   void emitIsinstance(Node* node) {
@@ -1418,7 +1425,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case CHECK_TENSOR: {
             auto type = af.types[inst.X]->expect<TensorType>();
-            checkTensor(stack, type);
+            checkTensor(stack, type, frames.back().function->debug_info_table_[inst.N]);
             ++af.pc;
             break;
           }

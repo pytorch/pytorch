@@ -26,7 +26,7 @@ void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs);
 
 void createObject(Stack& stack, at::ClassTypePtr type);
 
-void checkTensor(Stack& stack, at::TensorTypePtr type);
+void checkTensor(Stack& stack, at::TensorTypePtr type, const std::string& debug_info);
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types);
 
