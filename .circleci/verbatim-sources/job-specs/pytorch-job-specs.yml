@@ -166,7 +166,7 @@ jobs:
     parameters:
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
       build_environment:
         type: string
         default: ""
@@ -237,7 +237,7 @@ jobs:
     parameters:
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
       build_environment:
         type: string
         default: ""
