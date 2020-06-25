@@ -164,7 +164,7 @@ Reducer::Reducer(
 
 // Note [Skip allreducing local_used_maps_dev]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
-// When find_unused_parameters_ is set to false, there is no need to allreduce
+// If find_unused_parameters_ is set to false, there is no need to allreduce
 // local_used_maps_dev_, because all parameters will be reduced anyway.
 // Therefore, we can avoid allocating memory for local_used_maps and
 // local_used_maps_dev_ if find_unused_parameters_ is false.
@@ -385,26 +385,27 @@ void Reducer::autograd_hook(VariableIndex index) {
   }
 
   // Rebuild bucket only if 1) it is the first time to rebuild bucket 2)
-  // unused_parameters_ is empty, currently it does not support when there are
-  // unused parameters 3) this backward pass needs to run allreduce. Here, we
+  // find_unused_parameters_ is false, currently it does not support when there
+  // are unused parameters 3) this backward pass needs to run allreduce. Here, we
   // just dump tensors and their parameter indices into rebuilt_params_ and
   // rebuilt_param_indices_ based on gradient arriving order, and then at the
   // end of finalize_backward(), buckets will be rebuilt based on
   // rebuilt_params_ and rebuilt_param_indices_, and then will be broadcasted
   // and intialized. Also we only need to dump tensors and parameter indcies of
   // one replica.
-  if (!has_rebuilt_bucket_ && unused_parameters_.empty() &&
+  if (!has_rebuilt_bucket_ && !find_unused_parameters_ &&
       index.replica_index == 0) {
     rebuilt_params_.push_back(
         replicas_[index.replica_index][index.variable_index]);
     rebuilt_param_indices_.push_back(index.variable_index);
   }
 
-  // If there are model parameters that went unused when computing the model
-  // output, they won't be part of the autograd graph, and won't receive
-  // gradients. These parameters are discovered in the `prepare_for_backward`
-  // function and their indexes stored in the `unused_parameters_` vector.
-  if (!has_marked_unused_parameters_ && !unused_parameters_.empty()) {
+  // If `find_unused_parameters_` is true there may be model parameters that
+  // went unused when computing the model output, they won't be part of the
+  // autograd graph, and won't receive gradients. These parameters are discovered
+  // in the `prepare_for_backward` function and their indexes stored in
+  // the `unused_parameters_` vector.
+  if (!has_marked_unused_parameters_ && find_unused_parameters_) {
     has_marked_unused_parameters_ = true;
     for (const auto& unused_index : unused_parameters_) {
       mark_variable_ready(unused_index);
@@ -767,10 +768,10 @@ void Reducer::prepare_for_backward(
   has_marked_unused_parameters_ = false;
   unused_parameters_.clear();
 
-  // If no outputs are specified, we assume that autograd hooks for ALL
+  // If find_unused_parameters_ is false, we assume that autograd hooks for ALL
   // variables will be called, and we don't have to search the autograd graph
   // for presence of these hooks.
-  if (outputs.empty()) {
+  if (!find_unused_parameters_) {
     return;
   }
 
