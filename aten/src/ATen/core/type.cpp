@@ -46,7 +46,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
       out << ")";
     } else {
-      out << "(...)";
+      if (PT_PRINT) {
+        out << "(...)";
+      }
     }
 
     
