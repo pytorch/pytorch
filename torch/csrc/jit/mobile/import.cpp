@@ -2,17 +2,17 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
-#include <torch/csrc/jit/mobile/observer.h>
 
+#include <exception>
 #include <fstream>
 #include <string>
 #include <vector>
-#include <exception>
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
@@ -313,9 +313,10 @@ mobile::Module _load_for_mobile(
       observer->onExitLoadModel(name);
     }
     return result;
-  } catch (const std::exception & ex) {
+  } catch (const std::exception& ex) {
     if (observer) {
-      observer->onFailLoadModel( "Error occured during loading model: " + (std::string)ex.what());
+      observer->onFailLoadModel(
+          "Error occured during loading model: " + (std::string)ex.what());
     }
     TORCH_CHECK(false, ex.what());
   } catch (...) {
