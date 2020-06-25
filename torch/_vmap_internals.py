@@ -9,12 +9,12 @@ REQUIRE_SAME_MAP_SIZE = (
 )
 
 ELEMENT_MUST_BE_TENSOR = (
-    'vmap({fn}, ...): `{fn}` must return a Tensor or a flat sequence of tensors, got '
+    'vmap({fn}, ...): `{fn}` must only return Tensors, got '
     'type {out} for return {idx}.'
 )
 
-MUST_BE_TENSOR_LIST = (
-    'vmap({fn}, ...): `{fn}` must return a Tensor or a flat sequence of tensors, got '
+MUST_RETURN_TENSORS = (
+    'vmap({fn}, ...): `{fn}` must only return Tensors, got '
     'type {out} as the return.'
 )
 
@@ -47,12 +47,15 @@ def _unwrap_batched(batched_outputs, vmap_level, batch_size):
     return tuple(torch._remove_batch_dim(out, vmap_level, batch_size, 0)  # type: ignore
                  for out in batched_outputs)
 
-# Checks that `outputs` is either a Tensor or a sequence of Tensors.
+# Checks that `fn` returned one or more Tensors and nothing else.
+# NB: A python function that return multiple arguments returns a single tuple,
+# so we are effectively checking that `outputs` is a single Tensor or a tuple of
+# Tensors.
 def _validate_outputs(outputs, fn_name):
     if isinstance(outputs, Tensor):
         return
-    if not hasattr(outputs, '__iter__'):
-        raise ValueError(MUST_BE_TENSOR_LIST.format(fn=fn_name, out=type(outputs)))
+    if not isinstance(outputs, tuple):
+        raise ValueError(MUST_RETURN_TENSORS.format(fn=fn_name, out=type(outputs)))
     for idx, output in enumerate(outputs):
         if isinstance(output, Tensor):
             continue
