@@ -344,6 +344,8 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .run(model.graph)
         FileCheck().check_not("aten::linear") \
                    .run(model.graph)
+        # make sure it runs
+        model(x)
 
     def test_insert_observers(self):
         class M(torch.nn.Module):
