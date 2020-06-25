@@ -24,7 +24,7 @@
 #
 from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
-from .gen_autograd import VIEW_FUNCTIONS
+from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE
 from .gen_autograd_functions import uses_single_grad
 
 # These functions we don't want to record for tracing, because we always want
@@ -190,11 +190,11 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${unqual_operator_name_with_overload}", ${class_type}::${type_wrapper_name});
+m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_wrapper_name});
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}", ${class_type}::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}", TORCH_FN(${class_type}::${type_wrapper_name}));
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -249,9 +249,9 @@ OPTIONAL_TO_VAL = CodeTemplate("""\
 auto ${val} = ${arg}.value_or(${default});
 """)
 
-SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED = CodeTemplate("""\
+SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate("""\
 c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
-if (!self.unsafeGetTensorImpl()->support_as_strided()) {
+if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
   ${replay_view_func}
 }
 """)
@@ -344,8 +344,9 @@ ${return_type} ${api_name}(${formals}); // {"schema": "${schema_string}", "compo
 
 # ProfiledType templates
 PROFILE_DISPATCH_UNBOXED = CodeTemplate("""\
-static auto op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"});
-TORCH_INTERNAL_ASSERT(op);
+static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${return_type} (${arg_types})>();
 RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
 return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_dispatch_args});
 """)
@@ -354,7 +355,9 @@ return c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${profiled_
 # TraceType templates
 # TODO: change `redispatch` to `NoTracerDispatchMode` + regular `call`.
 TRACE_DISPATCH_UNBOXED = CodeTemplate("""\
-static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
+static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+    .typed<${return_type} (${arg_types})>();
 ${assign_return_values}c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
 """)
 
@@ -691,6 +694,7 @@ def emit_profiled_body(declaration):
     for a in arguments:
         processed_args.append('{}'.format(a['name']))
 
+    arg_types = ', '.join([a['type'] for a in declaration['arguments']])
     ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
 
     def check_record_function_input_type(simple_type):
@@ -701,12 +705,14 @@ def emit_profiled_body(declaration):
             arg['name'] for arg in declaration['arguments']
             if check_record_function_input_type(arg['simple_type'])])
 
-    profiled_dispatch_args = ['*op', 'c10::DispatchKey::Profiler'] + declaration['args']
+    profiled_dispatch_args = ['op', 'c10::DispatchKey::Profiler'] + declaration['args']
 
     call = PROFILE_DISPATCH_UNBOXED.substitute(
         declaration,
         name=name,
         input_names=record_function_input_names(),
+        return_type=declaration['return_type'],
+        arg_types=arg_types,
         ret_and_arg_types=ret_and_arg_types,
         profiled_dispatch_args=profiled_dispatch_args,
     )
@@ -729,11 +735,14 @@ def emit_trace_body(declaration):
     trace_body.append(pre_record_trace)
     trace_body.append(declare_returned_variables)
 
+    arg_types = ', '.join([a['type'] for a in declaration['arguments']])
     ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
+
     trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['args']
     assign_return_values = '{} = '.format(tie_return_values) if not modifies_arguments and not returns_void else ''
     call = TRACE_DISPATCH_UNBOXED.substitute(
         declaration,
+        arg_types=arg_types,
         ret_and_arg_types=ret_and_arg_types,
         trace_dispatch_args=trace_dispatch_args,
         assign_return_values=assign_return_values,
@@ -999,7 +1008,11 @@ def emit_body(declaration):
         replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
             input_base=input_base,
             replay_view_call=replay_view_call)
-        return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED.substitute(
+
+        is_view_with_metadata_change = 'true' if name in VIEW_FUNCTIONS_WITH_METADATA_CHANGE else 'false'
+
+        return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE.substitute(
+            is_view_with_metadata_change=is_view_with_metadata_change,
             replay_view_func=replay_view_func)
 
     def wrap_output(return_values, var):
@@ -1216,8 +1229,7 @@ def dispatch_strategy(declaration):
           get dispatched back to VariableType (which will ensure that they
           are differentiable.)
     """
-    if (declaration['abstract'] or declaration['requires_tensor'] or
-            declaration['derivative'] is not None):
+    if declaration['abstract'] or declaration['derivative'] is not None:
         # If the function is abstract (not implemented on at::Type), we must
         # call the implementation on the derived type with unpacked tensors.
 
@@ -1232,6 +1244,7 @@ def dispatch_strategy(declaration):
         # more performant and to ensure factory functions return tensors with _version
         # of 0 (probably not strictly necessary, but nice to have to keeps versions simple
         # to understand.
+
         return 'use_derived'
     else:
         # If the function is concrete (we don't have to override it) and we

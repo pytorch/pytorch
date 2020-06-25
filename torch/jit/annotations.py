@@ -4,16 +4,19 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, RRef, is_rref, Future, is_future
+    is_optional, _qualified_name, Any, Future, is_future
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, RRefType, FutureType
+    DeviceObjType, FutureType
 
 from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
-from typing import Callable
+
+if torch.distributed.rpc.is_available():
+    from .._jit_internal import RRef, is_rref
+    from torch._C import RRefType
 
 
 class Module(object):
@@ -37,12 +40,13 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
-        'RRef': RRef,
         'Future': Future,
     }
 
     def __init__(self, rcb):
         self.rcb = rcb
+        if torch.distributed.rpc.is_available():
+            self.env['RRef'] = RRef
 
     def __getitem__(self, name):
         if name in self.env:
@@ -256,7 +260,7 @@ def try_ann_to_type(ann, loc):
             return OptionalType(try_ann_to_type(ann.__args__[0], loc))
         else:
             return OptionalType(try_ann_to_type(ann.__args__[1], loc))
-    if is_rref(ann):
+    if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
@@ -281,10 +285,7 @@ def try_ann_to_type(ann, loc):
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))
-        # Why Callable?  forward is declared to be a Callable so that
-        # people can define it without mypy complaining.  But we shouldn't
-        # try to recursively compile it!
-        ignored_builtin_classes = (torch.nn.Module, tuple, list, Callable)
+        ignored_builtin_classes = (torch.nn.Module, tuple, list)
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
             torch.jit._recursive_compile_class(ann, loc)
             return ClassType(_qualified_name(ann))

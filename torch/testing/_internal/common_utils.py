@@ -718,7 +718,15 @@ class TestCase(expecttest.TestCase):
     # atol values when comparing tensors. Used by @precisionOverride, for
     # example.
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
-    precision = 0
+    _precision: float = 0
+
+    @property
+    def precision(self) -> float:
+        return self._precision
+
+    @precision.setter
+    def precision(self, prec: float) -> None:
+        self._precision = prec
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
@@ -860,11 +868,13 @@ class TestCase(expecttest.TestCase):
     #   arguments then wrap the function in a lambda or pass a partial function.
     # TODO: support bfloat16 comparisons
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
-    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device, dtype):
+    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device=None, dtype=None):
         assert TEST_NUMPY
         assert dtype is not torch.bfloat16
 
         if isinstance(tensor_like, torch.Tensor):
+            assert device is None
+            assert dtype is None
             a = tensor_like.detach().cpu().numpy()
             t = tensor_like
         else:
@@ -1599,7 +1609,7 @@ def do_test_empty_full(self, dtypes, layout, device):
 
     default_dtype = torch.get_default_dtype()
     check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
-    check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
+    check_value(torch.full(shape, -5.), default_dtype, torch.strided, -1, None, False)
     for dtype in dtypes:
         for rg in {dtype.is_floating_point, False}:
             int64_dtype = get_int64_dtype(dtype)
