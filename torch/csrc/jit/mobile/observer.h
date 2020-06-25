@@ -43,10 +43,10 @@ class MobileModuleObserver {
  public:
   virtual ~MobileModuleObserver() = default;
 
-  virtual void onEnter(
-      const std::string& model_name,
-      const std::string& method_name) {}
-  virtual void onExit() {}
+  virtual void onEnterRunMethod(const std::string&, const std::string&) {}
+  virtual void onExitRunMethod() {}
+  virtual void onCancelRunMethod(const std::string&) {}
+  virtual void onFailRunMethod(const std::string&) {}
 };
 
 class MobileObserverConfig {
