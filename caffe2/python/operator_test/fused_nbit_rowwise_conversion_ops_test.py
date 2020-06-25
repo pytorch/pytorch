@@ -1,15 +1,16 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import math
 import struct
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+from caffe2.python import core, workspace
 from caffe2.python.operator_test.fused_nbit_rowwise_test_helper import (
     _compress_uniform_simplified,
     param_search_greedy,
 )
-from caffe2.python import core, dyndep, workspace
 from hypothesis import assume, given
 
 
@@ -20,7 +21,9 @@ round_to_nearest = np.vectorize(round)
 def bytes_to_half_floats(byte_matrix):
     floats = np.empty([np.shape(byte_matrix)[0], 1], dtype=np.float16)
     for i, byte_values in enumerate(byte_matrix):
-        floats[i], = np.frombuffer(memoryview(byte_values).tobytes(), dtype=np.float16)
+        (floats[i],) = np.frombuffer(
+            memoryview(byte_values).tobytes(), dtype=np.float16
+        )
     return floats
 
 
@@ -58,10 +61,12 @@ def fused_rowwise_nbit_quantize_reference(data, bit):
 
     for i in range(data.shape[0]):
         bias[i] = minimum[i]
-        if scale[i] == 0.0:
+        inverse_scale = 1.0 if scale[i] == 0.0 else 1 / scale[i]
+        if scale[i] == 0.0 or math.isinf(inverse_scale):
             scale[i] = 1.0
+            inverse_scale = 1.0
         quantized_data[i] = np.clip(
-            np.round((data[i, :] - minimum[i]) / scale[i]), 0, qmax
+            np.round((data[i, :] - minimum[i]) * inverse_scale), 0, qmax
         )
 
     # pack
@@ -146,10 +151,15 @@ class TestFusedNBitRowwiseQuantizationConversion(hu.HypothesisTestCase):
             quantized_data[:, interleaved_dim + 2], reference[:, interleaved_dim + 2]
         )
 
-    @given(input_data=hu.tensor(min_dim=2, max_dim=2), bit_rate=st.sampled_from([2, 4]))
-    def test_quantize_and_dequantize_op(self, input_data, bit_rate):
+    @given(
+        batch_size=st.integers(1, 100),
+        block_size=st.integers(1, 100),
+        bit_rate=st.sampled_from([2, 4]),
+    )
+    def test_quantize_and_dequantize_op(self, batch_size, block_size, bit_rate):
         assert 8 % bit_rate == 0
         num_elem_per_byte = 8 // bit_rate
+        input_data = np.random.rand(batch_size, block_size).astype(np.float32)
         assume(input_data.shape[1] % num_elem_per_byte == 0)
         quantize = core.CreateOperator(
             "FloatToFused" + str(bit_rate) + "BitRowwiseQuantized",
@@ -186,7 +196,9 @@ def ErrorThresholdRow(X, bit_rate):
     scale = np.float16((max_elem - bias) / ((1 << bit_rate) - 1))
 
     max_round_error = scale / 2
-    max_clip_error = np.maximum(np.abs(min_elem - bias), np.abs(scale * ((1 << bit_rate) - 1) + bias - max_elem))
+    max_clip_error = np.maximum(
+        np.abs(min_elem - bias), np.abs(scale * ((1 << bit_rate) - 1) + bias - max_elem)
+    )
     thres = np.maximum(max_round_error, max_clip_error) * 1.1
     return thres
 
@@ -235,7 +247,7 @@ class TestNBitFakeFused(hu.HypothesisTestCase):
             assert (
                 np.sum(diff_minmax[i, :] > err_thres[i]) == 0
             ), "error at row {} too high (diff_minmax[i, :] {} diff_minmax[i, :] > err_thres[i] {} err_thres[i] {}".format(
-                i, diff_minmax[i, :], diff_minmax[i, :] > err_thres[i], err_thres[i],
+                i, diff_minmax[i, :], diff_minmax[i, :] > err_thres[i], err_thres[i]
             )
 
             # Check error from greedy quantization is smaller than minmax quantization
