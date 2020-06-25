@@ -34,13 +34,15 @@ class TestProfiler_cuda(TestCase):
             torch.cuda.empty_cache()
             last_rss.append(p.memory_info().rss)
 
+        # with CUDA events leaking the increase in memory was ~7 MB between
+        # profiler invocations above
+        is_increasing = all(
+            [last_rss[idx] > last_rss[idx - 1] for idx in range(1, len(last_rss))])
         max_diff = -1
         for idx in range(1, len(last_rss)):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
-
-        # with CUDA events leaking the increase in memory was ~7 MB,
-        # using much smaller threshold but not zero to reduce flakiness
-        self.assertTrue(max_diff < 100 * 1024)
+        self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
+                        msg='memory usage is increasing, {}'.format(str(last_rss)))
 
 if __name__ == '__main__':
     run_tests()
