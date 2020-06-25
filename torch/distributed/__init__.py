@@ -1,7 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from sys import platform
+import logging
 import torch
-
 
 def is_available():
     """
@@ -15,8 +16,11 @@ def is_available():
     return hasattr(torch._C, "_c10d_init")
 
 
-if not (is_available() and torch._C._c10d_init()):
-    raise RuntimeError("Failed to initialize torch.distributed")
+if platform in ["linux", "darwin"]:
+    if not (is_available() and torch._C._c10d_init()):
+        raise RuntimeError("Failed to initialize torch.distributed")
+elif platform in ["win32", "cygwin"]:
+    logging.warning("Windows Dosen't support torch.distributed")
 
 
 if is_available():
