@@ -2272,6 +2272,10 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
             def forward(self, x):
                 x = self.conv(x)
+                # add_scalar
+                x = x + 3
+                # mul_scalar
+                x = x * 3
                 x = self.maxpool1d(x)
                 x = self.maxpool2d(x)
                 x = self.maxpool3d(x)
@@ -2332,9 +2336,14 @@ class TestQuantizeJitOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
+        # TODO: the checks are problematic, we need to split all checks
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
                    .check_count("quantized::conv2d", 2, exactly=True) \
                    .check("aten::dequantize") \
+                   .run(m.graph)
+
+        FileCheck().check("quantized::add_scalar") \
+                   .check("quantized::mul_scalar") \
                    .run(m.graph)
 
     def test_general_value_ops(self):
