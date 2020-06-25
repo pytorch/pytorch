@@ -68,6 +68,43 @@ VMAP_LEVEL = 0
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.
 def vmap(func, in_dims=0, out_dims=0):
+    """
+    vmap is the vectorizing map. Returns a new function that maps `func` over some
+    dimension of the inputs. Semantically, vmap pushes the map into PyTorch
+    operations called by `func`, effectively vectorizing those operations.
+
+    vmap is useful for handling batch dimensions: one can write a function `func`
+    that runs on examples and the lift it to a function that can take batches of
+    examples with `vmap(func)`. Furthermore, it is possible to use vmap to obtain
+    batched gradients when composed with autograd.
+
+    Args:
+        func (function): A Python function that takes one or more arguments.
+            Must return one or more Tensors.
+        in_dims (int or Tuple[Optional[int]]): Specifies which dimension of the
+            inputs should be mapped over. If `in_dims` is a Tuple, then it should have
+            one element per input. If the `in_dim` for a particular input is
+            None, then that indicates there is no map dimension. Default: 0.
+        out_dims (int or Tuple[int]): Specifies where the mapped dimension
+            should appear in the outputs. If `out_dims` is a Tuple, then it should
+            have one element per output. Default: 0.
+
+    Returns:
+        Returns a new "batched" function. It takes the same inputs as `func`,
+        except each input has an extra dimension at the index specified by `in_dims`.
+        It takes returns the same outputs as `func`, except each output has
+        an extra dimension at the index specified by `out_dims`.
+
+    .. warning:
+        vmap works best with functional-style code. Please do not perform any
+        side-effects in `func`, with the exception of in-place PyTorch operations.
+        Examples of side-effects include mutating Python data structures and
+        assigning values to variables not captured in `func`.
+
+    .. warning::
+        torch.vmap is an experimental prototype that is subject to
+        change and/or deletion. Please use at your own risk.
+    """
     warnings.warn(
         'torch.vmap is an experimental prototype that is subject to '
         'change and/or deletion. Please use at your own risk.')
