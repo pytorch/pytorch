@@ -354,7 +354,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     The scale and zero point are then computed as in
     :class:`~torch.quantization.observer.MinMaxObserver`.
 
-    .. note:: Only works with ``torch.per_tensor_affine`` quantization shceme.
+    .. note:: Only works with ``torch.per_tensor_affine`` quantization scheme.
 
     .. note:: If the running minimum equals to the running maximum, the scale
               and zero_point are set to 1.0 and 0.

@@ -41,7 +41,7 @@ default_per_channel_qconfig = QConfig(activation=default_observer,
 class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
     """
     Describes how to dynamically quantize a layer or a part of the network by providing
-    settings (observer classe) for weights.
+    settings (observer classes) for weights.
 
     It's like QConfig, but for dynamic quantization.
 
