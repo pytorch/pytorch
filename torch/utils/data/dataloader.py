@@ -131,6 +131,7 @@ class DataLoader(Generic[T_co]):
     pin_memory: bool
     drop_last: bool
     timeout: float
+    sampler: Sampler
 
     __initialized = False
 
