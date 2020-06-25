@@ -11051,77 +11051,70 @@ class TestTorchDeviceType(TestCase):
                 # Currently multiply a bfloat16 type with floating-point causes error:
                 #   RuntimeError: dtype != ScalarType::Undefined INTERNAL ASSERT FAILED at
                 #   "/pytorch/aten/src/ATen/native/TensorIterator.cpp":125, please report a bug to PyTorch.
-                # We skip bfloat16 for now, but we should fix it.
-                if not device.startswith('xla'):
+                # We skip bfloat16 for now, but we should fix it. https://github.com/pytorch/pytorch/issues/40580
+                if self.device_type == 'cpu' or self.device_type == 'cuda':
                     with self.assertRaises(RuntimeError):
                         torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device)
                     return
 
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi
-            expected = np.exp(a.cpu().numpy())
-            actual = torch.exp(a)
-            self.assertEqual(actual, torch.from_numpy(expected))
+            a = a.to(dtype)
+            self.compare_with_numpy(torch.exp, np.exp, a)
 
             if dtype.is_complex:
                 inf_real_zero_imag_in = torch.tensor(complex(float('inf'), 0), device=device, dtype=dtype)
                 inf_real_zero_imag_out = torch.exp(inf_real_zero_imag_in).item()
                 self.assertTrue(math.isinf(inf_real_zero_imag_out.real))
-                if device.startswith('cpu') and not IS_WINDOWS:  # Windows tests don't show some bugs consistently
-                    # This is incorrect. It should be zero. Need fix!
-                    self.assertNotEqual(inf_real_zero_imag_out.imag, 0)
-                    # This is incorrect. They should equal. Need fix!
-                    self.assertNotEqual(np.exp(inf_real_zero_imag_in.numpy()).item(), inf_real_zero_imag_out)
-                elif not device.startswith('cpu'):
+                if self.device_type == 'cpu':
+                    if not IS_WINDOWS:  # Windows tests don't show some bugs consistently
+                        # This is incorrect. It should be zero. Need fix!
+                        # https://github.com/pytorch/pytorch/issues/40590
+                        self.assertNotEqual(inf_real_zero_imag_out.imag, 0)
+                        # This is incorrect. They should equal. Need fix!
+                        # https://github.com/pytorch/pytorch/issues/40590
+                        with self.assertRaises(AssertionError):
+                            self.compare_with_numpy(torch.exp, np.exp, inf_real_zero_imag_in)
+                else:
                     self.assertEqual(inf_real_zero_imag_out.imag, 0, atol=0, rtol=0)
-                    self.assertEqual(np.exp(inf_real_zero_imag_in.to('cpu').numpy()).item(), inf_real_zero_imag_out)
+                    self.compare_with_numpy(torch.exp, np.exp, inf_real_zero_imag_in)
 
                 zero_real_inf_imag_in = torch.tensor(complex(0, float('inf')), device=device, dtype=dtype)
                 zero_real_inf_imag_out = torch.exp(zero_real_inf_imag_in).item()
                 self.assertTrue(math.isnan(zero_real_inf_imag_out.real))
                 self.assertTrue(math.isnan(zero_real_inf_imag_out.imag))
                 # Ensure we are notified when NumPy changes its behavior
-                zero_real_inf_imag_out_numpy = np.exp(zero_real_inf_imag_in.to('cpu').numpy()).item()
-                self.assertTrue(math.isnan(zero_real_inf_imag_out_numpy.real))
-                self.assertTrue(math.isnan(zero_real_inf_imag_out_numpy.imag))
+                self.compare_with_numpy(torch.exp, np.exp, zero_real_inf_imag_in)
 
                 inf_real_imag_in = torch.tensor(complex(float('inf'), float('inf')), device=device, dtype=dtype)
                 inf_real_imag_out = torch.exp(inf_real_imag_in).item()
-                if device.startswith('cpu') and not IS_WINDOWS:  # Windows tests don't show some bugs consistently
-                    # This is incorrect. It should be nan. Need fix!
-                    self.assertFalse(math.isinf(inf_real_imag_out.real))
-                    # This is correct but sometimes fails on Windows.
-                    self.assertTrue(math.isnan(inf_real_imag_out.imag))
-                elif not device.startswith('cpu'):
+                if self.device_type == 'cpu':
+                    if not IS_WINDOWS:  # Windows tests don't show some bugs consistently
+                        # This is incorrect. Need fix! https://github.com/pytorch/pytorch/issues/40590
+                        with self.assertRaises(AssertionError):
+                            self.compare_with_numpy(torch.exp, np.exp, inf_real_imag_in)
+                else:
                     self.assertTrue(math.isinf(inf_real_imag_out.real))
                     self.assertTrue(math.isnan(inf_real_imag_out.imag))
-                # Ensure we are notified when NumPy changes its behavior
-                inf_real_imag_out_numpy = np.exp(inf_real_imag_in.to('cpu').numpy()).item()
-                self.assertTrue(math.isinf(inf_real_imag_out_numpy.real))
-                self.assertTrue(math.isnan(inf_real_imag_out_numpy.imag))
+                    self.compare_with_numpy(torch.exp, np.exp, inf_real_imag_in)
 
                 inf_real_nan_imag_in = torch.tensor(complex(float('inf'), float('nan')), device=device, dtype=dtype)
                 inf_real_nan_imag_out = torch.exp(inf_real_nan_imag_in).item()
-                if device.startswith('cpu') and not IS_WINDOWS:  # Windows tests don't show some bugs consistently
-                    # This is incorrect. It should be inf. Need fix!
-                    self.assertFalse(math.isinf(inf_real_nan_imag_out.real))
-                    # This is correct but sometimes fails on Windows.
-                    self.assertTrue(math.isnan(inf_real_nan_imag_out.imag))
-                elif not device.startswith('cpu'):
+                if self.device_type == 'cpu':
+                    if not IS_WINDOWS:  # Windows tests don't show some bugs consistently
+                        # This is incorrect. It should be inf. Need fix! https://github.com/pytorch/pytorch/issues/40590
+                        with self.assertRaises(AssertionError):
+                            self.compare_with_numpy(torch.exp, np.exp, inf_real_nan_imag_in)
+                else:
                     self.assertTrue(math.isinf(inf_real_nan_imag_out.real))
                     self.assertTrue(math.isnan(inf_real_nan_imag_out.imag))
-                # Ensure we are notified when NumPy changes its behavior
-                inf_real_nan_imag_out_numpy = np.exp(inf_real_nan_imag_in.to('cpu').numpy()).item()
-                self.assertTrue(math.isinf(inf_real_nan_imag_out_numpy.real))
-                self.assertTrue(math.isnan(inf_real_nan_imag_out_numpy.imag))
+                    self.compare_with_numpy(torch.exp, np.exp, inf_real_nan_imag_in)
 
                 nan_real_inf_imag_in = torch.tensor(complex(float('nan'), float('inf')), device=device, dtype=dtype)
                 nan_real_inf_imag_out = torch.exp(nan_real_inf_imag_in).item()
                 self.assertTrue(math.isnan(nan_real_inf_imag_out.real))
                 self.assertTrue(math.isnan(nan_real_inf_imag_out.imag))
                 # Ensure we are notified when NumPy changes its behavior
-                nan_real_inf_imag_out_numpy = np.exp(nan_real_inf_imag_in.to('cpu').numpy()).item()
-                self.assertTrue(math.isnan(nan_real_inf_imag_out_numpy.real))
-                self.assertTrue(math.isnan(nan_real_inf_imag_out_numpy.imag))
+                self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
