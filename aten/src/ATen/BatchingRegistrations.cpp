@@ -98,6 +98,33 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  // NB: unsqueeze has some special handling of its `dim` argument so we can't call
+  // self_physical.getPhysicalDim directly. In particular, native::unsqueeze
+  // wraps the dim to (the logical dimension) + 1, so we need to do that here too.
+  // https://github.com/pytorch/pytorch/blob/b623bdeabb0aa8da44285d303246e7f8ac06c2a9/aten/src/ATen/native/TensorShape.cpp#L1413
+  auto dim_physical =
+      self_physical.numBatchDims() + maybe_wrap_dim(dim, /*logical_dim*/self.dim() + 1);
+  auto result = self_physical.tensor().unsqueeze(dim_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = self_physical.tensor().squeeze(dim_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim0_physical = self_physical.getPhysicalDim(dim0);
+  auto dim1_physical = self_physical.getPhysicalDim(dim1);
+  auto result = self_physical.tensor().transpose(dim0_physical, dim1_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 void batchedTensorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_CHECK(false, "NYI: Calling ", op.schema().name(), " inside of vmap");
 }
@@ -118,6 +145,9 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl_UNBOXED("mul.Tensor", mul_batching_rule);
   m.impl("expand", expand_batching_rule);
+  m.impl("transpose.int", transpose_int_batching_rule);
+  m.impl("unsqueeze", unsqueeze_batching_rule);
+  m.impl("squeeze.dim", squeeze_dim_batching_rule);
 }
 
 } // namespace at
