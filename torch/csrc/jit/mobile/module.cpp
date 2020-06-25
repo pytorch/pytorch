@@ -46,7 +46,8 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   auto m = find_method(method_name);
   if (m == nullptr) {
     if (observer) {
-      std::string cancellation_reason = "Method '" + method_name + "' is not defined";
+      std::string cancellation_reason =
+          "Method '" + method_name + "' is not defined";
       observer->onCancelRunMethod(cancellation_reason);
     }
     AT_ERROR("Method '", method_name, "' is not defined.");
@@ -59,9 +60,11 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
       observer->onExitRunMethod();
     }
     return result;
-  } catch (const std::exception &ex) {
+  } catch (const std::exception& ex) {
     if (observer) {
-      observer->onFailRunMethod("Error occured during model running entry point: " + (std::string) ex.what());
+      observer->onFailRunMethod(
+          "Error occured during model running entry point: " +
+          (std::string)ex.what());
     }
     TORCH_CHECK(false, ex.what());
   } catch (...) {
