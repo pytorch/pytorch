@@ -120,9 +120,12 @@ void checkTensor(Stack& stack, at::TensorTypePtr type, const std::string& debug_
   if (type->requires_grad()) {
     type = type->withRequiresGrad({});
   }
-  auto merged_sym_sizes = actual_type->symbolic_sizes().merge(type->symbolic_sizes());
+  auto merged_sym_sizes = actual_type->symbolic_sizes().merge(type->symbolic_sizes(), true);
   actual_type = actual_type->withSymbolicShapes(merged_sym_sizes);
+  
   if (!actual_type->isSubtypeOf(type)) {
+    std::cerr << "actual type merged: " << merged_sym_sizes << std::endl;
+    std::cerr << "merge of equal sizes: " << merged_sym_sizes.merge(type->symbolic_sizes()) << std::endl;
     std::cerr << "actual type :" << *old_actual_type << " didn't match expected type " << *type << 
     " for node " << debug_info << std::endl;
   }

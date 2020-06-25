@@ -629,11 +629,7 @@ std::ostream& operator<<(
     if (i > 0) {
       os << ", ";
     }
-    if(sizes[i].is_static()) {
-      os << sizes[i];
-    } else {
-      os << "*";
-    }
+    os << sizes[i];
   }
   os << ")";
 
