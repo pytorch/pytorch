@@ -32,7 +32,7 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
     stream << "torch::nn::ParameterDict(" << std::endl;
     for (const auto& pair : parameters_) {
       stream << "(" << pair.key() << ")"
-             << ": Parameter containing: [" << pair.value().type()
+             << ": Parameter containing: [" << pair.value().scalar_type()
              << " of size " << pair.value().sizes() << "]";
       ;
       stream << std::endl;
@@ -46,43 +46,23 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
     return register_parameter(key, param, requires_grad);
   }
 
-  /// Remove key from the ParameterDict, and return its value
+  /// Remove key from the ParameterDict and return its value, throw exception
+  /// if the key is not contained. Please check contains(key) before for a
+  /// non-throwing access.
   Tensor pop(const std::string& key) {
-    TORCH_CHECK(
-        parameters_.contains(key),
-        "No Parameter with name `",
-        key,
-        "` is registered");
-    torch::Tensor v = parameters_[key].clone();
+    torch::Tensor v = parameters_[key];
     parameters_.erase(key);
     return v;
   }
 
   /// Return the keys in the dict
   ::std::vector<std::string> keys() const {
-    std::vector<std::string> keys;
-    keys.reserve(parameters_.size());
-    for (const auto& param : parameters_) {
-      keys.push_back(param.key());
-    }
-    return keys;
+    return parameters_.keys();
   }
 
   /// Return the Values in the dict
   ::std::vector<torch::Tensor> values() const {
-    std::vector<torch::Tensor> values;
-    values.reserve(parameters_.size());
-    for (const auto& param : parameters_) {
-      values.push_back(param.value());
-    }
-    return values;
-  }
-
-  /// Returns an `OrderedDict` with the parameters of this `Module` along with
-  /// their keys, and if `recurse` is true also recursively of every
-  /// submodule.
-  OrderedDict<std::string, Tensor> named_parameters(bool recurse = true) const {
-    return named_parameters(recurse);
+    return parameters_.values();
   }
 
   /// Return an iterator to the start of ParameterDict
@@ -119,7 +99,6 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   /// another ParameterDict, overwriting existing key
   template <typename Container>
   void update(const Container& container) {
-    parameters_.reserve(parameters_.size() + container.size());
     for (auto& item : container) {
       // erase and overwrite the duplicate keys
       if (contains(item.key())) {
@@ -135,18 +114,34 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   }
 
   /// Check if the centain parameter with the key in the ParameterDict
-  bool contains(const std::string& key) {
+  bool contains(const std::string& key) const noexcept {
     return parameters_.contains(key);
   }
 
-  Tensor& get(std::string key) {
+  /// Returns the value associated with the given `key`. Throws an exception if
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// for a non-throwing way of access
+  const Tensor& get(const std::string& key) const {
     return parameters_[key];
   }
 
+  /// Returns the value associated with the given `key`. Throws an exception if
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// for a non-throwing way of access
+  Tensor& get(const std::string& key) {
+    return parameters_[key];
+  }
+
+  /// Returns the value associated with the given `key`. Throws an exception if
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// for a non-throwing way of access
   Tensor& operator[](const std::string& key) {
     return parameters_[key];
   }
 
+  /// Returns the value associated with the given `key`. Throws an exception if
+  /// no such key is stored in the `ParameterDict`. Check contains(key) before 
+  /// for a non-throwing way of access
   const Tensor& operator[](const std::string& key) const {
     return parameters_[key];
   }
