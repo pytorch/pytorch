@@ -3418,6 +3418,36 @@ void testGPU_FusionSplitBCast() {
   torch::jit::fuser::cuda::runTestKernel(&prog, {t0, t1}, {cg_output});
 }
 
+void testGPU_FusionBCastInnerDim() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  // reduce then broadcast
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = broadcast(tv1, {false, true});
+
+  TORCH_CHECK(!tv2->axis(0)->isReduction() && tv2->axis(1)->isBroadcast());
+}
+
+void testGPU_FusionBCastReduce() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+
+  auto tv1 = broadcast(tv0, {true, false, false});
+  auto tv2 = sum(tv1, {1});
+  TORCH_CHECK(
+      tv2->axis(0)->isBroadcast() && tv2->axis(1)->isReduction() &&
+      !tv2->axis(2)->isBroadcast() && !tv2->axis(2)->isReduction());
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

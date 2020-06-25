@@ -385,8 +385,21 @@ static TensorView* newForReduction(
     }
 
     const IterDomain* id = orig_domain[dim];
+
+    TORCH_CHECK(
+        !(isReduction && id->isBroadcast()),
+        "Cannot reduce an axis that is marked as broadcasted as it has an undetermined size. Tried to reduce ID = ",
+        id,
+        " of tensor ",
+        tv);
+
     new_domain.push_back(new IterDomain(
-        id->start(), id->extent(), ParallelType::Serial, isReduction));
+        id->start(),
+        id->extent(),
+        ParallelType::Serial,
+        isReduction,
+        false,
+        id->isBroadcast()));
   }
 
   TensorDomain* td = new TensorDomain(new_domain);
@@ -479,7 +492,8 @@ TORCH_CUDA_API TensorView* broadcast(
       out_domain.push_back(new IterDomain(
           new Int(0), new Int(1), ParallelType::Serial, false, false, true));
     } else {
-      out_domain.push_back(inp->axis(iinp));
+      // Don't propagate reduction IDs through arith ops.
+      out_domain.push_back(inp->domain()->noReductions()[iinp]);
       iinp++;
     }
     ibdim++;
