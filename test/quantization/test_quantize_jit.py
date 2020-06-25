@@ -333,10 +333,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 self.weight = weight
 
             def forward(self, x):
-                return torch.matmul(x, weight)
+                return torch.matmul(x, self.weight)
 
-        x = torch.rand(5, 5)
-        w = torch.rand(5, 5, 5)
+        x = torch.rand(5, 6, 5)
+        w = torch.rand(5, 5, 100)
         model = torch.jit.trace(Matmul(w), [x])
         torch._C._jit_pass_fuse_linear(model.graph)
         # check 3d matmul is not fused
