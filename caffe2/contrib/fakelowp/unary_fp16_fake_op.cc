@@ -688,4 +688,12 @@ The input and output of this operator are converted to fp16 precision.
     .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
     .InheritOnnxSchema();
 
+REGISTER_CPU_OPERATOR(
+    LogitFakeFp16,
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        LogitFakeIdealFp16Functor>);
+OPERATOR_SCHEMA(LogitFakeFp16).NumInputs(1).NumOutputs(1);
+
 } // namespace caffe2

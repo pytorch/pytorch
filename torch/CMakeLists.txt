@@ -124,6 +124,9 @@ if(USE_CUDA)
       ${GENERATED_THNN_CXX_CUDA}
       )
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
+    if(USE_CUDNN)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
+    endif()
 
     if(MSVC)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib)
@@ -137,18 +140,6 @@ if(USE_CUDA)
 
 endif()
 
-if(USE_CUDNN)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
-
-    list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
-      )
-endif()
-
-if(USE_NUMPY)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
-endif()
-
 if(USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
@@ -159,7 +150,6 @@ if(USE_ROCM)
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )
@@ -170,6 +160,16 @@ if(USE_ROCM)
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
     list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
+endif()
+
+if(USE_CUDNN OR USE_ROCM)
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
+      )
+endif()
+
+if(USE_NUMPY)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
 endif()
 
 if(USE_DISTRIBUTED)

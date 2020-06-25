@@ -4,6 +4,7 @@
 #include <istream>
 #include <ostream>
 #include <fstream>
+#include <algorithm>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Backend.h>
@@ -275,7 +276,8 @@ PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
 
 PyTorchStreamWriter::PyTorchStreamWriter(
     const std::function<size_t(const void*, size_t)>& writer_func)
-    : archive_name_("archive"), writer_func_(writer_func) {
+    : archive_name_("archive"),
+      writer_func_(writer_func) {
   setup(archive_name_);
 }
 
@@ -303,10 +305,10 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
+}
 
-  std::string version = c10::to_string(kProducedFileFormatVersion);
-  version.push_back('\n');
-  writeRecord("version", version.c_str(), version.size());
+void PyTorchStreamWriter::setMinVersion(const uint64_t version) {
+  version_ = std::max(version, version_);
 }
 
 void PyTorchStreamWriter::writeRecord(
@@ -339,8 +341,14 @@ void PyTorchStreamWriter::writeRecord(
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
+  // Rewrites version info
+  std::string version = c10::to_string(version_);
+  version.push_back('\n');
+  writeRecord("version", version.c_str(), version.size());
+
   AT_ASSERT(!finalized_);
   finalized_ = true;
+
   mz_zip_writer_finalize_archive(ar_.get());
   mz_zip_writer_end(ar_.get());
   valid("writing central directory for archive ", archive_name_.c_str());
