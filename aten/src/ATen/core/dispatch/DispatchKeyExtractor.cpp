@@ -4,11 +4,11 @@
 
 namespace c10 {
 
-void DispatchKeyExtractor::setOperatorHasFallthroughForBackend(DispatchKey k, bool has_fallthrough) {
+void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough) {
   if (has_fallthrough) {
-    keysWithoutFallthrough_ = keysWithoutFallthrough_.remove(k);
+    nonFallthroughKeys_ = nonFallthroughKeys_.remove(k);
   } else {
-    keysWithoutFallthrough_ = keysWithoutFallthrough_.add(k);
+    nonFallthroughKeys_ = nonFallthroughKeys_.add(k);
   }
 }
 
@@ -21,7 +21,7 @@ std::string DispatchKeyExtractor::dumpState() const {
       oss << "0";
     }
   }
-  oss << " " << keysWithoutFallthrough_ << "\n";
+  oss << " " << nonFallthroughKeys_ << "\n";
   return oss.str();
 }
 

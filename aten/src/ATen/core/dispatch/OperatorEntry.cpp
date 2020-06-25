@@ -179,7 +179,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
   auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
-  dispatchKeyExtractor_.setOperatorHasFallthroughForBackend(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
+  dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
 
 void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) {

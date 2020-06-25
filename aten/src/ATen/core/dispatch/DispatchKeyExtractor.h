@@ -141,7 +141,7 @@ public:
     return dispatchKeySetToDispatchKey_(eligibleKeys, ks);
   }
 
-  void setOperatorHasFallthroughForBackend(DispatchKey k, bool has_fallthrough);
+  void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);
 
   std::string dumpState() const;
   void checkInvariants(const FunctionSchema& schema) const;
@@ -168,7 +168,7 @@ private:
   ) const {
     return impl::dispatchTypeId(ks,
       // Keys that are fallthrough should be skipped
-        keysWithoutFallthrough_
+        nonFallthroughKeys_
       // Regardless of fallthrough behavior, only accept keys which are eligible
       // for dispatch, as requested by the user
       & eligibleKeys);
@@ -176,7 +176,7 @@ private:
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
   : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
-  , keysWithoutFallthrough_(DispatchKeySet::FULL) {}
+  , nonFallthroughKeys_(DispatchKeySet::FULL) {}
 
   // this is a bitset that has ones for each argument index which has to be
   // considered for dispatch. This avoids having to iterate over the stack
@@ -189,7 +189,7 @@ private:
   c10::utils::bitset dispatch_arg_indices_reverse_;
 
   // Set of keys for which the operator does NOT have fallthrough kernel.
-  DispatchKeySet keysWithoutFallthrough_;
+  DispatchKeySet nonFallthroughKeys_;
 };
 
 }
