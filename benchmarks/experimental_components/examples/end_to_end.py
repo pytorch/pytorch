@@ -14,6 +14,7 @@ NOTE:
 """
 
 import argparse
+import itertools as it
 import multiprocessing
 import multiprocessing.dummy
 import os
@@ -26,7 +27,7 @@ import textwrap
 import numpy as np
 import torch
 from op_fuzzers import unary
-from utils import Timer
+from utils import Timer, Measurement
 
 
 _MAIN, _SUBPROCESS = "main", "subprocess"
@@ -46,12 +47,16 @@ _PR_LIST = (
 )
 
 _CPU, _GPU = "cpu", "gpu"
-_MIN_RUN_SEC = {
+_MIN_RUN_SEC = 1
+_REPLICATES = {
+    _CPU: 5,  # CPU has a higher variance.
     _GPU: 1,
-    _CPU: 5,  # CPU has higher variation.
 }
-_RUNS_PER_LOOP = 10
-_NUM_LOOPS = 64
+_RUNS_PER_LOOP = 3
+_NUM_LOOPS = {
+    _CPU: 32,
+    _GPU: 64,
+}
 
 _DEVICES_TO_TEST = {
     "39850": {_CPU: False, _GPU: True},
@@ -76,6 +81,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pr", type=str, default=_PR_LIST[0], choices=_PR_LIST)
     parser.add_argument("--num_gpus", type=int, default=8)
+    parser.add_argument("--test_variance", action="store_true")
 
     # (Implementation details)
     parser.add_argument("--DETAIL_context", type=str, choices=(_MAIN, _SUBPROCESS), default=_MAIN)
@@ -88,7 +94,7 @@ def parse_args():
 
 
 _SUBPROCESS_CMD_TEMPLATE = (
-    "source activate {env} && python -m examples.end_to_end "
+    "source activate {source_env} && python -m examples.end_to_end "
     "--pr {pr} "
     "--DETAIL_context subprocess "
     "--DETAIL_device {device} "
@@ -123,7 +129,7 @@ def subprocess_main(args):
     seed = args.DETAIL_seed
     cuda = (args.DETAIL_device == _GPU)
 
-    with open(args.DETAIL_result_file, "wb") as f:
+    with open(args.DETAIL_result_file, "ab") as f:
         for dtype_str in _DTYPES_TO_TEST[args.pr]:
             dtype = _DTYPE_STR_TO_DTYPE[dtype_str]
             iterator = unary.UnaryOpFuzzer(
@@ -139,7 +145,7 @@ def subprocess_main(args):
                     env=args.DETAIL_env,
                 )
 
-                measurement = timer.blocked_autorange(min_run_time=_MIN_RUN_SEC[args.DETAIL_device])
+                measurement = timer.blocked_autorange(min_run_time=_MIN_RUN_SEC)
                 measurement.metadata = {
                     "tensor_parameters": tensor_parameters,
                     "params": params,
@@ -151,11 +157,7 @@ def subprocess_main(args):
 def _main(args):
     pools, map_iters, finished_counts = {}, {}, {}
     pr = args.pr
-
-    runs = [
-        (seed, env) for seed in range(_NUM_LOOPS)
-        for env in (_REF_ENV_TEMPLATE.format(pr=args.pr), _PR_ENV_TEMPLATE.format(pr=args.pr))
-    ]
+    envs = (_REF_ENV_TEMPLATE.format(pr=pr), _PR_ENV_TEMPLATE.format(pr=pr))
 
     # We initialize both pools at the start so that they run simultaneously
     # if applicable
@@ -165,43 +167,74 @@ def _main(args):
             _AVAILABLE_GPUS.put(i)
 
         pools[_GPU] = multiprocessing.dummy.Pool(args.num_gpus)
-        map_iters[_GPU] = pools[_GPU].imap(
-            map_fn, [(seed, env, pr, True, finished_counts) for seed, env in runs])
+        trials = [
+            (seed, envs, pr, True, finished_counts, args.test_variance)
+            for seed in range(_NUM_LOOPS[_GPU])] * _REPLICATES[_GPU]
+        map_iters[_GPU] = pools[_GPU].imap(map_fn, trials)
 
     if _DEVICES_TO_TEST[args.pr][_CPU]:
         finished_counts[_CPU] = 0
-        cpu_workers = int(multiprocessing.cpu_count() / 2)
+        cpu_workers = int(multiprocessing.cpu_count() / 3)
         pools[_CPU] = multiprocessing.dummy.Pool(cpu_workers)
-        map_iters[_CPU] = pools[_CPU].imap(
-            map_fn, [(seed, env, pr, False, finished_counts) for seed, env in runs])
+        trials = [
+            (seed, envs, pr, False, finished_counts, args.test_variance)
+            for seed in range(_NUM_LOOPS[_CPU])] * _REPLICATES[_CPU]
+        map_iters[_CPU] = pools[_CPU].imap(map_fn, trials)
 
     results = []
     for map_iter in map_iters.values():
         for r in map_iter:
             results.append(r)
-            progress = [f"{k}: {v} / {len(runs)}" for k, v in finished_counts.items()]
+            progress = [
+                f"{k}: {v} / {_NUM_LOOPS[k] * _REPLICATES[k]}"
+                for k, v in finished_counts.items()]
             print(f"\r{(' ' * 10).join(progress)}", end="")
     print()
 
     for pool in pools.values():
         pool.close()
 
-    process_results(results)
+    process_results(results, args.test_variance)
 
 
 # \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 # == Data processing and string formatting ====================================
 # /////////////////////////////////////////////////////////////////////////////
-def process_results(results):
+def merge(measurements):
+    if not measurements:
+        return None
+
+    states = [m.__getstate__() for m in measurements]
+    for k in states[0].keys():
+        if k in ("number_per_run", "times", "metadata"):
+            continue
+
+        assert all(s[k] == states[0][k] for s in states)
+
+    numbers_per_run = {m.number_per_run for m in measurements}
+    n = numbers_per_run.pop() if len(numbers_per_run) == 1 else 1
+
+    merged_state = states[0]
+    times = [[t / m.number_per_run * n for t in m.times] for m in measurements]
+    merged_state["times"] = list(it.chain(*times))
+    merged_state["number_per_run"] = n
+    merged_state["metadata"] = states[0]["metadata"]
+    return Measurement(**merged_state)
+
+
+def process_results(results, test_variance):
     paired_results = {}
-    for (seed, env, _, use_gpu, _), result_batch in results:
+    for (seed, use_gpu), result_batch in results:
         for r in result_batch:
             key = (r.label, r.description, r.num_threads, use_gpu, seed)
-            paired_results.setdefault(key, [None, None])
-            index = 0 if env.startswith("ref") else 1
+            paired_results.setdefault(key, [[], []])
+            index = 0 if r.env.startswith("ref") else 1
+            paired_results[key][index].append(r)
 
-            assert paired_results[key][index] is None
-            paired_results[key][index] = r
+    paired_results = {
+        key: (merge(r_ref_list), merge(r_pr_list))
+        for key, (r_ref_list, r_pr_list) in paired_results.items()
+    }
 
     flagged_for_removal = set()
     for key, (r_ref, r_pr) in paired_results.items():
@@ -218,14 +251,15 @@ def process_results(results):
     cpu_results = [(k, v) for k, v in paired_results.items() if not k[3]]
 
     if cpu_results:
-        construct_table(cpu_results, "CPU")
+        construct_table(cpu_results, "CPU", test_variance)
 
     if gpu_results:
-        construct_table(gpu_results, "GPU")
+        construct_table(gpu_results, "GPU", test_variance)
 
 
-def construct_table(results, device_str):
-    print(f"{'=' * 40}\n== {device_str} {'=' * 33}\n{'=' * 40}\n")
+def construct_table(results, device_str, test_variance):
+    device_str = f"== {device_str} {' (Variance Test)' if test_variance else ''}  ".ljust(40, "=")
+    print(f"{'=' * 40}\n{device_str}\n{'=' * 40}\n")
     results = sorted((
         (key, (r_ref, r_pr), r_pr.median / r_ref.median - 1)
         for key, (r_ref, r_pr) in results
@@ -240,11 +274,11 @@ def construct_table(results, device_str):
         print(f"{legend:<17} {count:>6}  ({count / len(results) * 100:>3.0f}%)")
 
     keys_to_print = (
-        {i[0] for i in results[:10]} |
+        {i[0] for i in results[20:30]} |
         {i[0] for i in results[int(n // 2 - 5):int(n // 2 + 5)]} |
-        {i[0] for i in results[-10:]}
+        {i[0] for i in results[-30:-20]}
     )
-    ellipsis_after = {results[9][0], results[int(n // 2 + 4)][0]}
+    ellipsis_after = {results[29][0], results[int(n // 2 + 4)][0]}
 
     column_labels = (
         f"Relative Δ     Absolute Δ      |      numel{'':>8}dtype{'':>14}"
@@ -254,7 +288,7 @@ def construct_table(results, device_str):
     _, result_log_file = tempfile.mkstemp(suffix=".log")
     with open(result_log_file, "wt") as f:
         f.write(f"{device_str}\n\n{column_labels}\n")
-        print(f"\n{column_labels}")
+        print(f"\n{column_labels}\n[First twenty omitted (these tend to be noisy) ]")
         for key, (r_ref, r_pr), rel_diff in results:
             row = row_str(rel_diff, r_pr.median - r_ref.median, r_ref)
             f.write(f"{row}\n")
@@ -262,6 +296,7 @@ def construct_table(results, device_str):
                 print(row)
             if key in ellipsis_after:
                 print("...")
+        print("[Last twenty omitted (these tend to be noisy) ]")
 
     print(textwrap.dedent("""
         steps:
@@ -343,17 +378,19 @@ def test_source(envs):
 
 
 def map_fn(args):
-    seed, env, pr, use_gpu, finished_counts = args
+    seed, envs, pr, use_gpu, finished_counts, test_variance = args
     gpu = _AVAILABLE_GPUS.get() if use_gpu else None
     try:
         _, result_file = tempfile.mkstemp(suffix=".pkl")
-        cmd = _SUBPROCESS_CMD_TEMPLATE.format(
-            env=env, pr=pr, device=_GPU if use_gpu else _CPU,
-            result_file=result_file, seed=seed,
-        )
-        run(cmd=cmd, cuda_visible_devices=gpu if use_gpu else "")
+        for env in envs:
+            cmd = _SUBPROCESS_CMD_TEMPLATE.format(
+                source_env=envs[0] if test_variance else env,
+                env=env, pr=pr, device=_GPU if use_gpu else _CPU,
+                result_file=result_file, seed=seed,
+            )
+            run(cmd=cmd, cuda_visible_devices=gpu if use_gpu else "")
         finished_counts[_GPU if use_gpu else _CPU] += 1
-        return args, read_results(result_file)
+        return (seed, use_gpu), read_results(result_file)
     except KeyboardInterrupt:
         pass  # Handle ctrl-c gracefully.
     finally:
@@ -378,4 +415,7 @@ if __name__ == "__main__":
         main(args)
 
     if args.DETAIL_context == "subprocess":
-        subprocess_main(args)
+        try:
+            subprocess_main(args)
+        except KeyboardInterrupt:
+            pass  # Handle ctrl-c gracefully.
