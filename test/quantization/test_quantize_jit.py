@@ -309,7 +309,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         x2 = torch.rand(5, 5)
         w2 = torch.rand(5, 5)
         b2 = torch.rand(5)
-        for has_bias, (x, weight, b) in itertools.product([True, False], [(x1, w1, b1), (x2, w2, b2)]):
+
+        x3 = torch.rand(5, 5, 5)
+        w3 = torch.rand(5, 5)
+        b3 = torch.rand(5)
+        for has_bias, (x, weight, b) in itertools.product([True, False], [(x1, w1, b1), (x2, w2, b2), (x3, w3, b3)]):
             bias = b if has_bias else None
             model = torch.jit.trace(FunctionalLinear(weight, bias), [x])
             torch._C._jit_pass_fuse_linear(model.graph)
@@ -319,6 +323,27 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             for cn in check_not:
                 FileCheck().check_not(cn) \
                            .run(model.graph)
+            # make sure it runs
+            model(x)
+
+        # check matmuls are not fused
+        class Matmul(torch.nn.Module):
+            def __init__(self, weight):
+                super(Matmul, self).__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                return torch.matmul(x, weight)
+
+        x = torch.rand(5, 5)
+        w = torch.rand(5, 5, 5)
+        model = torch.jit.trace(Matmul(w), [x])
+        torch._C._jit_pass_fuse_linear(model.graph)
+        # check 3d matmul is not fused
+        FileCheck().check("aten::matmul") \
+                   .run(model.graph)
+        FileCheck().check_not("aten::linear") \
+                   .run(model.graph)
 
     def test_insert_observers(self):
         class M(torch.nn.Module):
