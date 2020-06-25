@@ -63,7 +63,7 @@ TEST_F(ParameterDictTest, InsertAndPop) {
   dict->insert("A", torch::tensor({1.0}));
   ASSERT_EQ(dict->size(), 1);
   ASSERT_THROWS_WITH(
-      dict->pop("B"), "No Parameter with name `B` is registered");
+      dict->pop("B"), "Parameter 'B' is not defined");
   torch::Tensor p = dict->pop("A");
   ASSERT_EQ(dict->size(), 0);
   ASSERT_TRUE(torch::eq(p, torch::tensor({1.0})).item<bool>());
@@ -137,9 +137,9 @@ TEST_F(ParameterDictTest, PrettyPrintParameterDict) {
   ASSERT_EQ(
       c10::str(dict),
       "torch::nn::ParameterDict(\n"
-      "(a): Parameter containing: [CPUFloatType of size [1]]\n"
-      "(b): Parameter containing: [CPUFloatType of size [2]]\n"
-      "(c): Parameter containing: [CPUFloatType of size [2, 1]]\n"
-      "(d): Parameter containing: [CPUFloatType of size [2, 2]]\n"
+      "(a): Parameter containing: [Float of size [1]]\n"
+      "(b): Parameter containing: [Float of size [2]]\n"
+      "(c): Parameter containing: [Float of size [2, 1]]\n"
+      "(d): Parameter containing: [Float of size [2, 2]]\n"
       ")");
 }
