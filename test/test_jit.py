@@ -8749,6 +8749,24 @@ a")
             o2 = m.forward2(i)
             self.assertEqual(o2, v)
 
+    def test_script_sequential_sliced_iteration(self):
+        class seq_mod(nn.Module):
+            def __init__(self):
+                super(seq_mod, self).__init__()
+                self.layers = [nn.ReLU(), nn.ReLU(), nn.ReLU()]
+                self.layers = nn.Sequential(*self.layers)
+
+            def forward(self, input):
+                x = self.layers[0].forward(input)
+                for layer in self.layers[1:3]:
+                    x = layer.forward(x)
+                for layer in self.layers[2:]:
+                    x = layer.forward(x)
+                return x
+
+        seq = seq_mod()
+        self.checkModule(seq, [torch.tensor([-2, 1, -1, 2])])
+
     def test_script_sequential_orderdict(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
