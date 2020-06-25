@@ -1027,3 +1027,63 @@ class TestClassType(JitTestCase):
             new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
             y.my_list = new_list
             return y
+
+    def test_properties(self):
+        """
+        Test that a scripted class can make use of the @property decorator.
+        """
+        @torch.jit.script
+        class Properties(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            @property
+            def attr(self) -> int:
+                return self.a
+
+            @attr.setter
+            def attr(self, value: int):
+                self.a = value
+
+        @torch.jit.script
+        class NoSetter(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            @property
+            def attr(self) -> int:
+                return self.a
+
+        @torch.jit.script
+        class MethodThatUsesProperty(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            @property
+            def attr(self) -> int:
+                return self.a
+
+            @attr.setter
+            def attr(self, value: int):
+                self.a = value
+
+            def forward(self):
+                return self.attr
+
+        class ModuleWithProperties(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.props = Properties(a)
+
+            def forward(self, a: int, b: int, c: int, d: int):
+                self.props.attr = a
+                props = Properties(b)
+                no_setter = NoSetter(c)
+                method_uses_property = MethodThatUsesProperty(a + b)
+
+                props.attr = c
+                method_uses_property.attr = d
+
+                return self.props.attr + no_setter.attr + method_uses_property.forward()
+
+        self.checkModule(ModuleWithProperties(5), (5, 6, 7, 8,))

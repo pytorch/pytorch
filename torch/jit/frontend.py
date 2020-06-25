@@ -12,7 +12,7 @@ from torch._C._jit_tree_views import (
     TrueLiteral, FalseLiteral, NoneLiteral, Starred,
     ListLiteral, TupleLiteral, DictLiteral, Const,
     StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
-    SliceExpr, Subscript, TernaryIf, With, WithItem,
+    SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
 )
 from torch._utils_internal import get_source_lines_and_file
 
@@ -128,15 +128,41 @@ def build_stmts(ctx, stmts):
     return list(filter(None, stmts))
 
 
+def get_class_properties(cls, self_name):
+    """
+    Get a list of Property objects representing the properties of a class.
+
+    Arguments:
+        cls:  The class to get properties of.
+        self_name: The name of the class that the properties should belong to.
+    Returns:
+        A list of Property objects corresponding to the properties of cls. Property
+        here refers to the subclass of TreeView.
+    """
+    props = inspect.getmembers(
+        cls, predicate=lambda m: isinstance(m, property))
+
+    # Create Property TreeView objects from inspected property objects.
+    properties = []
+    for prop in props:
+        getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
+        setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
+        properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
+
+    return properties
+
+
 def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
         cls, predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m)) and m.__name__ in cls.__dict__)
 
-    method_defs = [get_jit_def(method[1],
-                               method[0],
-                               self_name=self_name) for method in methods]
+    methods = [get_jit_def(method[1],
+                           method[0],
+                           self_name=self_name) for method in methods]
+
+    properties = get_class_properties(cls, self_name)
 
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
@@ -144,7 +170,7 @@ def get_jit_class_def(cls, self_name):
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
-    return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
+    return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
 
 
 def get_jit_def(fn, def_name, self_name=None):
@@ -194,10 +220,10 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_class_def(ctx, py_def, methods, self_name):
+def build_class_def(ctx, py_def, methods, properties, self_name):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods])
+    return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods], properties)
 
 
 def build_def(ctx, py_def, type_line, def_name, self_name=None):

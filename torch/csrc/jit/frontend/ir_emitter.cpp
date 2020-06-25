@@ -3708,6 +3708,39 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
+std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>> CompilationUnit::
+    define(
+        const c10::optional<c10::QualifiedName>& prefix,
+        const Property& prop,
+        const ResolverPtr& resolver,
+        const Self* self,
+        const std::unordered_map<std::string, Function*>& function_table,
+        bool shouldMangle) const {
+  TORCH_INTERNAL_ASSERT(self);
+  TORCH_INTERNAL_ASSERT(resolver);
+
+  std::unique_ptr<Function> getter_fn = define(
+      prefix, prop.getter(), resolver, self, function_table, shouldMangle);
+
+  std::unique_ptr<Function> setter_fn = prop.setter().present()
+      ? define(
+            prefix,
+            prop.setter().get(),
+            resolver,
+            self,
+            function_table,
+            shouldMangle)
+      : nullptr;
+
+  auto* getter = self->getClassType()->findMethod(prop.getter().name().name());
+  auto* setter = prop.setter().present()
+      ? self->getClassType()->findMethod(prop.setter().get().name().name())
+      : nullptr;
+  self->getClassType()->addProperty(prop.name().name(), getter, setter);
+
+  return std::make_pair(std::move(getter_fn), std::move(setter_fn));
+}
+
 std::unique_ptr<Function> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const Def& def,
@@ -3753,6 +3786,75 @@ std::unique_ptr<Function> CompilationUnit::define(
     self->getClassType()->addMethod(fn.get());
   }
   return fn;
+}
+
+std::vector<Function*> CompilationUnit::define(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Property>& properties,
+    const std::vector<ResolverPtr>& propResolvers,
+    const std::vector<Def>& definitions,
+    const std::vector<ResolverPtr>& defResolvers,
+    const Self* self,
+    bool shouldMangle) {
+  TORCH_INTERNAL_ASSERT(self);
+  TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
+  TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
+  std::vector<Function*> functions;
+  std::unordered_map<std::string, Function*> function_table;
+
+  for (size_t i = 0; i < properties.size(); i++) {
+    std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>>
+        property_fns = define(
+            prefix,
+            properties[i],
+            propResolvers[i],
+            self,
+            function_table,
+            shouldMangle);
+
+    auto& getter_fn = property_fns.first;
+    auto& setter_fn = property_fns.second;
+
+    const auto& getter_name = getter_fn->name();
+    function_table[getter_name] = getter_fn.get();
+    functions.push_back(getter_fn.get());
+    register_function(std::move(getter_fn));
+
+    if (setter_fn) {
+      const auto& setter_name = setter_fn->name();
+      function_table[setter_name] = setter_fn.get();
+      functions.push_back(setter_fn.get());
+      register_function(std::move(setter_fn));
+    }
+  }
+
+  for (size_t i = 0; i < definitions.size(); i++) {
+    auto fn = define(
+        prefix,
+        definitions[i],
+        defResolvers[i],
+        self,
+        function_table,
+        shouldMangle);
+    const auto& name = fn->name();
+    function_table[name] = fn.get();
+    functions.push_back(fn.get());
+    register_function(std::move(fn));
+  }
+
+  // We need to compile `__init__` first, since it can determine what attributes
+  // are available to other methods. So reorder the definitions accordingly.
+  for (auto& kv : function_table) {
+    if (kv.first == "__init__") {
+      kv.second->ensure_defined();
+    }
+  }
+
+  for (Function* function : functions) {
+    function->ensure_defined();
+  }
+
+  return functions;
 }
 
 std::vector<Function*> CompilationUnit::define(

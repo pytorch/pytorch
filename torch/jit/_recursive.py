@@ -6,13 +6,15 @@ import functools
 import warnings
 
 import torch._jit_internal as _jit_internal
-from torch.jit.frontend import get_default_args, get_jit_def
+from torch.jit.frontend import get_default_args, get_jit_def, get_class_properties
 from torch.jit._builtins import _find_builtin
 from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
 
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
+PropertyStub = collections.namedtuple('Property', ('resolution_callback', 'def_'))
+
 
 # TODO: there should be a more principled way of doing this.
 ignored_attributes = [
@@ -27,6 +29,16 @@ ignored_attributes = [
     "_state_dict_hooks",
     "_load_state_dict_pre_hooks",
     "dump_patches",
+]
+
+ignored_properties = [
+    # Temporary fix for RNN module property named 'all_weights' being scripted
+    "all_weights",
+    "original_name",
+    "graph",
+    "inlined_graph",
+    "code",
+    "code_with_constants",
 ]
 
 def make_stub(func, name):
@@ -47,6 +59,7 @@ def make_stub_from_method(nn_module, method_name):
     # In this case, the actual function object will have the name `_forward`,
     # even though we requested a stub for `forward`.
     return make_stub(func, method_name)
+
 
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants
@@ -239,14 +252,6 @@ def infer_concrete_type_builder(nn_module):
                     "to a TorchScript type.)").format(torch.typename(type(value)))
             concrete_type_builder.add_failed_attribute(name, hint)
 
-    # Add @property methods as failed attributes, to give a better error message.
-    for name, value in type(nn_module).__dict__.items():
-        if isinstance(value, property):
-            hint = ("\n(This attribute exists on the Python module, but it's an @property "
-                    "method. @property methods are not yet supported in TorchScript. "
-                    "Please file a feature request on Github)")
-            concrete_type_builder.add_failed_attribute(name, hint)
-
     return concrete_type_builder
 
 class ConcreteTypeStore(object):
@@ -285,11 +290,17 @@ class ConcreteTypeStore(object):
 
 concrete_type_store = ConcreteTypeStore()
 
-def create_methods_from_stubs(concrete_type, stubs):
-    defs = [m.def_ for m in stubs]
-    rcbs = [m.resolution_callback for m in stubs]
-    defaults = [get_default_args(m.original_method) for m in stubs]
-    concrete_type._create_methods(defs, rcbs, defaults)
+
+def create_methods_and_properties_from_stubs(concrete_type, method_stubs, property_stubs):
+    method_defs = [m.def_ for m in method_stubs]
+    method_rcbs = [m.resolution_callback for m in method_stubs]
+    method_defaults = [get_default_args(m.original_method) for m in method_stubs]
+
+    property_defs = [p.def_ for p in property_stubs]
+    property_rcbs = [p.resolution_callback for p in property_stubs]
+
+    concrete_type._create_methods_and_properties(property_defs, property_rcbs, method_defs, method_rcbs, method_defaults)
+
 
 def create_script_module(nn_module, stubs_fn, share_types=True):
     """
@@ -326,7 +337,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
     """
     cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
-    stubs = stubs_fn(nn_module)
+    method_stubs = stubs_fn(nn_module)
+    property_stubs = get_property_stubs(nn_module)
 
     def init_fn(script_module):
         # Initialize the ScriptModule:
@@ -373,7 +385,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
 
     # Compile methods if necessary
     if concrete_type not in concrete_type_store.methods_compiled:
-        create_methods_from_stubs(concrete_type, stubs)
+        create_methods_and_properties_from_stubs(concrete_type, method_stubs, property_stubs)
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
 
@@ -391,14 +403,14 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
 
 
     # Make the compiled methods available to the Python ScriptModule class.
-    for stub in stubs:
-        if stub.original_method is None:
+    for method_stub in method_stubs:
+        if method_stub.original_method is None:
             # define()'d methods don't have an Python original_method, so we
             # don't need to do any Python re-wrapping stuff
             continue
 
-        name = stub.original_method.__name__
-        if name != stub.def_.name().name:
+        name = method_stub.original_method.__name__
+        if name != method_stub.def_.name().name:
             # TODO: Why skip this? Because @torch.jit._overload_method will
             # mangle the name of the function.
             continue
@@ -407,13 +419,19 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Wrap the original to propagate docstrings and such.
         # TODO: we don't currently do this functions that are recursively
         # compiled, we should.
-        script_method = functools.wraps(stub.original_method)(script_method)
+        script_method = functools.wraps(method_stub.original_method)(script_method)
 
         # Add the methods to the script_module directly. This ensures they will
         # be found first when `name` is looked up (as opposed to the stubs or
         # nn.Module.forward)
         script_module.__dict__[name] = script_method
 
+
+    for property_stub in property_stubs:
+        property_name = property_stub.def_.name().name
+        fget = cpp_module._get_method(property_stub.def_.getter_name().name)
+        fset = cpp_module._get_method(property_stub.def_.setter_name().name)
+        script_module.__dict__[property_name] = property(property_name, fget, fset)
 
     # copy over python methods to script module if they aren't defined on the script module
     # this is currently an internal api used only on module containers
@@ -548,6 +566,32 @@ def infer_methods_to_compile(nn_module):
         stubs.append(make_stub_from_method(nn_module, method))
     return overload_stubs + stubs
 
+
+def get_property_stubs(nn_module):
+    """
+    Create property stubs for the properties of the module by creating method
+    stubs for the getter and setter.
+    """
+    module_ty = type(nn_module)
+    properties_asts = get_class_properties(module_ty, self_name="RecursiveScriptModule")
+    rcbs = {}
+
+    for name in dir(module_ty):
+        item = getattr(module_ty, name, None)
+        if isinstance(item, property) and name not in ignored_properties:
+            if not item.fget:
+                raise RuntimeError(f'Property {name} of {nn_module.__name__} must have a getter')
+
+            rcbs[name] = _jit_internal.createResolutionCallbackFromClosure(item.fget)
+
+    stubs = []
+    for ast in properties_asts:
+        if ast.name().name not in ignored_properties:
+            stubs.append(PropertyStub(rcbs[ast.name().name], ast))
+
+    return stubs
+
+
 def interface_script(mod_interface, nn_module):
     """
     Makes a ScriptModule from an nn.Module, using the interface methods rule for
@@ -612,7 +656,7 @@ def compile_unbound_method(concrete_type, fn):
     with torch._jit_internal._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
-        create_methods_from_stubs(concrete_type, (stub,))
+        create_methods_and_properties_from_stubs(concrete_type, (stub,), ())
     return stub
 
 def lazy_bind(concrete_type, unbound_method):

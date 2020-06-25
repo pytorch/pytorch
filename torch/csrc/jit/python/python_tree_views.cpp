@@ -156,11 +156,36 @@ void initTreeViewBindings(PyObject* module) {
           }))
       .def("decl", [](const Def& def) { return def.decl(); })
       .def("name", [](const Def& def) { return def.name(); });
+  py::class_<Property, TreeView>(m, "Property")
+      .def(py::init([](const SourceRange& r,
+                       const Ident& name,
+                       const Def& getter,
+                       Def* setter) {
+        return Property::create(r, name, getter, wrap_maybe(r, setter));
+      }))
+      .def("name", [](const Property& property) { return property.name(); })
+      .def(
+          "getter_name",
+          [](const Property& property) { return property.getter().name(); })
+      .def("setter_name", [](const Property& property) {
+        if (property.setter().present()) {
+          return property.setter().get().name();
+        }
+
+        return Ident::create(property.range(), "");
+      });
+
   py::class_<ClassDef, TreeView>(m, "ClassDef")
-      .def(py::init([](const Ident& name, std::vector<Stmt> body) {
+      .def(py::init([](const Ident& name,
+                       std::vector<Stmt> body,
+                       std::vector<Property> props) {
         const auto& r = name.range();
         return ClassDef::create(
-            r, name, Maybe<Expr>::create(r), wrap_list(r, std::move(body)));
+            r,
+            name,
+            Maybe<Expr>::create(r),
+            wrap_list(r, std::move(body)),
+            wrap_list(r, std::move(props)));
       }));
   py::class_<Decl, TreeView>(m, "Decl").def(py::init(
       [](const SourceRange& r, std::vector<Param> params, Expr* return_type) {
