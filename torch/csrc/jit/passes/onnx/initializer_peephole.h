@@ -11,4 +11,4 @@ void InitializerPeepholeONNX(
 
 } // namespace jit
 
-} // namespace torc
+} // namespace torch

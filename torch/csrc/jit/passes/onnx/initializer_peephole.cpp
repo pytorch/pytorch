@@ -1,6 +1,6 @@
-#include <torch/torch.h>
 #include <torch/csrc/jit/passes/onnx/initializer_peephole.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/torch.h>
 
 #include <c10/util/Optional.h>
 #include <algorithm>
@@ -39,7 +39,8 @@ static void fuseConvBachNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
     for (auto* child_block : it->blocks()) {
       fuseConvBachNorm(child_block, valsToParamsMap);
     }
-    if (it->kind() == onnx::Conv and it->next()->kind() == onnx::BatchNormalization){
+    if (it->kind() == onnx::Conv and
+        it->next()->kind() == onnx::BatchNormalization) {
       auto bnNode = it->next();
       auto origconvNode = *it;
       auto epsilon = bnNode->f(attr::epsilon);
@@ -52,20 +53,14 @@ static void fuseConvBachNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       auto w_conv = w_conv_value[0];
       at::Tensor b_conv;
 
-      if (!bn_scale.is_floating_point() ||
-          !bn_B.is_floating_point() ||
-          !bn_mean.is_floating_point() ||
-          !bn_var.is_floating_point() ||
-          !w_conv.is_floating_point() ||
-          bn_scale.dim() != 1 ||
-          bn_B.dim() != 1 ||
-          bn_mean.dim() != 1 ||
-          bn_var.dim() != 1 ||
+      if (!bn_scale.is_floating_point() || !bn_B.is_floating_point() ||
+          !bn_mean.is_floating_point() || !bn_var.is_floating_point() ||
+          !w_conv.is_floating_point() || bn_scale.dim() != 1 ||
+          bn_B.dim() != 1 || bn_mean.dim() != 1 || bn_var.dim() != 1 ||
           !(bn_scale.size(0) == bn_B.size(0)) ||
           !(bn_B.size(0) == bn_mean.size(0)) ||
-          !(bn_mean.size(0) == bn_var.size(0)) ||
-          !(w_conv.dim() > 2) ||
-          !(w_conv.size(0) == bn_scale.size(0))){
+          !(bn_mean.size(0) == bn_var.size(0)) || !(w_conv.dim() > 2) ||
+          !(w_conv.size(0) == bn_scale.size(0))) {
         return;
       }
 
@@ -90,8 +85,8 @@ static void fuseConvBachNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
         b_conv = bn_B;
       }
 
-
-      Node* convNode = b->owningGraph()->create(onnx::Conv, bnNode->outputs().size());
+      Node* convNode =
+          b->owningGraph()->create(onnx::Conv, bnNode->outputs().size());
       for (size_t i = 0; i < convNode->outputs().size(); ++i) {
         convNode->outputs()[i]->copyMetadata(bnNode->outputs()[i]);
       }
@@ -101,12 +96,14 @@ static void fuseConvBachNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       convNode->addInput(origconvNode->inputs().at(0));
 
       auto conv_W = b->addInput();
-      valsToParamsMap.insert({conv_W, std::make_pair(conv_W->debugName(), w_conv)});
+      valsToParamsMap.insert(
+          {conv_W, std::make_pair(conv_W->debugName(), w_conv)});
       conv_W->inferTypeFrom(w_conv);
       convNode->addInput(conv_W);
 
       auto conv_B = b->addInput();
-      valsToParamsMap.insert({conv_B, std::make_pair(conv_B->debugName(), b_conv)});
+      valsToParamsMap.insert(
+          {conv_B, std::make_pair(conv_B->debugName(), b_conv)});
       conv_B->inferTypeFrom(bn_B);
       convNode->addInput(conv_B);
 
