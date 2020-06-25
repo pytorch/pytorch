@@ -213,7 +213,7 @@ if _C_for_compiled_check.__file__ is None:
         _torch_root_path = os.path.split(os.path.split(__file__)[0])[0]
         raise ImportError(textwrap.dedent(f'''
             Failed to load PyTorch C extensions:
-                `{_torch_root_path}`` appears in `sys.path`
+                `{_torch_root_path}` appears in `sys.path`
                 This generally occurs because the PYTHONPATH environment
                 variable is set or an entry is manually added to `sys.path`
                 before calling `import torch`.
