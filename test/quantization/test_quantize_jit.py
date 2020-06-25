@@ -2699,7 +2699,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
     for individual ops end to end.
     """
     @override_qengines
-    def test_quantized_linear_dynamic(self):
+    def test_linear(self):
         class FunctionalLinear(torch.nn.Module):
             def __init__(self, weight, bias):
                 super(FunctionalLinear, self).__init__()
