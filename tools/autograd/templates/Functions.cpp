@@ -280,7 +280,7 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
-    return (grad * result) / input * input.isnan().logical_not());
+    return (grad * result) / input * input.isnan().logical_not();
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
