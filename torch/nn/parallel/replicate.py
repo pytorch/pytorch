@@ -1,5 +1,6 @@
 import torch.cuda.comm as comm
 from torch.cuda._utils import _get_device_index
+from torch.nn.modules.container import ParameterList, ParameterDict
 
 from collections import OrderedDict
 
@@ -131,21 +132,35 @@ def replicate(network, devices, detach=False):
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
                     setattr(replica, key, module_copies[j][module_idx])
-        for key, param in module._parameters.items():
-            if param is None:
-                for j in range(num_replicas):
-                    replica = module_copies[j][i]
-                    replica._parameters[key] = None
-            else:
-                param_idx = param_indices[param]
-                for j in range(num_replicas):
-                    replica = module_copies[j][i]
+        if isinstance(module_copies[0][i], (ParameterList, ParameterDict)):
+            # if replica is ParameterList or ParameterDict we setup its _parameters as
+            # ordered dict of tensors
+            for j in range(num_replicas):
+                replica = module_copies[j][i]
+                parameters = OrderedDict()
+                for key, param in module._parameters.items():
+                    param_idx = param_indices[param]
                     param = param_copies[j][param_idx]
-                    # parameters in replicas are no longer leaves,
-                    # so setattr them as non-parameter attributes
-                    setattr(replica, key, param)
-                    # expose the parameter for DDP
+                    parameters[str(key)] = param
+                    # TODO: verify if this is correct
                     replica._former_parameters[key] = param
+                replica._parameters = parameters
+        else:
+            for key, param in module._parameters.items():
+                if param is None:
+                    for j in range(num_replicas):
+                        replica = module_copies[j][i]
+                        replica._parameters[key] = None
+                else:
+                    param_idx = param_indices[param]
+                    for j in range(num_replicas):
+                        replica = module_copies[j][i]
+                        param = param_copies[j][param_idx]
+                        # parameters in replicas are no longer leaves,
+                        # so setattr them as non-parameter attributes
+                        setattr(replica, key, param)
+                        # expose the parameter for DDP
+                        replica._former_parameters[key] = param
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
