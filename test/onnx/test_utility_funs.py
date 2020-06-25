@@ -8,6 +8,8 @@ from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_
 import torch.utils.cpp_extension
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 
+import torchvision
+
 import onnx
 import onnxruntime  # noqa
 
@@ -693,6 +695,49 @@ class TestUtilityFuns(TestCase):
         for node in graph.nodes():
             assert node.kind() != "onnx::BatchNormalization"
             assert node.kind() == "onnx::Conv"
+
+        assert len(list(graph.nodes())) == 1
+
+    def test_fuse_resnet18(self):
+        model = torchvision.models.resnet18(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        graph, _, __ = utils._model_to_graph(model, (x, ),
+                                             do_constant_folding=True)
+
+        for node in graph.nodes():
+            assert node.kind() != "onnx::BatchNormalization"
+
+    def test_conv_bn(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=1, stride=2, padding=3, bias=True)
+                self.bn = torch.nn.BatchNorm2d(16, affine=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                bn = self.bn(x)
+                return bn
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+        model.train()
+        model_export = MyModule()
+        f = io.BytesIO()
+        torch.onnx.export(model_export, (x,), f, verbose=True,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
+        ort_outs1 = ort_sess.run(None, ort_inputs)
+        model.eval()
+        f = io.BytesIO()
+        torch.onnx.export(model_export, (x,), f, verbose=True,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
+        ort_outs2 = ort_sess.run(None, ort_inputs)
+        [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
+
 
 
 # opset 10 tests

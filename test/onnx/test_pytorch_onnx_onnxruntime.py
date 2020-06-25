@@ -19,7 +19,6 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptT
                                  skipIfUnsupportedOpsetVersion, skipIfNoLapack)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from torch.onnx import TrainingMode
 import model_defs.word_language_model as word_language_model
 import torchvision
 import onnx
@@ -50,8 +49,7 @@ def ort_test_with_input(ort_sess, input, output, rtol, atol):
 
 def run_model_test(self, model, batch_size=2, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                   example_outputs=None, training=None,
-                   do_constant_folding=True,
+                   example_outputs=None, do_constant_folding=True,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
                    fixed_batch_size=False):
@@ -75,7 +73,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         torch.onnx._export(model, input_copy, f,
                            opset_version=self.opset_version,
-                           example_outputs=output, training=training, verbose=True,
+                           example_outputs=output,
                            do_constant_folding=do_constant_folding,
                            keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                            dynamic_axes=dynamic_axes,
@@ -112,13 +110,13 @@ class TestONNXRuntime(unittest.TestCase):
         np.random.seed(seed=0)
         self.is_script_test_enabled = False
 
-    def run_test(self, model, input, rtol=1e-3, atol=1e-7, training=None, do_constant_folding=True,
+    def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
-                                  training=training, do_constant_folding=do_constant_folding,
+                                  do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size)
@@ -314,13 +312,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         model = Fuse()
         x = torch.randn(2, 3, 2, 2, requires_grad=True)
-        self.run_test(model, (x,), training=TrainingMode.TRAINING, rtol=0.1, atol=0.1)
-        self.run_test(model, (x,), training=TrainingMode.EVAL)
-
-    def test_fuse_resnet18(self):
-        model = torchvision.models.resnet18(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), training=TrainingMode.EVAL)
+        self.run_test(model, (x,))
 
     def test_reshape_constant_fold(self):
         class Reshape(torch.nn.Module):
