@@ -473,7 +473,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                          operator_export_type,
                                                          opset_version)
         val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
-        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
+        val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type, training)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, propagate, _retain_param_name,
