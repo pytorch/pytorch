@@ -125,6 +125,23 @@ Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dims_physical = self_physical.getPhysicalDims(dims);
+
+  VmapDimVector all_dims_physical;
+  all_dims_physical.reserve(self_physical.tensor().dim());
+  for (int64_t bdim = 0; bdim < self_physical.numBatchDims(); bdim++) {
+    all_dims_physical.push_back(bdim); 
+  }
+  all_dims_physical.insert(
+      all_dims_physical.end(),
+      dims_physical.begin(),
+      dims_physical.end());
+  auto result = self_physical.tensor().permute(all_dims_physical);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 void batchedTensorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_CHECK(false, "NYI: Calling ", op.schema().name(), " inside of vmap");
 }
@@ -148,6 +165,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unsqueeze", unsqueeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
+  m.impl("permute", permute_batching_rule);
 }
 
 } // namespace at

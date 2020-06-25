@@ -816,4 +816,38 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
   }
 }
 
+// Basic test for BatchedTensor::permute
+TEST(VmapTest, TestBatchedTensorPermute) {
+  {
+    // Basic test
+    auto tensor = at::randn({2, 3, 5});  // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+
+    auto batched_out = batched.permute({1, 0});
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.permute({0, 2, 1})));
+  }
+  {
+    // Test with multiple levels
+    auto tensor = at::randn({2, 3, 5, 7, 11});  // NOLINT
+    auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
+
+    auto batched_out = batched.permute({2, 1, 0});
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.permute({0, 1, 4, 3, 2})));
+  }
+  {
+    // Negative dims
+    auto tensor = at::randn({2, 3, 5, 7});  // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+
+    auto batched_out = batched.permute({-1, -2, -3});
+    const auto& out = maybeGetBatched(batched_out)->value();
+    ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
+    ASSERT_TRUE(at::allclose(out, tensor.permute({0, -1, -2, -3})));
+  }
+}
+
 } // namespace
