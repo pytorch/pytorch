@@ -232,10 +232,12 @@ def scatter(g, self, dim, index, src):
 @parse_args('v', 'i', 'none')
 def cumsum(g, self, dim, dtype=None):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
-    csum = g.op("CumSum", self, dim_tensor)
     if dtype and dtype.node().kind() != 'prim::Constant':
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-        csum = g.op("Cast", csum, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+        cast = g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+    else:
+        cast = self
+    csum = g.op("CumSum", cast, dim_tensor)
     return csum
 
 
