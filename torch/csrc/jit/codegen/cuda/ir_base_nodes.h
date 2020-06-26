@@ -71,21 +71,21 @@ struct TORCH_CUDA_API Statement {
   static Statement* mutatorDispatch(T mutator, Statement*);
 
   // Accessor functions to types. Vals always have a DataType, Exprs never do
-  virtual c10::optional<ValType> getValType() const noexcept {
+  virtual c10::optional<ValType> getValType() const {
     return c10::nullopt;
   }
   virtual c10::optional<DataType> getDataType() const {
     return c10::nullopt;
   }
-  virtual c10::optional<ExprType> getExprType() const noexcept {
+  virtual c10::optional<ExprType> getExprType() const {
     return c10::nullopt;
   }
 
   // Short cut to figure out if it is a value/expression
-  bool isVal() const noexcept {
+  bool isVal() const {
     return getValType() != c10::nullopt;
   }
-  bool isExpr() const noexcept {
+  bool isExpr() const {
     return getExprType() != c10::nullopt;
   }
 
@@ -119,12 +119,12 @@ struct TORCH_CUDA_API Statement {
   }
 
   // Return the fusion this statement belongs to
-  Fusion* fusion() const noexcept {
+  Fusion* fusion() const {
     return fusion_;
   }
 
   // Return the int that represents its name
-  StmtNameType name() const noexcept {
+  StmtNameType name() const {
     return name_;
   }
 
@@ -196,7 +196,7 @@ struct TORCH_CUDA_API Val : public Statement {
   Val(Val&& other) = delete;
   Val& operator=(Val&& other) = delete;
 
-  c10::optional<ValType> getValType() const noexcept override {
+  c10::optional<ValType> getValType() const override {
     return vtype_;
   }
 
@@ -249,7 +249,7 @@ struct TORCH_CUDA_API Val : public Statement {
 
 struct TORCH_CUDA_API Scope {
  public:
-  const std::vector<Expr*>& exprs() const noexcept {
+  const std::vector<Expr*>& exprs() const {
     return exprs_;
   }
 
@@ -310,8 +310,14 @@ struct TORCH_CUDA_API Scope {
  *   binary operations on tensors, scalar values, or a combination, a thread all
  *   reduce, for loops
  */
-struct TORCH_CUDA_API IRInputOutput {
+class TORCH_CUDA_API IRInputOutput {
+ public:
   virtual ~IRInputOutput() = default;
+
+  void clear() {
+    inputs_.clear();
+    outputs_.clear();
+  }
 
   // Returns if Val is an input or output of this IRInputOutput instance
   bool hasInput(const Val* const input) const;
@@ -326,10 +332,10 @@ struct TORCH_CUDA_API IRInputOutput {
     outputs_.insert(outputs_.begin() + pos, output);
   }
 
-  const std::deque<Val*>& inputs() const noexcept {
+  const std::deque<Val*>& inputs() const {
     return inputs_;
   }
-  const std::deque<Val*>& outputs() const noexcept {
+  const std::deque<Val*>& outputs() const {
     return outputs_;
   }
 
@@ -353,10 +359,10 @@ struct TORCH_CUDA_API IRInputOutput {
   void removeInput(Val* val);
   void removeOutput(Val* val);
 
-  std::deque<Val*>::size_type nInputs() const noexcept {
+  std::deque<Val*>::size_type nInputs() const {
     return inputs_.size();
   }
-  std::deque<Val*>::size_type nOutputs() const noexcept {
+  std::deque<Val*>::size_type nOutputs() const {
     return outputs_.size();
   }
 
@@ -405,9 +411,9 @@ struct TORCH_CUDA_API IRInputOutput {
  */
 struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
  public:
-  virtual ~Expr() = default;
   Expr() = delete;
-  Expr(ExprType _type);
+  explicit Expr(ExprType _type);
+  virtual ~Expr() = default;
 
   Expr(const Expr& other) = delete;
   Expr& operator=(const Expr& other) = delete;
@@ -415,10 +421,11 @@ struct TORCH_CUDA_API Expr : public Statement, IRInputOutput {
   Expr(Expr&& other) = delete;
   Expr& operator=(Expr&& other) = delete;
 
-  c10::optional<ExprType> getExprType() const noexcept override {
+  c10::optional<ExprType> getExprType() const override {
     return type_;
   }
-  ExprType type() const noexcept {
+
+  ExprType type() const {
     return type_;
   }
 

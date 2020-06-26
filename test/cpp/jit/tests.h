@@ -105,6 +105,7 @@ namespace jit {
   _(Interp)                       \
   _(GPU_IrGraphGenerator)         \
   _(GPU_FusionDispatch)           \
+  _(GPU_FusionClear)              \
   _(GPU_FusionSimpleArith)        \
   _(GPU_FusionExprEvalConstants)  \
   _(GPU_FusionExprEvalBindings)   \

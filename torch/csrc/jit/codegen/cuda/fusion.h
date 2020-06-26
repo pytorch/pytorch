@@ -101,20 +101,22 @@ struct InputsOf : public IterVisitor {
  * duplicating all associated values and exprs. Fusion is considered to SSA,
  * though this could also change in the future if there is a good reason to do
  * so.
+ *
+ * The Fusion owns the whole IR graph (Vals and Exprs)
  */
+class TORCH_CUDA_API Fusion : public IRInputOutput {
+ public:
+  Fusion() = default;
 
-struct TORCH_CUDA_API Fusion : public IRInputOutput {
-  Fusion() {}
-
-  // Not copyable
   Fusion(const Fusion& other) = delete;
   Fusion& operator=(const Fusion& other) = delete;
 
   Fusion(Fusion&& other) = delete;
   Fusion& operator=(Fusion&& other) = delete;
 
-  // When destroyed clean up all IR associated with this fusion
   ~Fusion();
+
+  void clear() noexcept;
 
   // Break dependency chains associated with Expr, remove references to expr
   // delete expr.
@@ -228,19 +230,20 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   }
 
  private:
+  // Return an int that monotonically increases for each val/expr, some are
+  // explicitly incremented by type.
+  StmtNameType getValName(ValType vtype);
+  StmtNameType getExprName();
+
+ private:
   // Sets of all Vals/Exprs registered with this fusion
   // (val_deque_ is not owning the objects)
   std::unordered_set<Val*> val_set_;
   std::deque<Val*> val_deque_;
   std::unordered_set<Expr*> expr_set_;
 
-  // Return an int that monotonically increases for each val/expr, some are
-  // explicitly incremented by type.
-  StmtNameType getValName(ValType vtype);
-  StmtNameType getExprName();
-
   // map from valtype to individual name counters
-  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map = {
+  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_ = {
       {ValType::TensorView, 0},
       {ValType::TensorDomain, 0},
       {ValType::IterDomain, 0},

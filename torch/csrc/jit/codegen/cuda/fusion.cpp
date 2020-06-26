@@ -58,13 +58,37 @@ std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
 }
 
 Fusion::~Fusion() {
+  clear();
+}
+
+void Fusion::clear() noexcept {
+  // Free the owned values
   for (auto ptr : val_set_) {
     delete ptr;
   }
+
+  // Free the owned expressions
   for (auto ptr : expr_set_) {
     delete ptr;
   }
-};
+
+  val_set_.clear();
+  val_deque_.clear();
+  expr_set_.clear();
+
+  for (auto& kv : val_type_name_map_) {
+    kv.second = 0;
+  }
+
+  val_name_counter_ = 0;
+  expr_name_counter_ = 0;
+
+  origin_.clear();
+  uses_.clear();
+  values_map_.clear();
+
+  IRInputOutput::clear();
+}
 
 void Fusion::removeExpr(Expr* expr) {
   assertInFusion(expr, "Cannot remove expr ");
@@ -355,10 +379,11 @@ const Expr* Fusion::origin(const Val* val) const {
 }
 
 StmtNameType Fusion::getValName(ValType vtype) {
-  if (val_type_name_map.find(vtype) != val_type_name_map.end())
-    return val_type_name_map[vtype]++;
+  if (val_type_name_map_.find(vtype) != val_type_name_map_.end())
+    return val_type_name_map_[vtype]++;
   return val_name_counter_++;
 }
+
 StmtNameType Fusion::getExprName() {
   return expr_name_counter_++;
 }

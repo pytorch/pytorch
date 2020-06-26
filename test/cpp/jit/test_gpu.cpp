@@ -346,6 +346,86 @@ void testGPU_FusionExprEvalPostLower() {
   checkIntValue(&eval_context, tid_x, 128);
 }
 
+void testGPU_FusionClear() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  // 1. Create a dummy IR
+
+  {
+    TensorView* tv0 = makeDummyTensor(2);
+    TensorView* tv1 = makeDummyTensor(2);
+
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    TensorView* tv2 = add(tv1, new Float(2.0));
+    TensorView* tv3 = add(tv0, tv2);
+
+    fusion.addOutput(tv3);
+
+    tv3->split(0, 4);
+    tv0->computeAt(tv3, 1);
+    tv1->computeAt(tv3, 1);
+
+    tv3->axis(0)->parallelize(ParallelType::BIDx);
+    tv2->axis(1)->parallelize(ParallelType::Unroll);
+    tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  // 2. Clear the IR
+
+  fusion.clear();
+
+  TORCH_CHECK(fusion.exprs().empty());
+  TORCH_CHECK(fusion.vals().empty());
+
+  TORCH_CHECK(fusion.inputs().empty());
+  TORCH_CHECK(fusion.outputs().empty());
+
+  TORCH_CHECK(!fusion.hasReduction());
+  TORCH_CHECK(!fusion.hasBlockReduction());
+  TORCH_CHECK(!fusion.hasGridReduction());
+
+  // 3. Rebuild the IR
+
+  {
+    TensorView* tv0 = makeDummyTensor(3);
+    TensorView* tv1 = makeDummyTensor(3);
+    TensorView* tv2 = add(tv1, new Float(2.0));
+    TensorView* tv3 = add(tv0, tv2);
+
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+    fusion.addOutput(tv3);
+
+    tv3->reorder({{0, 2}, {2, 0}});
+    tv3->split(-1, 4);
+    tv3->reorder({{2, 0}, {3, 1}, {0, 3}});
+    tv0->computeAt(tv3, -1);
+    tv1->computeAt(tv3, -1);
+  }
+
+  prog.device_ = 0;
+  prog.grid(4);
+  prog.block(8);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor input1 = at::randn({16, 8, 8}, options);
+  at::Tensor input2 = at::randn_like(input1);
+  at::Tensor output = at::empty_like(input1);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input1, input2}, {output});
+
+  at::Tensor tv2_ref = input2 + 2.0;
+  at::Tensor output_ref = input1 + tv2_ref;
+
+  TORCH_CHECK(output_ref.equal(output));
+}
+
 void testGPU_FusionSimpleArith() {
   std::stringstream ss1, ss2;
 
