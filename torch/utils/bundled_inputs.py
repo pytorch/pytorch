@@ -134,8 +134,10 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[T, str]:
             return arg.clone(), ref
         # Example inputs commonly come from torch.zeros, torch.ones, or torch.full.
         # These can be represented compactly.
-        if arg.is_contiguous() and (arg == arg.flatten()[0]).all().item():
-            return torch.tensor([arg.flatten()[0]]).expand(*arg.size()), f"{ref}.contiguous()"
+        for fmt in [torch.contiguous_format, torch.channels_last]:
+            if arg.is_contiguous(memory_format=fmt) and (arg == arg.flatten()[0]).all().item():
+                return (torch.tensor([arg.flatten()[0]]).expand(*arg.size()),
+                        f"{ref}.contiguous(memory_format={fmt})")
         # Prevent big tensors from being bundled by default.
         # TODO: Provide more useful diagnostics.
         raise Exception(

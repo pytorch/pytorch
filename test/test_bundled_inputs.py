@@ -37,6 +37,8 @@ class TestBundledInputs(TestCase):
             (torch.tensor(range(1 << 16))[-8:],),
             # Large zero tensor.
             (torch.zeros(1 << 16),),
+            # Large channels-last ones tensor.
+            (torch.ones(4, 8, 32, 32).contiguous(memory_format=torch.channels_last),),
             # Special encoding of random tensor.
             (torch.utils.bundled_inputs.bundle_randn(1 << 16),),
         ]
@@ -52,24 +54,24 @@ class TestBundledInputs(TestCase):
 
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
-        self.assertEqual(loaded.get_num_bundled_inputs(), 5)
-        self.assertEqual(len(inflated), 5)
+        self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
+        self.assertEqual(len(inflated), len(samples))
         self.assertTrue(loaded.run_on_bundled_input(0) is inflated[0][0])
 
         for idx, inp in enumerate(inflated):
             self.assertIsInstance(inp, tuple)
             self.assertEqual(len(inp), 1)
             self.assertIsInstance(inp[0], torch.Tensor)
-            if idx != 4:
+            if idx != 5:
                 # Strides might be important for benchmarking.
                 self.assertEqual(inp[0].stride(), samples[idx][0].stride())
                 self.assertEqual(inp[0], samples[idx][0], exact_dtype=True)
 
         # This tensor is random, but with 100,000 trials,
         # mean and std had ranges of (-0.0154, 0.0144) and (0.9907, 1.0105).
-        self.assertEqual(inflated[4][0].shape, (1 << 16,))
-        self.assertAlmostEqual(inflated[4][0].mean().item(), 0, delta=0.025)
-        self.assertAlmostEqual(inflated[4][0].std().item(), 1, delta=0.02)
+        self.assertEqual(inflated[5][0].shape, (1 << 16,))
+        self.assertAlmostEqual(inflated[5][0].mean().item(), 0, delta=0.025)
+        self.assertAlmostEqual(inflated[5][0].std().item(), 1, delta=0.02)
 
 
     def test_large_tensor_with_inflation(self):
