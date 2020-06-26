@@ -49,7 +49,8 @@ class Conf:
 
         cuda_parms = []
         if self.cuda_version:
-            cuda_parms.extend(["cuda" + self.cuda_version, "cudnn7"])
+            cudnn = "cudnn8" if self.cuda_version.startswith("11.") else "cudnn7"
+            cuda_parms.extend(["cuda" + self.cuda_version, cudnn])
         result = leading + ["linux", self.distro] + cuda_parms + self.parms
         if not for_docker and self.parms_list_ignored_for_docker_image is not None:
             result = result + self.parms_list_ignored_for_docker_image
