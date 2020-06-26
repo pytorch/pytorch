@@ -376,7 +376,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   to the creation of this RRef on the remote node has been recorded.
               )")
           // not releasing GIL to avoid context switch
-          .def("__str__", &PyRRef::str);
+          .def("__repr__", &PyRRef::str);
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,

@@ -9,7 +9,7 @@ import os
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 
@@ -113,12 +113,12 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
 
 
 class UnaryOpTest(serial.SerializedTestCase):
-    def _test_unary_op(self, opname):
+    @settings(max_examples=1)
+    def _test_unary_op(self, opname, value):
         workspace.ResetWorkspace()
         n = 1
         m = 10001
-        X = np.linspace(-25, 25, num=m, dtype=np.float32)
-        assert 0.0 in X
+        X = np.linspace(-value, value, num=m, dtype=np.float32)
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
         pred_net.external_input.append("X")
@@ -139,6 +139,7 @@ class UnaryOpTest(serial.SerializedTestCase):
                 ['X'],
                 ['Y'])
         )
+        print("REF NET = {}".format(ref_net))
 
         shape_hints = {"X": (n, m)}
         pred_net_onnxified = onnxifi_caffe2_net(pred_net,
@@ -173,13 +174,16 @@ class UnaryOpTest(serial.SerializedTestCase):
             assert(0)
 
     def test_sigmoid(self):
-        self._test_unary_op("Sigmoid")
+        self._test_unary_op("Sigmoid", value=20)
 
     def test_tanh(self):
-        self._test_unary_op("Tanh")
+        self._test_unary_op("Tanh", value=20)
 
     def _test_swish(self):
-        self._test_unary_op("Swish")
+        self._test_unary_op("Swish", value=20)
+
+    def _test_logit(self):
+        self._test_unary_op("Logit", value=1)
 
 
 class ReluTest(serial.SerializedTestCase):
