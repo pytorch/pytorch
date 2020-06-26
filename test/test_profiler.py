@@ -4,7 +4,7 @@ import unittest
 
 import torch
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_ASAN)
+    TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS)
 from torch.autograd.profiler import profile
 
 try:
@@ -16,6 +16,7 @@ except ImportError:
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
 @unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
+@unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfiler_cuda(TestCase):
     def test_mem_leak(self):

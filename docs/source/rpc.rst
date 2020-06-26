@@ -1,8 +1,3 @@
-:orphan:
-
-.. contents:: :local:
-    :depth: 2
-
 .. _distributed-rpc-framework:
 
 Distributed RPC Framework
@@ -252,7 +247,7 @@ parameters during training. See :ref:`remote-reference-protocol` for more
 details.
 
 .. autoclass:: RRef
-    :inherited-members:
+    :members:
 
 
 .. toctree::
