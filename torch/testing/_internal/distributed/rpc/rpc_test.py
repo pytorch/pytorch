@@ -445,8 +445,8 @@ def async_add_multi_fanout(to, x, num, step):
 
 class AsyncExecutionClass:
 
-    @rpc.functions.async_execution
     @staticmethod
+    @rpc.functions.async_execution
     def static_async_add(to, x, y, z):
         return rpc.rpc_async(to, torch.add, args=(x, y)).then(
             lambda fut: fut.wait() + z
