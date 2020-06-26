@@ -43,6 +43,15 @@ std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     {ONNX_UINT32, at::kLong},
 };
 
+void eraseUnusedBlockInputs(Block* b) {
+  for (size_t i_1 = b->inputs().size(); i_1 > 0; --i_1) {
+    size_t i = i_1 - 1;
+    if (!b->inputs().at(i)->hasUses()) {
+      b->eraseInput(i);
+    }
+  }
+}
+
 void handleNegativeStartEndIndex(
     int64_t& start,
     int64_t& end,
@@ -103,7 +112,10 @@ c10::optional<at::Tensor> runTorchSlice_opset9(
 c10::optional<at::Tensor> runTorchSlice_opset10(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues) {
-  if (inputTensorValues.size() < 3 || inputTensorValues.size() > 5) {
+  const int maxSliceInputCount = 5;
+  const int minSliceInputCount = 3;
+  if (inputTensorValues.size() < minSliceInputCount ||
+      inputTensorValues.size() > maxSliceInputCount) {
     std::cerr
         << "Warning: Constant folding - Invalid number of inputs found for opset 10 or 11 onnx::Slice op. "
         << "Constant folding not applied." << std::endl;
@@ -249,11 +261,9 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Cast) {
     assert(inputTensorValues.size() == 1);
-    if (node->hasAttributeS("to") &&
-        onnxTypeToScalarTypeMap.find(node->i(attr::to)) !=
-            onnxTypeToScalarTypeMap.end()) {
-      updated_val =
-          inputTensorValues[0].to(onnxTypeToScalarTypeMap[node->i(attr::to)]);
+    if (node->hasAttributeS("to") && ONNXTypeToATenType(node->i(attr::to))) {
+      updated_val = inputTensorValues[0].to(
+          ONNXTypeToATenType(node->i(attr::to)).value());
       return c10::optional<at::Tensor>(updated_val);
     }
     return c10::nullopt;

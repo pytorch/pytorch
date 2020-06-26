@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
-#include <torch/csrc/jit/jit_log.h>
+#include <onnx/onnx_pb.h>
 
 namespace torch {
 namespace jit {
@@ -59,5 +59,40 @@ Node* addNodeToBlock(Block* block, Value* input, Symbol kind) {
   }
   return new_node;
 }
+
+c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
+  switch (onnx_type) {
+    case ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED:
+      return at::ScalarType::Undefined;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT:
+      return at::kFloat;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_UINT8:
+      return at::kByte;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_INT8:
+      return at::kChar;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_INT16:
+      return at::kShort;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_INT32:
+      return at::kInt;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_INT64:
+      return at::kLong;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_BOOL:
+      return at::kBool;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16:
+      return at::kHalf;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_DOUBLE:
+      return at::kDouble;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX64:
+      return at::kComplexFloat;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX128:
+      return at::kComplexDouble;
+    case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
+      return at::kBFloat16;
+    default:
+      TORCH_CHECK("unexpected tensor scalar type");
+  }
+  return c10::optional<at::ScalarType>{};
+}
+
 } // namespace jit
 } // namespace torch
