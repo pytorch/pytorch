@@ -285,6 +285,34 @@ class RNNBase(torch.nn.Module):
         return qRNNBase
 
 
+    def _weight_bias(self):
+        # Returns a dict of weights and biases
+        weight_bias_dict = {'weight' : {}, 'bias' : {}}
+        count = 0
+        num_directions = 2 if self.bidirectional else 1
+        for layer in range(self.num_layers):
+            for direction in range(num_directions):
+                suffix = '_reverse' if direction == 1 else ''
+                key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                # packed weights are part of torchbind class, CellParamsSerializationType
+                # Within the packed weight class, the weight and bias are accessible as Tensors
+                packed_weight_bias = self._all_weight_values[count].param.__getstate__()[0][4]
+                weight_bias_dict['weight'][key_name1] = packed_weight_bias[0].__getstate__()[0][0]
+                weight_bias_dict['weight'][key_name2] = packed_weight_bias[1].__getstate__()[0][0]
+                key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                weight_bias_dict['bias'][key_name1] = packed_weight_bias[0].__getstate__()[0][1]
+                weight_bias_dict['bias'][key_name2] = packed_weight_bias[1].__getstate__()[0][1]
+                count = count + 1
+        return weight_bias_dict
+
+    def get_weight(self):
+        return self._weight_bias()['weight']
+
+    def get_bias(self):
+        return self._weight_bias()['bias']
+
 class LSTM(RNNBase):
 
     _FLOAT_MODULE = nn.LSTM
@@ -519,6 +547,35 @@ class RNNCellBase(torch.nn.Module):
         qRNNCellBase._packed_weight_hh = process_weights(mod.weight_hh, mod.bias_hh, dtype)
         return qRNNCellBase
 
+    def _weight_bias(self):
+        # Returns a dict of weights and biases
+        weight_bias_dict = {'weight' : {}, 'bias' : {}}
+        w1, b1 = self._packed_weight_ih.__getstate__()[0]
+        w2, b2 = self._packed_weight_hh.__getstate__()[0]
+        weight_bias_dict['weight']['weight_ih'] = w1
+        weight_bias_dict['weight']['weight_hh'] = w2
+        weight_bias_dict['bias']['bias_ih'] = b1
+        weight_bias_dict['bias']['bias_hh'] = b2
+        return weight_bias_dict
+
+    def get_weight(self):
+        return self._weight_bias()['weight']
+
+    def get_bias(self):
+        return self._weight_bias()['bias']
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(RNNCellBase, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + '_packed_weight_ih'] = self._packed_weight_ih
+        destination[prefix + '_packed_weight_hh'] = self._packed_weight_hh
+
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self._packed_weight_ih = state_dict.pop(prefix + '_packed_weight_ih')
+        self._packed_weight_hh = state_dict.pop(prefix + '_packed_weight_hh')
+        super(RNNCellBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                       missing_keys, unexpected_keys, error_msgs)
 
 class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.

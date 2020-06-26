@@ -64,6 +64,7 @@ types = [
     torch.HalfTensor,
 ]
 
+
 def make_sparse_tensor(t, n, *sizes):
     assert t.is_sparse
     tensor = t()
@@ -75,6 +76,7 @@ def make_sparse_tensor(t, n, *sizes):
     return t(i, v, torch.Size(sizes))
 
 _cycles_per_ms = None
+
 
 def get_cycles_per_ms():
     """Approximate number of cycles per millisecond for torch.cuda._sleep"""
@@ -2055,6 +2057,66 @@ t2.start()
         self.assertEqual(growth_tracker, 0)
         self.assertEqual(scale, 2.0)
 
+    def test_grad_scaling_unscale_sparse(self, device="cuda", dtype=torch.float):
+        scaler = torch.cuda.amp.GradScaler()
+
+        inv_scale = torch.tensor([0.25], dtype=dtype, device=device)
+        found_inf = torch.empty((1,), dtype=dtype, device=device)
+        cur = found_inf.device
+
+        # As of d0c925f (4/16/20), docs are unclear about best API for sparse cuda tensor construction.
+        # https://pytorch.org/docs/master/tensors.html shows torch.sparse_coo_tensor(...), but it has no docstring.
+        # The same page shows several tensors with layout=torch.sparse_coo, but no constructors using that layout.
+        # Meanwhile, https://pytorch.org/docs/master/sparse.html shows torch.sparse.FloatTensor(...), which looks
+        # legacy and does not accept a device="cuda" kwarg.  Going with torch.sparse_coo_tensor.
+        i = torch.tensor([[0, 1, 1],
+                          [2, 0, 2]], device="cuda", dtype=torch.int64)
+        v = torch.tensor([16., 32., 64.], device="cuda", dtype=torch.float)
+        s = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
+
+        p = s.clone()
+        assert p.is_sparse
+        opt = torch.optim.SGD([p], lr=1.)
+
+        p.grad = s.clone()
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
+        self.assertEqual(found_inf, 0.0)
+        self.assertTrue(torch.allclose(p.grad.to_dense(), (s / 4).to_dense()))
+
+        v = torch.FloatTensor([16., 32., float('inf')])
+        p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
+        self.assertEqual(found_inf, 1.0)
+
+        v = torch.FloatTensor([16., 32., float('nan')])
+        p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
+        self.assertEqual(found_inf, 1.0)
+
+        p = s.clone().half()
+        assert p.is_sparse
+        opt = torch.optim.SGD([p], lr=1.)
+
+        p.grad = s.clone().half()
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
+        self.assertEqual(found_inf, 0.0)
+        self.assertTrue(torch.allclose(p.grad.to_dense(), (s.half() / 4).to_dense()))
+
+        # Creates fp16 sparse tensor with duplicated indices (uncoalesced).  The uncoalesced representation
+        # does not overflow in fp16, but the coalesced representation would, because 64000 + 64000 > fp16 max.
+        # _amp_non_finite_check_and_unscale_ should report an overflow here.
+        i = torch.LongTensor([[0, 1, 0],
+                              [2, 0, 2]])
+        v = torch.FloatTensor([64000., 32., 64000.])
+        p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=torch.float16)
+        found_inf.zero_()
+        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
+        self.assertEqual(found_inf, 1.0)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_device_as_key(self):
         # Ensure that different instances of "device" objects that point to the same device
@@ -2644,7 +2706,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op_with_args in self.autocast_lists.torch_fp16:
                 skip_test = False
                 op, args = op_with_args[0], op_with_args[1]
@@ -2671,7 +2733,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp16(self):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
@@ -2682,7 +2744,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp16(self):
-        with torch.backends.cudnn.flags(deterministic=True):
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.methods_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=None)
 
@@ -2764,14 +2826,14 @@ t2.start()
             loss = output.sum()
         loss.backward()
 
-    def test_autocast_custom_disabled(self):
+    def test_autocast_custom_cast_inputs(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
             @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
-            def forward(ctx, a, container):
+            def forward(ctx, a, container, expect_type):
                 b = container[1][0]
-                self.assertTrue(a.dtype is torch.float32)
-                self.assertTrue(b.dtype is torch.float32)
+                self.assertTrue(a.dtype is expect_type)
+                self.assertTrue(b.dtype is expect_type)
                 self.assertFalse(torch.is_autocast_enabled())
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
@@ -2781,7 +2843,7 @@ t2.start()
             def backward(ctx, grad):
                 self.assertFalse(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
-                return grad.mm(b.t()), None
+                return grad.mm(b.t()), None, None
 
         mymm = MyMM.apply
 
@@ -2792,9 +2854,15 @@ t2.start()
         y = (0, {0: torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=False)})
 
         with torch.cuda.amp.autocast():
-            output = mymm(x, y)
+            output = mymm(x, y, torch.float32)
             self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
+        loss.backward()
+
+        # Tests if custom_fwd becomes a no-op when mymm runs outside an autocast-enabled region.
+        output = mymm(x, y, torch.float16)
+        self.assertTrue(output.dtype is torch.float16)
+        loss = output.sum()
         loss.backward()
 
     def test_autocast_cat_jit(self):

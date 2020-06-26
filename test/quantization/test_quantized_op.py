@@ -306,34 +306,23 @@ class TestQuantizedOps(TestCase):
            alpha=st.floats(0.01, 10.0, allow_nan=False, allow_infinity=False))
     def test_qelu(self, X, alpha):
         X, (scale, zero_point, torch_type) = X
+        output_scale = 0.5
+        output_zero_point = 1
 
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
-        op = torch.nn.quantized.functional.elu
 
         # calculate ELU(dqX) and quantize
         dqX = qX.dequantize()
         dqY_hat = dqX.clone()
-        dqY_hat[dqX < 0] = alpha * (torch.exp(dqY_hat[dqX < 0]) - 1.)
-        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=scale, zero_point=zero_point,
+        dqY_hat = torch.nn.functional.elu(dqX, alpha)
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale, zero_point=output_zero_point,
                                            dtype=torch_type)
 
-        # test regular
-        qY = op(qX, alpha=alpha)
+        qY = torch.nn.quantized.functional.elu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
                          msg="F.elu failed ({} vs {})".format(qY, qY_hat))
-
-        # test inplace
-        qXcopy = qX.clone()
-        op(qXcopy, alpha=alpha, inplace=True)
-        self.assertEqual(qXcopy, qY_hat,
-                         msg="F.elu_ failed ({} vs {})".format(qXcopy, qY_hat))
-
-        # test explicit scale and zp
-        qYout = op(qX, alpha=alpha, scale=scale, zero_point=zero_point)
-        self.assertEqual(qYout, qY_hat,
-                         msg="F.elu.out failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
@@ -1223,50 +1212,8 @@ class TestQuantizedOps(TestCase):
                              msg=error_message.format(name + '.zero_point', scale,
                              X_hat.q_zero_point()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=1, max_side=10),
-                       qparams=hu.qparams(dtypes=torch.quint8)),
-           output_size_h=st.integers(1, 10),
-           output_size_w=st.integers(1, 10))
-    def test_adaptive_avg_pool2d(self, X, output_size_h, output_size_w):
-        X, (scale, zero_point, torch_type) = X
-
-        H, W = X.shape[-2:]
-        assume(output_size_h <= H)
-        assume(output_size_w <= W)
-        if output_size_h == output_size_w:
-            output_size = output_size_h
-        else:
-            output_size = (output_size_h, output_size_w)
-        X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
-
-        # Run reference on int_repr + round to avoid double rounding error.
-        X_ref = torch.nn.functional.adaptive_avg_pool2d(
-            qX.int_repr().to(torch.float), output_size).round()
-
-        ops_under_test = {
-            "nn.functional": torch.nn.functional.adaptive_avg_pool2d,
-            "nn.quantized.functional":
-                torch.nn.quantized.functional.adaptive_avg_pool2d
-        }
-
-        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
-
-        for name, op in ops_under_test.items():
-            qX_hat = op(qX, output_size=output_size)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                                       msg=error_message.format(name, X_ref, qX_hat))
-            self.assertEqual(scale, qX_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
-            self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                                                      qX_hat.q_zero_point()))
-
     """Tests adaptive average pool operation on NHWC quantized tensors."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
            output_size_h=st.integers(1, 10),
@@ -1284,10 +1231,20 @@ class TestQuantizedOps(TestCase):
         if X.shape[1] < 176:
             X = np.repeat(X, 176 / X.shape[1], 1)
 
-        X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
-        X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
-        qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
+        if X.ndim == 4:
+            X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
+            X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
+            qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw),
+                                           scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type).permute([0, 3, 1, 2])
+        else:  # ndim == 3
+            X_nchw = np.ascontiguousarray(X.transpose([1, 2, 0]))
+            X = torch.from_numpy(X_nchw).permute([2, 0, 1])
+            qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw),
+                                           scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type).permute([2, 0, 1])
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.adaptive_avg_pool2d(qX.int_repr().to(torch.double), output_size).round()
@@ -1298,6 +1255,132 @@ class TestQuantizedOps(TestCase):
             "nn.functional": torch.nn.functional.adaptive_avg_pool2d,
             "nn.quantized.functional":
                 torch.nn.quantized.functional.adaptive_avg_pool2d
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            X_hat = op(qX, output_size=output_size)
+            self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
+                                       msg="{} results are off".format(name))
+            self.assertEqual(scale, X_hat.q_scale(),
+                             msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+            self.assertEqual(zero_point, X_hat.q_zero_point(),
+                             msg=error_message.format(name + '.zero_point', scale,
+                                                      X_hat.q_zero_point()))
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=5,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           output_size_d=st.integers(1, 10),
+           output_size_h=st.integers(1, 10),
+           output_size_w=st.integers(1, 10))
+    def test_adaptive_avg_pool(self, X, output_size_d, output_size_h,
+                               output_size_w):
+        X, (scale, zero_point, torch_type) = X
+        ndim = X.ndim
+        dim_to_check = []
+        if ndim <= 4:
+            dim_to_check.append(2)
+        if ndim >= 4:
+            dim_to_check.append(3)
+
+        D, H, W = X.shape[-3:]
+        assume(output_size_d <= D)
+        assume(output_size_h <= H)
+        assume(output_size_w <= W)
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        for dim in dim_to_check:
+            if dim == 2:
+                if output_size_h == output_size_w:
+                    output_size = output_size_h
+                else:
+                    output_size = (output_size_h, output_size_w)
+            elif dim == 3:
+                if output_size_d == output_size_h == output_size_w:
+                    output_size = output_size_h
+                else:
+                    output_size = (output_size_d, output_size_h, output_size_w)
+
+            # Run reference on int_repr + round to avoid double rounding error.
+            ref_op = getattr(torch.nn.functional, 'adaptive_avg_pool{}d'.format(dim))
+            X_ref = ref_op(qX.int_repr().to(torch.float), output_size).round()
+
+            ops_under_test = {
+                "nn.functional":
+                    getattr(torch.nn.functional, 'adaptive_avg_pool{}d'.format(dim)),
+                "nn.quantized.functional":
+                    getattr(torch.nn.quantized.functional, 'adaptive_avg_pool{}d'.format(dim))
+            }
+
+            error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+
+            for name, op in ops_under_test.items():
+                qX_hat = op(qX, output_size=output_size)
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                self.assertEqualIgnoreType(
+                    X_ref, qX_hat.int_repr(), atol=1.0,
+                    rtol=0, msg=error_message.format(name, X_ref, qX_hat))
+                self.assertEqual(
+                    scale, qX_hat.q_scale(),
+                    msg=error_message.format(name + '.scale', scale,
+                                             qX_hat.q_scale()))
+                self.assertEqual(
+                    zero_point, qX_hat.q_zero_point(),
+                    msg=error_message.format(name + '.zero_point', scale,
+                                             qX_hat.q_zero_point()))
+
+    """Tests adaptive average pool operation on NHWC quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=5,
+                                              min_side=1, max_side=10),
+                       qparams=hu.qparams(dtypes=torch.qint8)),
+           output_size_d=st.integers(1, 10),
+           output_size_h=st.integers(1, 10),
+           output_size_w=st.integers(1, 10))
+    def test_adaptive_avg_pool3d_ndhwc(self, X, output_size_d, output_size_h,
+                                       output_size_w):
+        X, (scale, zero_point, torch_type) = X
+        D, H, W = X.shape[-3:]
+        assume(output_size_d <= D)
+        assume(output_size_h <= H)
+        assume(output_size_w <= W)
+        if output_size_d == output_size_h == output_size_w:
+            output_size = output_size_h
+        else:
+            output_size = (output_size_d, output_size_h, output_size_w)
+
+        if X.shape[1] < 176:
+            X = np.repeat(X, 176 / X.shape[1], 1)
+
+        if X.ndim == 5:
+            X_ncdhw = np.ascontiguousarray(X.transpose([0, 2, 3, 4, 1]))
+            X = torch.from_numpy(X_ncdhw).permute([0, 4, 1, 2, 3])
+            qX = torch.quantize_per_tensor(torch.from_numpy(X_ncdhw),
+                                           scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type).permute([0, 4, 1, 2, 3])
+        else:  # ndim == 4
+            X_ncdhw = np.ascontiguousarray(X.transpose([1, 2, 3, 0]))
+            X = torch.from_numpy(X_ncdhw).permute([3, 0, 1, 2])
+            qX = torch.quantize_per_tensor(torch.from_numpy(X_ncdhw),
+                                           scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type).permute([3, 0, 1, 2])
+
+        # Run reference on int_repr + round to avoid double rounding error.
+        X_ref = torch.nn.functional.adaptive_avg_pool3d(
+            qX.int_repr().to(torch.double), output_size).round()
+
+        self.assertTrue(qX.stride() != sorted(qX.stride()))
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.adaptive_avg_pool3d,
+            "nn.quantized.functional":
+                torch.nn.quantized.functional.adaptive_avg_pool3d
         }
         error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
         for name, op in ops_under_test.items():
