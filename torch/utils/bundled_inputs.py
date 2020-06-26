@@ -153,3 +153,8 @@ def bundle_randn(*size, dtype=None):
     """Generate a tensor that will be inflated with torch.randn."""
     stub = torch.zeros(1, dtype=dtype).expand(*size)
     return InflatableArg(value=stub, fmt="torch.randn_like({})")
+
+
+def bundle_large_tensor(t):
+    """Wrap a tensor to allow bundling regardless of size."""
+    return InflatableArg(value=t, fmt="{}")

@@ -82,8 +82,7 @@ class TestBundledInputs(TestCase):
         sample_tensor = torch.randn(1 << 16)
         # We can store tensors with custom inflation functions regardless
         # of size, even if inflation is just the identity.
-        sample = torch.utils.bundled_inputs.InflatableArg(
-            value=sample_tensor, fmt="{}")
+        sample = torch.utils.bundled_inputs.bundle_large_tensor(sample_tensor)
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
             sm, [(sample,)])
 
