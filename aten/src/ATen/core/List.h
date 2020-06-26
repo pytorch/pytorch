@@ -51,6 +51,9 @@ template<class T, class Iterator>
 bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
 
 template<class T, class Iterator>
+bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
+
+template<class T, class Iterator>
 class ListElementReference final {
 public:
   operator T() const;

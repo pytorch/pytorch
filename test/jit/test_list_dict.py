@@ -238,12 +238,26 @@ class TestList(JitTestCase):
 
         self.checkScript(test_equality, (), optimize=True)
 
+        def test_equality_str():
+            a = ["foo", "bar"]
+            b = ["foo", "bar"]
+            return a == b
+
+        self.checkScript(test_equality_str, (), optimize=True)
+
         def test_inequality():
             a = [1, 2, 3]
             b = [1, 2, 3]
             return a != b
 
-        self.checkScript(test_equality, (), optimize=True)
+        self.checkScript(test_inequality, (), optimize=True)
+
+        def test_inequality_str():
+            a = ["foo", "bar"]
+            b = ["foo", "bar", "food"]
+            return a != b
+
+        self.checkScript(test_inequality_str, (), optimize=True)
 
         def test_non_equality():
             a = [1, 2, 3]

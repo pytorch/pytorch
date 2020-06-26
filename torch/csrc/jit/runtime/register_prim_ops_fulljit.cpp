@@ -898,6 +898,10 @@ RegisterOperators reg2({
         "aten::ne.bool_list(bool[] a, bool[] b) -> bool",
         listNe<bool>,
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::ne.str_list(str[] a, str[] b) -> bool",
+        listNe<std::string>,
+        aliasAnalysisFromSchema()),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
   Operator(                                              \

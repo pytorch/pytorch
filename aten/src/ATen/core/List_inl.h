@@ -135,6 +135,11 @@ bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs) {
   T lhs_tmp = lhs;
   return lhs_tmp == rhs;
 }
+
+template<class T, class Iterator>
+inline bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs) {
+  return rhs == lhs;
+}
 }
 
 template<class T>
