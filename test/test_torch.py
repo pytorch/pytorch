@@ -6696,14 +6696,13 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
     def test_signed_shift(self, device, dtype):
         "Ensure that signed integer bit shifting works as expected."
-        values = [-10, 10]
-        a = torch.tensor(values, device=device, dtype=dtype)  # [11...1110110, 1010]
+        a = torch.tensor([-10, 10], device=device, dtype=dtype)  # [11...1110110, 1010]
         expected_l = torch.tensor([-40, 40], device=device, dtype=dtype)  # [11...11011000, 101000]
         self.assertEqual(a << 2, expected_l)
-        self.compare_with_numpy(lambda x: x << 2, lambda x: np.left_shift(x, 2), values, device, dtype)
+        self.compare_with_numpy(lambda x: x << 2, lambda x: np.left_shift(x, 2), a)
         expected_r = torch.tensor([-5, 5], device=device, dtype=dtype)  # [1111...111011, 101]
         self.assertEqual(a >> 1, expected_r)
-        self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), values, device, dtype)
+        self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
     def test_bitwise_not(self, device):
         res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
