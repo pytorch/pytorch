@@ -274,6 +274,9 @@ to unconditionally dispatch to a native function whose name is different than
 the name in the public ATen API, but this is generally frowned upon (just name
 them the same thing!)
 
+If two backends have the same dispatch function, you can write `CPU, CUDA: func`
+to reuse the same function name in both cases.
+
 ### `device_guard`
 
 ```

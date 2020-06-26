@@ -70,6 +70,7 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 
 # Standard library
 from collections import defaultdict, namedtuple, OrderedDict
+import copy
 from copy import deepcopy
 from itertools import product, chain
 import itertools
@@ -551,24 +552,25 @@ class TestJit(JitTestCase):
                 super(M, self).__init__()
                 self.relu_op = relu_op
 
-            def forward(self, a, b):
-                x = torch.add(a, b)
-                x = self.relu_op(x)
-                return x
+            def forward(self, a, b, c):
+                tmp = torch.add(a, b)
+                x = self.relu_op(tmp)
+                d = torch.add(a, c)
+                return x + d
         a = torch.rand((7, 11))
         a = a * -10
         a = a + 5
         b = torch.rand((7, 11))
+        c = torch.rand((7, 11))
         m = torch.jit.script(M(torch.relu))
-        orig_res = m(a, b)
+        orig_res = m(a, b, c)
         torch._C._jit_pass_fuse_add_relu(m.graph)
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
         m = torch.jit.load(buffer)
-        new_res = m(a, b)
-        FileCheck().check_not("aten::add(") \
-            .check_not("aten::relu(") \
+        new_res = m(a, b, c)
+        FileCheck().check_not("aten::relu(") \
             .check("aten::add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
@@ -578,17 +580,17 @@ class TestJit(JitTestCase):
         a = a * -10
         a = a + 5
         b = torch.rand((7, 11))
+        c = torch.rand((7, 11))
         m = torch.jit.script(M(torch.relu_))
-        orig_res = m(a, b)
+        orig_res = m(a, b, c)
         torch._C._jit_pass_fuse_add_relu(m.graph)
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
         m = torch.jit.load(buffer)
-        new_res = m(a, b)
-        FileCheck().check_not("aten::add(") \
-            .check_not("aten::relu_(") \
-            .check("aten::add_relu_(") \
+        new_res = m(a, b, c)
+        FileCheck().check_not("aten::relu_(") \
+            .check("aten::add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
 
@@ -620,6 +622,9 @@ class TestJit(JitTestCase):
             .check("aten::add_relu_(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
+        # Since add_relu_ does inplace mutation ensure
+        # a_copy is modified
+        torch.testing.assert_allclose(orig_res, a_copy)
 
         # add_, relu_
         a = torch.rand((7, 11))
@@ -641,6 +646,9 @@ class TestJit(JitTestCase):
             .check("aten::add_relu_(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
+        # Since add_relu_ does inplace mutation ensure
+        # a_copy is modified
+        torch.testing.assert_allclose(orig_res, a_copy)
 
         class Madd_out(torch.nn.Module):
             def __init__(self, relu_op):
@@ -670,6 +678,9 @@ class TestJit(JitTestCase):
             .check("aten::add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
+        # Since add_relu_ with out=a does inplace mutation ensure
+        # a_copy is modified
+        torch.testing.assert_allclose(orig_res, a_copy)
 
         # add_, relu_
         a = torch.rand((7, 11))
@@ -691,6 +702,9 @@ class TestJit(JitTestCase):
             .check("aten::add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
+        # Since add_relu_ with out=a does inplace mutation ensure
+        # a_copy is modified
+        torch.testing.assert_allclose(orig_res, a_copy)
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
@@ -3000,6 +3014,24 @@ def foo(x):
 
         FileCheck().check("goodbye").run(traced.graph)
 
+        def foo(x: int):
+            return x + 1
+
+        @torch.jit._script_if_tracing
+        def fee(x: int = 2):
+            return foo(1) + x
+
+        # test directly compiling function
+        fee_compiled = torch.jit.script(fee)
+        self.assertEqual(fee_compiled(), fee())
+
+        # test compiling it within another function
+        @torch.jit.script
+        def hum():
+            return fee(x=3)
+
+        self.assertEqual(hum(), 5)
+
     def test_big_int_literals(self):
         def ok():
             # signed 64 bit max
@@ -4691,7 +4723,7 @@ a")
                 return result
 
         v = Vocabulary(list('uabcdefg'))
-        v.copy()
+        v.__copy__()
 
     def test_tuple_to_opt_list(self):
         @torch.jit.script
@@ -8877,6 +8909,24 @@ a")
             o2 = m.forward2(i)
             self.assertEqual(o2, v)
 
+    def test_script_sequential_sliced_iteration(self):
+        class seq_mod(nn.Module):
+            def __init__(self):
+                super(seq_mod, self).__init__()
+                self.layers = [nn.ReLU(), nn.ReLU(), nn.ReLU()]
+                self.layers = nn.Sequential(*self.layers)
+
+            def forward(self, input):
+                x = self.layers[0].forward(input)
+                for layer in self.layers[1:3]:
+                    x = layer.forward(x)
+                for layer in self.layers[2:]:
+                    x = layer.forward(x)
+                return x
+
+        seq = seq_mod()
+        self.checkModule(seq, [torch.tensor([-2, 1, -1, 2])])
+
     def test_script_sequential_orderdict(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -9337,7 +9387,8 @@ a")
 
         m = torch.jit.script(M())
         # test copy
-        m_c = m.copy()
+        copy.copy(m)
+        copy.deepcopy(m)
 
     def test_script_forward_method_replacement(self):
         # We want to support the use case of attaching a different `forward` method
