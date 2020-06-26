@@ -390,7 +390,7 @@ class TestTracer(JitTestCase):
     # Test that a trace of torch.full(x.shape) doesn't store the shape as a constant
     def test_trace_full_dynamic_shape(self):
         def full_with_shape_like(x):
-            return torch.full(x.shape, 2)
+            return torch.full(x.shape, 2.)
 
         x = torch.randn(3, 4)
         ge = torch.jit.trace(full_with_shape_like, example_inputs=x)
@@ -2045,3 +2045,37 @@ class TestMixTracingScripting(JitTestCase):
         with torch.jit.optimized_execution(False):
             m2 = M2()
             m2(torch.zeros(4, 3))
+
+    def test_trace_dict_mix_script(self):
+        class testB(torch.nn.Module):
+            def __init__(self):
+                super(testB, self).__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, feature_map: Dict[str, List[Tensor]]) -> Tensor:
+                output = []
+                for i, j in feature_map.items():
+                    output.append(self.linear(j[0]))
+
+                return torch.stack(output)
+
+        class testA(torch.nn.Module):
+            def __init__(self):
+                super(testA, self).__init__()
+                self.b = torch.jit.script(testB())
+
+            def forward(self, input_map: Dict[str, List[Tensor]]) -> Tensor:
+                feature_map = {}
+                for i, j in input_map.items():
+                    feature_map[i] = [j[0]]
+
+                return self.b(feature_map)
+
+        input_map = {"1" : [torch.rand(2, 2), torch.rand(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        model = testA()
+        traced_model = torch.jit.trace(model, input_map)
+        # the dict should not be inlined as constants in the IR
+        self.assertFalse("CONSTANTS" in str(traced_model.code))
+
+        new_input_map = {"new1" : [torch.rand(2, 2), torch.randn(2, 2)], "new3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        self.assertEqual(model(new_input_map), traced_model(new_input_map))
