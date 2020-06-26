@@ -117,14 +117,16 @@ class _ObserverBase(ObserverBase):
         ), "Default Observer only works for qint8 and quint8 data type"
 
     @torch.jit.export
-    def _calculate_qparams(self, min_val, max_val):
-        # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
+    def _calculate_qparams(self, min_val, max_val, qmin=None, qmax=None):
+        # type: (Tensor, Tensor, Optional[int], Optional[int]) -> Tuple[Tensor, Tensor]
         r"""Calculates the quantization parameters, given min and max
         value tensors. Works for both per tensor and per channel cases
 
         Args:
             min_val: Minimum values per channel
             max_val: Maximum values per channel
+            qmin: Minimum quantized value; follows 8-bit setup if unspecified.
+            qmax: Maximum quantized value; follows 8-bit setup if unspecified.
 
         Returns:
             scales: Scales tensor of shape (#channels,)
@@ -146,16 +148,17 @@ class _ObserverBase(ObserverBase):
                 min_val, max_val
             )
 
-        if self.dtype == torch.qint8:
-            if self.reduce_range:
-                qmin, qmax = -64, 63
+        if qmin is None or qmax is None:
+            if self.dtype == torch.qint8:
+                if self.reduce_range:
+                    qmin, qmax = -64, 63
+                else:
+                    qmin, qmax = -128, 127
             else:
-                qmin, qmax = -128, 127
-        else:
-            if self.reduce_range:
-                qmin, qmax = 0, 127
-            else:
-                qmin, qmax = 0, 255
+                if self.reduce_range:
+                    qmin, qmax = 0, 127
+                else:
+                    qmin, qmax = 0, 255
 
         min_val = torch.min(min_val, torch.zeros_like(min_val))
         max_val = torch.max(max_val, torch.zeros_like(max_val))
@@ -169,7 +172,9 @@ class _ObserverBase(ObserverBase):
             scale = max_val / (float(qmax - qmin) / 2)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
             if self.dtype == torch.quint8:
-                zero_point = zero_point.new_full(zero_point.size(), 128)
+                bitrange = torch.tensor(qmax - qmin + 1).double()
+                bitwidth = int(torch.log2(bitrange).item())
+                zero_point = zero_point.new_full(zero_point.size(), 2 ** (bitwidth - 1))
         else:
             scale = (max_val - min_val) / float(qmax - qmin)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
@@ -290,9 +295,9 @@ class MinMaxObserver(_ObserverBase):
         return x_orig
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self, qmin=None, qmax=None):
         r"""Calculates the quantization parameters."""
-        return self._calculate_qparams(self.min_val, self.max_val)
+        return self._calculate_qparams(self.min_val, self.max_val, qmin=qmin, qmax=qmax)
 
     @torch.jit.export
     def extra_repr(self):
@@ -531,8 +536,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         return x_orig
 
     @torch.jit.export
-    def calculate_qparams(self):
-        return self._calculate_qparams(self.min_vals, self.max_vals)
+    def calculate_qparams(self, qmin=None, qmax=None):
+        return self._calculate_qparams(self.min_vals, self.max_vals, qmin=qmin, qmax=qmax)
 
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
@@ -870,7 +875,7 @@ class HistogramObserver(_ObserverBase):
         return x_orig
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self, qmin=None, qmax=None):
         if self.min_val.numel() == 0 or self.max_val.numel() == 0:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
@@ -884,7 +889,7 @@ class HistogramObserver(_ObserverBase):
 
         new_min, new_max = self._non_linear_param_search()
 
-        return self._calculate_qparams(new_min, new_max)
+        return self._calculate_qparams(new_min, new_max, qmin=qmin, qmax=qmax)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(HistogramObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
