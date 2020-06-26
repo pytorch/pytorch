@@ -316,4 +316,4 @@ operators, see :ref:`name_inference_reference-doc`.
           (('N', 'features'), torch.Size([32, 49152]))
 
       .. warning::
-          The named tensor API is experimental and subject to change.
+          The named tensor API is a prototype feature and subject to change.
