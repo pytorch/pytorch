@@ -60,10 +60,11 @@ void reflection_pad1d_out_template(
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
   int64_t nbatch = 1;
-
-  TORCH_CHECK(input_.numel() > 0 &&
-    (input_.ndimension() == 2 || input_.ndimension() == 3), "non-empty 2D "
-    "or 3D (batch mode) tensor expected for input, but got: ", input_);
+  // allow dim=0 only in the batch dimension.
+  TORCH_CHECK(
+      (input_.ndimension() == 2 && input_.size(1) != 0) ||
+      (input_.ndimension() == 3 && input_.size(1) != 0 && input_.size(2) != 0),
+      "2D or 3D (batch mode) tensor expected for input, but got: ", input_);
 
   if (input_.ndimension() == 3) {
     nbatch = input_.size(0);
@@ -300,9 +301,11 @@ void reflection_pad2d_out_template(
   int dim_slices = 0;
   int64_t nbatch = 1;
 
-  TORCH_CHECK(input_.numel() > 0 &&
-    (input_.ndimension() == 3 || input_.ndimension() == 4), "non-empty 3D or "
-    "4D (batch mode) tensor expected for input, but got: ", input_);
+  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
+  TORCH_CHECK(
+      (input_.ndimension() == 3 && valid_dims) ||
+      (input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
+      "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
 
   if (input_.ndimension() == 4) {
     nbatch = input_.size(0);

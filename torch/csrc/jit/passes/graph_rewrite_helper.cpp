@@ -61,6 +61,7 @@ std::unordered_map<std::string, c10::IValue> getConvParams(
 }
 
 void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
+  // TODO: remove constant prop in the pass
   ConstantPropagation(graph);
   std::string convolution = R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
