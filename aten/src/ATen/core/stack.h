@@ -72,9 +72,8 @@ template <typename... Types>
 static inline void pop(Stack& stack, Types&... args) {
   size_t i = 0;
   constexpr size_t N = sizeof...(args);
-  int result[N] = {
+  (void)std::initializer_list<int>{
       (args = std::move(peek(stack, i++, N)).template to<Types>(), 0)...};
-  (void)result;
   drop(stack, N);
 }
 template <typename Type>

@@ -20,6 +20,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "linear",
     "batch_norm",
     "hardswish",
+    "elu",
     "layer_norm",
     "group_norm",
     "instance_norm",
@@ -33,6 +34,9 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "addmm",
     "matmul",
     "hardswish",
+    "hardswish_",
+    "elu",
+    "elu_",
     "batch_norm",
     "layer_norm",
     "group_norm",
@@ -60,7 +64,6 @@ std::vector<std::string> _single_input_general_shape_call_funcs = {
     "_max_pool3d",
     "dropout",
     "relu",
-    "hardsigmoid",
 };
 
 // Similar to prim::CallFunctions, there are aten ops that doesn't
@@ -92,6 +95,8 @@ std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "squeeze_",
     "unsqueeze",
     "unsqueeze_",
+    "detach",
+    "detach_",
 };
 
 // Theses are prim::CallFunctions for ops that doesn't require observation and
@@ -111,7 +116,6 @@ std::vector<std::string> _single_input_general_value_call_funcs = {
     "upsample_bilinear",
     "upsample_nearest",
     "hardtanh",
-    "elu",
     "leaky_relu",
 };
 
@@ -138,8 +142,6 @@ std::vector<std::string> _single_input_general_value_aten_funcs = {
     // "clamp_",  // Enable when quantized `clamp_` is ready
     "hardtanh",
     "hardtanh_",
-    "elu",
-    "elu_",
     "leaky_relu",
     "leaky_relu_",
 };
@@ -351,8 +353,13 @@ bool isFunctionNode(
   return is_func_node;
 }
 
+bool isSingleInputGeneralShapeAtenFunction(Node* n) {
+  return isAtenFunc(n, _single_input_general_shape_aten_funcs);
+}
+
 bool isSingleInputGeneralValueAtenFunction(Node* n) {
-  return isAtenFunc(n, _single_input_general_value_aten_funcs);
+  return isAtenFunc(n, _single_input_general_value_aten_funcs) ||
+      isBinaryOpWithScalarInput(n);
 }
 
 bool isSingleInputGeneralCallFunction(Node* n) {
@@ -379,8 +386,8 @@ bool isSingleInputGeneralAtenFunction(Node* n) {
       std::back_inserter(fixed_qparams_aten_funcs),
       [](auto pair) { return pair.first; });
 
-  return isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
-      isAtenFunc(n, _single_input_general_value_aten_funcs) ||
+  return isSingleInputGeneralValueAtenFunction(n) ||
+      isSingleInputGeneralShapeAtenFunction(n) ||
       isAtenFunc(n, fixed_qparams_aten_funcs);
 }
 
@@ -400,8 +407,12 @@ bool isPropagateQuantBinaryOp(Node* n) {
   return isAtenFunc(n, _propagate_quant_binary_ops);
 }
 
-bool isPropagateQuantNode(Node* n) {
+bool isPropagateQuantOp(Node* n) {
   return isPropagateQuantSingleInputOp(n) || isPropagateQuantBinaryOp(n);
+}
+
+bool isBinaryOpWithScalarInput(Node* n) {
+  return isPropagateQuantBinaryOp(n) && isScalar(n->input(1));
 }
 
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {
@@ -593,6 +604,19 @@ bool is_relu_module(
     const std::unordered_map<std::string, Value*>& vmap) {
   return is_module(
       match, vmap, "relu", "__torch__.torch.nn.modules.activation.ReLU");
+}
+
+bool is_functional_linear(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_functional(match, vmap, "linear", "linear");
+}
+
+bool is_linear_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  return is_module(
+      match, vmap, "linear", "__torch__.torch.nn.modules.linear.Linear");
 }
 
 bool is_conv1d_module(

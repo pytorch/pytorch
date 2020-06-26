@@ -528,6 +528,8 @@ class AbstractTestCases:
             _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int32), torch.randint(0, 100, (100, ), dtype=torch.int32))
             _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int64), torch.randint(0, 100, (100, ), dtype=torch.int64))
             _test_mv(torch.randn(100, 100, dtype=torch.float32).bfloat16(), torch.randn(100, dtype=torch.float32).bfloat16())
+            _test_mv(torch.randn(100, 100, dtype=torch.cfloat), torch.randn(100, dtype=torch.cfloat))
+            _test_mv(torch.randn(100, 100, dtype=torch.cdouble), torch.randn(100, dtype=torch.cdouble))
 
         def test_numpy_args(self):
             x1 = torch.randn(10)
@@ -5119,6 +5121,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     self.assertEqual(output3, output1)
                     self.assertEqual(output3, output2)
 
+        def test_empty_meta(self):
+            x = torch.empty_meta(2 ** 20, 2 ** 20)
+            y = torch.empty_meta(2 ** 20)
+            z = x + y
+            self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
+
         def test_tensor_grad_warnings(self):
             dummy = torch.empty(1)
 
@@ -5226,13 +5234,25 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             qy = qyraw.contiguous(memory_format=torch.channels_last)
             test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
 
-            # non contiguous case fast setup (dense, non-overlapping, same shape and sizes)
+            # non contiguous case fast setup (dense, non-overlapping, same shape and strides)
             x = xraw.permute(0, 2, 3, 1)
             y = yraw.permute(0, 2, 3, 1)
             test_memory_layout(x, y, None, None, x + y)
             qx = qxraw.permute(0, 2, 3, 1)
             qy = qyraw.permute(0, 2, 3, 1)
             test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
+
+            # non contiguous case fast setup (dense, non-overlapping)
+            # input tensors have same shape and strides
+            # output tensor have same shape as input tensors but different stride
+            # output tensor should preserve its strides in this case
+            x = xraw.permute(0, 2, 3, 1)
+            y = yraw.permute(0, 2, 3, 1)
+            out = torch.empty_like(xraw)
+            out = out.permute(0, 3, 2, 1)
+            expected_stride = out.stride()
+            test_memory_layout(x, y, None, None, torch.add(x, y, out=out))
+            self.assertEqual(expected_stride, out.stride())
 
             # non contiguous case non fast setup
             x = xraw.permute(0, 2, 3, 1)
@@ -7044,6 +7064,28 @@ class TestTorchDeviceType(TestCase):
         z = res1.clone().contiguous(memory_format=torch.channels_last)
         res2 = torch.cat((x, y), out=z)
         self.assertEqual(res1, res2)
+
+    @onlyCPU
+    def test_cat_in_channels_last(self, device):
+        for dim in range(4):
+            x = torch.randn((4, 15, 8, 8), device=device)
+            y = torch.randn(x.shape, device=device)
+            res1 = torch.cat((x, y), dim=dim)
+            x = x.clone().contiguous(memory_format=torch.channels_last)
+            y = y.clone().contiguous(memory_format=torch.channels_last)
+            res2 = torch.cat((x, y), dim=dim)
+            self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(res1, res2)
+
+            # Size larger than grain size.
+            x = torch.randn((4, 15, 256, 256), device=device)
+            y = torch.randn(x.shape, device=device)
+            res1 = torch.cat((x, y), dim=dim)
+            x = x.clone().contiguous(memory_format=torch.channels_last)
+            y = y.clone().contiguous(memory_format=torch.channels_last)
+            res2 = torch.cat((x, y), dim=dim)
+            self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(res1, res2)
 
     @onlyCUDA
     def test_cat_preserve_channels_last(self, device):
@@ -10700,6 +10742,15 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
+    @onlyOnCPUAndCUDA
+    def test_nonzero_deprecated(self, device):
+        x = torch.randn((2, 3), device=device)
+        with self.maybeWarnsRegex(UserWarning, "This overload of nonzero is deprecated"):
+            x.nonzero()
+
+        with self.maybeWarnsRegex(UserWarning, "This overload of nonzero is deprecated"):
+            torch.nonzero(x)
+
     # TODO: add torch.complex64, torch.complex128
     @dtypes(torch.float, torch.double)
     def test_normal(self, device, dtype):
@@ -13038,9 +13089,9 @@ class TestTorchDeviceType(TestCase):
             ('mode', torch.mode, None),
             ('median', torch.median, None),
 
-            ('prod', torch.prod, 1),
-            ('sum', torch.sum, 0),
-            ('norm', torch.norm, 0),
+            ('prod', torch.prod, 1.),
+            ('sum', torch.sum, 0.),
+            ('norm', torch.norm, 0.),
             ('mean', torch.mean, nan),
             ('var', torch.var, nan),
             ('std', torch.std, nan),
@@ -13834,11 +13885,11 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipCUDAIfRocm
-    @dtypesIfCUDA(*(torch.float, torch.double) +
+    @dtypesIfCUDA(*(torch.float, torch.double, torch.cfloat, torch.cdouble) +
                   # This test is disabled on CUDA 9, due to:
                   # See: https://github.com/pytorch/pytorch/issues/31006
                   ((torch.half,) if torch.version.cuda and not torch.version.cuda.startswith('9.') else ()))
-    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool, torch.complex64, torch.complex128}))
+    @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool}))
     def test_blas_alpha_beta_empty(self, device, dtype):
         if dtype is torch.bfloat16 and self.device_type == 'xla':
             # TODO (@zasdfgbnm): this causes the following error on test
@@ -13858,6 +13909,10 @@ class TestTorchDeviceType(TestCase):
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta))
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
+
+        # TODO: update this once torch.addmm is supported for complex
+        if dtype.is_complex:
+            return
 
         # torch.addmm
         input = torch.full((2, 3), value, dtype=dtype, device=device)
@@ -14400,6 +14455,23 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(val, expect)
         self.assertEqual(idx, [5, 4, 3, 2])
 
+    def test_topk_4d(self, device):
+        x = torch.ones(2, 3072, 2, 2, device=device)
+        x[:, 1, :, :] *= 2.
+        x[:, 10, :, :] *= 1.5
+        val, ind = torch.topk(x, k=2, dim=1)
+        expected_ind = torch.ones(2, 2, 2, 2, dtype=torch.long, device=device)
+        expected_ind[:, 1, :, :] = 10
+        expected_val = torch.ones(2, 2, 2, 2, device=device)
+        expected_val[:, 0, :, :] *= 2.
+        expected_val[:, 1, :, :] *= 1.5
+        print(val, ind)
+        self.assertEqual(val, expected_val, atol=0, rtol=0)
+        self.assertEqual(ind, expected_ind, atol=0, rtol=0)
+
+
+
+
     def test_is_signed(self, device):
         self.assertEqual(torch.IntTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.ByteTensor(5).to(device).is_signed(), False)
@@ -14490,6 +14562,48 @@ class TestTorchDeviceType(TestCase):
         test_helper((10, 3, 32, 32), 10 * 3 * 32 * 32, torch.channels_last, device)
         test_helper((3, 10, 3, 32, 32), 3 * 10 * 3 * 32 * 32, torch.channels_last_3d, device)
 
+    def test_memory_format_proparation_rules(self, device):
+
+        contiguous = torch.rand(10, 3, 5, 5, device=device)
+        cl = torch.rand(10, 3, 5, 5, device=device).contiguous(memory_format=torch.channels_last)
+        ambiguous = torch.rand(10, 3, 1, 1, device=device).contiguous(memory_format=torch.channels_last)
+        self.assertTrue(ambiguous.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ambiguous.is_contiguous(memory_format=torch.contiguous_format))
+        bias = torch.rand(1, 1, 1, 1, device=device).contiguous(memory_format=torch.channels_last)
+
+        def _test_propagation_rules(self, contiguous, cl, ambiguous, bias):
+            options = ((ambiguous, contiguous, torch.contiguous_format),
+                       (ambiguous, cl, torch.channels_last),
+                       (contiguous, ambiguous, torch.contiguous_format),
+                       (contiguous, cl, torch.contiguous_format),
+                       (cl, ambiguous, torch.channels_last),
+                       (cl, contiguous, torch.channels_last),
+                       (bias, cl, torch.channels_last),
+                       (cl, bias, torch.channels_last),)
+
+            for a, b, mf in options:
+                result = a + b
+                self.assertTrue(result.is_contiguous(memory_format=mf))
+
+        _test_propagation_rules(self, contiguous, cl, ambiguous, bias)
+
+        cl = cl.to(memory_format=torch.channels_last)
+        ambiguous = ambiguous.to(memory_format=torch.channels_last)
+        bias = bias.to(memory_format=torch.channels_last)
+
+        _test_propagation_rules(self, contiguous, cl, ambiguous, bias)
+
+        # test cases when strides matter in ambiguous tensors
+        for mf in (torch.channels_last, torch.contiguous_format):
+            ambiguous = torch.rand(10, 3, 1, 1, device=device).to(memory_format=mf)
+            bias = torch.rand(3, 1, 1, device=device)
+            result = ambiguous + bias
+            self.assertEqual(ambiguous.stride(), result.stride())
+            result = bias + ambiguous
+            self.assertEqual(ambiguous.stride(), result.stride())
+            result = ambiguous * 5
+            self.assertEqual(ambiguous.stride(), result.stride())
+
     def test_memory_format_empty_like(self, device):
         def test_helper(x, memory_format):
             xc = x.contiguous(memory_format=memory_format)
@@ -14532,27 +14646,33 @@ class TestTorchDeviceType(TestCase):
             x.is_contiguous(memory_format=torch.channels_last_3d), x_rep.is_contiguous(memory_format=torch.channels_last_3d))
 
     def test_memory_format_operators(self, device):
-        def chunk_op(x, y):
+        def _chunk_op(x, y):
             x1, x2 = x.chunk(2, dim=1)
-            y1, y2 = x.chunk(2, dim=1)
-            y1 = y1.contiguous()
-            return y1 + x1
+            return x1 + x2
 
-        def unsqueeze_op_add(x, y):
+        def _unsqueeze_op_add(x, y):
             return x[0].unsqueeze(0) + 3
 
-        def unsqueeze_op_clone(x, y):
+        def _unsqueeze_op_clone(x, y):
             return x[0].unsqueeze(0).clone()
 
-        def test_helper(x, y, memory_format):
+        def _test_helper(x, y, bias, memory_format):
+            return_contig_fns = [
+                lambda x, y: y + x,
+                lambda x, y: y * x,
+                lambda x, y: y.addcdiv(x, y, value=2),
+                lambda x, y: y.addcmul(x, y, value=2),
+            ]
+            bias_fns = [
+                lambda x, b: x + b,
+                lambda x, b: b + x,
+            ]
             fns = [
                 lambda x, y: x.clone(),
                 lambda x, y: x + 3,
                 lambda x, y: 3 * x,
                 lambda x, y: x + y,
-                lambda x, y: y + x,
                 lambda x, y: x * y,
-                lambda x, y: y * x,
                 lambda x, y: abs(x),
                 lambda x, y: x.abs(),
                 lambda x, y: x.abs_(),
@@ -14562,10 +14682,8 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.add_(y, alpha=3),
                 lambda x, y: x.addcdiv(y, y, value=2),
                 lambda x, y: x.addcdiv_(y, y, value=2),
-                lambda x, y: y.addcdiv(x, y, value=2),
                 lambda x, y: x.addcmul(y, y, value=2),
                 lambda x, y: x.addcmul_(y, y, value=2),
-                lambda x, y: y.addcmul(x, y, value=2),
                 lambda x, y: x.acosh(),
                 lambda x, y: x.acosh_(),
                 lambda x, y: x.asinh(),
@@ -14614,9 +14732,9 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.neg_(),
                 lambda x, y: x.pow(3),
                 lambda x, y: x.pow_(3),
-                # lambda x, y: x.pow(0.0), # Need to make resize_as_ memory format aware
-                # lambda x, y: x.pow(1.0), # Need to make resize_as_ memory format aware
-                # lambda x, y: x.reciprocal(), # Not migrated for CUDA
+                lambda x, y: x.pow(0.0),
+                lambda x, y: x.pow(1.0),
+                lambda x, y: x.reciprocal(),
                 lambda x, y: x.remainder(2),
                 lambda x, y: x.round(),
                 lambda x, y: x.round_(),
@@ -14636,9 +14754,9 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.tanh(),
                 lambda x, y: x.trunc(),
                 lambda x, y: x.trunc_(),
-                chunk_op,
-                unsqueeze_op_add,
-                # unsqueeze_op_clone,
+                _chunk_op,
+                _unsqueeze_op_add,
+                _unsqueeze_op_clone,
             ]
             for fn in fns:
                 x_c = x.contiguous()
@@ -14650,13 +14768,35 @@ class TestTorchDeviceType(TestCase):
                     result.is_contiguous(memory_format=memory_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
 
-        test_helper(
+            for fn in bias_fns:
+                x_c = x.contiguous()
+                b_c = bias.contiguous()
+                result_c = fn(x_c, b_c)
+                result = fn(x, bias)
+                self.assertEqual(result, result_c)
+                self.assertTrue(
+                    result.is_contiguous(memory_format=memory_format),
+                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
+
+            for fn in return_contig_fns:
+                x_c = x.contiguous()
+                y_c = y.contiguous()
+                result_c = fn(x_c, y_c)
+                result = fn(x, y)
+                self.assertEqual(result, result_c)
+                self.assertTrue(
+                    result.is_contiguous(memory_format=torch.contiguous_format),
+                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), torch.contiguous_format))
+
+        _test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
             abs(torch.randn((4, 3, 8, 8), device=device)) + 1,
+            torch.randn((1, 3, 1, 1), device=device).contiguous(memory_format=torch.channels_last),
             torch.channels_last)
-        test_helper(
+        _test_helper(
             torch.randn((4, 3, 8, 8, 8), device=device).contiguous(memory_format=torch.channels_last_3d),
             abs(torch.randn((4, 3, 8, 8, 8), device=device)) + 1,
+            torch.randn((1, 3, 1, 1, 1), device=device).contiguous(memory_format=torch.channels_last_3d),
             torch.channels_last_3d)
 
     def _test_unique_scalar_empty(self, dtype, device, f):
@@ -17163,25 +17303,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
 
-    def test_full_deprecation_warning(self, device):
+    # NOTE: inferring the dtype from bool or integer fill values is
+    #   disabled because the behavior is changing from PyTorch 1.5,
+    #   where the default scalar type would be inferred, to PyTorch 1.7,
+    #   where bool or long, respectively, will be inferred.
+    def test_full_unsupported_integer_inference(self, device):
         size = (2, 2)
         # Tests bool and integer fill_values deprecated without specific dtype set
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, True).dtype, torch.float)
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, 1).dtype, torch.float)
 
         # Explicitly setting the dtype doesn't warn
-        with self.maybeWarnsRegex(UserWarning, ''):
-            self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
-        with self.maybeWarnsRegex(UserWarning, ''):
-            self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype,
-                             torch.bool)
+        self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
+        self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype, torch.bool)
 
         # Performs same tests with named tensor
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, True, names=('a', 'b')).dtype, torch.float)
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, 1, names=('a', 'b')).dtype, torch.float)
 
         with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
@@ -17199,15 +17340,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         prev_default = torch.get_default_dtype()
         torch.set_default_dtype(dtype)
 
-        # Tests bool fill value inference
+        # Tests bool fill value inference (currently unsupported)
         # Note: in the future this will return a tensor of torch.bool dtype
-        t = torch.full(size, True)
-        self.assertEqual(t.dtype, dtype)
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
+            t = torch.full(size, True)
+            self.assertEqual(t.dtype, dtype)
 
-        # Tests integer fill value inference
+        # Tests integer fill value inference (currently unsupported)
         # Note: in the future this will return a tensor of torch.long dtype
-        t = torch.full(size, 1)
-        self.assertEqual(t.dtype, dtype)
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
+            t = torch.full(size, 1)
+            self.assertEqual(t.dtype, dtype)
 
         # Tests float fill value inference
         t = torch.full(size, 1.)
@@ -17232,7 +17375,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          torch.complex64)
 
     def test_full_out(self, device):
-        o = torch.empty((5,), device=device, dtype=torch.long)
+        size = (5,)
+        o = torch.empty(size, device=device, dtype=torch.long)
 
         # verifies dtype/out conflict throws a RuntimeError
         with self.assertRaises(RuntimeError):
@@ -17240,6 +17384,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # verifies out dtype overrides inference
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
+        self.assertEqual(torch.full(size, 1, out=o).dtype, o.dtype)
 
     def _float_to_int_conversion_helper(self, vals, device, dtype):
         assert TEST_NUMPY
@@ -17589,6 +17734,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for replacement in (True, False):
             out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
             self.assertEqual(out, expected)
+
+    @dtypes(torch.int32, torch.int64)
+    def test_large_linspace(self, device, dtype):
+        start = torch.iinfo(dtype).min
+        end = torch.iinfo(dtype).max & ~0xfff
+        steps = 15
+        x = torch.linspace(start, end, steps, dtype=dtype, device=device)
+        self.assertGreater(x[1] - x[0], (end - start) / steps)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
@@ -18004,7 +18157,6 @@ class TestViewOps(TestCase):
                 other._base is not base or
                 base.device != other.device):
             return False
-
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
         if base.device.type == 'cpu' or base.device.type == 'cuda':
@@ -18012,6 +18164,89 @@ class TestViewOps(TestCase):
                 return False
 
         return True
+
+    # Performs transpose if contiguous=True, else returns the input tensor as is
+    def _do_transpose(self, x, contiguous=False, dim0=0, dim1=1):
+        if contiguous:
+            return x
+        else:
+            return x.transpose(dim0, dim1)
+
+    @onlyOnCPUAndCUDA
+    def test_view_as_complex(self, device):
+        def fn(contiguous_input=True, dim0=0, dim1=1):
+            t = torch.randn(3, 2, 2, device=device)
+            c_t = t[:, :, 0] + 1j * t[:, :, 1]
+
+            input = self._do_transpose(t, contiguous_input, dim0, dim1)
+
+            if input.size()[-1] != 2:
+                self.assertRaisesRegex(
+                    RuntimeError, "Tensor must have a last dimension of size 2",
+                    lambda: torch.view_as_complex(input))
+                return
+
+            if input.stride()[-1] != 1:
+                self.assertRaisesRegex(
+                    RuntimeError, "Tensor must have a last dimension with stride 1",
+                    lambda: torch.view_as_complex(input))
+                return
+
+            res = torch.view_as_complex(input)
+            self.assertEqual(res, self._do_transpose(c_t, contiguous_input, dim0, dim1))
+            self.assertTrue(self.is_view_of(t, res))
+
+        fn()
+        fn(contiguous_input=False)
+        # RuntimeError since in this case the last dim of input would not be of size 2
+        fn(contiguous_input=False, dim0=0, dim1=2)
+        # RuntimeError since in this case the last dim of input would not have stride 1
+        fn(contiguous_input=False, dim0=1, dim1=2)
+
+
+        # RuntimeError since in this case the stride of non-last dim of input would not be of size 2
+        x = torch.randn(3, 3, device=device)
+        t = torch.as_strided(x, (2, 2), (1, 1))
+        self.assertRaisesRegex(
+            RuntimeError, "Tensor must have a stride divisible by 2 for all but last dimension",
+            lambda: torch.view_as_complex(t))
+
+        # tensor with zero elements
+        x = torch.tensor([], device=device)  # torch.Size([0])
+        self.assertRaisesRegex(
+            RuntimeError, "Tensor must have a last dimension of size 2",
+            lambda: torch.view_as_complex(x))
+
+        y = x.reshape(0, 2)  # torch.Size([0, 2])
+        res = torch.view_as_complex(y)
+        self.assertTrue(self.is_view_of(x, res))
+        self.assertEqual(res.shape, torch.Size([0]))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_complex_dtypes())
+    def test_view_as_real(self, device, dtype):
+        def fn(contiguous_input=True):
+            t = torch.randn(3, 4, dtype=dtype, device=device)
+            input = self._do_transpose(t, contiguous_input)
+            res = torch.view_as_real(input)
+            self.assertEqual(res[:, :, 0], input.real)
+            self.assertEqual(res[:, :, 1], input.imag)
+            self.assertTrue(self.is_view_of(t, res))
+
+        fn()
+        fn(contiguous_input=False)
+
+        # tensor with zero elements
+        x = torch.tensor([], dtype=dtype, device=device)
+        res = torch.view_as_real(x)
+        self.assertTrue(self.is_view_of(x, res))
+        self.assertEqual(res.shape, torch.Size([0, 2]))
+
+        # tensor with zero dim
+        x = torch.tensor(2 + 3j, dtype=dtype, device=device)
+        res = torch.view_as_real(x)
+        self.assertTrue(self.is_view_of(x, res))
+        self.assertEqual(res.shape, torch.Size([2]))
 
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
@@ -18031,21 +18266,22 @@ class TestViewOps(TestCase):
         def compare_with_numpy(contiguous_input=True):
             t = torch.randn(3, 3, dtype=dtype, device=device)
             if not contiguous_input:
-                t = t.T
+                u = t.T
+            else:
+                u = t
 
-            re = t.real
-            exp = torch.from_numpy(t.cpu().numpy().real).to(device=device)
+            re = u.real
+            exp = torch.from_numpy(u.cpu().numpy().real).to(device=device)
             self.assertEqual(re, exp)
-            # TODO: update this to use is_view_of() when the autograd code is modified to
-            # correctly handle .real
-            self.assertTrue(t.storage().data_ptr() == re.storage().data_ptr())
+            # for the case of contiguous_input, t=u
+            # for the case of non contiguous_input, the base still remains
+            # t since we are performing a view operation to make the input non-contiguous
+            self.assertTrue(self.is_view_of(t, re))
 
-            im = t.imag
-            exp = torch.from_numpy(t.cpu().numpy().imag).to(device=device)
+            im = u.imag
+            exp = torch.from_numpy(u.cpu().numpy().imag).to(device=device)
             self.assertEqual(im, exp)
-            # TODO: update this to use is_view_of() when the autograd code is modified to
-            # correctly handle .imag
-            self.assertTrue(t.storage().data_ptr() == im.storage().data_ptr())
+            self.assertTrue(self.is_view_of(t, im))
 
         compare_with_numpy()
         compare_with_numpy(contiguous_input=False)
@@ -18320,6 +18556,8 @@ _float_types = [torch.half, torch.float, torch.double]
 
 _complex_types = [torch.cfloat, torch.cdouble]
 
+_complex_types_skip_rocm = [] if TEST_WITH_ROCM else _complex_types
+
 _float_types_no_half = [torch.float, torch.double]
 
 _complex_types = [torch.cfloat, torch.cdouble]
@@ -18488,15 +18726,15 @@ tensor_op_tests = [
     ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
     ('floor_divide', 'tensor', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
-    ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-5, 1e-5, _float_types),
-    ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1),
-    ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1),
-    ('pow', '3', _small_3d, lambda t, d: [_number(3., 3, t)], 1e-1),
-    ('pow', '-1', _small_3d, lambda t, d: [_number(-1., -1, t)], 1e-1, 1e-5, 1e-5, _float_types),
+    ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-1, 1e-5, _float_types2),
+    ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1, 1e-1, 1e-5, _float_types2),
+    ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1, 1e-1, 1e-5, _float_types2),
+    ('pow', '3', _small_3d, lambda t, d: [_number(3., 3, t)], 1e-1, 1e-1, 1e-5, _float_types2),
+    ('pow', '-1', _small_3d, lambda t, d: [_number(-1., -1, t)], 1e-1, 1e-1, 1e-5, _float_types2),
     ('pow', '-2', _small_3d, lambda t, d: [_number(-2., -2, t)],
         1e-1, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfRocm]),
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
-        1e-1, 1e-5, 1e-5, _float_types),
+        1e-1, 1e-1, 1e-5, _float_types2),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types2),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
@@ -18539,14 +18777,14 @@ tensor_op_tests = [
         1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2),
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
@@ -18789,11 +19027,11 @@ tensor_op_tests = [
     ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('cos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('cosh', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _float_types),
-    ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('exp', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
-    ('exp', 'samll', lambda t, d: _small_3d(t, d).clamp(-1, 1),
-        lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
+    ('exp', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
+        lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('expm1', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
     ('expm1', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
         lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),

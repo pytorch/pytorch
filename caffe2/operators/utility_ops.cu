@@ -26,16 +26,8 @@ bool WeightedSumOp<CUDAContext>::RunOnDevice() {
 
 template <>
 bool SumOp<CUDAContext>::RunOnDevice() {
-  if (Input(0).IsType<float>()) {
-    return DoRunWithType<float, float>();
-  } else if (Input(0).IsType<at::Half>()) {
-    return DoRunWithType<at::Half, at::Half>();
-  } else if (Input(0).IsType<int32_t>()) {
-    return DoRunWithType<int32_t, int32_t>();
-  } else {
-    CAFFE_THROW("Unsupported inputs");
-  }
-  return false;
+  return DispatchHelper<TensorTypes<float, int32_t, int64_t>>::call(
+      this, Input(0));
 }
 
 REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);

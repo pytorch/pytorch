@@ -69,7 +69,8 @@ constexpr int64_t kShmTransportPriority = 100;
 // The UV transport just uses TCP and should work everywhere, thus keep it last.
 constexpr int64_t kUvTransportPriority = 0;
 
-constexpr int64_t kCmaChannelPriority = 100;
+constexpr int64_t kCmaChannelPriority = 200;
+constexpr int64_t kMultiplexedUvChannelPriority = 100;
 // The basic channel reuses a transport as a channel, and is thus our fallback.
 constexpr int64_t kBasicChannelPriority = 0;
 
@@ -127,6 +128,34 @@ std::unique_ptr<ChannelRegistration> makeCmaChannel() {
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cma, makeCmaChannel);
 
 #endif
+
+constexpr static int kNumUvThreads = 16;
+
+std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
+  std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
+  std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
+  for (int laneIdx = 0; laneIdx < kNumUvThreads; ++laneIdx) {
+    auto context = std::make_shared<tensorpipe::transport::uv::Context>();
+    std::string address = TensorPipeAgent::guessUvAddress(*context);
+    contexts.push_back(std::move(context));
+    listeners.push_back(contexts.back()->listen(address));
+  }
+  auto context = std::make_shared<tensorpipe::channel::mpt::Context>(
+      std::move(contexts), std::move(listeners));
+  return std::make_unique<ChannelRegistration>(
+      ChannelRegistration{std::move(context), kMultiplexedUvChannelPriority});
+}
+
+// The multiplexed UV channel encapsulates multiple UV transports (each with its
+// own event loop thread). Each channel will, in turn, contain multiple UV
+// connections, one for each of those contexts. When sending a tensor, its data
+// is split in equal chunks and each chunks is sent on a different connection
+// and thus driven by a different thread. This is needed to reach very high
+// bandwidths.
+C10_REGISTER_CREATOR(
+    TensorPipeChannelRegistry,
+    mpt_uv,
+    makeMultiplexedUvChannel);
 
 } // namespace
 
@@ -603,8 +632,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
-      [this, &clientPipe, messageId, futureResponseMessage](
-          const tensorpipe::Error& error) mutable {
+      [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
               !rpcAgentRunning_.load()) {
@@ -616,7 +644,11 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                          << clientPipe.pipe_->getRemoteName() << ": "
                          << error.what();
           }
-          markFutureWithError(std::move(futureResponseMessage), error.what());
+          auto pendingFutIt =
+              clientPipe.pendingResponseMessage_.find(messageId);
+          if (pendingFutIt != clientPipe.pendingResponseMessage_.end()) {
+            markFutureWithError(pendingFutIt->second, error.what());
+          }
           return;
         }
 

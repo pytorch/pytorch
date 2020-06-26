@@ -164,7 +164,7 @@ class DeviceTypeTestBase(TestCase):
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
-    _tls.precision = TestCase.precision
+    _tls.precision = TestCase._precision
 
     @property
     def precision(self):

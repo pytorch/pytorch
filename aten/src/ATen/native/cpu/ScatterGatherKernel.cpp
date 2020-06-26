@@ -63,7 +63,7 @@ struct cpu_scatter_gather_base_kernel {
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .dont_resize_outputs()
+      .resize_outputs(false)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
       .add_output(self)
       .add_input(src)
