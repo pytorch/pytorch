@@ -812,28 +812,24 @@ void initJITBindings(PyObject* module) {
   m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
-        try {
-          auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
-          std::ostringstream docstring;
-          docstring << "Automatically bound operator '" << op_name
-                    << "' with schema(s):\n";
+        auto symbol = Symbol::fromQualString(op_name);
+        auto operations = getAllOperatorsFor(symbol);
+        TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
+        std::ostringstream docstring;
+        docstring << "Automatically bound operator '" << op_name
+                  << "' with schema(s):\n";
 
-          for (const auto& op : operations) {
-            docstring << "  " << op->schema() << "\n";
-          }
-
-          return py::cpp_function(
-              [operations](py::args args, py::kwargs kwargs) {
-                return invokeOperatorFromPython(
-                    operations, std::move(args), std::move(kwargs));
-              },
-              py::name(symbol.toUnqualString()),
-              py::doc(docstring.str().c_str()));
-        } catch (const c10::Error& error) {
-          throw std::runtime_error(error.what_without_backtrace());
+        for (const auto& op : operations) {
+          docstring << "  " << op->schema() << "\n";
         }
+
+        return py::cpp_function(
+            [operations](py::args args, py::kwargs kwargs) {
+              return invokeOperatorFromPython(
+                  operations, std::move(args), std::move(kwargs));
+            },
+            py::name(symbol.toUnqualString()),
+            py::doc(docstring.str().c_str()));
       },
       py::arg("qualified_name"));
 
