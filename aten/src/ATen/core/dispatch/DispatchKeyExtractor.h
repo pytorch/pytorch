@@ -28,9 +28,8 @@ static inline DispatchKey dispatchTypeId(
     // The key mask lets us eliminate (by zero entries) keys which should not
     // be considered for dispatch.  There are two cases when we use this:
     //
-    // - If there is no operator registered for a backend whose fallback behavior
-    //   is to fallthrough, we eliminate that backend from consideration (since
-    //   we want to "fallthrough" to the next valid key.)
+    // - If an operator's dispatch table contains a fallthrough entry, we
+    //   should bypass it entirely when finding the key
     // - If a user invokes with redispatch, the mask lets us
     //   zero out the key the user asked us to stop.
     //
@@ -119,7 +118,7 @@ public:
     dispatch_arg_indices_reverse_ = c10::utils::bitset();
   }
 
-  DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
+  DispatchKey getDispatchKeyBoxed(const torch::jit::Stack* stack) const {
     DispatchKeySet ks;
     dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
       const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
@@ -133,19 +132,16 @@ public:
         }
       }
     });
-    return dispatchKeySetToDispatchKey_(backendsWithoutFallthrough, DispatchKeySet::FULL, ks);
+    return dispatchKeySetToDispatchKey_(DispatchKeySet::FULL, ks);
   }
 
   template<class... Args>
-  DispatchKey getDispatchKeyUnboxed(DispatchKeySet backendsWithoutFallthrough, DispatchKeySet eligibleKeys, const Args&... args) const {
+  DispatchKey getDispatchKeyUnboxed(DispatchKeySet eligibleKeys, const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
-    return dispatchKeySetToDispatchKey_(backendsWithoutFallthrough, eligibleKeys, ks);
+    return dispatchKeySetToDispatchKey_(eligibleKeys, ks);
   }
 
-  // Used by DispatchTable to maintain the fallthrough invariant, see
-  // docs on operatorHasKernelForBackend_
-  void setOperatorHasKernelForBackend(DispatchKey k, bool has_kernel);
-  void setOperatorHasFallthroughForBackend(DispatchKey k, bool has_fallthrough);
+  void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);
 
   std::string dumpState() const;
   void checkInvariants(const FunctionSchema& schema) const;
@@ -166,22 +162,13 @@ private:
 
   // NB: If there is no valid dispatch key, this will return Undefined
   DispatchKey dispatchKeySetToDispatchKey_(
-      DispatchKeySet backendsWithoutFallthrough,
       // This is often known statically to be all ones; IN OPTIMIZER WE TRUST
       DispatchKeySet eligibleKeys,
       DispatchKeySet ks
   ) const {
     return impl::dispatchTypeId(ks,
-      // We must NOT respect the passed in backendsWithoutFallthrough if an operator has
-      // specifically overridden the backend, since that means we've opted to
-      // not fallthrough and instead apply some specific behavior (which we
-      // must dispatch to).
-      //
-      // This scheme doesn't work if you want to also apply fallthrough on a
-      // per-op basis, but while we could directly fix this by maintaining a
-      // second DispatchKeySet, it doesn't seem that there is any actual use case,
-      // so we are deferring it for #32454.
-        ((backendsWithoutFallthrough | operatorHasKernelForBackend_) - operatorHasFallthroughForBackend_)
+      // Keys that are fallthrough should be skipped
+        nonFallthroughKeys_
       // Regardless of fallthrough behavior, only accept keys which are eligible
       // for dispatch, as requested by the user
       & eligibleKeys);
@@ -189,8 +176,7 @@ private:
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
   : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
-  , operatorHasKernelForBackend_()
-  , operatorHasFallthroughForBackend_() {}
+  , nonFallthroughKeys_(DispatchKeySet::FULL) {}
 
   // this is a bitset that has ones for each argument index which has to be
   // considered for dispatch. This avoids having to iterate over the stack
@@ -202,10 +188,8 @@ private:
   // fallthrough
   c10::utils::bitset dispatch_arg_indices_reverse_;
 
-  // Set of backends for which the operator has explicitly registered a kernel.
-  DispatchKeySet operatorHasKernelForBackend_;
-  // Set of backends for which the operator has explicitly registered a fallthrough kernel.
-  DispatchKeySet operatorHasFallthroughForBackend_;
+  // Set of keys for which the operator does NOT have fallthrough kernel.
+  DispatchKeySet nonFallthroughKeys_;
 };
 
 }
