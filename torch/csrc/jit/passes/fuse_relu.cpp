@@ -16,28 +16,18 @@ void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
         %add_res = aten::add(%a, %b, %alpha)
         %res = aten::relu(%add_res)
         return (%res))";
-  std::string add_relu_fused_0 = R"(
+  std::string add_relu_fused = R"(
     graph(%a, %b, %alpha):
         %res = aten::add_relu(%a, %b, %alpha)
         return (%res))";
-  rewriter.RegisterRewritePattern(add_relu_0, add_relu_fused_0);
+  rewriter.RegisterRewritePattern(add_relu_0, add_relu_fused);
 
   std::string add_relu_1 = R"(
     graph(%a, %b, %alpha):
         %add_res = aten::add(%a, %b, %alpha)
         %res = aten::relu_(%add_res)
         return (%res))";
-  // If add was followed by in place relu then
-  // we should probably make fused add_relu also
-  // inplace. since in the graph, it does not seem
-  // that output of add will be really used anywhere else.
-  // NB: In some sense even in the previous case we can be aggressive
-  // and use in place add_relu_.
-  std::string add_inplace_relu_fused = R"(
-    graph(%a, %b, %alpha):
-        %res = aten::add_relu_(%a, %b, %alpha)
-        return (%res))";
-  rewriter.RegisterRewritePattern(add_relu_1, add_inplace_relu_fused);
+  rewriter.RegisterRewritePattern(add_relu_1, add_relu_fused);
 
   std::string add_inplace_relu_0 = R"(
     graph(%a, %b, %alpha):
@@ -50,6 +40,10 @@ void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
   // used elsewhere. Given that we are fusing add + relu, this fusion
   // is only possible if output of the add is not used elsewhere.
   // Thus this should be safe.
+  std::string add_inplace_relu_fused = R"(
+    graph(%a, %b, %alpha):
+        %res = aten::add_relu_(%a, %b, %alpha)
+        return (%res))";
   rewriter.RegisterRewritePattern(add_inplace_relu_0, add_inplace_relu_fused);
 
   std::string add_inplace_relu_1 = R"(

@@ -1,6 +1,6 @@
-#include <c10/util/Logging.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
+#include <c10/util/Logging.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -49,23 +49,25 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
-
 void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
     const char* condition,
     const std::string& msg,
     const void* caller) {
-    throw c10::EnforceFiniteError(
-      file, line, condition, msg, (*GetFetchStackTrace())(), caller
-    );
+  throw c10::EnforceFiniteError(
+      file, line, condition, msg, (*GetFetchStackTrace())(), caller);
 }
 
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, std::string msg)
-    : Error(std::move(msg), str("Exception raised from ", source_location, " (most recent call first):\n", (*GetFetchStackTrace())())) {
-}
+    : Error(
+          std::move(msg),
+          str("Exception raised from ",
+              source_location,
+              " (most recent call first):\n",
+              (*GetFetchStackTrace())())) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
 
@@ -207,12 +209,12 @@ void ShowLogInfoToStderr() {
 
 C10_DEFINE_int(
     caffe2_log_level,
-    WARNING,
+    ::google::GLOG_WARNING,
     "The minimum log level that caffe2 will output.");
 
 namespace c10 {
 bool InitCaffeLogging(int* argc, char** argv) {
-  // When doing InitCaffeLogging, we will assume that caffe's flag paser has
+  // When doing InitCaffeLogging, we will assume that caffe's flag parser has
   // already finished.
   if (*argc == 0)
     return true;
@@ -223,10 +225,11 @@ bool InitCaffeLogging(int* argc, char** argv) {
               << std::endl;
     return false;
   }
-  if (FLAGS_caffe2_log_level > FATAL) {
-    std::cerr << "The log level of Caffe2 has to be no larger than FATAL("
-              << FATAL << "). Capping it to FATAL." << std::endl;
-    FLAGS_caffe2_log_level = FATAL;
+  if (FLAGS_caffe2_log_level > ::google::GLOG_FATAL) {
+    std::cerr << "The log level of Caffe2 has to be no larger than GLOG_FATAL("
+              << ::google::GLOG_FATAL << "). Capping it to GLOG_FATAL."
+              << std::endl;
+    FLAGS_caffe2_log_level = ::google::GLOG_FATAL;
   }
   return true;
 }
@@ -234,7 +237,7 @@ bool InitCaffeLogging(int* argc, char** argv) {
 void UpdateLoggingLevelsFromFlags() {}
 
 void ShowLogInfoToStderr() {
-  FLAGS_caffe2_log_level = INFO;
+  FLAGS_caffe2_log_level = ::google::GLOG_INFO;
 }
 
 MessageLogger::MessageLogger(const char* file, int line, int severity)
@@ -257,16 +260,17 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch());
   */
-  stream_ << "["
-          << CAFFE2_SEVERITY_PREFIX[std::min(4, FATAL - severity_)]
-          //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-          //<< std::setfill('0')
-          //<< " " << std::setw(2) << timeinfo->tm_hour
-          //<< ":" << std::setw(2) << timeinfo->tm_min
-          //<< ":" << std::setw(2) << timeinfo->tm_sec
-          //<< "." << std::setw(9) << ns.count() % 1000000000
-          << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
-          << "] ";
+  stream_
+      << "["
+      << CAFFE2_SEVERITY_PREFIX[std::min(4, ::google::GLOG_FATAL - severity_)]
+      //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
+      //<< std::setfill('0')
+      //<< " " << std::setw(2) << timeinfo->tm_hour
+      //<< ":" << std::setw(2) << timeinfo->tm_min
+      //<< ":" << std::setw(2) << timeinfo->tm_sec
+      //<< "." << std::setw(9) << ns.count() % 1000000000
+      << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
+      << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
@@ -285,12 +289,13 @@ MessageLogger::~MessageLogger() {
       ANDROID_LOG_DEBUG, // VLOG(1)
       ANDROID_LOG_VERBOSE, // VLOG(2) .. VLOG(N)
   };
-  int android_level_index = FATAL - std::min(FATAL, severity_);
+  int android_level_index =
+      ::google::GLOG_FATAL - std::min(::google::GLOG_FATAL, severity_);
   int level = android_log_levels[std::min(android_level_index, 5)];
   // Output the log string the Android log at the appropriate level.
   __android_log_print(level, tag_, "%s", stream_.str().c_str());
   // Indicate termination if needed.
-  if (severity_ == FATAL) {
+  if (severity_ == ::google::GLOG_FATAL) {
     __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
   }
 #else // !ANDROID
@@ -300,12 +305,12 @@ MessageLogger::~MessageLogger() {
     // Simulating the glog default behavior: if the severity is above INFO,
     // we flush the stream so that the output appears immediately on std::cerr.
     // This is expected in some of our tests.
-    if (severity_ > INFO) {
+    if (severity_ > ::google::GLOG_INFO) {
       std::cerr << std::flush;
     }
   }
 #endif // ANDROID
-  if (severity_ == FATAL) {
+  if (severity_ == ::google::GLOG_FATAL) {
     DealWithFatal();
   }
 }
