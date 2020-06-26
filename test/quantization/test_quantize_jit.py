@@ -233,8 +233,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         for tracing, dim, bias in options:
             eager = TestModule(dim, bias).eval()
             x = data[dim]
-            scripted_or_traced = get_script_module(eager, tracing, x).copy()
-            torch._C._jit_pass_dedup_module_uses(scripted_or_traced ._c)
+            scripted_or_traced = get_script_module(eager, tracing, x)
             folded = fuse_conv_bn_jit(scripted_or_traced)
             self.assertEqual(eager(x), scripted_or_traced(x))
 
@@ -310,7 +309,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         x2 = torch.rand(5, 5)
         w2 = torch.rand(5, 5)
         b2 = torch.rand(5)
-        for has_bias, (x, weight, b) in itertools.product([True, False], [(x1, w1, b1), (x2, w2, b2)]):
+
+        x3 = torch.rand(5, 5, 5)
+        w3 = torch.rand(5, 5)
+        b3 = torch.rand(5)
+        for has_bias, (x, weight, b) in itertools.product([True, False], [(x1, w1, b1), (x2, w2, b2), (x3, w3, b3)]):
             bias = b if has_bias else None
             model = torch.jit.trace(FunctionalLinear(weight, bias), [x])
             torch._C._jit_pass_fuse_linear(model.graph)
@@ -320,6 +323,29 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             for cn in check_not:
                 FileCheck().check_not(cn) \
                            .run(model.graph)
+            # make sure it runs
+            model(x)
+
+        # check matmuls are not fused
+        class Matmul(torch.nn.Module):
+            def __init__(self, weight):
+                super(Matmul, self).__init__()
+                self.weight = weight
+
+            def forward(self, x):
+                return torch.matmul(x, self.weight)
+
+        x = torch.rand(5, 6, 5)
+        w = torch.rand(5, 5, 100)
+        model = torch.jit.trace(Matmul(w), [x])
+        torch._C._jit_pass_fuse_linear(model.graph)
+        # check 3d matmul is not fused
+        FileCheck().check("aten::matmul") \
+                   .run(model.graph)
+        FileCheck().check_not("aten::linear") \
+                   .run(model.graph)
+        # make sure it runs
+        model(x)
 
     def test_insert_observers(self):
         class M(torch.nn.Module):
@@ -1037,6 +1063,19 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .check_not("quantized::linear_prepack") \
                    .check("quantized::linear") \
                    .run(model.graph)
+
+    def test_inplace_option(self):
+        for tracing in [True, False]:
+            model = get_script_module(torch.nn.Conv2d(3, 3, 3), tracing, self.img_data[0][0])
+            qconfig_dict = {'': default_qconfig}
+            quantize_jit(
+                model, qconfig_dict, test_only_eval_fn, [self.img_data], inplace=True)
+            FileCheck().check("quantized::conv2d") \
+                       .run(model.graph)
+
+            FileCheck().check_not("aten::conv2d") \
+                       .run(model.graph)
+
 
     def test_finalize_debug(self):
         class M(torch.nn.Module):
@@ -2660,7 +2699,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
     for individual ops end to end.
     """
     @override_qengines
-    def test_quantized_linear_dynamic(self):
+    def test_linear(self):
         class FunctionalLinear(torch.nn.Module):
             def __init__(self, weight, bias):
                 super(FunctionalLinear, self).__init__()

@@ -398,19 +398,22 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/serialize/output-archive.cpp",
 ]
 
-libtorch_python_cuda_sources = [
+libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/Event.cpp",
     "torch/csrc/cuda/Module.cpp",
+    "torch/csrc/cuda/python_comm.cpp",
     "torch/csrc/cuda/Storage.cpp",
     "torch/csrc/cuda/Stream.cpp",
-    "torch/csrc/cuda/Tensor.cpp",
-    "torch/csrc/cuda/python_comm.cpp",
-    "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/serialization.cpp",
-    "torch/csrc/cuda/utils.cpp",
     "torch/csrc/cuda/shared/cudart.cpp",
-    "torch/csrc/cuda/shared/cudnn.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
+    "torch/csrc/cuda/utils.cpp",
+]
+
+libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
+    "torch/csrc/cuda/python_nccl.cpp",
+    "torch/csrc/cuda/shared/cudnn.cpp",
+    "torch/csrc/cuda/Tensor.cpp",
 ]
 
 libtorch_python_core_sources = [

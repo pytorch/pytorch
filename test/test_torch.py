@@ -7069,6 +7069,28 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.cat((x, y), out=z)
         self.assertEqual(res1, res2)
 
+    @onlyCPU
+    def test_cat_in_channels_last(self, device):
+        for dim in range(4):
+            x = torch.randn((4, 15, 8, 8), device=device)
+            y = torch.randn(x.shape, device=device)
+            res1 = torch.cat((x, y), dim=dim)
+            x = x.clone().contiguous(memory_format=torch.channels_last)
+            y = y.clone().contiguous(memory_format=torch.channels_last)
+            res2 = torch.cat((x, y), dim=dim)
+            self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(res1, res2)
+
+            # Size larger than grain size.
+            x = torch.randn((4, 15, 256, 256), device=device)
+            y = torch.randn(x.shape, device=device)
+            res1 = torch.cat((x, y), dim=dim)
+            x = x.clone().contiguous(memory_format=torch.channels_last)
+            y = y.clone().contiguous(memory_format=torch.channels_last)
+            res2 = torch.cat((x, y), dim=dim)
+            self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(res1, res2)
+
     @onlyCUDA
     def test_cat_preserve_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8), device=device)
@@ -13071,9 +13093,9 @@ class TestTorchDeviceType(TestCase):
             ('mode', torch.mode, None),
             ('median', torch.median, None),
 
-            ('prod', torch.prod, 1),
-            ('sum', torch.sum, 0),
-            ('norm', torch.norm, 0),
+            ('prod', torch.prod, 1.),
+            ('sum', torch.sum, 0.),
+            ('norm', torch.norm, 0.),
             ('mean', torch.mean, nan),
             ('var', torch.var, nan),
             ('std', torch.std, nan),
@@ -17285,25 +17307,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
 
-    def test_full_deprecation_warning(self, device):
+    # NOTE: inferring the dtype from bool or integer fill values is
+    #   disabled because the behavior is changing from PyTorch 1.5,
+    #   where the default scalar type would be inferred, to PyTorch 1.7,
+    #   where bool or long, respectively, will be inferred.
+    def test_full_unsupported_integer_inference(self, device):
         size = (2, 2)
         # Tests bool and integer fill_values deprecated without specific dtype set
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, True).dtype, torch.float)
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, 1).dtype, torch.float)
 
         # Explicitly setting the dtype doesn't warn
-        with self.maybeWarnsRegex(UserWarning, ''):
-            self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
-        with self.maybeWarnsRegex(UserWarning, ''):
-            self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype,
-                             torch.bool)
+        self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
+        self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype, torch.bool)
 
         # Performs same tests with named tensor
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, True, names=('a', 'b')).dtype, torch.float)
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, 1, names=('a', 'b')).dtype, torch.float)
 
         with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
@@ -17321,15 +17344,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         prev_default = torch.get_default_dtype()
         torch.set_default_dtype(dtype)
 
-        # Tests bool fill value inference
+        # Tests bool fill value inference (currently unsupported)
         # Note: in the future this will return a tensor of torch.bool dtype
-        t = torch.full(size, True)
-        self.assertEqual(t.dtype, dtype)
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
+            t = torch.full(size, True)
+            self.assertEqual(t.dtype, dtype)
 
-        # Tests integer fill value inference
+        # Tests integer fill value inference (currently unsupported)
         # Note: in the future this will return a tensor of torch.long dtype
-        t = torch.full(size, 1)
-        self.assertEqual(t.dtype, dtype)
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
+            t = torch.full(size, 1)
+            self.assertEqual(t.dtype, dtype)
 
         # Tests float fill value inference
         t = torch.full(size, 1.)
@@ -17354,7 +17379,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          torch.complex64)
 
     def test_full_out(self, device):
-        o = torch.empty((5,), device=device, dtype=torch.long)
+        size = (5,)
+        o = torch.empty(size, device=device, dtype=torch.long)
 
         # verifies dtype/out conflict throws a RuntimeError
         with self.assertRaises(RuntimeError):
@@ -17362,6 +17388,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # verifies out dtype overrides inference
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
+        self.assertEqual(torch.full(size, 1, out=o).dtype, o.dtype)
 
     def _float_to_int_conversion_helper(self, vals, device, dtype):
         assert TEST_NUMPY
@@ -17711,6 +17738,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for replacement in (True, False):
             out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
             self.assertEqual(out, expected)
+
+    @dtypes(torch.int32, torch.int64)
+    def test_large_linspace(self, device, dtype):
+        start = torch.iinfo(dtype).min
+        end = torch.iinfo(dtype).max & ~0xfff
+        steps = 15
+        x = torch.linspace(start, end, steps, dtype=dtype, device=device)
+        self.assertGreater(x[1] - x[0], (end - start) / steps)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
