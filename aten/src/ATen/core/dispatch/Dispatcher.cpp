@@ -38,7 +38,6 @@ Dispatcher::Dispatcher()
 : operators_()
 , operatorLookupTable_()
 , backendFallbackKernels_()
-, backendsWithoutFallthrough_(DispatchKeySet::FULL)
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
@@ -206,7 +205,14 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   auto op = findOrRegisterName_(op_name);
 
-  auto handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel), std::move(cpp_signature), std::move(inferred_function_schema), std::move(debug));
+  auto handle = op.operatorIterator_->op.registerKernel(
+    *this,
+    dispatch_key,
+    std::move(kernel),
+    std::move(cpp_signature),
+    std::move(inferred_function_schema),
+    std::move(debug)
+  );
 
   ++op.operatorIterator_->def_and_impl_count;
 
@@ -215,10 +221,10 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   });
 }
 
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::OperatorEntry::KernelEntry>::iterator handle) {
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::AnnotatedKernel>::iterator handle) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  op.operatorIterator_->op.deregisterKernel_(dispatch_key, handle);
+  op.operatorIterator_->op.deregisterKernel_(*this, dispatch_key, handle);
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
 
@@ -249,8 +255,6 @@ void Dispatcher::deregisterName_(
 // Test if the operator entry is completely dead, and if so remove it completely
 void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) {
   if (0 == op.operatorIterator_->def_and_impl_count) {
-    // TODO: rename this to "assert deregistration invariants"
-    op.operatorIterator_->op.prepareForDeregistration();
     operators_.erase(op.operatorIterator_);
     operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
       operatorLookupTable.erase(op_name);
@@ -261,14 +265,17 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  // TODO: preserve debug for old fallback
   TORCH_CHECK(
-    !backendFallbackKernels_[dispatchKey].isValid(),
-    "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, " (", debug, ")"
+    !backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].kernel.isValid(),
+    "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, "; previous registration ",
+    backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].debug, ", new registration ", debug
   );
-  backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
-  if (kernel.isFallthrough()) {
-    backendsWithoutFallthrough_ = backendsWithoutFallthrough_.remove(dispatchKey);
+  // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
+  // cannot be unobxed
+  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
+
+  for (auto& op : operators_) {
+    op.op.updateFallback(*this, dispatchKey);
   }
 
   return RegistrationHandleRAII([this, dispatchKey] {
@@ -279,8 +286,11 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  backendFallbackKernels_.removeKernelIfExists(dispatchKey);
-  backendsWithoutFallthrough_ = backendsWithoutFallthrough_.add(dispatchKey);
+  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = {};
+
+  for (auto& op : operators_) {
+    op.op.updateFallback(*this, dispatchKey);
+  }
 }
 
 
@@ -300,38 +310,16 @@ RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpReg
   });
 }
 
-[[noreturn]] void Dispatcher::reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey) {
-  if (dispatchKey == DispatchKey::Undefined) {
-    TORCH_CHECK(false,
-          "There were no tensor arguments to this function (e.g., you passed an "
-          "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
-          ".  This usually means that this function requires a non-empty list of Tensors.  "
-          "Available functions are ", dispatchTable.listAllDispatchKeys())
-  }
-
-  const std::string dispatchKeyStr = toString(dispatchKey);
-  TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
-          " from the '", dispatchKeyStr, "' backend. '",
-          dispatchTable.operatorName(), "' is only available for these backends: ",
-          dispatchTable.listAllDispatchKeys(), ".");
-}
-
 void Dispatcher::checkInvariants() const {
   for (const auto& op : operators_) {
     op.op.checkInvariants();
   }
-  // NB: skip Undefined
-  for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
-    auto k = static_cast<DispatchKey>(i);
-    if (!backendsWithoutFallthrough_.has(k)) {
-      const auto& kernel = backendFallbackKernels_[k];
-      TORCH_INTERNAL_ASSERT(kernel.isFallthrough());
-    }
-  }
 }
 
 void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
-  op.operatorIterator_->op.setManuallyBoxedKernel_(func);
+  std::lock_guard<std::mutex> lock(mutex_);
+  op.operatorIterator_->op.setManuallyBoxedKernel_(*this, func);
+  // NB: Do not need to set manually boxed kernel for backend fallbacks
 }
 
 }
