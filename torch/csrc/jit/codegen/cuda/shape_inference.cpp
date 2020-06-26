@@ -169,7 +169,7 @@ class NaiveShapeTypePropagator {
 
  protected:
   TensorTypePtr unary_reduce_type(
-      const TensorTypePtr & op,
+      const TensorTypePtr& op,
       const std::vector<int64_t>& dims,
       bool keepdim) {
     TORCH_CHECK(

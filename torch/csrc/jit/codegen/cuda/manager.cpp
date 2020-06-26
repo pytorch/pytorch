@@ -155,7 +155,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
   fusion_node->i_(attr::cache_id, fusion_cache_id);
 }
 
-void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
+void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   TORCH_CHECK(
       fusion_node->kind() == prim::CudaFusionGroup,
       "prim::CudaFusionGroup expected");
@@ -190,7 +190,7 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
 
     // we need to construct outputs;
     std::vector<at::Tensor> outputs;
-    for (const auto* const output : graph->outputs()) {
+    for (const auto* output : graph->outputs()) {
       auto type = output->type()->expect<TensorType>();
       // Expect output to be tensor;
       TORCH_CHECK(

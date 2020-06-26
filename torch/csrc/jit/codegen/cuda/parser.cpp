@@ -29,8 +29,7 @@ namespace {
 typedef Val* CgValue;
 typedef Expr* CgOp;
 
-typedef void (
-    *ParseFuncPtr)(const Node*, std::unordered_map<size_t, CgValue>&);
+typedef void (*ParseFuncPtr)(const Node*, std::unordered_map<size_t, CgValue>&);
 typedef bool (*MergeQueryFuncPtr)(const Node*);
 
 std::vector<int> reductionAxes(TensorView* tv) {
@@ -71,9 +70,7 @@ class IrParser {
     RegistrationEntry(ParseFuncPtr parse_f, MergeQueryFuncPtr merge_f = nullptr)
         : parse_f_(parse_f), merge_f_(merge_f) {}
 
-    void parse(
-        const Node* node,
-        std::unordered_map<size_t, CgValue>& values) {
+    void parse(const Node* node, std::unordered_map<size_t, CgValue>& values) {
       parse_f_(node, values);
     }
 
@@ -253,7 +250,7 @@ class IrParser {
           out_tv->split(0, kNonFcdReductionThreadX);
           out_tv->split(
               -1, kNonFcdReductionThreadY); // necessary to avoid dynamic
-                                               // allocation on intermediates;
+                                            // allocation on intermediates;
           intermediate = out_tv->rFactor({-2});
         }
         for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
