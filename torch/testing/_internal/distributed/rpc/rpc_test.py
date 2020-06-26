@@ -3210,10 +3210,6 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.REMOTE
         )
 
-    @dist_init
-    def test_async_class_method_remote(self):
-        self._test_async_function(AsyncExecutionClass.class_async_add)
-
     def _test_async_function_multi(self, fn, mode=RPCExecMode.SYNC):
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
