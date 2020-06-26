@@ -46,7 +46,7 @@ pytorch_windows_params: &pytorch_windows_params
   parameters:
     executor:
       type: string
-      default: "windows-cpu-with-nvidia-cuda"
+      default: "windows-xlarge-cpu-with-nvidia-cuda"
     build_environment:
       type: string
       default: ""
