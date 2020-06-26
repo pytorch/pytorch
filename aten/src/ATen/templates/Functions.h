@@ -22,6 +22,25 @@ using native::tensor;
 
 ${function_declarations}
 
+// Special C++ only overloads for std()-like functions (See gh-40287)
+// These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
+// So, for example std(0) would select the std(unbiased=False) overload
+inline Tensor var(const Tensor& self, int dim) {
+  return at::native::var(self, IntArrayRef{dim});
+}
+
+inline std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim) {
+  return at::native::var_mean(self, IntArrayRef{dim});
+}
+
+inline Tensor std(const Tensor& self, int dim) {
+  return at::native::std(self, IntArrayRef{dim});
+}
+
+inline std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim) {
+  return at::native::std_mean(self, IntArrayRef{dim});
+}
+
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
