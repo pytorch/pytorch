@@ -356,7 +356,7 @@ alias analysis kind: PURE_FUNCTION
         except RuntimeError as e:
             self.assertExpectedInline(
                 str(e),
-                '''Tried to register multiple backend fallbacks for the same dispatch key XLA (registered at /dev/null:0)'''  # noqa
+                '''Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration registered at /dev/null:0, new registration registered at /dev/null:0'''  # noqa
             )
         else:
             self.assertTrue(False)
