@@ -65,5 +65,8 @@ from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F
 # Backward Compatibility
 from quantization.test_backward_compatibility import TestSerialization  # noqa: F401
 
+# Experimental QAT backward tests
+from quantization.test_qat_backward import TestQATBackward  # noqa: F401
+
 if __name__ == '__main__':
     run_tests()
