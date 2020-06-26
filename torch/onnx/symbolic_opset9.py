@@ -1519,8 +1519,8 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
         tmp = zeros_like(g, input, dtype, layout, device)
         return add(g, tmp, fill_value, g.op("Constant", value_t=torch.tensor(1)))
     else:
-        dtype = 6 if dtype is None else dtype
         dtype = sym_help._get_const(dtype, 'i', 'dtype')
+        dtype = 6 if dtype is None else dtype
         shape = g.op("Shape", input)
         return g.op("ConstantOfShape", shape,
                     value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
