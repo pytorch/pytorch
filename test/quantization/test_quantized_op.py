@@ -3,6 +3,7 @@ from builtins import round
 
 import itertools
 import numpy as np
+import sys
 import unittest
 
 import torch
@@ -2695,6 +2696,131 @@ class TestQuantizedLinear(unittest.TestCase):
                 W_q.q_scale()), np.float32(W_q_origin.q_scale()))
             np.testing.assert_equal(
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
+
+
+# This testcase tests the underlying operators that are implemented in C++.
+@unittest.skipIf(sys.platform == "darwin", "Known test failure on Mac.")
+class TestQuantizedEmbeddingBag(TestCase):
+
+    def embedding_bag_rowwise_offsets_run(
+            self, bit_rate, num_embeddings,
+            embedding_dim, num_offsets, enable_per_sample_weights,
+            include_last_offset, atol, rtol):
+        # PyTorch ops require weights to be fused and N bit rowwise quantized.
+        # TODO(radkris) Remove the usage of C2 conversion ops once
+        # embedding_bag_prepack op have been landed.
+        from caffe2.python import core, workspace
+        conversion_op = "FloatToFused8BitRowwiseQuantized"
+        pt_op = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
+        if bit_rate == 4:
+            conversion_op = "FloatToFused4BitRowwiseQuantized"
+            pt_op = torch.ops.quantized.embedding_bag_4bit_rowwise_offsets
+
+        weights = torch.from_numpy((np.random.random_sample((
+            num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+        max_segments = 5
+        max_segment_length = 20
+        num_lengths = np.random.randint(1, max_segments + 1)
+        lengths = np.random.randint(0, max_segment_length + 1,
+                                    size=num_lengths).astype(np.int32)
+        num_indices = np.sum(lengths)
+
+        def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
+            """
+            Convert lengths to offsets
+            """
+            tt = np.zeros((t.shape[0] + 1,), dtype=offset_type)
+            tt[1:] = t
+            tt = torch.from_numpy(np.cumsum(tt, dtype=offset_type))
+            if use_begin_offset:
+                return tt[:-1]
+            return tt[1:]
+
+        offsets = lengths_to_offsets(lengths)
+        indices = torch.from_numpy(np.random.randint(
+            low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
+
+        # TODO(radkris) Remove the usage of C2 conversion ops once
+        # embedding_bag_prepack op have been landed.
+        def get_quantized_weights(weights):
+            workspace.ResetWorkspace()
+
+            workspace.FeedBlob("weights", weights)
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    conversion_op, ["weights"], ["quantized_weights"]
+                )
+            )
+            emb_q = workspace.FetchBlob("quantized_weights")
+            return torch.from_numpy(emb_q)
+
+        q_weights = get_quantized_weights(weights)
+        per_sample_weights = torch.from_numpy(np.random.uniform(
+            low=0.01, high=0.5, size=[len(indices)]).astype(np.float32)) if \
+            enable_per_sample_weights else None
+        if include_last_offset:
+            offsets = torch.cat(
+                (offsets, torch.tensor([indices.size(0)], dtype=torch.long)), 0
+            )
+
+        # Reference result will be the floating point torch.nn.EmbeddingBag.
+        def get_reference_result(
+                num_embeddings, embedding_dim,
+                include_last_offset, weights, per_sample_weights,
+                indices, offsets):
+            embedding_bag = torch.nn.EmbeddingBag(
+                num_embeddings=num_embeddings,
+                embedding_dim=embedding_dim,
+                include_last_offset=include_last_offset, _weight=weights,
+                scale_grad_by_freq=False, mode='sum'
+            )
+            return embedding_bag(indices, offsets,
+                                 per_sample_weights=per_sample_weights)
+
+        reference_result = get_reference_result(
+            num_embeddings, embedding_dim, include_last_offset, weights,
+            per_sample_weights, indices, offsets)
+        result = pt_op(
+            q_weights,
+            indices,
+            offsets,
+            mode=0,
+            per_sample_weights=per_sample_weights,
+            include_last_offset=include_last_offset,
+        )
+        torch.testing.assert_allclose(reference_result, result, atol=atol,
+                                      rtol=rtol)
+
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
+           num_offsets=st.integers(1, 20),
+           enable_per_sample_weights=st.booleans(),
+           include_last_offset=st.booleans())
+    def test_embedding_bag_byte_rowwise_offsets(self, num_embeddings,
+                                                embedding_dim, num_offsets,
+                                                enable_per_sample_weights,
+                                                include_last_offset):
+        self.embedding_bag_rowwise_offsets_run(
+            8, num_embeddings, embedding_dim, num_offsets,
+            enable_per_sample_weights, include_last_offset,
+            atol=0.005, rtol=1e-3)
+
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 2 == 0),
+           num_offsets=st.integers(1, 20),
+           enable_per_sample_weights=st.booleans(),
+           include_last_offset=st.booleans())
+    def test_embedding_bag_4bit_rowwise_offsets(self, num_embeddings,
+                                                embedding_dim, num_offsets,
+                                                enable_per_sample_weights,
+                                                include_last_offset):
+        self.embedding_bag_rowwise_offsets_run(4, num_embeddings,
+                                               embedding_dim, num_offsets,
+                                               enable_per_sample_weights,
+                                               include_last_offset, atol=0.1,
+                                               rtol=1e-2)
+
 
 class TestQuantizedConv(unittest.TestCase):
     def _test_qconv_unpack_impl(
