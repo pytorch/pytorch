@@ -276,13 +276,13 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
 
 Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& result) {
   if (input.dim() == 0) {
-    return grad;
+    return grad * input.isnan().logical_not();
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
     return (grad * result) / input * input.isnan().logical_not();
   } else if (zero_idx.size(0) > 1) {
-    return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT) * input.isnan().logical_not();
   } else {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input) * input.isnan().logical_not();
   }
@@ -290,7 +290,7 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
 
 Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t dim, bool keepdim) {
   if (input.dim() == 0) {
-    return grad;
+    return grad * input.isnan().logical_not();
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
   if (!keepdim && input.dim() != 1) {
