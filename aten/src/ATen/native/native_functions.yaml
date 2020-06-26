@@ -728,7 +728,7 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor
+- func: contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)
   variants: method
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
@@ -1154,7 +1154,7 @@
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
 
-- func: expand_as(Tensor self, Tensor other) -> Tensor
+- func: expand_as(Tensor(a) self, Tensor other) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
@@ -1173,17 +1173,17 @@
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
-- func: flatten.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor
+- func: flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
 
-- func: flatten.named_out_dim(Tensor self, int start_dim, int end_dim, Dimname out_dim) -> Tensor
+- func: flatten.named_out_dim(Tensor(a) self, int start_dim, int end_dim, Dimname out_dim) -> Tensor(a)
   variants: function, method
 
-- func: flatten.using_names(Tensor self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor
+- func: flatten.using_names(Tensor(a) self, Dimname start_dim, Dimname end_dim, Dimname out_dim) -> Tensor(a)
   variants: function, method
 
-- func: flatten.DimnameList(Tensor self, Dimname[] dims, Dimname out_dim) -> Tensor
+- func: flatten.DimnameList(Tensor(a) self, Dimname[] dims, Dimname out_dim) -> Tensor(a)
   variants: function, method
 
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
@@ -2076,7 +2076,7 @@
   use_c10_dispatcher: full
   variants: method
 
-- func: pin_memory(Tensor self) -> Tensor
+- func: pin_memory(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
 
@@ -2225,7 +2225,7 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: reshape(Tensor self, int[] shape) -> Tensor
+- func: reshape(Tensor(a) self, int[] shape) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
@@ -2236,7 +2236,7 @@
   dispatch:
     MkldnnCPU: mkldnn_reshape
 
-- func: reshape_as(Tensor self, Tensor other) -> Tensor
+- func: reshape_as(Tensor(a) self, Tensor other) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   device_guard: False
@@ -2385,7 +2385,7 @@
 # to false to make such changes explicitly illegal, in order to prevent users from
 # changing metadata of the detached tensor and expecting the original tensor to also
 # be updated.
-- func: detach(Tensor self) -> Tensor
+- func: detach(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   manual_kernel_registration: True
   variants: function, method
@@ -2837,7 +2837,7 @@
 - func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
 
-- func: view_as(Tensor self, Tensor other) -> Tensor
+- func: view_as(Tensor(a) self, Tensor other) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   device_guard: False
