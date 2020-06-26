@@ -7,7 +7,7 @@ torch.sparse
 
 .. warning::
 
-    This API is currently experimental and may change in the near future.
+    This API is in beta and may change in the near future.
 
 Torch supports sparse tensors in COO(rdinate) format, which can
 efficiently store and process tensors for which the majority of elements
