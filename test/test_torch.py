@@ -11056,6 +11056,19 @@ class TestTorchDeviceType(TestCase):
                     with self.assertRaises(RuntimeError):
                         torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device)
                     return
+                elif self.device_type == 'xla':
+                    # Error:
+                    # Traceback (most recent call last):
+                    # File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_device_type.py",
+                    # line 241, in instantiated_test
+                    #   result = test(self, device_arg, dtype)
+                    # File "/var/lib/jenkins/workspace/xla/test/../../test/test_torch.py", line 11062, in test_exp
+                    #   self.compare_with_numpy(torch.exp, np.exp, a)
+                    # File "/opt/conda/lib/python3.6/site-packages/torch/testing/_internal/common_utils.py", line 878,
+                    # in compare_with_numpy
+                    #   a = tensor_like.detach().cpu().numpy()
+                    # TypeError: Got unsupported ScalarType BFloat16
+                    return
 
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi
             a = a.to(dtype)
