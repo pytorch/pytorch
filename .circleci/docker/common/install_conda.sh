@@ -24,13 +24,20 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   mkdir /opt/conda
   chown jenkins:jenkins /opt/conda
 
+  # Work around bug where devtoolset replaces sudo and breaks it.
+  if [ -n "$DEVTOOLSET_VERSION" ]; then
+    SUDO=/bin/sudo
+  else
+    SUDO=sudo
+  fi
+
   as_jenkins() {
     # NB: unsetting the environment variables works around a conda bug
     # https://github.com/conda/conda/issues/6576
     # NB: Pass on PATH and LD_LIBRARY_PATH to sudo invocation
     # NB: This must be run from a directory that jenkins has access to,
     # works around https://github.com/conda/conda-package-handling/pull/34
-    sudo -H -u jenkins env -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND -u SUDO_USER env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" $*
+    $SUDO -H -u jenkins env -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND -u SUDO_USER env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" $*
   }
 
   pushd /tmp
@@ -49,10 +56,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   pushd /opt/conda
 
   # Track latest conda update
-  as_jenkins conda update -n base conda
+  as_jenkins conda update -y -n base conda
 
   # Install correct Python version
-  as_jenkins conda install python="$ANACONDA_PYTHON_VERSION"
+  as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
 
   conda_install() {
     # Ensure that the install command don't upgrade/downgrade Python

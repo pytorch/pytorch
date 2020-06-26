@@ -10,15 +10,6 @@ if [ -z "${image}" ]; then
   exit 1
 fi
 
-# TODO: Generalize
-OS="ubuntu"
-DOCKERFILE="${OS}/Dockerfile"
-if [[ "$image" == *-cuda* ]]; then
-  DOCKERFILE="${OS}-cuda/Dockerfile"
-elif [[ "$image" == *-rocm* ]]; then
-  DOCKERFILE="${OS}-rocm/Dockerfile"
-fi
-
 if [[ "$image" == *-trusty* ]]; then
   UBUNTU_VERSION=14.04
 elif [[ "$image" == *-xenial* ]]; then
@@ -29,9 +20,41 @@ elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
 elif [[ "$image" == *-focal* ]]; then
   UBUNTU_VERSION=20.04
+elif [[ "$image" == *ubuntu* ]]; then
+  UBUNTU_VERSION="$(echo "${image}" | perl -n -e'/ubuntu(\d+\.\d+)/ && print $1')"
+elif [[ "$image" == *centos* ]]; then
+  CENTOS_VERSION="$(echo "${image}" | perl -n -e'/centos(\d+(\.\d+)?(\.\d+)?)/ && print $1')"
+fi
+
+if [ -n "${UBUNTU_VERSION}" ]; then
+  OS="ubuntu"
+elif [ -n "${CENTOS_VERSION}" ]; then
+  OS="centos"
+else
+  echo "Unable to derive operating system base..."
+  exit 1
+fi
+
+DOCKERFILE="${OS}/Dockerfile"
+if [[ "$image" == *-cuda* ]]; then
+  DOCKERFILE="${OS}-cuda/Dockerfile"
+elif [[ "$image" == *-rocm* ]]; then
+  DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
+
+# verify the given variable was parsed from $image correctly
+function check_variable() {
+  if [ "x$1" = x ]; then
+    echo "missing argument to function check_variable()"
+    exit 1
+  fi
+  if [ "x${!1}" = x ]; then
+    echo "variable '$1' not correctly parsed from image='$image'"
+    exit 1
+  fi
+}
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -240,6 +263,47 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=3.5.1
     ;;
+  *)
+    # Catch-all for builds that are not hardcoded.
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    echo "image '$image' did not match an existing build configuration"
+    if [[ "$image" == *py* ]]; then
+      ANACONDA_PYTHON_VERSION="$(echo "${image}" | perl -n -e'/py(\d+\.\d+)/ && print $1')"
+      check_variable ANACONDA_PYTHON_VERSION
+    fi
+    if [[ "$image" == *cuda* ]]; then
+      CUDA_VERSION="$(echo "${image}" | perl -n -e'/cuda(\d+\.\d+)/ && print $1')"
+      check_variable CUDA_VERSION
+      CUDNN_VERSION="$(echo "${image}" | perl -n -e'/cudnn(\d+)/ && print $1')"
+      check_variable CUDNN_VERSION
+    fi
+    if [[ "$image" == *rocm* ]]; then
+      ROCM_VERSION="$(echo "${image}" | perl -n -e'/rocm(\d+\.\d+(\.\d+)?)/ && print $1')"
+      check_variable ROCM_VERSION
+    fi
+    if [[ "$image" == *gcc* ]]; then
+      GCC_VERSION="$(echo "${image}" | perl -n -e'/gcc(\d+(\.\d+)?)/ && print $1')"
+      check_variable GCC_VERSION
+    fi
+    if [[ "$image" == *clang* ]]; then
+      CLANG_VERSION="$(echo "${image}" | perl -n -e'/clang(\d+(\.\d+)?)/ && print $1')"
+      check_variable CLANG_VERSION
+    fi
+    if [[ "$image" == *devtoolset* ]]; then
+      DEVTOOLSET_VERSION="$(echo "${image}" | perl -n -e'/devtoolset(\d+(\.\d+)?)/ && print $1')"
+      check_variable DEVTOOLSET_VERSION
+    fi
+    if [[ "$image" == *glibc* ]]; then
+      GLIBC_VERSION="$(echo "${image}" | perl -n -e'/glibc(\d+(\.\d+)?)/ && print $1')"
+      check_variable GLIBC_VERSION
+    fi
+    if [[ "$image" == *cmake* ]]; then
+      CMAKE_VERSION="$(echo "${image}" | perl -n -e'/cmake(\d+\.\d+\.\d+)/ && print $1')"
+      check_variable CMAKE_VERSION
+    fi
+  ;;
 esac
 
 # Set Jenkins UID and GID if running Jenkins
@@ -268,6 +332,9 @@ docker build \
        --build-arg "JENKINS_UID=${JENKINS_UID:-}" \
        --build-arg "JENKINS_GID=${JENKINS_GID:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
+       --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
+       --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
+       --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
        --build-arg "TRAVIS_PYTHON_VERSION=${TRAVIS_PYTHON_VERSION}" \

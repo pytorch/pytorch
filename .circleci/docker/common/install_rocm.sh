@@ -62,7 +62,7 @@ install_centos() {
 
   echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
   echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
-  echo "baseurl=http://repo.radeon.com/rocm/yum/rpm/" >> /etc/yum.repos.d/rocm.repo
+  echo "baseurl=http://repo.radeon.com/rocm/yum/${ROCM_VERSION}" >> /etc/yum.repos.d/rocm.repo
   echo "enabled=1" >> /etc/yum.repos.d/rocm.repo
   echo "gpgcheck=0" >> /etc/yum.repos.d/rocm.repo
 
