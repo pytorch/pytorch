@@ -253,10 +253,13 @@ double dot_impl(int64_t n, double* x, int64_t incx, double* y, int64_t incy) {
   return dot_impl_floating(n, x, incx, y, incy);
 }
 
-#define INSTANTIATE_DOT_IMPL(scalar_t, _)  \
-  template scalar_t dot_impl<scalar_t>( \
-      int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy);
-AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, INSTANTIATE_DOT_IMPL);
-#undef INSTANTIATE_DOT_IMPL
+// Skip reinstantiating the explicitly specialized types `float` and `double`.
+template uint8_t dot_impl<uint8_t>(int64_t n, uint8_t * x, int64_t incx, uint8_t * y, int64_t incy);
+template int8_t dot_impl<int8_t>(int64_t n, int8_t * x, int64_t incx, int8_t * y, int64_t incy);
+template int16_t dot_impl<int16_t>(int64_t n, int16_t * x, int64_t incx, int16_t * y, int64_t incy);
+template int dot_impl<int>(int64_t n, int * x, int64_t incx, int * y, int64_t incy);
+template int64_t dot_impl<int64_t>(int64_t n, int64_t * x, int64_t incx, int64_t * y, int64_t incy);
+template c10::Half dot_impl<c10::Half>(int64_t n, c10::Half * x, int64_t incx, c10::Half * y, int64_t incy);
+template c10::BFloat16 dot_impl<c10::BFloat16>(int64_t n, c10::BFloat16 * x, int64_t incx, c10::BFloat16 * y, int64_t incy);
 
 }} // namespace at::native
