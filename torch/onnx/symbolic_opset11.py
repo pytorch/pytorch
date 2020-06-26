@@ -665,11 +665,11 @@ def flatten(g, input, start_dim, end_dim):
         end_dim = dim + end_dim
     input_size = g.op("Shape", input)
     slice1 = sym_help._slice_helper(g, input_size, axes=[0], starts=[0], ends=[start_dim])
-    slice2 = sym_help._slice_helper(g, input_size, axes=[0],  starts=[start_dim], ends=[end_dim+1])
+    slice2 = sym_help._slice_helper(g, input_size, axes=[0], starts=[start_dim], ends=[end_dim + 1])
     slice2 = g.op("ReduceProd", slice2)
     slices = [slice1, slice2]
-    if end_dim < dim-1:
-        slice3 = sym_help._slice_helper(g, input_size, axes=[0], starts=[end_dim+1], ends=[dim])
+    if end_dim < dim - 1:
+        slice3 = sym_help._slice_helper(g, input_size, axes=[0], starts=[end_dim + 1], ends=[dim])
         slices = [slice1, slice2, slice3]
 
     final_shape = g.op("Concat", *slices, axis_i=0)
