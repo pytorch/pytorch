@@ -235,6 +235,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       "quantized::linear(): Input tensor rank should be >= 2");
   auto input_contig = input.contiguous();
 
+  TORCH_CHECK(false, "Hope you get a backtrace");
+
   auto packB = w.get();
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
