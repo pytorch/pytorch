@@ -715,7 +715,6 @@ def emit_profiled_body(declaration):
 
     profiled_dispatch_args = ['op', 'c10::DispatchKey::Profiler'] + declaration['args']
 
-
     template = PROFILE_DISPATCH_UNBOXED if base_name not in DONT_PROFILE and not declaration['manual_kernel_registration'] else PROFILE_DISPATCH_UNBOXED_DONT_PROFILE
     call = template.substitute(
         declaration,
