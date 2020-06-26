@@ -13,17 +13,33 @@ struct ParameterDictTest : torch::test::SeedingFixture {};
 
 TEST_F(ParameterDictTest, ConstructFromTensor) {
   ParameterDict dict;
-  dict->insert("A", torch::tensor({1.0}));
-  dict->insert("B", torch::tensor({2.0}));
-  dict->insert("C", torch::tensor({3.3}));
+  torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
+  torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
+  torch::Tensor tc = torch::randn({1, 2});
+  ASSERT_TRUE(ta.requires_grad());
+  ASSERT_FALSE(tb.requires_grad());
+  dict->insert("A", ta);
+  dict->insert("B", tb);
+  dict->insert("C", tc);
   ASSERT_EQ(dict->size(), 3);
+  ASSERT_TRUE(torch::all(torch::eq(dict["A"], ta)).item<bool>());
+  ASSERT_TRUE(dict["A"].requires_grad());
+  ASSERT_TRUE(torch::all(torch::eq(dict["B"], tb)).item<bool>());
+  ASSERT_FALSE(dict["B"].requires_grad());
 }
 
 TEST_F(ParameterDictTest, ConstructFromOrderedDict) {
+  torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
+  torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
+  torch::Tensor tc = torch::randn({1, 2});
   torch::OrderedDict<std::string, torch::Tensor> params = {
-      {"a", torch::tensor({1.0})}, {"b", torch::tensor({2.0})}};
+      {"A", ta}, {"B", tb}, {"C", tc}};
   auto dict = torch::nn::ParameterDict(params);
-  ASSERT_EQ(dict->size(), 2);
+  ASSERT_EQ(dict->size(), 3);
+  ASSERT_TRUE(torch::all(torch::eq(dict["A"], ta)).item<bool>());
+  ASSERT_TRUE(dict["A"].requires_grad());
+  ASSERT_TRUE(torch::all(torch::eq(dict["B"], tb)).item<bool>());
+  ASSERT_FALSE(dict["B"].requires_grad());
 }
 
 TEST_F(ParameterDictTest, InsertAndContains) {
@@ -55,22 +71,18 @@ TEST_F(ParameterDictTest, InsertAndPop) {
 
 TEST_F(ParameterDictTest, SimpleUpdate) {
   ParameterDict dict;
-  ParameterDict otherDict;
+  ParameterDict wrongDict;
+  ParameterDict rightDict;
   dict->insert("A", torch::tensor({1.0}));
   dict->insert("B", torch::tensor({2.0}));
   dict->insert("C", torch::tensor({3.0}));
-  otherDict->insert("A", torch::tensor({5.0}));
-  otherDict->insert("D", torch::tensor({5.0}));
-  dict->update(*otherDict);
-  ASSERT_EQ(dict->size(), 4);
+  wrongDict->insert("A", torch::tensor({5.0}));
+  wrongDict->insert("D", torch::tensor({5.0}));
+  ASSERT_THROWS_WITH(dict->update(*wrongDict), "Parameter 'D' is not defined");
+  rightDict->insert("A", torch::tensor({5.0}));
+  dict->update(*rightDict);
+  ASSERT_EQ(dict->size(), 3);
   ASSERT_TRUE(torch::eq(dict["A"], torch::tensor({5.0})).item<bool>());
-}
-
-TEST_F(ParameterDictTest, InsertAndGetTest) {
-  ParameterDict dict;
-  dict->insert("A", torch::tensor({1.0}));
-  ASSERT_EQ(dict->size(), 1);
-  ASSERT_TRUE(torch::eq(dict["A"], torch::tensor({1.0})).item<bool>());
 }
 
 TEST_F(ParameterDictTest, Keys) {
@@ -85,24 +97,42 @@ TEST_F(ParameterDictTest, Keys) {
 }
 
 TEST_F(ParameterDictTest, Values) {
+  torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
+  torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
+  torch::Tensor tc = torch::randn({1, 2});
   torch::OrderedDict<std::string, torch::Tensor> params = {
-      {"a", torch::tensor({1.0})},
-      {"b", torch::tensor({2.0})},
-      {"c", torch::tensor({3.0})}};
+      {"a", ta}, {"b", tb}, {"c", tc}};
   auto dict = torch::nn::ParameterDict(params);
   std::vector<torch::Tensor> values = dict->values();
-  std::vector<torch::Tensor> true_values{
-      torch::tensor({1.0}), torch::tensor({2.0}), torch::tensor({3.0})};
+  std::vector<torch::Tensor> true_values{ta, tb, tc};
   for (auto i = 0; i < values.size(); i += 1) {
-    ASSERT_TRUE(torch::eq(values[i], true_values[i]).item<bool>());
+    ASSERT_TRUE(torch::all(torch::eq(values[i], true_values[i])).item<bool>());
   }
+}
+
+TEST_F(ParameterDictTest, Get) {
+  ParameterDict dict;
+  torch::Tensor ta = torch::randn({1, 2}, torch::requires_grad(true));
+  torch::Tensor tb = torch::randn({1, 2}, torch::requires_grad(false));
+  torch::Tensor tc = torch::randn({1, 2});
+  ASSERT_TRUE(ta.requires_grad());
+  ASSERT_FALSE(tb.requires_grad());
+  dict->insert("A", ta);
+  dict->insert("B", tb);
+  dict->insert("C", tc);
+  ASSERT_EQ(dict->size(), 3);
+  ASSERT_TRUE(torch::all(torch::eq(dict->get("A"), ta)).item<bool>());
+  ASSERT_TRUE(dict->get("A").requires_grad());
+  ASSERT_TRUE(torch::all(torch::eq(dict->get("B"), tb)).item<bool>());
+  ASSERT_FALSE(dict->get("B").requires_grad());
 }
 
 TEST_F(ParameterDictTest, PrettyPrintParameterDict) {
   torch::OrderedDict<std::string, torch::Tensor> params = {
       {"a", torch::tensor({1.0})},
-      {"b", torch::tensor({2.0})},
-      {"c", torch::tensor({3.0})}};
+      {"b", torch::tensor({2.0, 1.0})},
+      {"c", torch::tensor({{3.0}, {2.1}})},
+      {"d", torch::tensor({{3.0, 1.3}, {1.2, 2.1}})}};
   auto dict = torch::nn::ParameterDict(params);
   ASSERT_EQ(
       c10::str(dict),
