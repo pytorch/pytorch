@@ -6769,13 +6769,19 @@ a")
         def foo(s: float):
             return torch.tensor(s), torch.tensor([s, s])
 
-        scripted_foo = torch.jit.script(foo)
-        with set_default_dtype(torch.float):
-            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+        # need to clear function cache so we re run shape analysis
         with set_default_dtype(torch.double):
-            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+            self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
+            FileCheck().check("Double").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
+        with set_default_dtype(torch.float):
+            del torch.jit._jit_caching_layer[foo]
+            self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
+            FileCheck().check("Float").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
         with set_default_dtype(torch.half):
-            self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
+            del torch.jit._jit_caching_layer[foo]
+            self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
+            FileCheck().check("Half").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
+
 
     def test_empty_like_memory_format_bc(self):
         def f(x):
