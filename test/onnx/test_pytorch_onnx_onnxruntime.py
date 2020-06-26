@@ -73,7 +73,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         torch.onnx._export(model, input_copy, f,
                            opset_version=self.opset_version,
-                           example_outputs=output, verbose=True,
+                           example_outputs=output,
                            do_constant_folding=do_constant_folding,
                            keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                            dynamic_axes=dynamic_axes,
