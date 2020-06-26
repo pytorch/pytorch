@@ -6375,8 +6375,7 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_nanprod(self, device, dtype):
-        x = ([ [float('nan'), 1.23], [2.06, float('nan')] ], [ [float('nan'), float('nan')], [float('nan'),
-            float('nan')] ])
+        x = ([[float('nan'), 1.23], [2.06, float('nan')]], [[float('nan'), float('nan')], [float('nan'), float('nan')]])
 
         torch_fn_with_axis = partial(torch.nanprod, axis=0)
         np_fn_with_axis = partial(np.nanprod, axis=0)

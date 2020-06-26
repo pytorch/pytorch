@@ -290,7 +290,7 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
 
 Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t dim, bool keepdim) {
   if (input.dim() == 0) {
-    return grad;
+    return grad * input.isnan().logical_not();
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
   if (!keepdim && input.dim() != 1) {
