@@ -52,6 +52,8 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   cd /tmp/libtorch
 fi
 
+export TORCH_SHOW_CPP_STACKTRACES=1
+
 # Test the package
 /builder/check_binary.sh
 

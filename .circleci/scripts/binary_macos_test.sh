@@ -25,6 +25,8 @@ else
   pip install "$pkg" --no-index --no-dependencies -v
 fi
 
+export TORCH_SHOW_CPP_STACKTRACES=1
+
 # Test
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   $workdir/builder/check_binary.sh
