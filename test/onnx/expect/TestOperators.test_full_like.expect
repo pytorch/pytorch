@@ -1,6 +1,6 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.6"
+producer_version: "1.7"
 graph {
   node {
     input: "0"
@@ -18,30 +18,10 @@ graph {
       t {
         dims: 1
         data_type: 1
-        raw_data: "\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    output: "3"
-    name: "Constant_2"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 1
         raw_data: "\000\000\000@"
       }
       type: TENSOR
     }
-  }
-  node {
-    input: "2"
-    input: "3"
-    output: "4"
-    name: "Add_3"
-    op_type: "Add"
   }
   name: "torch-jit-export"
   input {
@@ -61,7 +41,7 @@ graph {
     }
   }
   output {
-    name: "4"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
