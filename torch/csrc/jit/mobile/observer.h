@@ -47,6 +47,9 @@ class MobileModuleObserver {
   virtual void onExitRunMethod() {}
   virtual void onCancelRunMethod(const std::string&) {}
   virtual void onFailRunMethod(const std::string&) {}
+  virtual void onEnterLoadModel() {}
+  virtual void onExitLoadModel(const std::string&) {}
+  virtual void onFailLoadModel(const std::string&) {}
 };
 
 class MobileObserverConfig {
