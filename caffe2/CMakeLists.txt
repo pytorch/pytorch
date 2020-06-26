@@ -87,7 +87,6 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
-# For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
 if(NOT MSVC AND USE_XNNPACK)
   if(NOT TARGET fxdiv)
     set(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
@@ -95,10 +94,6 @@ if(NOT MSVC AND USE_XNNPACK)
     add_subdirectory(
       "${FXDIV_SOURCE_DIR}"
       "${CMAKE_BINARY_DIR}/FXdiv")
-  endif()
-  if(NOT (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
-    set_source_files_properties(
-        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp)
   endif()
 endif()
 
@@ -820,7 +815,7 @@ if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_compile_options(torch_cpu INTERFACE ${OpenMP_CXX_FLAGS})
+  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_FLAGS})
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 

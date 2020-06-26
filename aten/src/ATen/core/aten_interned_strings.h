@@ -730,6 +730,10 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
+_(aten, real) \
+_(aten, imag) \
+_(aten, view_as_real) \
+_(aten, view_as_complex) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

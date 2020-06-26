@@ -1,6 +1,8 @@
 from __future__ import print_function
 import os
 import collections
+from pprint import pformat
+
 import yaml
 import re
 import argparse
@@ -554,6 +556,7 @@ def gen_pyi(declarations_path, out):
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
         'is_quantized': ['is_quantized: _bool'],
+        'is_meta': ['is_meta: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
@@ -639,6 +642,16 @@ def gen_pyi(declarations_path, out):
                           'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
                           'quint8', 'qint8', 'qint32', 'bool']]
 
+    # Generate __all__ directive
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Include only the functions that contain hints, to prevent undefined
+    # symbols to be included in the `__all__` directive.
+    hinted_function_names = [name for name, hint in unsorted_function_hints.items() if hint]
+    all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
+    all_directive = pformat(all_symbols, width=100, compact=True).split('\n')
+    all_directive[0] = '__all__ = {}'.format(all_directive[0])
+
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
 
@@ -649,6 +662,7 @@ def gen_pyi(declarations_path, out):
         'legacy_class_hints': legacy_class_hints,
         'legacy_storage_base_hints': legacy_storage_base_hints,
         'dtype_class_hints': dtype_class_hints,
+        'all_directive': all_directive
     }
     TORCH_C_TYPE_STUBS = CodeTemplate.from_file(os.path.join('torch', '_C', '__init__.pyi.in'))
     TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS = \

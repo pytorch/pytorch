@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
@@ -375,7 +376,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   to the creation of this RRef on the remote node has been recorded.
               )")
           // not releasing GIL to avoid context switch
-          .def("__str__", &PyRRef::str);
+          .def("__repr__", &PyRRef::str);
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module,
@@ -722,6 +723,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
       &profiler::processglobal::disableServer);
 
   module.def("_set_profiler_node_id", &at::RecordFunction::setDefaultNodeId);
+
+  py::class_<
+      RemoteProfilerManager,
+      std::unique_ptr<RemoteProfilerManager, py::nodelete>>(
+      module, "RemoteProfilerManager")
+      .def("set_current_profiling_key", [](const std::string& key) {
+        auto& inst = RemoteProfilerManager::getInstance();
+        inst.setCurrentKey(key);
+      });
 
   Py_RETURN_TRUE;
 }
