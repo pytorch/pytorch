@@ -76,15 +76,16 @@ def cross_layer_equalization(module1, module2):
         print(module2)
         raise TypeError("Only Linear and Conv2d modules are supported at this time")
 
-    tensor1, tensor2 = scaling_channels(module1.weight, module2.weight,
-                        module1_output_channel_axis, module2_input_channel_axis)
+    tensor1, tensor2 = scaling_channels(module1.weight, module2.weight, module1_output_channel_axis, module2_input_channel_axis)
 
     module1.weight = nn.parameter.Parameter(tensor1)
     module2.weight = nn.parameter.Parameter(tensor2)
 
-def equalize(model, paired_modules_list):
-    # use deep copy to provide out of place option
-    # https://discuss.pytorch.org/t/copy-deepcopy-vs-clone/55022
+def equalize(model, paired_modules_list, threshold):
+    ''' Given a list of adjacent modules within a model, equalization will
+    be applied between each pair, this will repeated until convergence is achieved
+
+    '''
     name_to_module = {}
     copies = {}
     name_set = {name for pair in paired_modules_list for name in pair}
@@ -94,12 +95,12 @@ def equalize(model, paired_modules_list):
             name_to_module[name] = module
             copies[name] = None
 
-    while not converged_test(name_to_module, copies, 1e-6):
+    while not converged_test(name_to_module, copies, threshold):
         for pair in paired_modules_list:
             copies[pair[0]] = copy.deepcopy(name_to_module[pair[0]])
             copies[pair[1]] = copy.deepcopy(name_to_module[pair[1]])
 
-            cross_layer_equalization(name_to_module[pair[0]],name_to_module[pair[1]])
+            cross_layer_equalization(name_to_module[pair[0]], name_to_module[pair[1]])
 
 def converged_test(curr_modules, prev_modules, threshold):
     if len(curr_modules) != len(prev_modules):
@@ -107,7 +108,7 @@ def converged_test(curr_modules, prev_modules, threshold):
 
     summed_norms = 0
     for name in curr_modules.keys():
-        if prev_modules[name] == None:
+        if prev_modules[name] is None:
             return False
         difference = curr_modules[name].weight.sub(prev_modules[name].weight)
         summed_norms += torch.norm(difference)

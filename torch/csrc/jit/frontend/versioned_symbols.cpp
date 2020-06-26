@@ -76,6 +76,12 @@ static std::unordered_map<Symbol, SymbolRange> symbol_range_map({
      {0, 4, Symbol::fromQualString("upgraders::full_0_4")}},
 });
 
+static std::unordered_map<NodeKind, uint64_t> kind_min_version_map({
+    {aten::div, 4},
+    {aten::div_, 4},
+    {aten::full, 5}, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+});
+
 Symbol get_symbol_for_version(const Symbol name, const uint64_t version) {
   auto it = symbol_range_map.find(name);
   if (it == symbol_range_map.end()) {
@@ -88,6 +94,15 @@ Symbol get_symbol_for_version(const Symbol name, const uint64_t version) {
   }
 
   return name;
+}
+
+uint64_t get_min_version_for_kind(const NodeKind& kind) {
+  auto it = kind_min_version_map.find(kind);
+  if (it == kind_min_version_map.end()) {
+    return 0;
+  }
+
+  return it->second;
 }
 
 } // namespace jit
