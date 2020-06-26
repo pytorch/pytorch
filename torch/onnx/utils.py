@@ -409,6 +409,8 @@ def _model_to_graph(model, args, verbose=False,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
+    params_dict = torch._C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
+
     # For ONNX opset < 9, constants only have three data types: float16, float, double.
     # In this pass transform constants of other data types to float/double + cast operator.
     if _export_onnx_opset_version < 9:
@@ -917,7 +919,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
-                           and sould start with a letter and contain only \
+                           and should start with a letter and contain only \
                            alphanumerical characters"
                            .format(symbolic_name))
     ns, op_name = symbolic_name.split('::')
