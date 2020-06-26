@@ -136,13 +136,6 @@ void ThreadPredicates::updateBitSet(Expr* expr) {
               "Invalid broadcast and reduction combination, tried to parallelize both with the same thread dim: ",
               inp);
         }
-      } else if (input_bcasts[i]) {
-        if (id_ptypes[i])
-          TORCH_INTERNAL_ASSERT(
-              id_bcasts[i],
-              "Mismatched parallelized broadcast found on inputs of epxr: ",
-              expr,
-              ".");
       }
     }
 
