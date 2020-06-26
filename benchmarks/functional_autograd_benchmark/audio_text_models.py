@@ -148,8 +148,8 @@ def get_deepspeech(device):
 
         def __repr__(self):
             return self.__class__.__name__ + '(' \
-                   + 'n_features=' + str(self.n_features) \
-                   + ', context=' + str(self.context) + ')'
+                + 'n_features=' + str(self.n_features) \
+                + ', context=' + str(self.context) + ')'
 
     class DeepSpeech(nn.Module):
         def __init__(self, rnn_type, labels, rnn_hidden_size, nb_layers, audio_conf,
@@ -236,7 +236,8 @@ def get_deepspeech(device):
             seq_len = input_length
             for m in self.conv.modules():
                 if type(m) == nn.modules.conv.Conv2d:
-                    seq_len = ((seq_len + 2 * m.padding[1] - m.dilation[1] * (m.kernel_size[1] - 1) - 1).true_divide(m.stride[1]) + 1)
+                    seq_len = seq_len + 2 * m.padding[1] - m.dilation[1] * (m.kernel_size[1] - 1) - 1
+                    seq_len = seq_len.true_divide(m.stride[1]) + 1
             return seq_len.int()
 
 
@@ -255,11 +256,12 @@ def get_deepspeech(device):
     num_classes = 10
     spectrogram_size = 161
     # Commented are the original sizes in the code
-    seq_length = 500 # 1343
-    target_length = 10 # 50
+    seq_length = 500  # 1343
+    target_length = 10  # 50
     labels = torch.rand(num_classes, device=device)
     inputs = torch.rand(N, 1, spectrogram_size, seq_length, device=device)
-    inputs_sizes = torch.rand(N, device=device).mul(seq_length*0.1).add(seq_length*0.8) # Sequence length for each input
+    # Sequence length for each input
+    inputs_sizes = torch.rand(N, device=device).mul(seq_length * 0.1).add(seq_length * 0.8)
     targets = torch.rand(N, target_length, device=device)
     targets_sizes = torch.full((N,), target_length, dtype=torch.int, device=device)
 
@@ -272,7 +274,7 @@ def get_deepspeech(device):
     def forward(*new_params):
         load_weights(model, names, new_params)
         out, out_sizes = model(inputs, inputs_sizes)
-        out = out.transpose(0, 1) # For ctc loss
+        out = out.transpose(0, 1)  # For ctc loss
 
         loss = criterion(out, targets, out_sizes, targets_sizes)
         return loss
@@ -332,7 +334,7 @@ def get_transformer(device):
             super(TransformerModel, self).__init__()
             try:
                 from torch.nn import TransformerEncoder, TransformerEncoderLayer
-            except:
+            except Exception:
                 raise ImportError('TransformerEncoder module does not exist in PyTorch 1.1 or lower.')
             self.model_type = 'Transformer'
             self.src_mask = None
@@ -381,7 +383,7 @@ def get_transformer(device):
     criterion = nn.NLLLoss()
     params, names = make_functional(model)
 
-    data = torch.rand(N, seq_length+1, device=device).mul(ntoken).long()
+    data = torch.rand(N, seq_length + 1, device=device).mul(ntoken).long()
     inputs = data.narrow(1, 0, seq_length)
     targets = data.narrow(1, 1, seq_length)
 
