@@ -3528,6 +3528,85 @@ void testGPU_FusionBCastReduce() {
       !tv2->axis(2)->isBroadcast() && !tv2->axis(2)->isReduction());
 }
 
+void testGPU_FusionComputeAtExprOrder() {
+  {
+    for (int i = 0; i < 2; ++i) {
+      torch::jit::fuser::cuda::CudaKernel prog;
+      Fusion& fusion = *prog.fusion_;
+      FusionGuard fg(&fusion);
+
+      // Set up your input tensor views
+      TensorView* tv0 = makeDummyTensor(1);
+      fusion.addInput(tv0);
+
+      auto tv1 = add(tv0, new Float(1));
+      auto tv2 = add(tv0, new Float(1));
+      TensorView* tv3 = add(tv1, tv2);
+      if (i == 0) {
+        tv1->computeAt(tv3, -1);
+        fusion.addOutput(tv2);
+      } else {
+        tv2->computeAt(tv3, -1);
+        fusion.addOutput(tv1);
+      }
+      fusion.addOutput(tv3);
+
+      prog.device_ = 0;
+      prog.grid(1);
+      prog.block(1);
+
+      torch::jit::fuser::cuda::compileKernel(&prog);
+
+      auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+      at::Tensor input = at::rand({100}, options);
+      at::Tensor output2 = at::empty_like(input, options);
+      at::Tensor output3 = at::empty_like(input, options);
+      torch::jit::fuser::cuda::runTestKernel(
+          &prog, {input}, {output2, output3});
+      auto aten_output = (input + 1) * 2;
+      TORCH_CHECK(
+          aten_output.allclose(output3),
+          "Error of: ",
+          aten_output.sub(output3).abs().max());
+    }
+  }
+  {
+    torch::jit::fuser::cuda::CudaKernel prog;
+    Fusion& fusion = *prog.fusion_;
+    FusionGuard fg(&fusion);
+
+    // Set up your input tensor views
+    TensorView* tv0 = makeDummyTensor(2);
+    fusion.addInput(tv0);
+
+    auto tv1 = add(tv0, new Float(1));
+    auto tv2 = add(tv0, new Float(1));
+    TensorView* tv3 = add(tv1, tv2);
+    fusion.addOutput(tv3);
+
+    tv3->split(-1, 32);
+
+    tv1->computeAt(tv3, -1);
+    tv2->computeAt(tv3, -2);
+
+    prog.device_ = 0;
+    prog.grid(1);
+    prog.block(1);
+
+    torch::jit::fuser::cuda::compileKernel(&prog);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor input = at::rand({100, 100}, options);
+    at::Tensor output = at::empty_like(input, options);
+    torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {output});
+    auto aten_output = (input + 1) * 2;
+    TORCH_CHECK(
+        aten_output.allclose(output),
+        "Error of: ",
+        aten_output.sub(output).abs().max());
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

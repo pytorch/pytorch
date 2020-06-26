@@ -157,7 +157,8 @@ namespace jit {
   _(GPU_FusionNonRedAxisBind)     \
   _(GPU_FusionBCastInnerDim)      \
   _(GPU_FusionBCastReduce)        \
-  _(GPU_FusionSplitBCast)
+  _(GPU_FusionSplitBCast)         \
+  _(GPU_FusionComputeAtExprOrder)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

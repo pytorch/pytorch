@@ -23,8 +23,8 @@ std::vector<Expr*> GPULower::getLoweredExprs() {
   auto preds = ThreadPredicates::compute(fusion_);
 
   // Run our passes keeping the lowered expressions and forwarding them.
-  auto loop_nests =
-      LoopNestGenerator::getLoopNest(fusion_, fusion_->exprs(true), preds);
+  auto loop_nests = LoopNestGenerator::getLoopNest(
+      fusion_, fusion_->exprs(true, false, true), preds);
 
   auto unrolled_loops = UnrollPass::runPass(fusion_, loop_nests, preds);
 

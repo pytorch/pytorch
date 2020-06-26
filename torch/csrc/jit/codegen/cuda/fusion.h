@@ -82,7 +82,8 @@ struct ExprSort : public IterVisitor {
   static std::vector<Expr*> getExprs(
       Fusion* fusion,
       bool from_outputs_only,
-      bool breadth_first);
+      bool breadth_first,
+      bool respect_compute_at);
 };
 
 struct InputsOf : public IterVisitor {
@@ -155,7 +156,8 @@ class TORCH_CUDA_API Fusion : public IRInputOutput {
    */
   std::vector<Expr*> exprs(
       bool from_outputs_only = false,
-      bool breadth_first = false);
+      bool breadth_first = false,
+      bool respect_compute_at = false);
 
   std::unordered_set<Val*> inputsOf(Val* val);
 

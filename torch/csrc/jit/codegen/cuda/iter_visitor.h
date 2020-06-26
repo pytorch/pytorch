@@ -48,8 +48,10 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // These functions will start at outputs and propagate up through the DAG
   // to inputs based on depth first traversal. Next could be called on a node
   // multiple times.
-  virtual std::vector<Statement*> next(Statement* stmt);
-  virtual std::vector<Statement*> next(Expr* expr);
+  virtual std::vector<Statement*> next(
+      Statement* stmt,
+      bool respect_compute_at);
+  virtual std::vector<Statement*> next(Expr* expr, bool respect_compute_at);
   virtual std::vector<Statement*> next(Val* v);
 
   // This handle functions is called on every Statement* in topological order,
@@ -79,7 +81,8 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
       Fusion* const fusion,
       bool from_outputs_only = false,
       bool breadth_first = false,
-      bool traverse_all_paths = false);
+      bool traverse_all_paths = false,
+      bool respect_compute_at = false);
 
  public:
   // Starts at nodes provided in from, traverses from these nodes to inputs.
@@ -90,23 +93,34 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   void traverseFrom(
       Fusion* const fusion,
       const std::vector<Val*>& from,
-      bool traverseAllPaths = false);
+      bool traverseAllPaths = false,
+      bool respectComputeAt = false);
+
+  void traverseFrom2(
+      Fusion* const fusion,
+      const std::vector<Val*>& from,
+      bool traverseAllPaths = false,
+      bool respectComputeAt = false);
 
   // from_outputs_only = true start from outputs registered with fusion,
   // from_outputs_only = false start from all leaf nodes,
   // bool breadth_first = true is not implemented yet
+  // respect_compute_at = true traverse computeAt input exprs later
   void traverse(
       Fusion* const fusion,
       bool from_outputs_only = false,
-      bool breadth_first = false);
+      bool breadth_first = false,
+      bool respect_compute_at = false);
 
   // from_outputs_only = true start from outputs registered with fusion,
   // from_outputs_only = false start from all leaf nodes,
   // bool breadth_first = true is not implemented yet
+  // respect_compute_at = true traverse computeAt input exprs later
   void traverseAllPaths(
       Fusion* const fusion,
       bool from_outputs_only = false,
-      bool breadth_first = false);
+      bool breadth_first = false,
+      bool respect_compute_at = false);
 
   static std::unordered_set<Val*> getTerminatingOutputs(Fusion* const);
 

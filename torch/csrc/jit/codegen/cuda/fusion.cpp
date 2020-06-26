@@ -35,9 +35,10 @@ void ExprSort::handle(Expr* expr) {
 std::vector<Expr*> ExprSort::getExprs(
     Fusion* fusion,
     bool from_outputs_only,
-    bool breadth_first) {
+    bool breadth_first,
+    bool respect_compute_at) {
   ExprSort es;
-  es.traverse(fusion, from_outputs_only, breadth_first);
+  es.traverse(fusion, from_outputs_only, breadth_first, respect_compute_at);
   return es.exprs;
 }
 
@@ -201,10 +202,14 @@ void Fusion::assertInFusion(const Statement* stmt, const std::string& msg)
   TORCH_CHECK(false, msg, " it was not found in the active fusion.");
 }
 
-std::vector<Expr*> Fusion::exprs(bool from_outputs_only, bool breadth_first) {
+std::vector<Expr*> Fusion::exprs(
+    bool from_outputs_only,
+    bool breadth_first,
+    bool respect_compute_at) {
   if (breadth_first)
     TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-  return ExprSort::getExprs(this, from_outputs_only, breadth_first);
+  return ExprSort::getExprs(
+      this, from_outputs_only, breadth_first, respect_compute_at);
 }
 
 std::unordered_set<Val*> Fusion::inputsOf(Val* val) {
