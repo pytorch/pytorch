@@ -251,6 +251,7 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
+    "torch/csrc/distributed/rpc/profiler/remote_profiler_manager.cpp",
     "torch/csrc/distributed/rpc/profiler/server_process_global_profiler.cpp",
     "torch/csrc/distributed/rpc/python_call.cpp",
     "torch/csrc/distributed/rpc/python_remote_call.cpp",
@@ -397,19 +398,22 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/serialize/output-archive.cpp",
 ]
 
-libtorch_python_cuda_sources = [
+libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/Event.cpp",
     "torch/csrc/cuda/Module.cpp",
+    "torch/csrc/cuda/python_comm.cpp",
     "torch/csrc/cuda/Storage.cpp",
     "torch/csrc/cuda/Stream.cpp",
-    "torch/csrc/cuda/Tensor.cpp",
-    "torch/csrc/cuda/python_comm.cpp",
-    "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/serialization.cpp",
-    "torch/csrc/cuda/utils.cpp",
     "torch/csrc/cuda/shared/cudart.cpp",
-    "torch/csrc/cuda/shared/cudnn.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
+    "torch/csrc/cuda/utils.cpp",
+]
+
+libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
+    "torch/csrc/cuda/python_nccl.cpp",
+    "torch/csrc/cuda/shared/cudnn.cpp",
+    "torch/csrc/cuda/Tensor.cpp",
 ]
 
 libtorch_python_core_sources = [

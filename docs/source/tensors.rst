@@ -168,6 +168,8 @@ view of a storage and defines numeric operations on it.
       :noindex:
    .. autoattribute:: ndim
    .. autoattribute:: T
+   .. autoattribute:: real
+   .. autoattribute:: imag
 
    .. automethod:: abs
    .. automethod:: abs_
