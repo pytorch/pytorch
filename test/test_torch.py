@@ -33,7 +33,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -7159,41 +7159,6 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
             self.assertEqual(res1, res2)
 
-    # This test ensures that all CUDA implementations of operations that use the
-    # non-deterministic `atomicAdd` function raise an error when
-    # `torch.get_deterministic() == True`
-    @onlyCUDA
-    def test_not_deterministic_alert_atomicAdd(self, device):
-        deterministic_restore = torch.is_deterministic()
-
-        test_cases = [
-            [
-                torch.nn.functional.adaptive_avg_pool3d,
-                None,
-                [torch.ones(10, 1, 1, 1, 1, device=device, requires_grad=True), (10, 1, 1)],
-                {},
-                'adaptive_avg_pool3d_backward_cuda',
-                [torch.ones(10, 1, 10, 1, 1, device=device)],
-                {},
-            ]
-        ]
-        common_msg = ' does not have a deterministic implementation, but you set'
-
-        for fn, fwd_msg, fwd_args, fwd_kwargs, bwd_msg, bwd_args, bwd_kwargs in test_cases:
-            if fwd_msg:
-                torch.set_deterministic(True)
-                with self.assertRaisesRegex(RuntimeError, fwd_msg + common_msg):
-                    fn(*fwd_args, **fwd_kwargs)
-
-            if bwd_msg:
-                torch.set_deterministic(False)
-                result = fn(*fwd_args, **fwd_kwargs)
-                torch.set_deterministic(True)
-                with self.assertRaisesRegex(RuntimeError, bwd_msg + common_msg):
-                    result.backward(*bwd_args, **bwd_kwargs)
-
-        torch.set_deterministic(deterministic_restore)
-
     @onlyCUDA
     def test_cat_preserve_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8), device=device)
@@ -12049,6 +12014,11 @@ class TestTorchDeviceType(TestCase):
         res1 = torch.zeros_like(expected)
         self.assertEqual(res1, expected)
 
+    @onlyCUDA
+    @expectedAlertNondeterministic('_histc_cuda', fn_has_device_arg=False)
+    def test_histc_alert_nondeterministic(self, device):
+        torch.histc(torch.tensor([], device=device), min=0, max=3)
+
     def test_histc(self, device):
         # negative nbins throws
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
@@ -15527,6 +15497,11 @@ class TestTorchDeviceType(TestCase):
         big_exp[1] = 1000000
         big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('_bincount_cuda', fn_has_device_arg=False)
+    def test_bincount_alert_nondeterministic(self, device):
+        torch.bincount(torch.tensor([], device=device, dtype=torch.long))
 
     @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial(self, device, dtype):
