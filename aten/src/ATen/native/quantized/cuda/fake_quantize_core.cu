@@ -28,11 +28,11 @@ void fake_quantize_tensor_kernel_cuda(
     int64_t quant_max) {
   // scalar type of this function is guaranteed to be float
   float inv_scale = 1.0f / scale;
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.add_output(output);
-  iter.add_input(input);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(output)
+    .add_input(input)
+    .build();
   gpu_kernel(iter,
     [=] GPU_LAMBDA (float input_val) -> float {
       return (fminf(
@@ -56,12 +56,12 @@ void fake_quantize_grad_tensor_kernel_cuda(
     int64_t quant_max) {
   // scalar type of this function is guaranteed to be float
   float inv_scale = 1.0f / scale;
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.add_output(input_grad);
-  iter.add_input(output_grad);
-  iter.add_input(input);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(input_grad)
+    .add_input(output_grad)
+    .add_input(input)
+    .build();
   gpu_kernel(iter,
     [=] GPU_LAMBDA (float dy, float x) -> float {
       int64_t Xq = std::nearbyint(x * inv_scale + zero_point);
