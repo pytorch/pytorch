@@ -730,7 +730,6 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance, strict,
                     all_ok = False
 
             return all_ok
-
         traced_outs = run_mod_and_filter_tensor_outputs(traced_func, inputs, 'trace')
         fn_outs = run_mod_and_filter_tensor_outputs(func, inputs, 'Python function')
         if compare_outputs(traced_outs, fn_outs, 'Python function'):
