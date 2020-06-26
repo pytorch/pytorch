@@ -152,3 +152,21 @@ namespace test_contains {
   static_assert(!contains<typelist<int, double>, float>::value, "");
   static_assert(!contains<typelist<>, double>::value, "");
 }
+
+namespace test_take {
+    static_assert(std::is_same<typelist<>, take_t<typelist<>, 0>>::value, "");
+    static_assert(std::is_same<typelist<>, take_t<typelist<int64_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int64_t>, take_t<typelist<int64_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<>, take_t<typelist<int64_t, int32_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int64_t>, take_t<typelist<int64_t, int32_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<int64_t, int32_t>, take_t<typelist<int64_t, int32_t>, 2>>::value, "");
+}
+
+namespace test_drop {
+    static_assert(std::is_same<typelist<>, drop_t<typelist<>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int64_t>, drop_t<typelist<int64_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_t<typelist<int64_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<int64_t, int32_t>, drop_t<typelist<int64_t, int32_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int32_t>, drop_t<typelist<int64_t, int32_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_t<typelist<int64_t, int32_t>, 2>>::value, "");
+}
