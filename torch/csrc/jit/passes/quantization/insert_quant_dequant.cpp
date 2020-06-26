@@ -1063,7 +1063,8 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
       // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/quantized/cpu/qadd.cpp#L64-L74
       if (debug_) {
         TORCH_WARN_ONCE(
-            "debug option for add_scalar and mul_scalar is not supported");
+            "debug option for add_scalar and mul_scalar is not supported, "
+            "please don't use debug option for models that uses these ops.");
       }
     }
   }

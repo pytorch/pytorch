@@ -354,8 +354,7 @@ bool isFunctionNode(
 }
 
 bool isSingleInputGeneralShapeAtenFunction(Node* n) {
-  return isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
-    isPropagateQuantSingleInputOp(n);
+  return isAtenFunc(n, _single_input_general_shape_aten_funcs);
 }
 
 bool isSingleInputGeneralValueAtenFunction(Node* n) {
