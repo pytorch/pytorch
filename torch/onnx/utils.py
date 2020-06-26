@@ -917,7 +917,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
-                           and sould start with a letter and contain only \
+                           and should start with a letter and contain only \
                            alphanumerical characters"
                            .format(symbolic_name))
     ns, op_name = symbolic_name.split('::')

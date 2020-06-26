@@ -10,7 +10,7 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace {
 // To have a sanity check for maximum matrix size.
@@ -687,7 +687,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         output_min,
         output_max,
         reinterpret_cast<uint8_t*>(output.template data_ptr<c10::quint8>()),
-        caffe2::mobile_pthreadpool());
+        caffe2::pthreadpool_());
   } else {
     run_status = qnnpack::qnnpackConv(
         conv_p,
@@ -703,7 +703,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         output_min,
         output_max,
         reinterpret_cast<uint8_t*>(output.template data_ptr<c10::quint8>()),
-        caffe2::mobile_pthreadpool());
+        caffe2::pthreadpool_());
   }
 
   TORCH_INTERNAL_ASSERT(
