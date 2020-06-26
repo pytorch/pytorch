@@ -654,14 +654,18 @@ class IrParser {
           [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto self = value_map[node->input(0)->unique()];
-            auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+            auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
             TORCH_INTERNAL_ASSERT(
-                dims.has_value(), "requires static reduce axes");
+                dims_list.has_value(), "requires static reduce axes");
             auto keepdim = constant_as<bool>(node->input(2));
+            std::vector<int> dims;
+            for (const auto dim : dims_list->vec()) {
+              dims.emplace_back(static_cast<int>(dim));
+            }
             TORCH_INTERNAL_ASSERT(
                 keepdim.has_value() && !keepdim.value(),
                 "Keep dim in reduction is not a const false");
-            auto out = sum(self->as<TensorView>(), dims->vec());
+            auto out = sum(self->as<TensorView>(), dims);
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {

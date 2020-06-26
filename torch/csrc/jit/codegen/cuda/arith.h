@@ -40,7 +40,7 @@ TORCH_CUDA_API TensorView* binaryOp(
 // reduces across axes, and reduction operation defined by BinaryOp.
 TORCH_CUDA_API TensorView* reductionOp(
     BinaryOpType reduction_op_type,
-    const std::vector<int64_t>& axes,
+    const std::vector<int>& axes,
     Val* init,
     TensorView* v1);
 
@@ -110,7 +110,7 @@ TORCH_CUDA_API TensorView* andOp(TensorView* v1, TensorView* v2);
 // REDUCTION OPERATIONS
 TORCH_CUDA_API TensorView* sum(
     TensorView* v1,
-    const std::vector<int64_t>& reduction_axes);
+    const std::vector<int>& reduction_axes);
 
 // COMPOUND OPERATIONS
 // add_alpha
