@@ -41,9 +41,7 @@ from torch.testing._internal.common_quantization import (
     RNNCellDynamicModel,
     ModelForFusionWithBias,
     ActivationsTestModel,
-    ActivationsQATTestModel,
     NormalizationTestModel,
-    NormalizationQATTestModel,
     test_only_eval_fn,
     test_only_train_fn,
     prepare_dynamic,
@@ -63,7 +61,6 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
-    override_qengines,
 )
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.common_utils import suppress_warnings
@@ -776,80 +773,6 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 model = quantize_qat(ManualLinearQATModel(qengine), test_only_train_fn,
                                      self.train_data)
                 checkQuantized(model)
-
-    def test_activations(self):
-        for qengine in supported_qengines:
-            with override_quantized_engine(qengine):
-                model = ActivationsQATTestModel(qengine)
-                model = prepare_qat(model)
-
-                self.assertEqual(type(model.fc1), torch.nn.qat.modules.Linear)
-                self.assertEqual(type(model.hardswish), torch.nn.qat.modules.Hardswish)
-                self.assertEqual(type(model.elu), torch.nn.qat.modules.ELU)
-
-                self.checkObservers(model)
-                test_only_train_fn(model, self.train_data)
-                model = convert(model)
-
-                def checkQuantized(model):
-                    self.assertEqual(type(model.fc1), nnq.Linear)
-                    self.assertEqual(type(model.hardswish), nnq.Hardswish)
-                    self.assertEqual(type(model.elu), nnq.ELU)
-                    test_only_eval_fn(model, self.calib_data)
-                    self.checkScriptable(model, self.calib_data)
-
-                checkQuantized(model)
-
-                model = quantize_qat(ActivationsQATTestModel(qengine), test_only_train_fn,
-                                     self.train_data)
-                checkQuantized(model)
-
-    @override_qengines
-    def test_normalization(self):
-        qengine = torch.backends.quantized.engine
-        model = NormalizationQATTestModel(qengine)
-        model = prepare_qat(model)
-
-        self.assertEqual(type(model.fc1), torch.nn.qat.modules.Linear)
-        self.assertEqual(
-            type(model.group_norm), torch.nn.qat.modules.GroupNorm)
-        self.assertEqual(
-            type(model.instance_norm1d),
-            torch.nn.qat.modules.InstanceNorm1d)
-        self.assertEqual(
-            type(model.instance_norm2d),
-            torch.nn.qat.modules.InstanceNorm2d)
-        self.assertEqual(
-            type(model.instance_norm3d),
-            torch.nn.qat.modules.InstanceNorm3d)
-        self.assertEqual(
-            type(model.layer_norm), torch.nn.qat.modules.LayerNorm)
-
-        self.checkObservers(model)
-        test_only_train_fn(model, self.train_data)
-        model = convert(model)
-
-        def checkQuantized(model):
-            self.assertEqual(type(model.fc1), nnq.Linear)
-            self.assertEqual(type(model.group_norm), nnq.GroupNorm)
-            self.assertEqual(type(model.fc1), nnq.Linear)
-            self.assertEqual(type(model.group_norm), nnq.GroupNorm)
-            self.assertEqual(
-                type(model.instance_norm1d), nnq.InstanceNorm1d)
-            self.assertEqual(
-                type(model.instance_norm2d), nnq.InstanceNorm2d)
-            self.assertEqual(
-                type(model.instance_norm3d), nnq.InstanceNorm3d)
-            self.assertEqual(type(model.layer_norm), nnq.LayerNorm)
-            test_only_eval_fn(model, self.calib_data)
-            self.checkScriptable(model, self.calib_data)
-
-        checkQuantized(model)
-
-        model = quantize_qat(
-            NormalizationQATTestModel(qengine), test_only_train_fn,
-            self.train_data)
-        checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
         r"""Using FakeQuant in evaluation only mode,

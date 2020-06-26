@@ -803,7 +803,10 @@ class FunctionEventAvg(FormattedTimesMixin):
 
 class StringTable(defaultdict):
     def __missing__(self, key):
-        self[key] = torch._C._demangle(key)
+        # manage cases like 't' (demangled to 'unsigned short') separately,
+        # for now simply check the length to avoid unexpected results for
+        # the short sequences
+        self[key] = torch._C._demangle(key) if len(key) > 1 else key
         return self[key]
 
 
@@ -1049,7 +1052,7 @@ def build_table(
         [event.input_shapes is not None for event in events])
     name_column_width = max([len(evt.key) for evt in events]) + 4
     DEFAULT_COLUMN_WIDTH = 15
-    SHAPES_COLUMN_WIDTH = 35
+    SHAPES_COLUMN_WIDTH = 45
 
     headers = [
         'Name',
