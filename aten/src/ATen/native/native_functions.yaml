@@ -4900,7 +4900,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_equal
+    CPU: cpu_equal
     CUDA: legacy::cuda::_th_equal
     QuantizedCPU: quantized_equal_cpu
 
@@ -5509,6 +5509,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_out_cpu
     CUDA: adaptive_avg_pool3d_out_cuda
+    QuantizedCPU: quantized_adaptive_avg_pool3d_out
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
   use_c10_dispatcher: full
@@ -5516,6 +5517,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_cpu
     CUDA: adaptive_avg_pool3d_cuda
+    QuantizedCPU: quantized_adaptive_avg_pool3d
 
 - func: adaptive_avg_pool3d_backward.grad_input(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -6381,6 +6383,19 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
+
+# NOTE [_add_batch_dim and _remove_batch_dim]
+# _add_batch_dim and _remove_batch_dim are meant to be used in the implementation
+# of the vmap frontend API (see torch/_vmap_internals.py). They are not
+# user-facing, hence the leading underscore. Please don't use them them anywhere else.
+- func: _add_batch_dim(Tensor self, int batch_dim, int level) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+# See NOTE [_add_batch_dim and _remove_batch_dim]
+- func: _remove_batch_dim(Tensor self, int level, int batch_size, int out_dim) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
 
 # Note: this function is only for testing.
 # It is undocumented and should not be used outside of tests.
