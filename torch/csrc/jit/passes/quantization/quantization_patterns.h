@@ -103,7 +103,7 @@ std::string getInputTensorQParamOpPattern(
   std::string op_pattern = "graph(%a_quant" + extra_op_arg_list + "):" + R"(
           %a_dequant = aten::dequantize(%a_quant)
           %r = )" +
-    op_name + "(" + "%a_dequant" + extra_op_arg_list + ")" + R"(
+      op_name + "(" + "%a_dequant" + extra_op_arg_list + ")" + R"(
           %r_scale : float = aten::q_scale(%a_quant)
           %r_zero_point : int = aten::q_zero_point(%a_quant)
           %r_dtype : int = prim::dtype(%a_quant)
@@ -116,7 +116,8 @@ std::string getInputTensorQParamOpPattern(
 QuantFusionInfo getInputTensorQParamOpFusionInfo(
     const std::string& op_name,
     const std::vector<std::string>& extra_op_args) {
-  std::string op_pattern = getInputTensorQParamOpPattern(op_name, extra_op_args);
+  std::string op_pattern =
+      getInputTensorQParamOpPattern(op_name, extra_op_args);
   const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
   std::string graph_header = "graph(%a_quant" + extra_op_arg_list + "):";
   std::string op_replacement =
@@ -132,13 +133,15 @@ QuantFusionInfo getBinaryOpScalarFusionInfo(
     const std::string& quantized_op_name,
     const std::vector<std::string>& extra_quantized_op_args,
     const std::vector<MatchFilter>& filters = {}) {
-  std::string op_pattern = getInputTensorQParamOpPattern(op_name, extra_op_args);
+  std::string op_pattern =
+      getInputTensorQParamOpPattern(op_name, extra_op_args);
 
   const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
   std::string graph_header = "graph(%a_quant" + extra_op_arg_list + "):";
-  const auto& extra_quantized_op_arg_list = getExtraArgList(extra_quantized_op_args);
-  std::string op_replacement =
-      getAtenOpPattern(graph_header, quantized_op_name, extra_quantized_op_args);
+  const auto& extra_quantized_op_arg_list =
+      getExtraArgList(extra_quantized_op_args);
+  std::string op_replacement = getAtenOpPattern(
+      graph_header, quantized_op_name, extra_quantized_op_args);
 
   return {op_name, op_pattern, op_replacement, filters};
 }
@@ -528,13 +531,17 @@ graph(%a_quant, %b_quant, %alpha, %scale, %zero_point, %dtype):
          return (%r) )";
 
   auto add_scalar = getBinaryOpScalarFusionInfo(
-      "aten::add", {"%b_scalar", "%alpha"},
-      "quantized::add_scalar", {"%b_scalar"},
+      "aten::add",
+      {"%b_scalar", "%alpha"},
+      "quantized::add_scalar",
+      {"%b_scalar"},
       {aten_add_alpha_is_one, input_b_is_scalar});
 
   auto add_scalar_out = getBinaryOpScalarFusionInfo(
-      "aten::add_", {"%b_scalar", "%alpha"},
-      "quantized::add_scalar_out", {"%b_scalar", "%a_quant"},
+      "aten::add_",
+      {"%b_scalar", "%alpha"},
+      "quantized::add_scalar_out",
+      {"%b_scalar", "%a_quant"},
       {aten_add_alpha_is_one, input_b_is_scalar});
 
   // quantized::add_scalar_relu -- fusing quantized::add_scalar
@@ -632,13 +639,17 @@ graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
          return (%r) )";
 
   auto mul_scalar = getBinaryOpScalarFusionInfo(
-      "aten::mul", {"%b_scalar"},
-      "quantized::mul_scalar", {"%b_scalar"},
+      "aten::mul",
+      {"%b_scalar"},
+      "quantized::mul_scalar",
+      {"%b_scalar"},
       {input_b_is_scalar});
 
   auto mul_scalar_out = getBinaryOpScalarFusionInfo(
-      "aten::mul_", {"%b_scalar"},
-      "quantized::mul_scalar_out", {"%b_scalar", "%a_quant"},
+      "aten::mul_",
+      {"%b_scalar"},
+      "quantized::mul_scalar_out",
+      {"%b_scalar", "%a_quant"},
       {input_b_is_scalar});
 
   // quantized::mul_relu

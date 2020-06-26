@@ -359,7 +359,7 @@ bool isSingleInputGeneralShapeAtenFunction(Node* n) {
 
 bool isSingleInputGeneralValueAtenFunction(Node* n) {
   return isAtenFunc(n, _single_input_general_value_aten_funcs) ||
-    isBinaryOpWithScalarInput(n);
+      isBinaryOpWithScalarInput(n);
 }
 
 bool isSingleInputGeneralCallFunction(Node* n) {
@@ -387,8 +387,8 @@ bool isSingleInputGeneralAtenFunction(Node* n) {
       [](auto pair) { return pair.first; });
 
   return isSingleInputGeneralValueAtenFunction(n) ||
-    isSingleInputGeneralShapeAtenFunction(n) ||
-    isAtenFunc(n, fixed_qparams_aten_funcs);
+      isSingleInputGeneralShapeAtenFunction(n) ||
+      isAtenFunc(n, fixed_qparams_aten_funcs);
 }
 
 bool isClamp(Node* n) {
