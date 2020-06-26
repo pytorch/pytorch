@@ -127,7 +127,8 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("bucket_indices"),
           py::arg("process_group"),
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
-          py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap)
+          py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,

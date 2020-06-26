@@ -49,11 +49,9 @@ When tensor is expanded from a smaller storage, serialized file size might be sm
      0.0
     [torch.FloatStorage of size 4]
 
-If you prefer to not preserve storage sharing (might produce different results before/after serialization),
-call :meth:`~torch.Tensor.clone` before saving::
-
-    torch.save(slice.clone())
-
+If saving storages causes issues like saved file contains a lot of unwanted data,
+you can break the storage sharing before saving using :meth:`~torch.Tensor.clone`. But it might
+produce different results compared to the original storage sharing version.
 
 Best practices
 --------------
