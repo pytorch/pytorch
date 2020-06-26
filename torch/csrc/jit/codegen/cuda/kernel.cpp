@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <torch/csrc/jit/resource_guard.h>
 #include <fstream>
@@ -19,8 +20,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-constexpr auto CG_NAMESPACE = "CudaCodeGen";
-constexpr auto KERNEL_NAME = "kernel";
+constexpr auto kCgNamespace = "CudaCodeGen";
+constexpr auto kKernelName = "kernel";
 
 namespace {
 // See NOTE [ USE OF NVRTC AND DRIVER API ]
@@ -147,7 +148,7 @@ struct KernelArgumentHolder {
 
 std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
   std::stringstream str_stream;
-  str_stream << "namespace " << CG_NAMESPACE << " {\n"
+  str_stream << "namespace " << kCgNamespace << " {\n"
              << code_template_tensor_struct << "\n"
              << code_fp16_support << "\n"
              << code_random_number_gen << "\n"
@@ -156,16 +157,16 @@ std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
              << code_template_grid_reduction << "\n";
   std::stringstream cdg;
   GPULower gpulw(fusion);
-  gpulw.printKernel(str_stream, KERNEL_NAME);
+  gpulw.printKernel(str_stream, kKernelName);
   str_stream << "\n} // namespace";
 
-  std::string func_name = std::string(CG_NAMESPACE) + "::" + KERNEL_NAME;
+  std::string func_name = std::string(kCgNamespace) + "::" + kKernelName;
   return std::make_pair(func_name, str_stream.str());
 };
 
 bool validateKernelArgTensor(
     const at::Tensor& arg,
-    const Val* const param,
+    const Val* param,
     int device_index,
     std::stringstream& msg) {
   // Arg is a tensor. Param must be a tensor too.
@@ -220,7 +221,7 @@ bool validateKernelArgTensor(
 
 bool validateKernelArgScalar(
     const c10::TypePtr& arg_type,
-    const Val* const param,
+    const Val* param,
     std::stringstream& msg) {
   if (!param->isScalar()) {
     msg << "Argument is a scalar, but the parameter is not.";
@@ -250,7 +251,7 @@ bool validateKernelArgScalar(
 
 bool validateKernelArg(
     const c10::IValue& arg,
-    const Val* const param,
+    const Val* param,
     int device_index,
     std::stringstream& msg) {
   if (arg.type()->kind() != c10::TypeKind::TensorType) {
@@ -272,7 +273,7 @@ void validateKernelArgs(
       "Wrong number of kernel inputs.");
   for (size_t i = 0; i < inputs.size(); ++i) {
     const IValue& arg = inputs[i];
-    const Val* const param = entry.fusion_->inputs()[i];
+    const Val* param = entry.fusion_->inputs()[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArg(arg, param, entry.device_, msg),
@@ -291,7 +292,7 @@ void validateKernelArgs(
       "Wrong number of kernel outputs.");
   for (size_t i = 0; i < outputs.size(); ++i) {
     const at::Tensor& arg = outputs[i];
-    const Val* const param = entry.fusion_->outputs()[i];
+    const Val* param = entry.fusion_->outputs()[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArgTensor(arg, param, entry.device_, msg),
@@ -530,7 +531,8 @@ void compileKernel(CudaKernel* entry) {
 void runKernel(
     CudaKernel* entry,
     const at::ArrayRef<IValue> inputs,
-    const std::vector<at::Tensor>& outputs) {
+    const std::vector<at::Tensor>& outputs,
+    const std::vector<int64_t>& broadcasted_shape) {
   validateKernelArgs(*entry, inputs, outputs);
 
   const auto prior_device = at::cuda::current_device();
@@ -539,10 +541,32 @@ void runKernel(
 
   // TODO: Proper API to establish reasonable launch configurations;
   // Naive launch config;
-  size_t numel = outputs[0].numel();
+  const size_t numel = outputs[0].numel();
 
-  // TODO: we can't randomly clap down this until we got striding.
-  const auto nBlocks = ceilDiv(numel, 128 * entry->unroll_factor_);
+  int blocks = 1;
+  int thread_x = 1;
+  int thread_y = 1;
+  if (!entry->reduction_axes_.empty()) {
+    // TODO: MAJOR HACK! Expr evaluation makes launch configuration much easier
+    blocks = numel;
+    // Translated to `fcd_reduction`
+    if (entry->reduction_axes_.back() ==
+        outputs[0].dim() + entry->reduction_axes_.size() - 1) {
+      thread_x = kFcdReductionThreadX;
+      thread_y = 1;
+    } else {
+      thread_x = kNonFcdReductionThreadX;
+      thread_y = kNonFcdReductionThreadY;
+    }
+  } else {
+    // TODO: we can't randomly clap down this until we got striding.
+    blocks = ceilDiv(numel, kPwThreadX * entry->unroll_factor_);
+    thread_x = kPwThreadX;
+    thread_y = 1;
+  }
+  const auto nBlocks = blocks;
+  const auto nThreadx = thread_x;
+  const auto nThready = thread_y;
 
   KernelArgumentHolder kernel_args;
 
@@ -551,7 +575,7 @@ void runKernel(
   // from I/O expected by the generated CUDA kernel.
   for (auto& input : inputs) {
     if (input.isTensor()) {
-      kernel_args.push(input.toTensor(), outputs[0].sizes());
+      kernel_args.push(input.toTensor(), broadcasted_shape);
     } else {
       kernel_args.push(input);
     }
@@ -583,8 +607,8 @@ void runKernel(
       nBlocks,
       1,
       1,
-      128,
-      1,
+      nThreadx,
+      nThready,
       1,
       0,
       stream,
