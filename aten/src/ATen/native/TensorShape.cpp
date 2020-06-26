@@ -145,6 +145,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 
   // compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
+  auto first_tensor_mem_format = tensors[0].suggest_memory_format();
   for (int i = 0; i < tensors.size(); i++) {
     auto const &tensor = tensors[i];
     if (should_skip(tensor)) {
@@ -155,7 +156,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     check_cat_shape_except_dim(notSkippedTensor, tensor, dim, i);
     cat_dim_size += tensor.size(dim);
 
-    if (!tensor.is_contiguous()) {
+    if (!tensor.is_contiguous(first_tensor_mem_format)) {
       allContiguous = false;
     }
 
@@ -170,11 +171,14 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // compute the size of the result
   auto result_size = notSkippedTensor.sizes().vec();
   result_size[dim] = cat_dim_size;
-  result.resize_(result_size);
+  result.resize_(result_size, first_tensor_mem_format);
+  if (result.numel() == 0) {
+    return result;
+  }
 
   // fast path for single thread when both inputs and result are contiguous and not empty
+  allContiguous = allContiguous && result.is_contiguous(first_tensor_mem_format);
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
-  allContiguous = allContiguous && result.is_contiguous();
   ScalarType dtype = notSkippedTensor.scalar_type();
   if (use_serial_kernel && allContiguous && no_type_promotion && (dtype == ScalarType::Double || dtype == ScalarType::Float)) {
     cat_serial_stub(kCPU, result, tensors, dim);
@@ -182,7 +186,9 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }
 
   int64_t offset = 0;
-  if (reuse_iterator && result.is_contiguous() && no_type_promotion) {
+  if (reuse_iterator &&
+      result.is_contiguous(first_tensor_mem_format) &&
+      no_type_promotion) {
     auto source_slice = notSkippedTensor;
     auto slice_dim_size = source_slice.size(dim);
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
