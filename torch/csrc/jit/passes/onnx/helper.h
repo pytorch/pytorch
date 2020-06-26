@@ -20,6 +20,9 @@ using ValueToParamPairMap = std::map<Value*, std::pair<std::string, IValue>>;
 
 using ParamMap = std::map<std::string, IValue>;
 
+void buildParamsMapFromValueToParamsMap(
+    const ValueToParamPairMap& valsToParamsMap,
+    ParamMap& paramsDict);
 ValueToParamPairMap buildValueToParamsMap(Block* b, const ParamMap& paramsDict);
 void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap);
 void eraseUnusedBlockInputs(Block* b);
@@ -28,5 +31,6 @@ void buildParamsMapFromValueToParamsMap(
     ParamMap& paramsDict);
 Node* addNodeToBlock(Block* block, Value* input, Symbol kind);
 
+TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 } // namespace jit
 } // namespace torch
