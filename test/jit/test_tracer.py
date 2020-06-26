@@ -2,6 +2,7 @@ import unittest
 import io
 import os
 import sys
+import copy
 
 import torch
 import torch.nn as nn
@@ -389,7 +390,7 @@ class TestTracer(JitTestCase):
     # Test that a trace of torch.full(x.shape) doesn't store the shape as a constant
     def test_trace_full_dynamic_shape(self):
         def full_with_shape_like(x):
-            return torch.full(x.shape, 2)
+            return torch.full(x.shape, 2.)
 
         x = torch.randn(3, 4)
         ge = torch.jit.trace(full_with_shape_like, example_inputs=x)
@@ -1143,7 +1144,8 @@ class TestTracer(JitTestCase):
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
         # should work
-        loaded.copy()
+        copy.copy(loaded)
+        copy.deepcopy(loaded)
 
     def test_trace_export_fns(self):
         class Foo(torch.nn.Module):

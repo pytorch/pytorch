@@ -1,8 +1,9 @@
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
-
 #include <ATen/ThreadLocalState.h>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
@@ -19,6 +20,17 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     std::vector<c10::IValue>& stack,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
+  if (torch::autograd::profiler::profilerEnabled() &&
+      !torch::distributed::rpc::RemoteProfilerManager::getInstance()
+           .isCurrentKeySet()) {
+    auto rpcAsyncJitKey = fmt::format(
+        "rpc_async_jit#({})->({})",
+        RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+        dstWorkerName);
+    auto& remoteProfilerManager =
+        torch::distributed::rpc::RemoteProfilerManager::getInstance();
+    remoteProfilerManager.setCurrentKey(rpcAsyncJitKey);
+  }
   auto scriptCall = std::make_unique<ScriptCall>(
       qualifiedName, std::move(stack), isAsyncExecution);
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();

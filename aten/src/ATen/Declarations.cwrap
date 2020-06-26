@@ -375,10 +375,10 @@
   name: _th_addmm
   cname: addmm
   cpu_bfloat16: True
-  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
+  backends: [CPU]
   options:
     - arguments:
       - arg: THTensor* result
@@ -395,6 +395,7 @@
   cuda_bfloat16: True
   variants: [function]
   return: self
+  backends: [CPU]
   options:
     - cname: addmm
       arguments:
@@ -409,9 +410,9 @@
   name: _th_addr
   cname: addr
   cpu_bfloat16: True
-  cuda_bfloat16: True
   variants: function
   return: argument 0
+  backends: [CPU]
   arguments:
     - arg: THTensor* result
       output: True
@@ -424,10 +425,10 @@
 [[
   name: _th_addr_
   cpu_bfloat16: True
-  cuda_bfloat16: True
   cname: addr
   return: self
   variants: function
+  backends: [CPU]
   arguments:
     - THTensor* self
     - THTensor* self
@@ -457,10 +458,10 @@
 ]]
 [[
   name: _th_addbmm
-  cuda_bfloat16: True
   cname: addbmm
   variants:
     - function
+  backends: [CPU]
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -473,10 +474,10 @@
 ]]
 [[
   name: _th_addbmm_
-  cuda_bfloat16: True
   cname: addbmm
   variants: function
   return: self
+  backends: [CPU]
   arguments:
     - THTensor* self
     - THTensor* self
