@@ -73,7 +73,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         torch.onnx._export(model, input_copy, f,
                            opset_version=self.opset_version,
-                           example_outputs=output,
+                           example_outputs=output, verbose=True,
                            do_constant_folding=do_constant_folding,
                            keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                            dynamic_axes=dynamic_axes,
@@ -2695,6 +2695,17 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.tensor(12)
         self.run_test(FullLikeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_full_like_value(self):
+        class FullLikeModel(torch.nn.Module):
+            def forward(self, x, y):
+                out = y + 2
+                return torch.full_like(x, out)
+
+        x = torch.tensor(12)
+        y = torch.tensor(2)
+        self.run_test(FullLikeModel(), (x, y))
 
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
