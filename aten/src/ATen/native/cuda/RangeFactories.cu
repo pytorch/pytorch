@@ -66,7 +66,8 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
+      // Cast `end` and `start` to `float`, since range can be larger than scalar_t for integral types
+      float step = (static_cast<float>(scalar_end) - static_cast<float>(scalar_start)) / (steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {

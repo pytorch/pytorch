@@ -522,7 +522,6 @@ FunctionOption = TypedDict('FunctionOption', {
     # options should be List[FunctionOption]
     'options': Any,
     'schema_string': str,
-    'requires_tensor': bool,
     'return_call': str,
     'return_type': str,
     'return': ReturnDecl,
@@ -556,7 +555,6 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('inplace', bool),
     ('is_factory_method', bool),
     ('abstract', bool),
-    ('requires_tensor', bool),
     ('device_guard', bool),
     ('with_gil', bool),
     ('deprecated', bool),
@@ -1302,7 +1300,6 @@ def create_generic(top_env, declarations):
             is_factory_method=is_factory_method,
             # See Note [Abstract ATen methods]
             abstract=abstract,
-            requires_tensor=option.get('requires_tensor', False),
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option['deprecated'],

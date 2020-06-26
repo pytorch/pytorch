@@ -58,7 +58,7 @@ bool _nnpack_available() {
 
 #include <nnpack.h>
 
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <ATen/native/ConvUtils.h>
 
 namespace at {
@@ -87,35 +87,7 @@ static bool init_nnpack() {
 }
 
 static pthreadpool_t nnpack_threadpool() {
-  // Try initializing a threadpool for NNPACK's use.  If we fail to
-  // successfully initialize an implementation, return nullptr which will
-  // instruct NNPACK to run single threaded.
-
-#ifdef C10_MOBILE
-  // If building for mobile, use Caffe 2's mobile-friendly threadpool.
-  return caffe2::mobile_pthreadpool();
-#else
-  // Otherwise, try using pthreadpool if we manage to initialize it successfully.
-  static pthreadpool_t nnpack_threadpool_ = nullptr;
-  static bool called_nnpack_threadpool_ = false;
-
-  if (!called_nnpack_threadpool_) {
-    called_nnpack_threadpool_ = true;
-
-#ifdef INTRA_OP_PARALLEL
-    const uint32_t threads = at::get_num_threads();
-#else
-    const uint32_t threads = std::thread::hardware_concurrency();
-#endif
-
-    nnpack_threadpool_ = pthreadpool_create(threads);
-    if (!nnpack_threadpool_) {
-      LOG(WARNING) << "Failed to initialize pthreadpool! Running NNPACK in single-threaded mode.";
-    }
-  }
-
-  return nnpack_threadpool_;
-#endif
+  return caffe2::pthreadpool_();
 }
 
 bool _nnpack_available() {
