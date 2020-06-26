@@ -638,6 +638,28 @@ class TestDataParallel(TestCase):
                 self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, msg='buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_replicate_parameters_list_dict(self):
+        net = nn.Module()
+        net.alpha = nn.Parameter(torch.tensor(0.0))
+        net.beta = nn.ParameterList([nn.Parameter(torch.tensor(1.0)), nn.Parameter(torch.tensor(2.0))])
+        net.gamma = nn.ParameterDict({"g0": nn.Parameter(torch.tensor(3.0)), "g1": nn.Parameter(torch.tensor(4.0))})
+        net.cuda()
+        for devices in [(0, 1), [0, 1]]:
+            replicas = dp.replicate(net, devices)
+            for i, replica in enumerate(replicas):
+                self.assertIsInstance(replica.alpha, torch.Tensor, msg='replicated parameter should be Tensor')
+                self.assertEqual(replica.alpha.get_device(), i, msg='parameter on wrong device')
+                self.assertEqual(len(replica.beta), 2, msg='parameter list does not contain correct number of tensors')
+                for t in replica.beta:
+                    self.assertIsInstance(t, torch.Tensor, msg='replicated parameter should be Tensor')
+                    self.assertEqual(t.get_device(), i, msg='parameter on wrong device')
+                self.assertEqual(len(replica.gamma), 2, msg='parameter dict does not contain correct number of tensors')
+                for key in replica.gamma:                    
+                    t = replica.gamma[key]
+                    self.assertIsInstance(t, torch.Tensor, msg='replicated parameter should be Tensor')
+                    self.assertEqual(t.get_device(), i, msg='parameter on wrong device')
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_zero_grad(self):
         # zero_grad should warn about using gradients inside forward
 
