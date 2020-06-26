@@ -489,4 +489,3 @@ def get_detr(device):
         return final_loss
 
     return forward, params
-

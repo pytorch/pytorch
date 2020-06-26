@@ -2,7 +2,6 @@ import torch
 from torch.autograd import functional
 
 import time
-import json
 import argparse
 from collections import namedtuple, defaultdict
 
@@ -72,7 +71,9 @@ def run_once(model, inp, task, extra=None):
 def run_model(model_getter, args, task):
     if args.gpu == -1:
         device = "cpu"
-        do_sync = lambda *args: args
+        def noop(*args):
+            return args
+        do_sync = noop
     else:
         device = "cuda:{}".format(args.gpu)
         do_sync = torch.cuda.synchronize

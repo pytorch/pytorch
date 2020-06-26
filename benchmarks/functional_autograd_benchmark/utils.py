@@ -32,6 +32,7 @@ def get_str(res, header=None):
     if header is None:
         header = ("model", "task", "mean", "var")
     out = ""
+
     def write_line(*args):
         nonlocal out
         out += "| {} |\n".format(" | ".join(str(a) for a in args))
@@ -47,7 +48,7 @@ def get_str(res, header=None):
 
 def read_str(out):
     out = out.strip().split("\n")
-    out = out[2:] # Ignore the header lines
+    out = out[2:]  # Ignore the header lines
 
     res = defaultdict(defaultdict)
 

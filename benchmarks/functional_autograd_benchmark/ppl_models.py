@@ -10,11 +10,11 @@ def get_simple_regression(device):
 
     beta_prior = dist.Normal(loc_beta, scale_beta)
 
-    X = torch.rand(N, K+1, device=device)
+    X = torch.rand(N, K + 1, device=device)
     Y = torch.rand(N, 1, device=device)
 
-    # X.shape: (N, K+1), Y.shape: (N, 1), beta_value.shape: (K+1, 1)
-    beta_value = beta_prior.sample((K+1, 1))
+    # X.shape: (N, K + 1), Y.shape: (N, 1), beta_value.shape: (K + 1, 1)
+    beta_value = beta_prior.sample((K + 1, 1))
     beta_value.requires_grad_(True)
 
     def forward(beta_value):
@@ -32,8 +32,8 @@ def get_robust_regression(device):
     N = 10
     K = 10
 
-    # X.shape: (N, K+1), Y.shape: (N, 1)
-    X = torch.rand(N, K+1, device=device)
+    # X.shape: (N, K + 1), Y.shape: (N, 1)
+    X = torch.rand(N, K + 1, device=device)
     Y = torch.rand(N, 1, device=device)
 
     # Predefined nu_alpha and nu_beta, nu_alpha.shape: (1, 1), nu_beta.shape: (1, 1)
@@ -45,9 +45,9 @@ def get_robust_regression(device):
     sigma_rate = torch.rand(N, 1, device=device)
     sigma = dist.Exponential(sigma_rate)
 
-    # Predefined beta_mean and beta_sigma: beta_mean.shape: (K+1, 1), beta_sigma.shape: (K+1, 1)
-    beta_mean = torch.rand(K+1, 1, device=device)
-    beta_sigma = torch.rand(K+1, 1, device=device)
+    # Predefined beta_mean and beta_sigma: beta_mean.shape: (K + 1, 1), beta_sigma.shape: (K + 1, 1)
+    beta_mean = torch.rand(K + 1, 1, device=device)
+    beta_sigma = torch.rand(K + 1, 1, device=device)
     beta = dist.Normal(beta_mean, beta_sigma)
 
     nu_value = nu.sample()
@@ -68,15 +68,15 @@ def get_robust_regression(device):
         # We need to compute the first and second gradient of this score with respect
         # to nu_value.
         nu_score = dist.StudentT(nu_value, mu, sigma_constrained_value).log_prob(Y).sum() \
-                    + nu.log_prob(nu_value)
+            + nu.log_prob(nu_value)
 
 
 
         # We need to compute the first and second gradient of this score with respect
         # to sigma_unconstrained_value.
         sigma_score = dist.StudentT(nu_value, mu, sigma_constrained_value).log_prob(Y).sum() \
-                            + sigma.log_prob(sigma_constrained_value) \
-                            + sigma_unconstrained_value
+            + sigma.log_prob(sigma_constrained_value) \
+            + sigma_unconstrained_value
 
 
 
@@ -98,7 +98,8 @@ def get_test_flakyness():
 
     Y = torch.rand(N, 1, device=device)
 
-    NUM_OF_FAILS = torch.arange(0, F + 1, step=1).to(dtype=torch.float32, device=device).expand(R, N, F + 1).transpose(0, -1).transpose(1, -1)
+    NUM_OF_FAILS = torch.arange(0, F + 1, step=1).to(dtype=torch.float32, device=device)
+    NUM_OF_FAILS = NUM_OF_FAILS.expand(R, N, F + 1).transpose(0, -1).transpose(1, -1)
 
     bad_state_prob = dist.Beta(torch.tensor([1.] * N, device=device), torch.tensor([1.] * N, device=device))
 
@@ -121,14 +122,13 @@ def get_test_flakyness():
         # We need to compute the first and second gradient of this score with respect
         # to bad_state_prob_value.
         score = dist.Categorical(probs).log_prob(Y) \
-                    + bad_state_prob.log_prob(bad_state_prob_value)
+            + bad_state_prob.log_prob(bad_state_prob_value)
 
         # We need to compute the first and second gradient of this score with respect
         # to good_state_failure_prob.
         score2 = dist.Categorical(probs).log_prob(Y) \
-                    + good_state_failure_prob.log_prob(good_state_failure_prob_value)
+            + good_state_failure_prob.log_prob(good_state_failure_prob_value)
 
         return score + score2
 
     return forward, (bad_state_prob_value.to(device), good_state_failure_prob_value.to(device))
-
