@@ -347,7 +347,7 @@ class TestQuantizedOps(TestCase):
                                            dtype=torch_type)
 
         # test regular
-        qY = torch.nn.quantized.functional.celu(qX, output_scale, output_zero_point, alpha=alpha)
+        qY = torch.ops.quantized.celu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
                          msg="F.celu failed ({} vs {})".format(qY, qY_hat))
 
