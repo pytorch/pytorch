@@ -91,7 +91,11 @@ class TestDispatch(TestCase):
         # In the order specified by ctor_order, run registrations
         set_to_report = frozenset(range(len(ops)))
         for i, op_ix in enumerate(ctor_order):
-            refs[op_ix] = C._dispatch_import(test_namespace)
+            # It would be better to DEF here, but because we manage
+            # lifetime of multiple registrations with multiple Library
+            # references (refs), we can't deal with the strict checking
+            # from DEF.
+            refs[op_ix] = C._dispatch_library("FRAGMENT", test_namespace, "")
             active_ops.add(op_ix)
             try:
                 ops[op_ix](refs[op_ix])
@@ -343,6 +347,19 @@ alias analysis kind: PURE_FUNCTION
             self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True),
             '''Tried to define the schema for test::foo with different alias analysis kinds: CONSERVATIVE (registered at /dev/null:0) vs PURE_FUNCTION (registered at /dev/null:0)'''  # noqa
         )
+
+    def test_multiple_fallback(self):
+        global_m = C._dispatch_library("IMPL", "_", "xla")
+        global_m.fallback_fallthrough(),
+        try:
+            global_m.fallback_fallthrough(),
+        except RuntimeError as e:
+            self.assertExpectedInline(
+                str(e),
+                '''Tried to register multiple backend fallbacks for the same dispatch key XLA (registered at /dev/null:0)'''  # noqa
+            )
+        else:
+            self.assertTrue(False)
 
     def test_overwrite_catchall(self):
         ops = [
