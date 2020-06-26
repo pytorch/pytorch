@@ -1,49 +1,54 @@
-from typing import Dict, Tuple
+import time
+from typing import Dict, List, Tuple
 
 import torch
-import time
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.distributed.rpc.internal import _build_rpc_profiling_key, RPCExecMode
 from torch import Tensor
 from torch.distributed.rpc import RRef
+from torch.distributed.rpc.internal import RPCExecMode, _build_rpc_profiling_key
+from torch.futures import Future
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.dist_utils import (
     dist_init,
+    get_function_event,
     initialize_pg,
     worker_name,
-    get_function_event
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
+
 def sleep(t):
     time.sleep(t)
 
+
 def rpc_return_rref(dst):
     return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
+
 
 @torch.jit.script
 def rref_local_value(rref: RRef[Tensor]) -> Tensor:
     return rref.local_value()
 
+
 @torch.jit.script
-def list_create():
-    # type: () -> List[int]
+def list_create() -> List[int]:
     global_list = [1, 2, 3]
     return global_list
 
+
 @torch.jit.script
-def rref_list_mutate(rref):
-    # type: (RRef[List[int]]) -> None
+def rref_list_mutate(rref: RRef[List[int]]) -> None:
     rref.local_value().append(4)
     rref.to_here().append(5)
     rref.to_here(5.0).append(6)
 
-def return_value(value):
-    # type: (int) -> int
+
+def return_value(value: int) -> int:
     return value
+
 
 class RRefAPITest:
     @dist_init
@@ -52,8 +57,7 @@ class RRefAPITest:
         rref_var = rpc_return_rref(dst_worker_name)
 
         @torch.jit.script
-        def rref_tensor_is_owner(rref_var):
-            # type: (RRef[Tensor]) -> bool
+        def rref_tensor_is_owner(rref_var: RRef[Tensor]) -> bool:
             return rref_var.is_owner()
 
         res = rref_tensor_is_owner(rref_var)
@@ -67,7 +71,9 @@ class RRefAPITest:
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
         rref = rpc_return_rref(dst_worker_name)
 
-        with self.assertRaisesRegex(RuntimeError, r"Can't call RRef.local_value\(\) on a non-owner RRef"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Can't call RRef.local_value\(\) on a non-owner RRef"
+        ):
             rref_local_value(rref)
 
         ret = ret = rpc.rpc_sync(dst_worker_name, rref_local_value, (rref,))
@@ -117,7 +123,6 @@ class RRefAPITest:
         self.assertEqual(list_rref.to_here(), [1, 2, 3, 4, 5, 6])
 
 
-
 @torch.jit.script
 def no_arg():
     return 0
@@ -132,6 +137,7 @@ def one_arg(value):
 def script_add_ones(x):
     return torch.add(x, torch.ones(1))
 
+
 @torch.jit.script
 def script_fork_wait_udf(tensor):
     fut = torch.jit._fork(script_add_ones, tensor)
@@ -140,14 +146,12 @@ def script_fork_wait_udf(tensor):
 
 
 @torch.jit.script
-def rref_to_here(rref_var):
-    # type: (RRef[Tensor]) -> Tensor
+def rref_to_here(rref_var: RRef[Tensor]) -> Tensor:
     return rref_var.to_here()
 
 
 @torch.jit.script
-def return_rref(rref_var):
-    # type: (RRef[Tensor]) -> RRef[Tensor]
+def return_rref(rref_var: RRef[Tensor]) -> RRef[Tensor]:
     return rref_var
 
 
@@ -157,11 +161,13 @@ def script_raise_func(value):
         raise ValueError("Expected error")
     return value + 1
 
+
 @torch.jit.script
 def script_fork_wait_throw(invalue):
     fut = torch.jit._fork(script_raise_func, invalue)
     value = torch.jit._wait(fut)
     return value
+
 
 @torch.jit.script
 def call_rpc_with_profiling(handle: Tensor, dst_worker_name: str) -> Tensor:
@@ -193,8 +199,7 @@ class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
             self.rrefs.append(rpc_return_rref(dst_worker))
 
     @torch.jit.script_method
-    def forward(self):
-        # type: () -> Tensor
+    def forward(self) -> Tensor:
         res_tensor = torch.ones(2, 2)
         for rref in self.rrefs:
             res_tensor += rref.to_here()
@@ -203,14 +208,12 @@ class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
 
 
 @torch.jit.ignore
-def rref_python_annotation(rref_var):
-    # type: (RRef[Tensor]) -> RRef[Tensor]
+def rref_python_annotation(rref_var: RRef[Tensor]) -> RRef[Tensor]:
     return rref_var
 
 
 @torch.jit.script
-def rref_script_annotation(rref_var):
-    # type: (RRef[Tensor]) -> Tensor
+def rref_script_annotation(rref_var: RRef[Tensor]) -> Tensor:
     return rref_python_annotation(rref_var).to_here()
 
 
@@ -264,27 +267,21 @@ class FutureTypingTest:
     def test_future_passed_between_python_and_jit(self):
         dst_rank = (self.rank + 1) % self.world_size
         inputs = (torch.tensor([1, 1]), torch.tensor([2, 2]))
-        ret_fut = rpc.rpc_async(
-            worker_name(dst_rank),
-            two_args_two_kwargs,
-            args=inputs
-        )
+        ret_fut = rpc.rpc_async(worker_name(dst_rank), two_args_two_kwargs, args=inputs)
         expected_res = torch.tensor([10, 10])
 
         @torch.jit.script
-        def future_wait_in_script(fut):
-            # type: (Future[Tensor]) -> Tensor
+        def future_wait_in_script(fut: Future[Tensor]) -> Tensor:
             return fut.wait()
 
         self.assertEqual(future_wait_in_script(ret_fut), expected_res)
 
         @torch.jit.script
-        def future_return_to_python(dst_rank, inputs):
-            # type: (int, Tuple[Tensor, Tensor]) -> Future[Tensor]
+        def future_return_to_python(
+            dst_rank: int, inputs: Tuple[Tensor, Tensor]
+        ) -> Future[Tensor]:
             return rpc.rpc_async(
-                "worker{}".format(dst_rank),
-                two_args_two_kwargs,
-                inputs
+                "worker{}".format(dst_rank), two_args_two_kwargs, inputs
             )
 
         fut_res = future_return_to_python(dst_rank, inputs)
@@ -301,14 +298,12 @@ class FutureTypingTest:
         expected_res = torch.add(input_0, input_1)
 
         @torch.jit.ignore
-        def python_return_future():
-            # type: () -> Future[Tensor]
+        def python_return_future() -> Future[Tensor]:
             fut = rpc.rpc_async(dst_worker_name, torch.add, (input_0, input_1), {})
             return fut
 
         @torch.jit.script
-        def script_use_future():
-            # type: () -> Tensor
+        def script_use_future() -> Tensor:
             fut = python_return_future()
             return fut.wait()
 
@@ -318,19 +313,16 @@ class FutureTypingTest:
 
 @torch.jit.script
 class MyScriptClass:
-    def __init__(self, a):
-        # type: (int) -> None
+    def __init__(self, a: int):
         self.a = a
 
-    def get_value(self):
-        # type: () -> int
+    def get_value(self) -> int:
         return self.a
 
 
 @torch.jit.interface
 class MyModuleInterface(torch.nn.Module):
-    def forward(self):
-        # type: () -> Tensor
+    def forward(self) -> Tensor:
         pass
 
 
@@ -340,8 +332,7 @@ class MyScriptModule(torch.jit.ScriptModule):
         self.a = torch.ones(rank)
 
     @torch.jit.script_method
-    def forward(self):
-        # type: () -> Tensor
+    def forward(self) -> Tensor:
         return self.a
 
 
@@ -354,14 +345,12 @@ def owner_create_rref_my_script_module(a):
 
 
 @torch.jit.script
-def script_run_get_value_rref_my_script_class(rref):
-    # type: (RRef[MyScriptClass]) -> int
+def script_run_get_value_rref_my_script_class(rref: RRef[MyScriptClass]) -> int:
     return rref.to_here().get_value()
 
 
 @torch.jit.script
-def script_run_forward_rref_my_script_module(rref):
-    # type: (RRef[MyModuleInterface]) -> Tensor
+def script_run_forward_rref_my_script_module(rref: RRef[MyModuleInterface]) -> Tensor:
     return rref.to_here().forward()
 
 
@@ -408,8 +397,7 @@ class LocalRRefTest:
             dst_worker_name, owner_create_rref_my_script_class, args=(self.rank,)
         )
 
-        def use_rref_on_owner(rref):
-            # type: (RRef[MyScriptClass]) -> int
+        def use_rref_on_owner(rref: RRef[MyScriptClass]) -> int:
             args = (rref,)
             kwargs: Dict[str, Any] = {}  # noqa
             fut = rpc.rpc_async(
@@ -439,8 +427,7 @@ class LocalRRefTest:
             dst_worker_name, owner_create_rref_my_script_module, args=(self.rank,)
         )
 
-        def use_rref_on_owner(rref):
-            # type: (RRef[MyModuleInterface]) -> Tensor
+        def use_rref_on_owner(rref: RRef[MyModuleInterface]) -> Tensor:
             args = (rref,)
             kwargs: Dict[str, Any] = {}
             fut = rpc.rpc_async(
@@ -585,7 +572,7 @@ class JitRpcAsyncOpTest:
 
         @torch.jit.script
         def rpc_async_call_remote_torchscript_in_torchscript_with_assorted_types(
-            dst_worker_name: str
+            dst_worker_name: str,
         ):
             args = (torch.tensor([1, 1]), "str_arg", 1)
             # Must annotate the value type as `Any`, because JIT type inference
@@ -618,7 +605,7 @@ class JitRpcAsyncOpTest:
 
         @torch.jit.script
         def rpc_async_call_remote_torchscript_in_torchscript_without_kwargs_passed(
-            dst_worker_name: str
+            dst_worker_name: str,
         ):
             args = ()
             fut = rpc.rpc_async(dst_worker_name, no_arg, args)
@@ -639,7 +626,7 @@ class JitRpcAsyncOpTest:
 
         @torch.jit.script
         def rpc_async_call_remote_torchscript_in_torchscript_without_args_kwargs_passed(
-            dst_worker_name: str
+            dst_worker_name: str,
         ):
             fut = rpc.rpc_async(dst_worker_name, no_arg)
             ret = fut.wait()
@@ -758,7 +745,7 @@ class JitRpcAsyncOpTest:
         # no matter what exception type and excetpion message are in the statement,
         @torch.jit.script
         def rpc_async_call_remote_raising_torchscript_in_torchscript(
-            dst_worker_name: str
+            dst_worker_name: str,
         ):
             args = ()
             kwargs = {}
@@ -785,7 +772,7 @@ class JitRpcAsyncOpTest:
 
         @torch.jit.script
         def rpc_async_call_remote_nonexisting_torchscript_in_torchscript(
-            dst_worker_name: str
+            dst_worker_name: str,
         ):
             args = ()
             kwargs = {}
@@ -803,57 +790,58 @@ class JitRpcAsyncOpTest:
 
 
 @torch.jit.ignore
-def my_script_module_init(rank):
-    # type: (int) -> MyModuleInterface
+def my_script_module_init(rank: int) -> MyModuleInterface:
     return MyScriptModule(rank)
 
 
 @torch.jit.script
-def construct_my_script_module(rank):
-    # type: (int) -> MyModuleInterface
+def construct_my_script_module(rank: int) -> MyModuleInterface:
     return my_script_module_init(rank)
 
 
 @torch.jit.script
-def run_ref_script_module(ref_script_module, t):
-    # type: (RRef[MyModuleInterface], Tensor) -> Tensor
+def run_ref_script_module(
+    ref_script_module: RRef[MyModuleInterface], t: Tensor
+) -> Tensor:
     module = ref_script_module.to_here()
     return module.forward() + t
 
 
 @torch.jit.script
-def script_check_rref_confirmed(rref):
-    # type: (RRef[Tensor]) -> bool
+def script_check_rref_confirmed(rref: RRef[Tensor]) -> bool:
     return rref.confirmed_by_owner()
 
 
 @torch.jit.script
-def save_rref(rref_var, fname):
-    # type: (RRef[Tensor], str) -> None
+def save_rref(rref_var: RRef[Tensor], fname: str) -> None:
     torch.save(rref_var, fname)
 
 
 @torch.jit.script
-def script_add(x, y):
-    # type: (Tensor, Tensor) -> Tensor
+def script_add(x: Tensor, y: Tensor) -> Tensor:
     return x + y
 
 
 @rpc.functions.async_execution
 @torch.jit.script
-def async_add(to, x, y):
-    # type: (str, Tensor, Tensor) -> Future[Tensor]
+def async_add(to: str, x: Tensor, y: Tensor) -> Future[Tensor]:
     return rpc.rpc_async(to, script_add, (x, y))
 
 
 @rpc.functions.async_execution
 @torch.jit.script
-def async_wrong_type():
-    # type: () -> Tensor
+def async_wrong_type() -> Tensor:
     return torch.zeros(2)
 
 
-class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, FutureTypingTest, RpcAgentTestFixture):
+class JitRpcTest(
+    RRefAPITest,
+    RRefTypingTest,
+    LocalRRefTest,
+    JitRpcAsyncOpTest,
+    FutureTypingTest,
+    RpcAgentTestFixture,
+):
     @dist_init
     def test_torchscript_function(self):
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
@@ -933,7 +921,8 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
 
         # pass rref arg to self/user
         with self.assertRaisesRegex(
-            RuntimeError, "is an RRef to a ScriptModule. It can't be sent through RPC from owner,"
+            RuntimeError,
+            "is an RRef to a ScriptModule. It can't be sent through RPC from owner,",
         ):
             ret = rpc.rpc_sync(
                 worker_name(self.rank),
@@ -954,17 +943,21 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
 
     @dist_init
     def test_remote_script_throw(self):
-        rref = rpc.remote(worker_name((self.rank + 1) % self.world_size),
-                          script_raise_func,
-                          args=(torch.ones(2),))
+        rref = rpc.remote(
+            worker_name((self.rank + 1) % self.world_size),
+            script_raise_func,
+            args=(torch.ones(2),),
+        )
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
             rref.to_here()
 
     @dist_init
     def test_remote_script_udf(self):
-        rref = rpc.remote(worker_name((self.rank + 1) % self.world_size),
-                          script_fork_wait_udf,
-                          args=(torch.ones(2),))
+        rref = rpc.remote(
+            worker_name((self.rank + 1) % self.world_size),
+            script_fork_wait_udf,
+            args=(torch.ones(2),),
+        )
         self.assertEqual(rref.to_here(), torch.ones(2) * 2)
 
     @dist_init
@@ -972,19 +965,19 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         future = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),
             script_fork_wait_udf,
-            args=(torch.ones(2),))
+            args=(torch.ones(2),),
+        )
         self.assertEqual(future.wait(), torch.ones(2) * 2)
 
     @dist_init
     def test_callback_simple(self):
-
         def callback(fut):
             return fut.wait() + 1
 
         future = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),
             script_fork_wait_udf,
-            args=(torch.ones(2),)
+            args=(torch.ones(2),),
         ).then(callback)
         self.assertEqual(future.wait(), torch.ones(2) * 2 + 1)
 
@@ -997,9 +990,7 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
             return fut.wait() + 1
 
         fut = rpc.rpc_async(
-            worker_name(n % self.world_size),
-            one_arg,
-            args=(torch.ones(n, n),)
+            worker_name(n % self.world_size), one_arg, args=(torch.ones(n, n),)
         )
 
         num_cbs = 20
@@ -1013,13 +1004,13 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         future = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),
             script_fork_wait_throw,
-            args=(torch.ones(2),))
+            args=(torch.ones(2),),
+        )
         with self.assertRaisesRegex(Exception, ".*Expected error.*"):
             future.wait()
 
     @dist_init
     def test_callback_with_exception(self):
-
         def callback(fut):
             with self.assertRaisesRegex(Exception, ".*Expected error.*"):
                 fut.wait()
@@ -1028,7 +1019,7 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         future = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),
             script_fork_wait_throw,
-            args=(torch.ones(2),)
+            args=(torch.ones(2),),
         ).then(callback)
 
         with self.assertRaisesRegex(RuntimeError, "Another expected error"):
@@ -1090,21 +1081,15 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         dst2 = worker_name((self.rank + 2) % self.world_size)
 
         ret = rpc.rpc_sync(
-            dst1,
-            async_add,
-            args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
+            dst1, async_add, args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
         )
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     @dist_init
     def test_async_function_wrong_return_type(self):
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected Future but got Tensor"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Expected Future but got Tensor"):
             rpc.rpc_sync(
-                worker_name((self.rank + 1) % self.world_size),
-                async_wrong_type
+                worker_name((self.rank + 1) % self.world_size), async_wrong_type
             )
 
     @dist_init
@@ -1121,10 +1106,12 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         #    return rpc.rpc_async(to, script_add, (x, y))
         #           ~~~ <--- HERE
         with self.assertRaises(RuntimeError):
+
             @torch.jit.script
             @rpc.functions.async_execution
-            def async_wrong_decorator_order(to, x, y):
-                # type: (str, Tensor, Tensor) -> Future[Tensor]
+            def async_wrong_decorator_order(
+                to: str, x: Tensor, y: Tensor
+            ) -> Future[Tensor]:
                 return rpc.rpc_async(to, script_add, (x, y))
 
     @dist_init
@@ -1133,9 +1120,7 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         dst2 = worker_name((self.rank + 2) % self.world_size)
 
         rref = rpc.remote(
-            dst1,
-            async_add,
-            args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
+            dst1, async_add, args=(dst2, torch.ones(2, 2), torch.ones(2, 2))
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
 
@@ -1149,9 +1134,7 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
         for i in range(num):
             rrefs.append(
                 rpc.remote(
-                    dst1,
-                    async_add,
-                    args=(dst2, torch.ones(2, 2), torch.ones(2, 2) * i)
+                    dst1, async_add, args=(dst2, torch.ones(2, 2), torch.ones(2, 2) * i)
                 )
             )
 
@@ -1161,12 +1144,8 @@ class JitRpcTest(RRefAPITest, RRefTypingTest, LocalRRefTest, JitRpcAsyncOpTest, 
     @dist_init
     def test_async_function_wrong_return_type_remote(self):
         rref = rpc.remote(
-            worker_name((self.rank + 1) % self.world_size),
-            async_wrong_type
+            worker_name((self.rank + 1) % self.world_size), async_wrong_type
         )
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected Future but got Tensor"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Expected Future but got Tensor"):
             rref.to_here()

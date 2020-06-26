@@ -2854,6 +2854,24 @@ def foo(x):
 
         FileCheck().check("goodbye").run(traced.graph)
 
+        def foo(x: int):
+            return x + 1
+
+        @torch.jit._script_if_tracing
+        def fee(x: int = 2):
+            return foo(1) + x
+
+        # test directly compiling function
+        fee_compiled = torch.jit.script(fee)
+        self.assertEqual(fee_compiled(), fee())
+
+        # test compiling it within another function
+        @torch.jit.script
+        def hum():
+            return fee(x=3)
+
+        self.assertEqual(hum(), 5)
+
     def test_big_int_literals(self):
         def ok():
             # signed 64 bit max
@@ -4545,7 +4563,7 @@ a")
                 return result
 
         v = Vocabulary(list('uabcdefg'))
-        v.copy()
+        v.__copy__()
 
     def test_tuple_to_opt_list(self):
         @torch.jit.script
@@ -8730,6 +8748,24 @@ a")
 
             o2 = m.forward2(i)
             self.assertEqual(o2, v)
+
+    def test_script_sequential_sliced_iteration(self):
+        class seq_mod(nn.Module):
+            def __init__(self):
+                super(seq_mod, self).__init__()
+                self.layers = [nn.ReLU(), nn.ReLU(), nn.ReLU()]
+                self.layers = nn.Sequential(*self.layers)
+
+            def forward(self, input):
+                x = self.layers[0].forward(input)
+                for layer in self.layers[1:3]:
+                    x = layer.forward(x)
+                for layer in self.layers[2:]:
+                    x = layer.forward(x)
+                return x
+
+        seq = seq_mod()
+        self.checkModule(seq, [torch.tensor([-2, 1, -1, 2])])
 
     def test_script_sequential_orderdict(self):
         class M(torch.jit.ScriptModule):

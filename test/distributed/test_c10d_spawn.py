@@ -241,7 +241,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
         for i, j in zip(ddp.parameters(), net.parameters()):
             self.assertTrue(i.allclose(j))
 
-        for _ in range(1):
+        for _ in range(10):
             net_out = net(*inp)
             ddp_out = ddp(*inp)
 
