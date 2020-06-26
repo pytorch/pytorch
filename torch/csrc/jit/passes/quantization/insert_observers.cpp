@@ -246,7 +246,8 @@ class ModuleCloneHelper {
     auto schema_type_remap_fn = [&](TypePtr type_ptr) {
       return type_remap_fn(type_ptr, module_qconfig_map.at(source._ivalue()));
     };
-    auto schema = method.getSchema().cloneWithRemappedTypes(schema_type_remap_fn);
+    auto schema =
+        method.getSchema().cloneWithRemappedTypes(schema_type_remap_fn);
     const auto this_method_name =
         c10::QualifiedName(*target.type()->name(), method.name());
     auto copied = target._ivalue()->compilation_unit()->create_function(
