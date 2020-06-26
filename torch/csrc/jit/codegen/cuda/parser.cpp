@@ -19,10 +19,10 @@ typedef Node JitOp;
 namespace fuser {
 namespace cuda {
 
-constexpr auto NUM_UNARY_OPS = 31;
-constexpr auto NUM_BINARY_OPS = 24;
-constexpr auto NUM_BINARY_OPS_WITH_ALPHA = 4;
-constexpr auto NUM_LERP_OPS = 2;
+constexpr auto kNumUnaryOps = 31;
+constexpr auto kNumBinaryOps = 24;
+constexpr auto kNumBinaryOpsWithAlpha = 4;
+constexpr auto kNumLerpOps = 2;
 
 namespace {
 
@@ -30,8 +30,8 @@ typedef Val* CgValue;
 typedef Expr* CgOp;
 
 typedef void (
-    *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue>&);
-typedef bool (*MergeQueryFuncPtr)(const Node* const);
+    *ParseFuncPtr)(const Node*, std::unordered_map<size_t, CgValue>&);
+typedef bool (*MergeQueryFuncPtr)(const Node*);
 
 std::vector<int> reductionAxes(TensorView* tv) {
   size_t n_dims = tv->nDims();
@@ -58,7 +58,9 @@ size_t coalescReduction(TensorView* tv) {
       coalesc_permute[reduction_axes[i]] = new_pos;
     }
   }
-  tv->reorder(coalesc_permute);
+  if (!coalesc_permute.empty()) {
+    tv->reorder(coalesc_permute);
+  }
   return reduction_axes.size();
 }
 
@@ -70,12 +72,12 @@ class IrParser {
         : parse_f_(parse_f), merge_f_(merge_f) {}
 
     void parse(
-        const Node* const node,
+        const Node* node,
         std::unordered_map<size_t, CgValue>& values) {
       parse_f_(node, values);
     }
 
-    bool is_compatible(const Node* const node) {
+    bool is_compatible(const Node* node) {
       if (merge_f_ == nullptr) {
         return true;
       }
@@ -142,7 +144,7 @@ class IrParser {
     // shape propagation during parsing is effctively done in parsing rules, as
     // we only explicitly register inputs in the graph.
     for (auto val : block->inputs()) {
-      TORCH_CHECK(registerValue(val, broadcast_dim));
+      TORCH_INTERNAL_ASSERT(registerValue(val, broadcast_dim));
       cuda_kernel_->fusion_->addInput(value_map_[val->unique()]);
 
       auto opt_dtype = value_map_[val->unique()]->getDataType();
@@ -219,7 +221,7 @@ class IrParser {
         while (out->nDims() > 1)
           out->merge(0, 1);
         // Split into 128 which will be bockDim.x
-        out->split(0, PW_THREAD_X);
+        out->split(0, kPwThreadX);
         // Split by another 4 which will be our unroll factor
         auto ur_factor = disable_unroll ? 1 : unroll_factor;
         if (!disable_unroll) {
@@ -242,15 +244,15 @@ class IrParser {
         // launch configuratoin.
         TensorView* intermediate;
         if (fcd_reduction) {
-          out_tv->split(-1, FCD_REDUCTION_THREAD_X);
+          out_tv->split(-1, kFcdReductionThreadX);
           // necessary to avoid dynamic allocation on intermediates;
           intermediate = out_tv->rFactor({-2});
         } else {
           // TODO: we don't need a full warp here, this should be determined by
           //       element data type
-          out_tv->split(0, NON_FCD_REDUCTION_THREAD_X);
+          out_tv->split(0, kNonFcdReductionThreadX);
           out_tv->split(
-              -1, NON_FCD_REDUCTION_THREAD_Y); // necessary to avoid dynamic
+              -1, kNonFcdReductionThreadY); // necessary to avoid dynamic
                                                // allocation on intermediates;
           intermediate = out_tv->rFactor({-2});
         }
@@ -269,7 +271,7 @@ class IrParser {
           out_tv->axis(1)->parallelize(ParallelType::TIDx);
         }
       }
-      // Run through intermediates, unroll, and bind their axes
+      // Run through all values, unroll, and bind their axes
       for (auto val : cuda_kernel_->fusion_->vals()) {
         if (val->getValType().value() != ValType::TensorView)
           continue;
@@ -294,7 +296,7 @@ class IrParser {
         out_tv->axis(0)->parallelize(ParallelType::BIDx);
       }
 
-      // Run through intermediates, unroll, and bind their axes
+      // Run through all values, unroll, and bind their axes
       for (auto val : cuda_kernel_->fusion_->vals()) {
         if (val->getValType().value() != ValType::TensorView)
           continue;
@@ -313,7 +315,7 @@ class IrParser {
     }
   }
 
-  static bool canParseNode(const Node* const node) {
+  static bool canParseNode(const Node* node) {
     if (init_registry_) {
       // TODO: mutex this guy;
       registerJitOperator();
@@ -333,7 +335,7 @@ class IrParser {
     return false;
   }
 
-  static bool isReductionNode(const Node* const node) {
+  static bool isReductionNode(const Node* node) {
     if (init_registry_) {
       // TODO: mutex this guy;
       registerJitOperator();
@@ -368,7 +370,7 @@ class IrParser {
     // This is a one-time look up, our hash registry indexes on the pointer in
     // OperatorRegistry.
 
-    std::array<const char*, NUM_BINARY_OPS_WITH_ALPHA> BinaryOpWithAlpha = {
+    std::array<const char*, kNumBinaryOpsWithAlpha> BinaryOpWithAlpha = {
         "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
         "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
         "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
@@ -377,7 +379,7 @@ class IrParser {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             using BinaryOpWithAlphaType = Val* (*)(Val*, Val*, Val*);
             static std::unordered_map<
@@ -407,7 +409,7 @@ class IrParser {
           });
     }
 
-    std::array<const char*, NUM_BINARY_OPS> BinaryOp = {
+    std::array<const char*, kNumBinaryOps> BinaryOp = {
         "aten::div(Tensor self, Tensor other) -> Tensor",
         "aten::div(Tensor self, Scalar other) -> Tensor",
         "aten::mul(Tensor self, Tensor other) -> Tensor",
@@ -436,7 +438,7 @@ class IrParser {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             static std::unordered_map<Symbol, BinaryOpType> op_mapping(
                 {{aten::div, BinaryOpType::Div},
@@ -464,7 +466,7 @@ class IrParser {
     }
 
     // TODO: cast operations should be merged in.
-    std::array<const char*, NUM_UNARY_OPS> UnaryOp = {
+    std::array<const char*, kNumUnaryOps> UnaryOp = {
         "aten::neg(Tensor self) -> Tensor",
         "aten::abs(Tensor self) -> Tensor",
         "aten::log(Tensor self) -> Tensor",
@@ -501,7 +503,7 @@ class IrParser {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             static std::unordered_map<Symbol, UnaryOpType> op_mapping({
                 {aten::neg, UnaryOpType::Neg},
@@ -548,7 +550,7 @@ class IrParser {
           "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto operand = value_map[node->inputs()[0]->unique()];
 
@@ -562,7 +564,7 @@ class IrParser {
           "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto operand = value_map[node->inputs()[0]->unique()];
             auto th = value_map[node->inputs()[1]->unique()];
@@ -578,7 +580,7 @@ class IrParser {
           "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto operand = value_map[node->inputs()[0]->unique()];
             // TODO: we need to get a proper lower bound per dtype in operand.
@@ -599,7 +601,7 @@ class IrParser {
           "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto condition = value_map[node->inputs()[0]->unique()];
             auto x = value_map[node->inputs()[1]->unique()];
@@ -611,14 +613,14 @@ class IrParser {
     }
 
     {
-      std::array<const char*, NUM_LERP_OPS> LerpOp = {
+      std::array<const char*, kNumLerpOps> LerpOp = {
           "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
           "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor"};
       for (auto signature : LerpOp) {
         auto ptr_op = getOperatorForLiteral(signature);
         registerParseRule(
             ptr_op,
-            [](const Node* const node,
+            [](const Node* node,
                std::unordered_map<size_t, CgValue>& value_map) -> void {
               auto self = value_map[node->inputs()[0]->unique()];
               auto end = value_map[node->inputs()[1]->unique()];
@@ -635,7 +637,7 @@ class IrParser {
           "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto self = value_map[node->inputs()[0]->unique()];
             auto tensor1 = value_map[node->inputs()[1]->unique()];
@@ -652,7 +654,7 @@ class IrParser {
           "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto self = value_map[node->input(0)->unique()];
             auto dims = constant_as<c10::List<int64_t>>(node->input(1));
@@ -665,7 +667,7 @@ class IrParser {
             auto out = sum(self->as<TensorView>(), dims->vec());
             value_map.emplace(node->output()->unique(), out);
           },
-          [](const Node* const node) -> bool {
+          [](const Node* node) -> bool {
             // we don't support cast of output types yet;
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
@@ -691,7 +693,7 @@ class IrParser {
       // partition doesn't take constant node explicitly, but it does and copy
       // constant into subgraph. So we need to register constants in codegen IR;
       for (auto output : node->outputs()) {
-        TORCH_CHECK(
+        TORCH_INTERNAL_ASSERT(
             registerScalar(output),
             "registration of output failed at index ",
             output->offset(),
@@ -701,7 +703,7 @@ class IrParser {
     } else {
       auto iter = IrParser::jit_operator_registry_.find(node->kind());
       // make sure we have a parser for the op;
-      TORCH_CHECK(
+      TORCH_INTERNAL_ASSERT(
           iter != IrParser::jit_operator_registry_.end(),
           "CudaFusionGroup Parser doesn't handle operator kind(): ",
           node->kind().toDisplayString());
@@ -711,7 +713,7 @@ class IrParser {
           return;
         }
       }
-      TORCH_CHECK(
+      TORCH_INTERNAL_ASSERT(
           false,
           "CudaFusionGroup Parser doesn't recognize operator overload:",
           canonicalSchemaString(node->schema()));
@@ -809,7 +811,7 @@ bool IrParser::init_registry_ = true;
 
 } // namespace
 
-bool hasReductionNode(const Block* const block) {
+bool hasReductionNode(const Block* block) {
   for (auto node : block->nodes()) {
     if (isReductionNode(node)) {
       return true;
@@ -823,11 +825,11 @@ bool hasReductionNode(const Block* const block) {
   return false;
 }
 
-bool isReductionNode(const Node* const node) {
+bool isReductionNode(const Node* node) {
   return IrParser::isReductionNode(node);
 }
 
-bool isNodeParsible(const Node* const node) {
+bool isNodeParsible(const Node* node) {
   return IrParser::canParseNode(node);
 }
 

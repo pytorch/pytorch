@@ -20,8 +20,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-constexpr auto CG_NAMESPACE = "CudaCodeGen";
-constexpr auto KERNEL_NAME = "kernel";
+constexpr auto kCgNamespace = "CudaCodeGen";
+constexpr auto kKernelName = "kernel";
 
 namespace {
 // See NOTE [ USE OF NVRTC AND DRIVER API ]
@@ -148,7 +148,7 @@ struct KernelArgumentHolder {
 
 std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
   std::stringstream str_stream;
-  str_stream << "namespace " << CG_NAMESPACE << " {\n"
+  str_stream << "namespace " << kCgNamespace << " {\n"
              << code_template_tensor_struct << "\n"
              << code_fp16_support << "\n"
              << code_random_number_gen << "\n"
@@ -157,16 +157,16 @@ std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
              << code_template_grid_reduction << "\n";
   std::stringstream cdg;
   GPULower gpulw(fusion);
-  gpulw.printKernel(str_stream, KERNEL_NAME);
+  gpulw.printKernel(str_stream, kKernelName);
   str_stream << "\n} // namespace";
 
-  std::string func_name = std::string(CG_NAMESPACE) + "::" + KERNEL_NAME;
+  std::string func_name = std::string(kCgNamespace) + "::" + kKernelName;
   return std::make_pair(func_name, str_stream.str());
 };
 
 bool validateKernelArgTensor(
     const at::Tensor& arg,
-    const Val* const param,
+    const Val* param,
     int device_index,
     std::stringstream& msg) {
   // Arg is a tensor. Param must be a tensor too.
@@ -221,7 +221,7 @@ bool validateKernelArgTensor(
 
 bool validateKernelArgScalar(
     const c10::TypePtr& arg_type,
-    const Val* const param,
+    const Val* param,
     std::stringstream& msg) {
   if (!param->isScalar()) {
     msg << "Argument is a scalar, but the parameter is not.";
@@ -251,7 +251,7 @@ bool validateKernelArgScalar(
 
 bool validateKernelArg(
     const c10::IValue& arg,
-    const Val* const param,
+    const Val* param,
     int device_index,
     std::stringstream& msg) {
   if (arg.type()->kind() != c10::TypeKind::TensorType) {
@@ -273,7 +273,7 @@ void validateKernelArgs(
       "Wrong number of kernel inputs.");
   for (size_t i = 0; i < inputs.size(); ++i) {
     const IValue& arg = inputs[i];
-    const Val* const param = entry.fusion_->inputs()[i];
+    const Val* param = entry.fusion_->inputs()[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArg(arg, param, entry.device_, msg),
@@ -292,7 +292,7 @@ void validateKernelArgs(
       "Wrong number of kernel outputs.");
   for (size_t i = 0; i < outputs.size(); ++i) {
     const at::Tensor& arg = outputs[i];
-    const Val* const param = entry.fusion_->outputs()[i];
+    const Val* param = entry.fusion_->outputs()[i];
     std::stringstream msg;
     TORCH_INTERNAL_ASSERT(
         validateKernelArgTensor(arg, param, entry.device_, msg),
@@ -541,27 +541,27 @@ void runKernel(
 
   // TODO: Proper API to establish reasonable launch configurations;
   // Naive launch config;
-  size_t numel = outputs[0].numel();
+  const size_t numel = outputs[0].numel();
 
-  int blocks;
-  int thread_x;
-  int thread_y;
+  int blocks = 1;
+  int thread_x = 1;
+  int thread_y = 1;
   if (!entry->reduction_axes_.empty()) {
     // TODO: MAJOR HACK! Expr evaluation makes launch configuration much easier
     blocks = numel;
     // Translated to `fcd_reduction`
     if (entry->reduction_axes_.back() ==
         outputs[0].dim() + entry->reduction_axes_.size() - 1) {
-      thread_x = FCD_REDUCTION_THREAD_X;
+      thread_x = kFcdReductionThreadX;
       thread_y = 1;
     } else {
-      thread_x = NON_FCD_REDUCTION_THREAD_X;
-      thread_y = NON_FCD_REDUCTION_THREAD_Y;
+      thread_x = kNonFcdReductionThreadX;
+      thread_y = kNonFcdReductionThreadY;
     }
   } else {
     // TODO: we can't randomly clap down this until we got striding.
-    blocks = ceilDiv(numel, PW_THREAD_X * entry->unroll_factor_);
-    thread_x = PW_THREAD_X;
+    blocks = ceilDiv(numel, kPwThreadX * entry->unroll_factor_);
+    thread_x = kPwThreadX;
     thread_y = 1;
   }
   const auto nBlocks = blocks;

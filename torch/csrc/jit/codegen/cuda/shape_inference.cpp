@@ -106,7 +106,7 @@ class NaiveShapeTypePropagator {
       // to neither type promoteion nor shape.
       case aten::add:
       case aten::sub: {
-        auto promoted_type = binary_broadcast_type(
+        const auto promoted_type = binary_broadcast_type(
             node->input(0)->type()->cast<TensorType>(),
             node->input(1)->type()->cast<TensorType>());
         node->output()->setType(promoted_type);
@@ -119,7 +119,7 @@ class NaiveShapeTypePropagator {
       case aten::ge:
       case aten::ne:
       case aten::eq: {
-        auto promoted_type = binary_broadcast_type(
+        const auto promoted_type = binary_broadcast_type(
             node->input(0)->type()->cast<TensorType>(),
             node->input(1)->type()->cast<TensorType>(),
             at::ScalarType::Bool);
@@ -127,7 +127,7 @@ class NaiveShapeTypePropagator {
         break;
       }
       case aten::where: {
-        auto promoted_type = binary_broadcast_type(
+        const auto promoted_type = binary_broadcast_type(
             node->input(1)->type()->cast<TensorType>(),
             node->input(2)->type()->cast<TensorType>());
         node->output()->setType(promoted_type);
@@ -143,9 +143,9 @@ class NaiveShapeTypePropagator {
         break;
       }
       case aten::sum: {
-        auto out_type = node->input(0)->type()->cast<TensorType>();
-        auto dims = constant_as<c10::List<int64_t>>(node->input(1));
-        auto keepdim = constant_as<bool>(node->input(2));
+        const auto out_type = node->input(0)->type()->cast<TensorType>();
+        const auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+        const auto keepdim = constant_as<bool>(node->input(2));
         TORCH_CHECK(
             dims.has_value() && keepdim.has_value(),
             "Shape inference cannot handle options.");
@@ -169,7 +169,7 @@ class NaiveShapeTypePropagator {
 
  protected:
   TensorTypePtr unary_reduce_type(
-      TensorTypePtr const& op,
+      const TensorTypePtr & op,
       const std::vector<int64_t>& dims,
       bool keepdim) {
     TORCH_CHECK(
@@ -182,6 +182,8 @@ class NaiveShapeTypePropagator {
       if (std::find(dims.begin(), dims.end(), i) == dims.end()) {
         output_size.emplace_back(input_size[i]);
       } else if (keepdim) {
+        // Pushing size 1 here to maintain the reduction dimension because
+        // keepdim is true;
         output_size.emplace_back(1);
       }
     }

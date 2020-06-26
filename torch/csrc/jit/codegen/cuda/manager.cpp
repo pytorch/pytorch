@@ -213,7 +213,8 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
       auto tensor = at::empty_strided(sizes, strides, options);
       outputs.push_back(tensor);
 
-      // TODO: unsafe broadcast assumption;
+      // TODO: unsafe broadcast assumption. We assume all output from fusion has
+      //       identical size when broadcasting.
       if (broadcasted_shape.empty()) {
         if (!hasReductionNode(graph->block())) {
           broadcasted_shape = sizes;
