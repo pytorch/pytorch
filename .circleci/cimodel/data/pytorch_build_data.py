@@ -36,6 +36,12 @@ CONFIG_TREE_DATA = [
                     ("libtorch", [XImportant(True)])
                 ]),
             ]),
+            ("11.0", [
+                X("3.8"),
+                ("3.8", [
+                    ("libtorch", [X(True)])
+                ]),
+            ]),
         ]),
     ]),
     ("bionic", [
@@ -51,14 +57,6 @@ CONFIG_TREE_DATA = [
         ]),
         ("gcc", [
             ("9", [XImportant("3.8")]),
-        ]),
-        ("cuda", [
-            ("11.0", [
-                X("3.6"),
-                ("3.6", [
-                    ("libtorch", [X(True)])
-                ]),
-            ]),
         ]),
     ]),
 ]

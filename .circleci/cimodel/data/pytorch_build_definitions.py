@@ -223,7 +223,7 @@ def instantiate_configs():
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
 
-        if cuda_version in ["9.2", "10", "10.1", "10.2"]:
+        if cuda_version in ["9.2", "10", "10.1", "10.2", "11.0"]:
             # TODO The gcc version is orthogonal to CUDA version?
             cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
             parms_list.append(cuda_gcc_version)
