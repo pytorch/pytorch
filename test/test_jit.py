@@ -603,28 +603,6 @@ class TestJit(JitTestCase):
                 x = a.add_(b)
                 x = self.relu_op(x)
                 return x
-        a = torch.rand((7, 11))
-        a = a * -10
-        a = a + 5
-        b = torch.rand((7, 11))
-        # Because in place add_ will overwrite a
-        a_copy = a.clone()
-        m = torch.jit.script(Madd_(torch.relu))
-        orig_res = m(a, b)
-        torch._C._jit_pass_fuse_add_relu(m.graph)
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        m = torch.jit.load(buffer)
-        new_res = m(a_copy, b)
-        FileCheck().check_not("aten::add_(") \
-            .check_not("aten::relu(") \
-            .check("aten::add_relu_(") \
-            .run(m.graph)
-        torch.testing.assert_allclose(orig_res, new_res)
-        # Since add_relu_ does inplace mutation ensure
-        # a_copy is modified
-        torch.testing.assert_allclose(orig_res, a_copy)
 
         # add_, relu_
         a = torch.rand((7, 11))

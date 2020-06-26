@@ -29,29 +29,15 @@ void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
         return (%res))";
   rewriter.RegisterRewritePattern(add_relu_1, add_relu_fused);
 
-  std::string add_inplace_relu_0 = R"(
-    graph(%a, %b, %alpha):
-        %add_res = aten::add_(%a, %b, %alpha)
-        %res = aten::relu(%add_res)
-        return (%res))";
-  // In this case we are being aggressive. Sure add is inplace.
-  // but relu is not. However, what are the side affects of replacing
-  // relu with inplace relu? Only if the previous output is going to be
-  // used elsewhere. Given that we are fusing add + relu, this fusion
-  // is only possible if output of the add is not used elsewhere.
-  // Thus this should be safe.
-  std::string add_inplace_relu_fused = R"(
-    graph(%a, %b, %alpha):
-        %res = aten::add_relu_(%a, %b, %alpha)
-        return (%res))";
-  rewriter.RegisterRewritePattern(add_inplace_relu_0, add_inplace_relu_fused);
-
   std::string add_inplace_relu_1 = R"(
     graph(%a, %b, %alpha):
         %add_res = aten::add_(%a, %b, %alpha)
         %res = aten::relu_(%add_res)
         return (%res))";
-  // Same argument as above holds here as well.
+  std::string add_inplace_relu_fused = R"(
+    graph(%a, %b, %alpha):
+        %res = aten::add_relu_(%a, %b, %alpha)
+        return (%res))";
   rewriter.RegisterRewritePattern(add_inplace_relu_1, add_inplace_relu_fused);
 
   std::string add_out_relu_0 = R"(
