@@ -595,7 +595,7 @@ change in a future interface.
 Custom operators
 ~~~~~~~~~~~~~~~~
 
-Following this tutorial `Extending TorchScript with Custom C++ Operators </advanced/torch_script_custom_ops.html>`_,
+Following this tutorial `Extending TorchScript with Custom C++ Operators <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_,
 you can create and register your own custom ops implementation in PyTorch. Here's how to export such model to ONNX.::
 
     # Create custom symbolic function
