@@ -26,10 +26,15 @@ executors:
       image: windows-server-2019-nvidia:stable
       shell: bash.exe
 
-  windows-cpu-with-nvidia-cuda:
+  windows-xlarge-cpu-with-nvidia-cuda:
     machine:
-      # we will change to CPU host when it's ready
       resource_class: windows.xlarge
+      image: windows-server-2019-vs2019:stable
+      shell: bash.exe
+
+  windows-medium-cpu-with-nvidia-cuda:
+    machine:
+      resource_class: windows.medium
       image: windows-server-2019-vs2019:stable
       shell: bash.exe
 commands:
@@ -266,7 +271,7 @@ pytorch_windows_params: &pytorch_windows_params
   parameters:
     executor:
       type: string
-      default: "windows-cpu-with-nvidia-cuda"
+      default: "windows-xlarge-cpu-with-nvidia-cuda"
     build_environment:
       type: string
       default: ""
@@ -391,7 +396,7 @@ binary_windows_params: &binary_windows_params
       default: ""
     executor:
       type: string
-      default: "windows-cpu-with-nvidia-cuda"
+      default: "windows-xlarge-cpu-with-nvidia-cuda"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     BUILD_FOR_SYSTEM: windows
@@ -581,7 +586,7 @@ jobs:
     parameters:
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
       build_environment:
         type: string
         default: ""
@@ -652,7 +657,7 @@ jobs:
     parameters:
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
       build_environment:
         type: string
         default: ""
@@ -1193,7 +1198,7 @@ jobs:
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
@@ -1222,7 +1227,7 @@ jobs:
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     - checkout
@@ -1243,6 +1248,14 @@ jobs:
 
   binary_windows_upload:
     <<: *binary_windows_params
+    parameters:
+      build_environment:
+        type: string
+        default: ""
+      executor:
+        type: string
+        default: "windows-medium-cpu-with-nvidia-cuda"
+    executor: <<parameters.executor>>
     docker:
       - image: continuumio/miniconda
     steps:
@@ -1271,7 +1284,7 @@ jobs:
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     - checkout
@@ -7804,21 +7817,6 @@ workflows:
           vc_version: "14.13"
           vc_year: "2017"
       - pytorch_windows_build:
-          build_environment: pytorch-win-vs2017-14-16-cuda10-cudnn7-py3
-          cuda_version: "10"
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: pytorch_windows_vs2017_14.16_py36_cuda10.1_build
-          python_version: "3.6"
-          use_cuda: "1"
-          vc_product: BuildTools
-          vc_version: "14.16"
-          vc_year: "2017"
-      - pytorch_windows_build:
           build_environment: pytorch-win-vs2017-14-16-cpu-py3
           cuda_version: cpu
           filters:
@@ -7880,6 +7878,12 @@ workflows:
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
           cuda_version: cpu
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
           name: pytorch_windows_vs2019_py36_cpu_test1
           python_version: "3.6"
           requires:
@@ -7910,29 +7914,17 @@ workflows:
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10"
-          name: pytorch_windows_vs2019_py36_cuda10.1_on_cpu_test1
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cuda10.1_build
-          test_name: pytorch-windows-test1
-          use_cuda: "0"
-          vc_product: Community
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
-          cuda_version: "10"
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py36_cuda10.1_on_cpu_test2
+          name: pytorch_windows_vs2019_py36_cuda10.1_on_cpu_test1
           python_version: "3.6"
           requires:
             - pytorch_windows_vs2019_py36_cuda10.1_build
-          test_name: pytorch-windows-test2
+          test_name: pytorch-windows-test1
           use_cuda: "0"
           vc_product: Community
           vc_version: ""

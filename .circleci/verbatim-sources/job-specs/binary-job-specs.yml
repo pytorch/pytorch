@@ -276,7 +276,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
@@ -305,7 +305,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     - checkout
@@ -326,6 +326,14 @@
 
   binary_windows_upload:
     <<: *binary_windows_params
+    parameters:
+      build_environment:
+        type: string
+        default: ""
+      executor:
+        type: string
+        default: "windows-medium-cpu-with-nvidia-cuda"
+    executor: <<parameters.executor>>
     docker:
       - image: continuumio/miniconda
     steps:
@@ -354,7 +362,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     - checkout
