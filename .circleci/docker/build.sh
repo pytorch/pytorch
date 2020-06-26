@@ -283,7 +283,7 @@ docker build \
 #   "$UBUNTU_VERSION" == "18.04-rc"
 # with
 #   "$UBUNTU_VERSION" == "18.04"
-UBUNTU_VERSION=$(echo ${UBUNTU_VERSION} | grep -oP '\d*\.\d*$|\d*\.\d*(?=-rc)')
+UBUNTU_VERSION=$(echo ${UBUNTU_VERSION} | sed 's/-rc$//')
 
 function drun() {
   docker run --rm "$tmp_tag" $*
