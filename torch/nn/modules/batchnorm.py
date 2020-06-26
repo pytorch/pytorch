@@ -452,6 +452,9 @@ class SyncBatchNorm(_BatchNorm):
         # gpu_size is set through DistributedDataParallel initialization. This is to ensure that SyncBatchNorm is used
         # under supported condition (single GPU per process)
         self.ddp_gpu_size = None
+        # debug, remove before landing
+        # uncomment for testing
+        # self.ddp_gpu_size = 1
 
     def _check_input_dim(self, input):
         if input.dim() < 2:
@@ -492,6 +495,9 @@ class SyncBatchNorm(_BatchNorm):
                 process_group = self.process_group
             world_size = torch.distributed.get_world_size(process_group)
             need_sync = world_size > 1
+        # debug only, do not land
+        # uncomment for testing
+        # need_sync = True
 
         # fallback to framework BN when synchronization is not necessary
         if not need_sync:

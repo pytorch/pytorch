@@ -10767,6 +10767,170 @@ class TestNNDeviceType(NNTestCase):
         inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardswish, (inputs,)))
 
+    # @onlyCUDA
+    # TODO: all of this is not for land at the moment, will need cleanup
+    def test_sync_bn_correctness(self, device):
+
+        import os
+        import torch.distributed as dist
+
+        # TODO before land: move this to distributed test files
+        # setup dist env
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '12355'
+        dist.init_process_group("gloo", rank=0, world_size=1)
+
+        num_channels = 4
+
+        inputs = (torch.randn(1, num_channels, 4, 4, device=device) - 0.5 + 3.0) * 10
+        inputs.requires_grad = True
+
+        bn = torch.nn.SyncBatchNorm(num_channels, process_group=torch.distributed.group.WORLD).to(device)
+
+        # OSS SyncBN
+        def sync_bn_wrapper(x):
+            return bn(x)
+
+        # slow, but passes
+        # self.assertTrue(gradcheck(sync_bn_wrapper, (inputs,)))
+
+        # TODO: verify with NaiveSyncBN
+
+        from torch.autograd.function import Function
+
+        def get_world_size() -> int:
+            if not dist.is_available():
+                return 1
+            if not dist.is_initialized():
+                return 1
+            return dist.get_world_size()
+
+        class AllReduce(Function):
+            @staticmethod
+            def forward(ctx, input):
+                input_list = [
+                    torch.zeros_like(input) for k in range(dist.get_world_size())
+                ]
+                # Use allgather instead of allreduce since I don't trust in-place operations ..
+                dist.all_gather(input_list, input, async_op=False)
+                inputs = torch.stack(input_list, dim=0)
+                return torch.sum(inputs, dim=0)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                dist.all_reduce(grad_output, async_op=False)
+                return grad_output
+
+
+        class NaiveSyncBatchNorm(nn.BatchNorm2d):
+            """
+            torch.nn.SyncBatchNorm has bugs. Use this before it is fixed.
+            """
+
+            def forward(self, input):
+                # debug
+                # if get_world_size() == 1 or not self.training:
+                    # return super().forward(input)
+
+                assert input.shape[0] > 0, "SyncBatchNorm does not support empty inputs"
+                C = input.shape[1]
+                mean = torch.mean(input, dim=[0, 2, 3])
+                meansqr = torch.mean(input * input, dim=[0, 2, 3])
+
+                vec = torch.cat([mean, meansqr], dim=0)
+                vec = AllReduce.apply(vec) * (1.0 / dist.get_world_size())
+
+                mean, meansqr = torch.split(vec, C)
+                var = meansqr - mean * mean
+                self.running_mean += self.momentum * (mean.detach() - self.running_mean)
+                self.running_var += self.momentum * (var.detach() - self.running_var)
+
+                invstd = torch.rsqrt(var + self.eps)
+                print('m2', mean, 'i2', invstd)
+                scale = self.weight * invstd
+                bias = self.bias - mean * scale
+                scale = scale.reshape(1, -1, 1, 1)
+                bias = bias.reshape(1, -1, 1, 1)
+                # return input * scale
+                return input * scale + bias
+
+        naive_sync_bn = NaiveSyncBatchNorm(num_channels).to(device)
+
+        def naive_sync_bn_wrapper(x):
+            return naive_sync_bn(x)
+
+        # slow, but passes
+        # self.assertTrue(gradcheck(naive_sync_bn_wrapper, (inputs,)))
+
+        import itertools
+
+        num_channels_list = [1]
+        # for master, fwd pass % diff is ~1e-16 for sides which are powers of 2,
+        #   and ~1e-9 elsewhere
+        #
+        # replacing the call to torch.batch_norm.stats with vanilla mean and
+        # variance calculations leads to fwd pass % diff being ~1e-16 for all
+        # side lengths
+
+        # side_list = range(2, 64 + 2)
+        side_list = range(2, 32 + 2)
+        # side_list = range(2, 8 + 2)
+        for num_channels, side in itertools.product(num_channels_list, side_list):
+            # num_channels, side = 1, 65
+            num_channels, side = 1, 3
+
+            bn = torch.nn.SyncBatchNorm(num_channels, momentum=0.5, process_group=torch.distributed.group.WORLD).to(device)
+            naive_sync_bn = NaiveSyncBatchNorm(num_channels, momentum=0.5).to(device)
+
+            # set the weights to be equal and test equivalence of forward and
+            # backward passes
+            naive_sync_bn.weight = torch.nn.Parameter(bn.weight.clone().detach()).to(device)
+            naive_sync_bn.bias = torch.nn.Parameter(bn.bias.clone().detach()).to(device)
+            naive_sync_bn.eps = bn.eps
+            naive_sync_bn.momentum = bn.momentum
+            naive_sync_bn.running_mean = bn.running_mean
+            naive_sync_bn.running_var = bn.running_var
+
+            l1 = nn.MSELoss().to(device)
+            l2 = nn.MSELoss().to(device)
+
+            inputs = torch.randn(1, num_channels, side, side).to(device)
+            inputs.requires_grad = True
+            gt = torch.randn(1, num_channels, side, side).to(device)
+
+            sync_forward = bn(inputs)
+            l1(sync_forward, gt).backward()
+
+            naive_sync_forward = naive_sync_bn(inputs)
+            l2(naive_sync_forward, gt).backward()
+            # print('out1', sync_forward)
+            # print('out2', naive_sync_forward)
+            tol = 1e-10
+
+            print('ch', num_channels, 'side', side,
+                  'close_out', torch.allclose(sync_forward, naive_sync_forward, atol=tol, rtol=tol),
+
+                  # equal
+                  # 'close_run_mean', torch.allclose(bn.running_mean, naive_sync_bn.running_mean, atol=tol, rtol=tol),
+                  # 'close_run_var', torch.allclose(bn.running_var, naive_sync_bn.running_var, atol=tol, rtol=tol),
+
+                  'weight_grad', torch.allclose(bn.weight.grad, naive_sync_bn.weight.grad, atol=tol, rtol=tol),
+            )
+
+            # print('grad1', bn.weight.grad)
+            # print('grad2', naive_sync_bn.weight.grad)
+            # print('mean', bn.running_mean, naive_sync_bn.running_mean)
+            # print('var', bn.running_var, naive_sync_bn.running_var)
+
+            # print('mean diff', (bn.running_mean - naive_sync_bn.running_mean) / bn.running_mean)
+            # print('var diff', (bn.running_var - naive_sync_bn.running_var) / bn.running_var)
+
+            o1 = sync_forward.reshape(1, -1)
+            o2 = naive_sync_forward.reshape(1, -1)
+            for i in range(o1.shape[1]):
+                print(i, (o1[0][i] - o2[0][i]) / o1[0][i])
+
+            break
 
     def _test_batchnorm_eval(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
