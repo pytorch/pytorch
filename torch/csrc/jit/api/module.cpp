@@ -236,10 +236,6 @@ Module Module::clone_impl(
   return r;
 }
 
-Module Module::clone_instance() const {
-  return Module(_ivalue()->copy());
-}
-
 void Module::train(bool on) {
   for (Module m : modules()) {
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
