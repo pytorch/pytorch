@@ -31,8 +31,6 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "conv2d",
     "conv3d",
     "linear",
-    "addmm",
-    "matmul",
     "hardswish",
     "hardswish_",
     "elu",
