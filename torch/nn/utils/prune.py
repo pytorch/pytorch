@@ -731,7 +731,6 @@ class RandomStructured(BasePruningMethod):
 
     PRUNING_TYPE = "structured"
 
-# def random_structured(module, name, amount, dim):
     def __init__(self, amount, dim=-1):
         # Check range of validity of amount
         _validate_pruning_amount_init(amount)
