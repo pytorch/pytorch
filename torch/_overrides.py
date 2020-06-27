@@ -102,6 +102,7 @@ def get_ignored_functions():
         torch.empty,
         torch.empty_meta,
         torch.empty_strided,
+        torch.empty_quantized,
         torch.eye,
         torch.from_file,
         torch.full,
