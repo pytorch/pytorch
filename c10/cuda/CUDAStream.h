@@ -159,7 +159,7 @@ public:
       // the range of priority **supported by CUDA**. The former is a subset of
       // the latter. Curently PyTorch only supports 0 and -1, which are "low" and
       // "high" priority.
-      return {0, -1};
+      return std::make_tuple(0, -1);
     #else
       AT_ERROR("cuDeviceGetStreamPriorityRange with HIP is not supported");
     #endif
