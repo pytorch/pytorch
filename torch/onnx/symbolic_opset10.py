@@ -185,7 +185,7 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
         _unimplemented(
             "fake_quantize_per_tensor_affine",
             "ONNX defines [0, 255] for quint8 and [-128, 127] for qint8, got [{}, {}]".format(quant_min, quant_max))
-    scale = scale.float().data  # Avoid exportor generating double type
+    scale = scale.float().data  # Avoid exporter generating double type
     zero_point_dtype = torch.int8 if quant_min == -128 else torch.uint8
     zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
