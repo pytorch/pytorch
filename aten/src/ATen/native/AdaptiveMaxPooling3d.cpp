@@ -69,7 +69,7 @@ static void adaptive_max_pool3d_single_out_frame(
             int64_t *indp = ind_p   + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
 
             /* compute local max: */
-            int64_t maxindex = -1;
+            int64_t maxindex = 0;
             scalar_t maxval = -std::numeric_limits<float>::max();
             int64_t it, ih, iw;
             for(it = 0; it < kT; it++)
