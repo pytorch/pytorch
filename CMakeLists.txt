@@ -327,7 +327,7 @@ if(MSVC)
     endif()
   endforeach(flag_var)
 
-  foreach(flag_var 
+  foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
     if(${flag_var} MATCHES "/Z[iI7]")
@@ -626,7 +626,7 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 # These need to take precedence over their empty counterparts located
 # in PROJECT_SOURCE_DIR.
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
-
+include_directories(BEFORE ${PROJECT_SOURCE_DIR}/caffe2/perfkernels/)
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
 

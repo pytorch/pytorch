@@ -11,6 +11,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 // for param_search_greedy
+
 #include "caffe2/operators/fused_rowwise_nbitfake_conversion_ops.h"
 #include "caffe2/perfkernels/fused_nbit_rowwise_conversion.h"
 
@@ -92,69 +93,25 @@ class FloatToFusedNBitRowwiseQuantizedOp final : public Operator<CPUContext> {
         }
 #endif
         convert(tmp, input_data + row * input_columns, input_columns);
-
         std::uint8_t* output_row = output_data + row * output_columns;
-        at::Half* output_row_scale = reinterpret_cast<at::Half*>(
-            output_row +
-            (input_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
-        at::Half* output_row_bias = reinterpret_cast<at::Half*>(
-            output_row +
-            (input_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
-            sizeof(at::Half));
-
-        float Xmin = *std::min_element(tmp, tmp + input_columns);
-        float Xmax = *std::max_element(tmp, tmp + input_columns);
-
-        if (GREEDY) {
-          internal::param_search_greedy(
-              tmp, input_columns, 200, 0.16, Xmin, Xmax, BIT_RATE);
-        }
-
-        // Round Xmin to fp16 to match with dequantization that will use fp16
-        // for Xmin.
-        Xmin = static_cast<at::Half>(Xmin);
-        const float range = Xmax - Xmin;
-        // Round scale to fp16 to match with dequantization that will use fp16
-        // for scale.
-        // Set scale to 1.0f for the corner case of Xmax == Xmin .
-        // Any non-zero scale would work because during quantization
-        // (X - Xmin) / scale will be 0 for all X unless scale is 0.
-        at::Half scale = range == 0 ? 1.0f : range / ((1 << BIT_RATE) - 1);
-        float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
-        if (scale == 0 || std::isinf(inverse_scale)) {
-          // Corner case handling when Xmax == Xmin
-          // Any scale would work because X - Xmin will be 0 for all X
-          scale = 1.0f;
-          inverse_scale = 1.0f;
-        }
-
-        *output_row_scale = scale;
-        *output_row_bias = Xmin;
-
-        for (int col = 0; col < input_columns; ++col) {
-          float X = tmp[col];
-          std::uint8_t quantized = std::max(
-              0,
-              std::min<int>(
-                  std::lrintf((X - Xmin) * inverse_scale),
-                  (1 << BIT_RATE) - 1));
-          if (col % NUM_ELEM_PER_BYTE == 0) {
-            output_row[col / NUM_ELEM_PER_BYTE] = quantized;
-          } else {
-            output_row[col / NUM_ELEM_PER_BYTE] |=
-                (quantized << ((col % NUM_ELEM_PER_BYTE) * BIT_RATE));
-          }
-        }
+        FloatToFused4BitRowwiseQuantizedHelper(
+            tmp,
+            input_rows,
+            input_columns,
+            BIT_RATE,
+            NUM_ELEM_PER_BYTE,
+            GREEDY,
+            &internal::param_search_greedy,
+            output_row);
       }
-    } // GREEDY || !std::is_same<T, float>::value
-
+    }
     return true;
   }
 
  private:
   INPUT_TAGS(DATA_FLOAT);
   OUTPUT_TAGS(DATA_FUSED_SCALE_BIAS);
-};
+}; // namespace caffe2
 
 template <
     int BIT_RATE,
@@ -179,7 +136,8 @@ class FusedNBitRowwiseQuantizedToFloatOp final : public Operator<CPUContext> {
     constexpr int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
     // The last 4 bytes per row are two fp16 scale and bias.
-    // The rest of input_columns is the number of values in the original row.
+    // The rest of input_columns is the number of values in the original
+    // row.
     auto output_dimensions = input.sizes().vec();
     output_dimensions[input.dim() - 1] =
         static_cast<std::int64_t>(input_columns - 2 * sizeof(at::Half)) *

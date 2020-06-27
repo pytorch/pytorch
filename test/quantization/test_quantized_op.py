@@ -2712,9 +2712,12 @@ class TestQuantizedEmbeddingBag(TestCase):
         from caffe2.python import core, workspace
         conversion_op = "FloatToFused8BitRowwiseQuantized"
         pt_op = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
+        pt_quantize_op = torch.ops.quantized.embedding_bag_byte_prepack
+
         if bit_rate == 4:
             conversion_op = "FloatToFused4BitRowwiseQuantized"
             pt_op = torch.ops.quantized.embedding_bag_4bit_rowwise_offsets
+            pt_quantize_op = torch.ops.quantized.embedding_bag_4bit_prepack
 
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
@@ -2741,24 +2744,11 @@ class TestQuantizedEmbeddingBag(TestCase):
         indices = torch.from_numpy(np.random.randint(
             low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
 
-        # TODO(radkris) Remove the usage of C2 conversion ops once
-        # embedding_bag_prepack op have been landed.
-        def get_quantized_weights(weights):
-            workspace.ResetWorkspace()
-
-            workspace.FeedBlob("weights", weights)
-            workspace.RunOperatorOnce(
-                core.CreateOperator(
-                    conversion_op, ["weights"], ["quantized_weights"]
-                )
-            )
-            emb_q = workspace.FetchBlob("quantized_weights")
-            return torch.from_numpy(emb_q)
-
-        q_weights = get_quantized_weights(weights)
-        per_sample_weights = torch.from_numpy(np.random.uniform(
-            low=0.01, high=0.5, size=[len(indices)]).astype(np.float32)) if \
-            enable_per_sample_weights else None
+        q_weights = pt_quantize_op(weights)
+        per_sample_weights = torch.from_numpy(
+            np.random.uniform(
+                low=0.01, high=0.5, size=[len(indices)]).astype(np.float32)) if \
+                enable_per_sample_weights else None
         if include_last_offset:
             offsets = torch.cat(
                 (offsets, torch.tensor([indices.size(0)], dtype=torch.long)), 0
@@ -2815,6 +2805,8 @@ class TestQuantizedEmbeddingBag(TestCase):
                                                 embedding_dim, num_offsets,
                                                 enable_per_sample_weights,
                                                 include_last_offset):
+        print(num_embeddings, embedding_dim, num_offsets,
+              enable_per_sample_weights, include_last_offset)
         self.embedding_bag_rowwise_offsets_run(4, num_embeddings,
                                                embedding_dim, num_offsets,
                                                enable_per_sample_weights,

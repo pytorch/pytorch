@@ -795,6 +795,7 @@ if __name__ == '__main__':
                 'include/ATen/quantized/*.h',
                 'include/caffe2/utils/*.h',
                 'include/caffe2/utils/**/*.h',
+                'include/caffe2/perfkernels/fused_nbit_rowwise_conversion.h',
                 'include/c10/*.h',
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',

@@ -3,6 +3,14 @@
 #include <c10/util/Half.h>
 #include <algorithm>
 #include <cmath>
+#include <vector>
+
+#include <c10/util/Half.h>
+#include "caffe2/core/logging.h"
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #include "common.h"
 
@@ -230,6 +238,97 @@ void FusedNBitRowwiseQuantizedSBHalfToFloat(
       input_rows,
       input_columns,
       output);
+}
+
+void FloatToFused4BitRowwiseQuantizedHelper(
+    const float* input_row,
+    int input_rows,
+    int input_columns,
+    int BIT_RATE,
+    int NUM_ELEM_PER_BYTE,
+    bool GREEDY,
+    void (*param_search_callback)(
+        const float* X,
+        int N,
+        const int n_bins,
+        const float ratio,
+        float& Xmin,
+        float& Xmax,
+        int bit_rate),
+    std::uint8_t* output_row) {
+  // const float* input_row = input + row * input_columns;
+  // std::uint8_t* output_row = output + row * output_columns;
+  at::Half* output_row_scale = reinterpret_cast<at::Half*>(
+      output_row + (input_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
+
+  at::Half* output_row_bias = reinterpret_cast<at::Half*>(
+      output_row + (input_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
+      sizeof(at::Half));
+
+  float Xmin = *std::min_element(input_row, input_row + input_columns);
+  float Xmax = *std::max_element(input_row, input_row + input_columns);
+
+  if (GREEDY) {
+    C10_LOG_EVERY_N(INFO, 100) << "Running the GREEDY engine!";
+    param_search_callback(
+        input_row, input_columns, 200, 0.16, Xmin, Xmax, BIT_RATE);
+  }
+  // Round Xmin to fp16 to match with dequantization that will use fp16
+  // for Xmin.
+  Xmin = static_cast<at::Half>(Xmin);
+  const float range = Xmax - Xmin;
+  // Round scale to fp16 to match with dequantization that will use fp16
+  // for scale.
+  // Set scale to 1.0f for the corner case of Xmax == Xmin .
+  // Any non-zero scale would work because during quantization
+  // (X - Xmin) / scale will be 0 for all X unless scale is 0.
+  at::Half scale = range == 0 ? 1.0f : range / ((1 << BIT_RATE) - 1);
+  if (scale == 0) {
+    // Corner case handling when Xmax == Xmin
+    // Any scale would work because X - Xmin will be 0 for all X
+    scale = 1.0f;
+  }
+
+  *output_row_scale = scale;
+  *output_row_bias = Xmin;
+
+  for (int col = 0; col < input_columns; ++col) {
+    float X = input_row[col];
+    std::uint8_t quantized = std::max(
+        0, std::min<int>(std::lrintf((X - Xmin) / scale), (1 << BIT_RATE) - 1));
+    if (col % NUM_ELEM_PER_BYTE == 0) {
+      // LSB
+      output_row[col / NUM_ELEM_PER_BYTE] = quantized;
+    } else {
+      output_row[col / NUM_ELEM_PER_BYTE] |=
+          (quantized << ((col % NUM_ELEM_PER_BYTE) * BIT_RATE));
+    }
+  }
+}
+
+void FloatToFused4BitRowwiseQuantized(
+    const float* input,
+    int input_rows,
+    int input_columns,
+    std::uint8_t* output) {
+  const int BIT_RATE = 4;
+  constexpr int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
+  const int output_columns = static_cast<std::int64_t>(
+      (input_columns + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE +
+      2 * sizeof(at::Half));
+  for (int row = 0; row < input_rows; ++row) {
+    const float* input_row = input + row * input_columns;
+    std::uint8_t* output_row = output + row * output_columns;
+    FloatToFused4BitRowwiseQuantizedHelper(
+        input_row,
+        input_rows,
+        input_columns,
+        BIT_RATE,
+        NUM_ELEM_PER_BYTE,
+        false,
+        nullptr,
+        output_row);
+  }
 }
 
 } // namespace caffe2

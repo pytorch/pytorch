@@ -80,6 +80,8 @@ TORCH_LIBRARY(quantized, m) {
   m.def("embedding_bag_byte_rowwise_offsets(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> Tensor");
   m.def("embedding_bag_4bit_rowwise_offsets(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
   m.def("group_norm(Tensor input, int num_groups, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor");
+  m.def("embedding_bag_byte_prepack(Tensor weight) -> Tensor");
+  m.def("embedding_bag_4bit_prepack(Tensor weight) -> Tensor");
   m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("instance_norm(Tensor input, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor");
