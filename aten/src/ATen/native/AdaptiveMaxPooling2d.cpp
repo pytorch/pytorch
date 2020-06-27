@@ -60,7 +60,7 @@ static void adaptive_max_pool2d_single_out_frame(
 
           /* compute local max: */
           int64_t maxindex = 0;
-          scalar_t maxval = -std::numeric_limits<float>::max();
+          scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
           int ih, iw;
           for(ih = 0; ih < kH; ih++)
           {
