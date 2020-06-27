@@ -655,24 +655,8 @@ def flatten(g, input, start_dim, end_dim):
     elif start_dim == 0:
         if (end_dim == -2 or (end_dim is not None and end_dim == dim - 2)):
             return g.op("Flatten", input, axis_i=end_dim + 1)
-    # use Reshape for cases where the output shape is not 2D
-    if not input.isCompleteTensor():
-        return _unimplemented("flatten",
-                              "input size not accessible "
-                              "(consider using reshape op instead of flatten op to export to ONNX)")
     # if end_dim is negative add dim
     if end_dim < 0 :
         end_dim = dim + end_dim
-    input_size = g.op("Shape", input)
-    slice1 = sym_help._slice_helper(g, input_size, axes=[0], starts=[0], ends=[start_dim])
-    slice2 = sym_help._slice_helper(g, input_size, axes=[0], starts=[start_dim], ends=[end_dim + 1])
-    slice2 = g.op("ReduceProd", slice2)
-    slices = [slice1, slice2]
-    if end_dim < dim - 1:
-        slice3 = sym_help._slice_helper(g, input_size, axes=[0], starts=[end_dim + 1], ends=[dim])
-        slices = [slice1, slice2, slice3]
 
-    final_shape = g.op("Concat", *slices, axis_i=0)
-    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
-    p = _reshape_from_tensor(g, input, final_shape)
-    return p
+    return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)
