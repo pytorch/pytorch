@@ -199,6 +199,10 @@ class TestTypeHints(TestCase):
         if not (os.path.exists(mypy_inifile) and is_torch_mypyini(mypy_inifile)):
             self.skipTest("Can't find PyTorch MyPy config file")
 
+        import numpy
+        if numpy.__version__ == '1.20.0.dev0+7af1024':
+            self.skipTest("Typeannotations in numpy-1.20.0-dev are broken")
+
         cwd = os.getcwd()
         os.chdir(repo_rootdir)
         (stdout, stderr, result) = mypy.api.run([
