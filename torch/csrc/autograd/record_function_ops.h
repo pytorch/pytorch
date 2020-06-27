@@ -1,6 +1,5 @@
 #pragma once
 #include <ATen/record_function.h>
-#include <torch/csrc/utils/future.h>
 
 namespace torch {
 namespace autograd {
