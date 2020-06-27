@@ -16,11 +16,8 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   ParameterDictImpl() = default;
 
   explicit ParameterDictImpl(
-      torch::OrderedDict<std::string, torch::Tensor> params) {
-    parameters_.reserve(params.size());
-    for (const auto& item : params) {
-      insert(std::move(item.key()), std::move(item.value()));
-    }
+      const torch::OrderedDict<std::string, torch::Tensor>& params) {
+    parameters_ = params;
   }
 
   /// `reset()` is empty for `ParameterDict`, since it does not have
@@ -42,8 +39,8 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
 
   /// Insert the parameter along with the key into ParameterDict
   /// The parameter is set to be require grad by default
-  Tensor& insert(std::string key, Tensor param, bool requires_grad = true) {
-    return register_parameter(key, param, requires_grad);
+  Tensor& insert(std::string key, Tensor param) {
+    return register_parameter(key, param, param.requires_grad());
   }
 
   /// Remove key from the ParameterDict and return its value, throw exception
@@ -100,11 +97,7 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   template <typename Container>
   void update(const Container& container) {
     for (auto& item : container) {
-      // erase and overwrite the duplicate keys
-      if (contains(item.key())) {
-        pop(item.key());
-      }
-      insert(std::move(item.key()), std::move(item.value()));
+      parameters_[item.key()] = item.value();
     }
   }
 
