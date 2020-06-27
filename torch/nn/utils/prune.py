@@ -476,6 +476,187 @@ class RandomUnstructured(BasePruningMethod):
         )
 
 
+class BlockwiseUnstructured(BasePruningMethod):
+    r"""Prune (currently unpruned) units in a tensor at random.
+
+    Args:
+        name (str): parameter name within ``module`` on which pruning
+            will act.
+        amount (int or float): quantity of parameters to prune.
+            If ``float``, should be between 0.0 and 1.0 and represent the
+            fraction of parameters to prune. If ``int``, it represents the
+            absolute number of parameters to prune.
+        block_type (str): block in which the number of non-zero weights is equal. 
+            - ``layer``, unit of pruning is layer
+            - ``filter``, unit of pruning is filter 
+            - ``kernel``, unit of pruning is kernel
+            - ``vector-inch``, unit of pruning is block along inch-axis
+            - ``vector-y``, unit of pruning is block along y-axis
+            - ``vector-x``, unit of pruning is block along x-axis
+         block_size (int): size of blocks
+            If block_type is``vector-inch``, in-channel should be divisible by block_size.  
+    """
+
+    PRUNING_TYPE = "unstructured"
+
+    def __init__(self, amount, block_type="layer", block_size=None):
+        _validate_pruning_amount_init(amount)
+        self.amount = amount
+        self.block_type = block_type
+        self.block_size = block_size
+
+    def compute_mask(self, t, default_mask):
+        r"""Computes and returns a mask for the input tensor ``t``.
+        Starting from a base ``default_mask`` (which should be a mask of ones
+        if the tensor has not been pruned yet), generate a random mask to
+        apply on top of the ``default_mask`` by randomly zeroing out channels
+        along the specified dim of the tensor.
+
+        Args:
+            t (torch.Tensor): tensor representing the parameter to prune
+            default_mask (torch.Tensor): Base mask from previous pruning
+                iterations, that need to be respected after the new mask is
+                applied. Same dims as ``t``.
+
+        Returns:
+            mask (torch.Tensor): mask to apply to ``t``, of same dims as ``t``
+
+        Raises:
+            IndexError: if ``self.dim >= len(t.shape)``
+        """
+        # Check that tensor has structure (i.e. 4 dimension) such
+        # that the concept of "channels" makes sense
+        _validate_blockwise_pruning(t)
+
+        # Check that self.block_type is a valid type, else raise ValueError
+        if not self.block_type in ("layer", "filter", "kernel", "vector-inch", "vector-y", "vector-x"):
+            raise ValueError("Block type {} is not supported.".format(self.block_type))
+
+        mask = default_mask.clone(memory_format=torch.contiguous_format)
+        och, ich, ky, kx = t.shape
+
+        if self.block_type == "layer":
+          nparams_toprune = _compute_nparams_toprune(self.amount, t.nelement())
+          if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
+            return default_mask
+
+          threshold = torch.kthvalue(t.view(-1).abs(), k=nparams_toprune).values
+          mask = t.abs() > threshold
+
+        elif self.block_type == "filter":
+          filters = t.view(t.shape[0], -1)
+          _, nelement = filters.shape
+          nparams_toprune = _compute_nparams_toprune(self.amount, nelement)
+          if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
+            return default_mask
+
+          thresholds = torch.kthvalue(filters.abs(), k=nparams_toprune, dim=1).values
+          thresholds = torch.repeat_interleave(thresholds, nelement, dim=0).view_as(t)
+          mask = t.abs() > thresholds
+
+        elif self.block_type == "kernel":
+          kernels = t.view(t.shape[0], t.shape[1], -1)
+          _, _, nelement = kernels.shape
+          nparams_toprune = _compute_nparams_toprune(self.amount, nelement)
+          if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
+            return default_mask
+
+          threshold = torch.kthvalue(kernels.abs(), k=nparams_toprune, dim=2).values
+          threshold = torch.repeat_interleave(threshold, nelement, dim=1).view_as(t)
+          mask = t.abs() > threshold
+        
+        elif self.block_type == "vector-inch":
+          if self.block_size is None:
+            nparams_toprune = _compute_nparams_toprune(self.amount, ich)
+            if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
+              return default_mask
+
+            threshold = torch.kthvalue(t.abs(), k=nparams_toprune, dim=1).values
+            threshold = torch.repeat_interleave(threshold, ich, dim=0).view_as(t)
+            mask = t.abs() > threshold
+          else:
+            assert ich % self.block_size == 0, "Block-size should be divisible value to input channel"
+            nblock= ich // self.block_size
+            blocks = t.view(och, nblock, self.block_size, ky, kx).abs()
+            nparams_toprune = _compute_nparams_toprune(self.amount, self.block_size)
+            if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
+              return default_mask
+
+            threshold = torch.kthvalue(blocks, k=nparams_toprune, dim=2).values
+            threshold = torch.repeat_interleave(threshold, self.block_size, dim=1).view_as(blocks)
+            mask = (blocks > threshold).view_as(t)
+
+        elif self.block_type == "vector-y":
+          if self.block_size is None:
+            nparams_toprune = _compute_nparams_toprune(self.amount, ky)
+            if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
+              return default_mask
+
+            threshold = torch.kthvalue(t.abs(), k=nparams_toprune, dim=2).values
+            threshold = torch.repeat_interleave(threshold, ky, dim=1).view_as(t)
+            mask = t.abs() > threshold
+          else:
+            assert ky % self.block_size == 0, "Block-size should be divisible value to input channel"
+            nblock= ky // self.block_size
+            blocks = t.view(och, ich, nblock, self.block_size, kx).abs()
+            nparams_toprune = _compute_nparams_toprune(self.amount, self.block_size)
+            if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
+              return default_mask
+
+            threshold = torch.kthvalue(blocks, k=nparams_toprune, dim=3).values
+            threshold = torch.repeat_interleave(threshold, self.block_size, dim=2).view_as(blocks)
+            mask = (blocks > threshold).view_as(t)
+
+        elif self.block_type == "vector-x":
+          if self.block_size is None:
+            nparams_toprune = _compute_nparams_toprune(self.amount, kx)
+            if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
+              return default_mask
+
+            threshold = torch.kthvalue(t.abs(), k=nparams_toprune, dim=3).values
+            threshold = torch.repeat_interleave(threshold, kx, dim=-1).view_as(t)
+            mask = t.abs() > threshold
+          else:
+            assert kx % self.block_size == 0, "Block-size should be divisible value to input channel"
+            nblock= kx // self.block_size
+            blocks = t.view(och, ich, ky, nblock, self.block_size).abs()
+            nparams_toprune = _compute_nparams_toprune(self.amount, self.block_size)
+            if nparams_toprune == 0:  # k=0 not supported by torch.kthvalue
+              return default_mask
+
+            threshold = torch.kthvalue(blocks, k=nparams_toprune, dim=4).values
+            threshold = torch.repeat_interleave(threshold, self.block_size, dim=-1).view_as(blocks)
+            mask = (blocks > threshold).view_as(t)
+
+        return mask
+
+    @classmethod
+    def apply(cls, module, name, amount, block_type, block_size):
+        r"""Adds the forward pre-hook that enables pruning on the fly and
+        the reparametrization of a tensor in terms of the original tensor
+        and the pruning mask.
+
+        Args:
+            module (nn.Module): module containing the tensor to prune
+            name (str): parameter name within ``module`` on which pruning
+                will act.
+            amount (float): quantity of parameters to prune.
+                If ``float``, should be between 0.0 and 1.0 and represent the
+                fraction of parameters to prune.
+            block_type (str): block in which the number of non-zero weights is equal. 
+                - ``layer``, unit of pruning is layer
+                - ``filter``, unit of pruning is filter 
+                - ``kernel``, unit of pruning is kernel
+                - ``vector-inch``, unit of pruning is block along inch-axis
+                - ``vector-y``, unit of pruning is block along y-axis
+                - ``vector-x``, unit of pruning is block along x-axis
+            block_size (int): size of blocks
+                If block_type is``vector-inch``, in-channel should be divisible by block_size.  
+        """
+        return super(BlockwiseUnstructured, cls).apply(
+            module, name, amount=amount, block_type=block_type, block_size=block_size)
+
+
 class L1Unstructured(BasePruningMethod):
     r"""Prune (currently unpruned) units in a tensor by zeroing out the ones
     with the lowest L1-norm.
@@ -550,6 +731,7 @@ class RandomStructured(BasePruningMethod):
 
     PRUNING_TYPE = "structured"
 
+# def random_structured(module, name, amount, dim):
     def __init__(self, amount, dim=-1):
         # Check range of validity of amount
         _validate_pruning_amount_init(amount)
@@ -960,6 +1142,47 @@ def ln_structured(module, name, amount, n, dim):
     return module
 
 
+def blockwise_unstructured(module, name, amount, block_type, block_size=None):
+    r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
+    by removing the specified ``amount`` of (currently unpruned) units with the 
+    lowest absolute value.
+    Modifies module in place (and also return the modified module) by:
+    1) adding a named buffer called ``name+'_mask'`` corresponding to the
+    binary mask applied to the parameter `name` by the pruning method.
+    2) replacing the parameter ``name`` by its pruned version, while the
+    original (unpruned) parameter is stored in a new parameter named
+    ``name+'_orig'``.
+
+    Args:
+        module (nn.Module): module containing the tensor to prune
+        name (str): parameter name within ``module`` on which pruning
+                will act.
+        amount (float): quantity of parameters to prune.
+            If ``float``, should be between 0.0 and 1.0 and represent the
+            fraction of parameters to prune.
+        block_type (str): block in which the number of non-zero weights is equal. 
+            - ``layer``, unit of pruning is layer
+            - ``filter``, unit of pruning is filter 
+            - ``kernel``, unit of pruning is kernel
+            - ``vector-inch``, unit of pruning is block along inch-axis
+            - ``vector-y``, unit of pruning is block along y-axis
+            - ``vector-x``, unit of pruning is block along x-axis
+         block_size (int): size of blocks
+            If block_type is``vector-inch``, in-channel should be divisible by block_size.  
+
+    Returns:
+        module (nn.Module): modified (i.e. pruned) version of the input module
+
+    Examples:
+        >>> m = prune.blockwise_unstructured(nn.Conv2d(4, 6, 3), name="weight", amount=0.5, block_type="filter")
+        >>> list(m.named_buffers())[0][1].view(6, -1).sum(1)
+        tensor([18, 18, 18, 18, 18, 18])
+
+    """
+    BlockwiseUnstructured.apply(module, name, amount, block_type, block_size)
+    return module
+
+
 def global_unstructured(parameters, pruning_method, **kwargs):
     r"""
     Globally prunes tensors corresponding to all parameters in ``parameters``
@@ -1209,6 +1432,25 @@ def _validate_pruning_amount(amount, tensor_size):
         raise ValueError(
             "amount={} should be smaller than the number of "
             "parameters to prune={}".format(amount, tensor_size)
+        )
+
+
+def _validate_blockwise_pruning(t):
+    r"""Validation helper to check that the tensor to be pruned is 4-dimensional, 
+    such that the concept of "channels" is well-defined.
+
+    Args:
+        t (torch.Tensor): tensor representing the parameter to prune
+
+    Raises:
+        ValueError: if the tensor `t` is not 4-D.
+    """
+    shape = t.shape
+    if len(shape) != 4:
+        raise ValueError(
+            "Structured pruning can only be applied to "
+            "4-dimensional tensors. Found tensor of shape "
+            "{} with {} dims".format(shape, len(shape))
         )
 
 
