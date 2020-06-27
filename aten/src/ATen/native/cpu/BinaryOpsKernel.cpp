@@ -661,6 +661,28 @@ void logaddexp2_kernel(TensorIterator& iter) {
   });
 }
 
+void gcd_kernel(TensorIterator& iter) {
+  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "gcd_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            scalar_t x = 1, y = 0;
+            scalar_t x1 = 0, y1 = 1, a1 = a, b1 = b;
+            scalar_t q;
+            while (b1) {
+              q = a1 / b1;
+              std::tie(x, x1) = std::make_tuple(x1, x - q * x1);
+              std::tie(y, y1) = std::make_tuple(y1, y - q * y1);
+              std::tie(a1, b1) = std::make_tuple(b1, a1 - q * b1);
+            }
+            return a1;
+          },
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a + b;
+          });
+    });
+}
+
 } // anonymous namespace
 
 
@@ -695,5 +717,6 @@ REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
 REGISTER_DISPATCH(fmod_scalar_stub, &fmod_scalar_kernel);
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
+REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
 
 }} // namespace at::native
