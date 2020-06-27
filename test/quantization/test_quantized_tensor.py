@@ -526,6 +526,17 @@ class TestQuantizedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Squeeze is only possible on non-axis dimension for Per-Channel"):
             qz = qy.squeeze()
 
+    def test_repeat(self):
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        for device in get_supported_device_types():
+            q_int = torch.randint(0, 100, [3], dtype=dtype, device=device)
+            q_int_repeat = q_int.repeat(4, 2)
+            q_ref = torch._make_per_tensor_quantized_tensor(q_int_repeat, scale=scale, zero_point=zero_point)
+
+            q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
+            q_repeat = q.repeat(4, 2)
+            self.assertEqual(q_ref, q_repeat)
+
     def test_qscheme_pickle(self):
         f = Foo()
         buf = io.BytesIO()
