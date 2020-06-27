@@ -78,23 +78,23 @@ Tensor empty_per_channel_affine_quantized_other_backends_stub(
 
 // Create an empty quantized Tensor with size, based on the configs
 // of the input Tensor
-Tensor empty_quantized(IntArrayRef size, const Tensor& original) {
+Tensor empty_quantized(IntArrayRef size, const Tensor& qtensor) {
   Tensor output;
-  if (original.qscheme() == kPerTensorAffine) {
-    output = at::_empty_affine_quantized(size, original.options(),
-                                         original.q_scale(),
-                                         original.q_zero_point());
-  } else if (original.qscheme() == kPerChannelAffine) {
+  if (qtensor.qscheme() == kPerTensorAffine) {
+    output = at::_empty_affine_quantized(size, qtensor.options(),
+                                         qtensor.q_scale(),
+                                         qtensor.q_zero_point());
+  } else if (qtensor.qscheme() == kPerChannelAffine) {
     output = at::_empty_per_channel_affine_quantized(
         size,
-        original.q_per_channel_scales(),
-        original.q_per_channel_zero_points(),
-        original.q_per_channel_axis(),
-        original.options());
+        qtensor.q_per_channel_scales(),
+        qtensor.q_per_channel_zero_points(),
+        qtensor.q_per_channel_axis(),
+        qtensor.options());
   } else {
     TORCH_CHECK(false,
                 "QScheme not supported by empty_quantized:",
-                toString(original.qscheme()));
+                toString(qtensor.qscheme()));
   }
   return output;
 }
