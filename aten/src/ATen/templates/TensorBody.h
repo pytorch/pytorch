@@ -323,6 +323,10 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
+  /// Returns if a `Tensor` is a meta tensor.  Meta tensors can
+  /// also have other designations.
+  bool is_meta() const;
+
   /// If a tensor is a quantized tensor, returns its quantizer
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;
@@ -544,6 +548,18 @@ class CAFFE2_API Tensor {
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
+
+  // Special C++ only overloads for std()-like functions (See gh-40287)
+  // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
+  // So, for example std(0) would select the std(unbiased=False) overload
+
+  Tensor var(int dim) const {
+    return var(IntArrayRef{dim});
+  }
+
+  Tensor std(int dim) const {
+    return std(IntArrayRef{dim});
+  }
 
   // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
   // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.

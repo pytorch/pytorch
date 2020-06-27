@@ -157,28 +157,6 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
     conda install -q -y cmake
   fi
 fi
-if which conda; then
-  # MKL is provided via conda. Usually, users will activate their conda
-  # environment before building a project, which will add LDFLAGS
-  # (and much more). Without LDFLAGS, we get
-  # "not found (try using -rpath or -rpath-link)"
-  # errors when looking for MKL libraries while linking
-  # Without the ldconfig conda-provided libs are not found at runtime
-  if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
-    CONDA_LIBS=${CONDA_PREFIX:-"$(dirname $(dirname $(which conda)))/lib"}
-    export LDFLAGS="-Wl,-rpath-link=${CONDA_LIBS}"
-    # TODO: once the new docker images in this PR (PR 37737) are created, this is
-    # redundant (it should be part of .circleci/docker/common/install_conda.sh)
-    if [ -e /etc/ld.so.conf.d/conda-python.conf ]; then
-      echo Now safe to remove this temporary fix from .jenkins/pytorch/commmon.sh
-    else
-      echo Temporarily adding "${CONDA_LIBS}" to ldconfig
-      sudo sh -c "echo ${CONDA_LIBS} > /etc/ld.so.conf.d/conda-python.conf"
-      sudo ldconfig
-    fi
-  fi
-  unset CONDA_LIBS
-fi
 
 function pip_install() {
   # retry 3 times
