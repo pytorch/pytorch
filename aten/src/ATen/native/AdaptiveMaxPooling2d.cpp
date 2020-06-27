@@ -237,6 +237,7 @@ static void adaptive_max_pool2d_backward_single_out_frame(
         {
           /* retrieve position of max */
           int64_t maxp = ind_p_d[oh*osizeW + ow];
+          TORCH_CHECK(maxp>=0, "maxp < 0");
 
           /* update gradient */
           gradInput_p_d[maxp] += gradOutput_p_d[oh*osizeW + ow];
