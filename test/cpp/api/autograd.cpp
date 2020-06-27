@@ -666,12 +666,6 @@ TEST(CustomAutogradTest, HookNone) {
   ASSERT_TRUE(was_called);
 }
 
-TEST(CustomAutogradTest, MyAdaptiveMaxPool) {
-  auto x2 = torch::full({1, 1, 3}, -std::numeric_limits<float>::infinity(), torch::requires_grad());
-  auto res2 = torch::nn::functional::adaptive_max_pool1d(x2, {1});
-  res2.backward(torch::randn_like(res2));
-}
-
 // TODO add these tests if needed
 // test_once_differentiable
 // test_sparse_backward
