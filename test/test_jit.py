@@ -47,7 +47,7 @@ import torch.nn.functional as F
 # Testing utils
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
@@ -1165,7 +1165,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_cpp(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
@@ -1174,7 +1173,6 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
@@ -1185,7 +1183,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(RUN_CUDA, "covered by test_tensorexpr_cuda")
     @unittest.skipIf(IS_WINDOWS, "enable on windows")
     @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_tensorexpr_cpp(self):
         torch._C._run_tensorexpr_cpp_tests(run_cuda=False)
 
@@ -1193,7 +1190,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(not RUN_CUDA, "covered by test_tensorexpr")
     @unittest.skipIf(IS_WINDOWS, "enable on windows")
     @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_tensorexpr_cpp_cuda(self):
         torch._C._run_tensorexpr_cpp_tests(run_cuda=True)
 
