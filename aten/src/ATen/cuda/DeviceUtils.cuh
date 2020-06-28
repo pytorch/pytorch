@@ -1,5 +1,5 @@
 #include <cuda.h>
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 #include <c10/util/Half.h>
 
 __device__ __forceinline__ unsigned int ACTIVE_MASK()

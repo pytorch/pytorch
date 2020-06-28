@@ -67,6 +67,11 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
+  // TODO @wconstab refactor to use ModuleValue::asTuple instead of new API
+  virtual SugaredValuePtr asTupleValue(const SourceRange& loc, Function& m) {
+    throw ErrorReport(loc) << kind() << " cannot be used as a tuplevalue";
+  }
+
   virtual std::vector<std::shared_ptr<SugaredValue>> asType(
       const SourceRange& loc,
       Method& m) {
