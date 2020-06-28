@@ -37,7 +37,8 @@ import textwrap
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 RUN_CUDA_HALF = RUN_CUDA
-if torch.cuda.is_available():
+# HIP supports half, no version check necessary
+if torch.cuda.is_available() and not torch.version.hip:
     CUDA_VERSION = torch._C._cuda_getCompiledVersion()
     for d in range(torch.cuda.device_count()):
         major = torch.cuda.get_device_capability(d)[0]
