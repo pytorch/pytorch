@@ -432,6 +432,62 @@ void ger(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar
 template void ger<float>(int64_t m, int64_t n, float alpha, float *x, int64_t incx, float *y, int64_t incy, float *a, int64_t lda);
 template void ger<double>(int64_t m, int64_t n, double alpha, double *x, int64_t incx, double *y, int64_t incy, double *a, int64_t lda);
 
+namespace {
+template <typename scalar_t>
+cublasStatus_t cublasDot(const cublasHandle_t &handle, int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy, scalar_t * result) {
+  TORCH_CHECK(false, "cublas dot is defined only for half, float and double");
+  return {};
+}
+template <>
+cublasStatus_t cublasDot<float>(const cublasHandle_t &handle, int64_t n, float * x, int64_t incx, float * y, int64_t incy, float * result) {
+  return cublasSdot(handle, n, x, incx, y, incy, result);
+}
+template <>
+cublasStatus_t cublasDot<double>(const cublasHandle_t &handle, int64_t n, double * x, int64_t incx, double * y, int64_t incy, double * result) {
+  return cublasDdot(handle, n, x, incx, y, incy, result);
+}
+template <>
+cublasStatus_t cublasDot<at::Half>(const cublasHandle_t &handle, int64_t n, at::Half * x, int64_t incx, at::Half * y, int64_t incy, at::Half * result) {
+#if CUDA_VERSION >= 8000
+  return cublasDotEx(handle, n, x, CUDA_R_16F, incx, y, CUDA_R_16F, incy, result, CUDA_R_16F, CUDA_R_32F);
+#elif HIP_VERSION >= 210
+  return rocblas_hdot(handle, n,
+                      reinterpret_cast<rocblas_half*>(x), incx,
+                      reinterpret_cast<rocblas_half*>(y), incy,
+                      reinterpret_cast<rocblas_half*>(result)));
+#else
+  TORCH_CHECK(false, "cublas_Hdot requires CUDA 8.0+");
+  return {};
+#endif
+}
+} // anonymous namespace
+
+template <typename scalar_t>
+scalar_t dot(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t incy) {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+
+  TORCH_CHECK(
+      (incx <= INT_MAX) && (incy <= INT_MAX),
+      "cublasDot only incx, incy "
+      "the bound [val] <= %d",
+      INT_MAX);
+
+  int i_incx = (int)incx;
+  int i_incy = (int)incy;
+  scalar_t result;
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+
+  TORCH_CUDABLAS_CHECK(
+      cublasDot<scalar_t>(handle, n, x, i_incx, y, i_incy, &result));
+
+  return result;
+}
+template at::Half dot(int64_t n, at::Half * x, int64_t incx, at::Half * y, int64_t incy);
+template float dot(int64_t n, float * x, int64_t incx, float * y, int64_t incy);
+template double dot(int64_t n, double * x, int64_t incx, double * y, int64_t incy);
 
 } // namespace blas
 } // namespace cuda

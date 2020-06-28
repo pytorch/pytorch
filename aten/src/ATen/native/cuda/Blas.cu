@@ -50,4 +50,45 @@ Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, c
   return result;
 }
 
+Tensor dot_cuda(const Tensor& self, const Tensor& other){
+
+  TORCH_CHECK(
+      self.dim() == 1 && other.dim() == 1,
+      "1D tensors expected, got, ",
+      self.dim(), ", ",
+      other.dim(),
+      " tensors");
+
+  TORCH_CHECK(
+      self.numel() == other.numel(),
+      "inconsistent tensor size, expected tensor [",
+      self.numel(),
+      "] and src [",
+      other.numel(), "] to have the same number of elements, but got ",
+      self.numel(), " and ",
+      other.numel(),
+      " elements respectively");
+
+  TensorArg self_arg{self, "self", 1};
+  TensorArg other_arg{other, "other", 2};
+  checkAllSameGPU("dot", {self_arg, other_arg});
+  checkSameType("dot", other_arg, other_arg);
+
+  auto self_contig = self.contiguous();
+  auto other_contig = other.contiguous();
+  return AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
+
+    Tensor result = at::empty({}, self_contig.options());
+    auto res = at::cuda::blas::dot<scalar_t>(
+        self_contig.numel(),
+        self_contig.data_ptr<scalar_t>(),
+        self_contig.stride(0),
+        other_contig.data_ptr<scalar_t>(),
+        other_contig.stride(0));
+
+    result.fill_(res);
+    return result;
+  });
+}
+
 }} // namespace at::native
