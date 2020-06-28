@@ -443,6 +443,25 @@ def async_add_multi_fanout(to, x, num, step):
     return ret_future
 
 
+class AsyncExecutionClass:
+
+    @staticmethod
+    @rpc.functions.async_execution
+    def static_async_add(to, x, y, z):
+        return rpc.rpc_async(to, torch.add, args=(x, y)).then(
+            lambda fut: fut.wait() + z
+        )
+
+    @classmethod
+    @rpc.functions.async_execution
+    def class_async_add(cls, to, x, y, z):
+        ret_fut = torch.futures.Future()
+        rpc.rpc_async(to, torch.add, args=(x, y)).then(
+            lambda fut: ret_fut.set_result(fut.wait() + z)
+        )
+        return ret_fut
+
+
 def return_future():
     return torch.futures.Future()
 
@@ -3167,6 +3186,29 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_async_function_nested_remote(self):
         self._test_async_function(async_add_nested, RPCExecMode.REMOTE)
+
+    @dist_init
+    def test_async_static_method(self):
+        self._test_async_function(AsyncExecutionClass.static_async_add)
+
+    @dist_init
+    def test_async_static_method_remote(self):
+        self._test_async_function(
+            AsyncExecutionClass.static_async_add,
+            RPCExecMode.REMOTE
+        )
+
+    @dist_init
+    def test_async_class_method(self):
+        print(dir(AsyncExecutionClass.class_async_add))
+        self._test_async_function(AsyncExecutionClass.class_async_add)
+
+    @dist_init
+    def test_async_class_method_remote(self):
+        self._test_async_function(
+            AsyncExecutionClass.class_async_add,
+            RPCExecMode.REMOTE
+        )
 
     def _test_async_function_multi(self, fn, mode=RPCExecMode.SYNC):
         dst1 = worker_name((self.rank + 1) % self.world_size)
