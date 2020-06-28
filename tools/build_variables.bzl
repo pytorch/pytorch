@@ -83,16 +83,16 @@ jit_core_sources = [
 
 core_sources_common = [
     "torch/csrc/autograd/profiler.cpp",
-    "torch/csrc/jit/serialization/unpickler.cpp",
-    "torch/csrc/jit/runtime/instruction.cpp",
-    "torch/csrc/jit/frontend/string_to_type.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
-    "torch/csrc/jit/runtime/operator.cpp",
+    "torch/csrc/jit/frontend/string_to_type.cpp",
+    "torch/csrc/jit/mobile/type_parser.cpp",
+    "torch/csrc/jit/runtime/instruction.cpp",
     "torch/csrc/jit/runtime/jit_exception.cpp",
+    "torch/csrc/jit/runtime/operator.cpp",
     "torch/csrc/jit/runtime/print_handler.cpp",
     "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
-    "torch/csrc/jit/mobile/type_parser.cpp",
+    "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
 jit_sources_common = [
