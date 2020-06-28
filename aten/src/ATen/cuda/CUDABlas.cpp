@@ -454,7 +454,7 @@ cublasStatus_t cublasDot<at::Half>(const cublasHandle_t &handle, int64_t n, at::
   return rocblas_hdot(handle, n,
                       reinterpret_cast<rocblas_half*>(x), incx,
                       reinterpret_cast<rocblas_half*>(y), incy,
-                      reinterpret_cast<rocblas_half*>(result)));
+                      reinterpret_cast<rocblas_half*>(result));
 #else
   TORCH_CHECK(false, "cublas_Hdot requires CUDA 8.0+");
   return {};
