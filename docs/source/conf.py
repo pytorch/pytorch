@@ -108,6 +108,11 @@ coverage_ignore_functions = [
     "verify",
     "whichmodule",
     "wrap_check_inputs",
+    # torch
+    # TODO: This should be documented eventually, but only after
+    # we build out more support for meta functions and actually
+    # do a release with it
+    "empty_meta",
 ]
 
 coverage_ignore_classes = [
