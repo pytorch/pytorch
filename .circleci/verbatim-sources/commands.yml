@@ -1,5 +1,24 @@
 commands:
 
+  # Must be run after attaching workspace from previous steps
+  load_shared_env:
+    description: "Loads .circleci/shared/env_file into ${BASH_ENV}"
+    parameters:
+      # For some weird reason we decide to reattach our workspace to ~/workspace so
+      # in the vein of making it simple let's assume our share env_file is here
+      root:
+        type: string
+        default: "~/workspace"
+    steps:
+      - run:
+          name: "Load .circleci/shared/env_file into ${BASH_ENV}"
+          command: |
+            if [[ -f  "<< parameters.root >>/.circleci/shared/env_file" ]]; then
+              cat << parameters.root >>/.circleci/shared/env_file >> ${BASH_ENV}
+            else
+              echo "We didn't have a shared env file, that's weird"
+            fi
+
   # This system setup script is meant to run before the CI-related scripts, e.g.,
   # installing Git client, checking out code, setting up CI env, and
   # building/testing.

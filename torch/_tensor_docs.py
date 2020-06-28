@@ -202,6 +202,20 @@ acos_() -> Tensor
 In-place version of :meth:`~Tensor.acos`
 """)
 
+add_docstr_all('acosh',
+               r"""
+acosh() -> Tensor
+
+See :func:`torch.acosh`
+""")
+
+add_docstr_all('acosh_',
+               r"""
+acosh_() -> Tensor
+
+In-place version of :meth:`~Tensor.acosh`
+""")
+
 add_docstr_all('add',
                r"""
 add(other, *, alpha=1) -> Tensor
@@ -481,6 +495,19 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('asinh', r"""
+asinh() -> Tensor
+
+See :func:`torch.asinh`
+""")
+
+add_docstr_all('asinh_',
+               r"""
+asinh_() -> Tensor
+
+In-place version of :meth:`~Tensor.asinh`
+""")
+
 add_docstr_all('as_strided', r"""
 as_strided(size, stride, storage_offset=0) -> Tensor
 
@@ -513,6 +540,18 @@ add_docstr_all('atan_',
 atan_() -> Tensor
 
 In-place version of :meth:`~Tensor.atan`
+""")
+
+add_docstr_all('atanh',
+               r"""
+atanh() -> Tensor
+
+See :func:`torch.atanh`
+""")
+
+add_docstr_all('atanh_',
+               r"""
+In-place version of :meth:`~Tensor.atanh`
 """)
 
 add_docstr_all('baddbmm',
@@ -1202,6 +1241,20 @@ add_docstr_all('flip',
 flip(dims) -> Tensor
 
 See :func:`torch.flip`
+""")
+
+add_docstr_all('fliplr',
+               r"""
+fliplr() -> Tensor
+
+See :func:`torch.fliplr`
+""")
+
+add_docstr_all('flipud',
+               r"""
+flipud() -> Tensor
+
+See :func:`torch.flipud`
 """)
 
 add_docstr_all('roll',
@@ -3128,7 +3181,7 @@ In-place version of :meth:`~Tensor.tanh`
 """)
 
 add_docstr_all('tolist',
-               r""""
+               r"""
 tolist() -> list or number
 
 Returns the tensor as a (nested) list. For scalars, a standard
@@ -3755,6 +3808,12 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('is_quantized',
                r"""
 Is ``True`` if the Tensor is quantized, ``False`` otherwise.
+""")
+
+add_docstr_all('is_meta',
+               r"""
+Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
+are like normal tensors, but they carry no data.
 """)
 
 add_docstr_all('device',

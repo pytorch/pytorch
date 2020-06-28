@@ -24,6 +24,9 @@ _(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
+_(aten, _acosh) \
+_(aten, _asinh) \
+_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _asin) \
@@ -328,6 +331,8 @@ _(aten, fft) \
 _(aten, fill) \
 _(aten, flatten) \
 _(aten, flip) \
+_(aten, fliplr) \
+_(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
 _(aten, fmod_) \
@@ -725,6 +730,10 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
+_(aten, real) \
+_(aten, imag) \
+_(aten, view_as_real) \
+_(aten, view_as_complex) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

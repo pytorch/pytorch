@@ -47,11 +47,11 @@ class TestSuite:
         print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
         if test_count > 2:
             print(f"    mean_time: {sorted_tests[test_count>>1].time:.2f} seconds")
-            print(f"    Three longest tests:")
+            print("    Three longest tests:")
             for idx in [-1, -2, -3]:
                 print(f"        {sorted_tests[idx].name} time: {sorted_tests[idx].time:.2f} seconds")
         elif test_count > 0:
-            print(f"    Longest test:")
+            print("    Longest test:")
             print(f"        {sorted_tests[-1].name} time: {sorted_tests[-1].time:.2f} seconds")
         print("")
 

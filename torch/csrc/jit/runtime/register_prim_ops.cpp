@@ -308,6 +308,34 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     // only used internally in range() translation
+     Operator(
+         "aten::__range_length(int lo, int hi, int step) -> int",
+         [](Stack& stack) {
+           int64_t lo, hi, step;
+           pop(stack, lo, hi, step);
+           // error handling when step_val = 0 during runtime
+           if (step == 0) {
+             throw std::runtime_error("range() arg 3 must not be zero");
+           }
+           if (step > 0 && lo < hi)
+             push(stack, 1 + (hi - 1 - lo) / step);
+           else if (step < 0 && lo > hi)
+             push(stack, 1 + (lo - 1 - hi) / (0 - step));
+           else
+             push(stack, 0);
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::__derive_index(int index, int start, int step) -> int",
+         [](Stack& stack) {
+           int64_t index, start, step;
+           pop(stack, index, start, step);
+           push(stack, start + index * step);
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
      // these ops are generic over the list element type.
      // CREATING GENERIC_LIST_OPS
      Operator(
@@ -426,7 +454,9 @@ RegisterOperators reg(
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),
-
+     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
+     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
+     DEFINE_UNARY_OP(aten::neg, -a, int, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and
      // Python (on negative), we preserve the python behavior as it's more
@@ -481,8 +511,12 @@ RegisterOperators reg(
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
          float),
-
-     DEFINE_BINARY_OP(aten::pow, pow(a, b)),
+     DEFINE_SCALAR_BINARY_OP(
+         aten::pow.Scalar,
+         static_cast<double>(pow(a, b)),
+         static_cast<double>(pow(a, b)),
+         Scalar),
+     DEFINE_INT_OP(aten::pow.int_to_int, pow(a, b)),
      // min and max are in prim:: because there is a difference between
      // the python builtin 'min' and 'torch.min'
      DEFINE_BINARY_OP(prim::min, a < b ? a : b),
@@ -617,12 +651,12 @@ RegisterOperators reg(
 // these ops are not defined for Tensor
 #define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
   Operator(                                                                   \
-      "prim::min." decl_type "(" decl_type "[] l, " decl_type                 \
+      "prim::min." decl_type "_list(" decl_type "[] l, " decl_type            \
       "[] r) -> " decl_type "[]",                                             \
       minList<value_type>,                                                    \
       aliasAnalysisFromSchema()),                                             \
       Operator(                                                               \
-          "prim::max." decl_type "(" decl_type "[] l, " decl_type             \
+          "prim::max." decl_type "_list(" decl_type "[] l, " decl_type        \
           "[] r) -> " decl_type "[]",                                         \
           maxList<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \

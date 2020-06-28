@@ -125,6 +125,17 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
+  pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7)
+    UBUNTU_VERSION=16.04-rc
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
@@ -182,23 +193,43 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-rocm-py3.6-clang7)
+  pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9)
+    UBUNTU_VERSION=18.04-rc
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
-    CLANG_VERSION=7
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-bionic-cuda11.0-cudnn8-py3.8-gcc9)
+    UBUNTU_VERSION=18.04-rc
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-xenial-rocm3.3-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.3
     # newer cmake version required
     CMAKE_VERSION=3.6.3
     ;;
-  pytorch-linux-bionic-rocm-py3.6-clang7)
+  pytorch-linux-bionic-rocm3.3-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
-    CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM=yes
+    ROCM_VERSION=3.3
     ;;
 esac
 
@@ -215,6 +246,7 @@ tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
 # it's no longer needed.
 docker build \
        --no-cache \
+       --progress=plain \
        --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
@@ -239,11 +271,19 @@ docker build \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
-       --build-arg "ROCM=${ROCM:-}" \
+       --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
        .
+
+# NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
+# for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
+# find the correct image. As a result, here we have to replace the
+#   "$UBUNTU_VERSION" == "18.04-rc"
+# with
+#   "$UBUNTU_VERSION" == "18.04"
+UBUNTU_VERSION=$(echo ${UBUNTU_VERSION} | sed 's/-rc$//')
 
 function drun() {
   docker run --rm "$tmp_tag" $*
@@ -295,11 +335,7 @@ if [ -n "$CLANG_VERSION" ]; then
   if !(drun clang --version 2>&1 | grep -qF "clang version $CLANG_VERSION"); then
     echo "CLANG_VERSION=$CLANG_VERSION, but:"
     drun clang --version
-    if [[ "$image" == *-rocm* ]]; then
-      echo "For ROCm builds, version mismatch expected."
-    else
-      exit 1
-    fi
+    exit 1
   fi
 fi
 
