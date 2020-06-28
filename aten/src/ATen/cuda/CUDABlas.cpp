@@ -477,7 +477,7 @@ scalar_t dot(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t incy) {
 
   int i_incx = (int)incx;
   int i_incy = (int)incy;
-  scalar_t result;
+  scalar_t result{};
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
 
   TORCH_CUDABLAS_CHECK(
