@@ -248,7 +248,7 @@ core_sources_full = [
     "torch/csrc/utils/variadic.cpp",
 ]
 
-libtorch_core_sources = core_sources_common + core_sources_full
+libtorch_core_sources = sorted(core_sources_common + core_sources_full)
 
 libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/autograd.cpp",
@@ -296,7 +296,7 @@ jit_sources_full = [
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
 ]
 
-libtorch_core_jit_sources = jit_sources_common + jit_sources_full
+libtorch_core_jit_sources = sorted(jit_sources_common + jit_sources_full)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
