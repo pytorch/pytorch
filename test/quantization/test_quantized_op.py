@@ -502,7 +502,7 @@ class TestQuantizedOps(TestCase):
             qY = op(qX, threshold, value)
             self.assertEqual(qY, qY_hat, msg="{} qthreshold failed".format(name))
 
-    """Tests the correctness of the quantized::clamp op."""
+    """Tests the correctness of the quantized torch.clamp op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
@@ -510,61 +510,91 @@ class TestQuantizedOps(TestCase):
            max_val=hu.floats(-1e6, 1e6, allow_nan=False))
     def test_qclamp(self, X, min_val, max_val):
         X, (scale, zero_point, torch_type) = X
-
-        assume(min_val <= max_val)
-        Y = X.copy()
-        Y[Y < min_val] = min_val
-        Y[Y > max_val] = max_val
-        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
         X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
 
-        ops_under_test = {
-            'ops.quantized': torch.ops.quantized.clamp,
-        }
+        def quantize_with_same_params(tensor):
+            return torch.quantize_per_tensor(tensor, scale=scale,
+                                             zero_point=zero_point,
+                                             dtype=torch_type)
 
-        for name, op in ops_under_test.items():
-            qY_hat = op(qX, min_val, max_val)
-            self.assertEqual(qY, qY_hat, msg="{} qclamp failed".format(name))
+        # Create min/max argument product
+        min_tensors = (torch.rand_like(X) * 2e5 - 1e5,  # [-1e5, 1e6)
+                       torch.rand_like(X[0]) * 2e5 - 1e5,  # Broadcasting
+                       min_val,  # With scalars
+                       )
+        max_tensors = (torch.rand_like(X) * 2e5 - 1e5,  # [-1e5, 1e6)
+                       torch.rand_like(X[-1]) * 2e5 - 1e5,   # Broadcasting
+                       max_val  # With scalars
+                       )
+        args = itertools.product(min_tensors, max_tensors)
 
-    """Tests the correctness of the quantized::clamp_with_tensors op."""
+        qX = quantize_with_same_params(X)
+
+        for min_tensor, max_tensor in args:
+            # Quantize tensors
+            if isinstance(min_tensor, torch.Tensor):
+                q_min = quantize_with_same_params(min_tensor)
+            else:
+                q_min = min_tensor
+            if isinstance(max_tensor, torch.Tensor):
+                q_max = quantize_with_same_params(max_tensor)
+            else:
+                q_max = max_tensor
+
+            # Use floating clamp implementation as reference
+            Y = torch.clamp(X, min_tensor, max_tensor)
+            qY = quantize_with_same_params(Y)
+            qY_hat = torch.clamp(qX, q_min, q_max)
+            self.assertEqual(qY, qY_hat, msg="quantized torch.clamp failed")
+
+    """Tests that error is thrown if the arguments have different quantization params."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
-                       qparams=hu.qparams()))
-    def test_qclamp_with_tensors(self, X):
+                       qparams=hu.qparams()),
+           qparams=hu.qparams())
+    def test_qclamp_with_tensors_different_quant_params(self, X, qparams):
         X, (scale, zero_point, torch_type) = X
-        min_tensor = np.random.uniform(-1e5, 0, size=X.shape).astype(np.float32)
-        max_tensor = np.random.uniform(0, 1e5, size=X.shape).astype(np.float32)
+        other_scale, other_zero_point, other_dtype = qparams
 
-        Y = X.copy()
-        min_mask = Y < min_tensor
-        Y[min_mask] = min_tensor[min_mask]
-        max_mask = Y > max_tensor
-        Y[max_mask] = max_tensor[max_mask]
-        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
+        assume(other_dtype == torch_type)
+        assume(other_scale != scale)
+        assume(other_zero_point != zero_point)
 
         X = torch.from_numpy(X)
+        min_tensor = torch.rand_like(X)
+        max_tensor = torch.rand_like(X)
+
+        # Quantize tensors
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
-        min_tensor = torch.from_numpy(min_tensor)
         q_min_tensor = torch.quantize_per_tensor(min_tensor, scale=scale,
                                                  zero_point=zero_point,
                                                  dtype=torch_type)
-        max_tensor = torch.from_numpy(max_tensor)
         q_max_tensor = torch.quantize_per_tensor(max_tensor, scale=scale,
                                                  zero_point=zero_point,
                                                  dtype=torch_type)
 
-        ops_under_test = {
-            'ops.quantized': torch.ops.quantized.clamp_with_tensors,
-        }
+        # Test incorrect quantization parameters
+        error_messages = ["Quantized input scale should match .*",
+                          "Quantized input zero-point should match .*"]
+        quant_params = [(other_scale, zero_point), (scale, other_zero_point)]
 
-        for name, op in ops_under_test.items():
-            qY_hat = op(qX, q_min_tensor, q_max_tensor)
-            self.assertEqual(qY, qY_hat, msg="{} qclamp_with_tensors failed".format(name))
+        for err_msg, params in zip(error_messages, quant_params):
+            q_min_tensor_bad_qparams = torch.quantize_per_tensor(min_tensor, scale=params[0],
+                                                                 zero_point=params[1],
+                                                                 dtype=torch_type)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                torch.clamp(qX, q_min_tensor_bad_qparams, q_max_tensor)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                torch.clamp(qX, q_min_tensor_bad_qparams, 1)
+
+            q_max_tensor_bad_qparams = torch.quantize_per_tensor(max_tensor, scale=params[0],
+                                                                 zero_point=params[1],
+                                                                 dtype=torch_type)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                torch.clamp(qX, q_min_tensor, q_max_tensor_bad_qparams)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                torch.clamp(qX, 1, q_max_tensor_bad_qparams)
 
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM

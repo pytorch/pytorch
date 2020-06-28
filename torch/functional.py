@@ -1414,18 +1414,11 @@ def clamp(input, min=None, max=None, out=None):
     a resulting tensor:
 
     .. math::
-        y_i = \begin{cases}
-            \text{min}_i & \text{if } x_i < \text{min}_i \\
-            x_i & \text{if } \text{min}_i \leq x_i \leq \text{max}_i \\
-            \text{max}_i & \text{if } x_i > \text{max}_i
-        \end{cases}
+        y_i = \min(\text{max}_i, \min(\text{min}_i, x_i))
 
     The :attr:`input` and arguments :attr:`min` and attr:`max` should have matching types.
     I.e. if :attr:`input` is of type `FloatTensor` or `DoubleTensor`, then args :attr:`min`
     and :attr:`max` must be `FloatTensor`, `DoubleTensor`, or real numbers.
-
-    For tensor :attr:`max` or :attr:`min` arguments `max = torch.max(min, max)` is called to make sure that 
-    :attr:`max` is greater than or equal to :attr:`min`.
 
     Args:
         input (Tensor): the input tensor

@@ -7057,209 +7057,73 @@ class TestTorchDeviceType(TestCase):
         self._test_logical(device, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
     def generate_clamp_baseline(self, device, min_vals=None, max_vals=None, with_nans=False):
-        m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
+        X = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
         if with_nans:
-            mask = torch.randint(0, 2, m1.shape, dtype=torch.bool, device=device)
-            m1[mask] = nan
+            mask = torch.randint(0, 2, X.shape, dtype=torch.bool, device=device)
+            X[mask] = nan
 
-        if min_vals is not None and not isinstance(min_vals, torch.Tensor):
-            min_vals = torch.full_like(m1, min_vals)
-        if max_vals is not None and not isinstance(max_vals, torch.Tensor):
-            max_vals = torch.full_like(m1, max_vals)
+        if isinstance(min_vals, torch.Tensor):
+            min_vals = min_vals.cpu().numpy()
 
-        m1_clamped = m1.clone()
-        if min_vals is not None and max_vals is not None:
-            for i in iter_indices(m1_clamped):
-                m1_clamped[i] = max(min(m1_clamped[i], max_vals[i]), min_vals[i])
-        elif min_vals is not None:
-            for i in iter_indices(m1_clamped):
-                m1_clamped[i] = max(m1_clamped[i], min_vals[i])
-        elif max_vals is not None:
-            for i in iter_indices(m1_clamped):
-                m1_clamped[i] = min(m1_clamped[i], max_vals[i])
-        return m1, m1_clamped
+        if isinstance(max_vals, torch.Tensor):
+            max_vals = max_vals.cpu().numpy()
+
+        # Use NumPy implementation as reference
+        X_clamped = torch.tensor(np.clip(X.cpu().numpy(), a_min=min_vals, a_max=max_vals))
+        return X, X_clamped
 
     def test_clamp(self, device):
-        min_val = -1
-        max_val = 1
-        m1, m1_base = self.generate_clamp_baseline(device, min_val, max_val)
+        # Create min/max argument product
+        args = product((torch.linspace(-1, 1, 100, device=device), -1, None),
+                       (torch.linspace(-1, 1, 100, device=device), 1, None))
 
-        m1_res = torch.clamp(m1, min_val, max_val)
-        self.assertEqual(m1_base, m1_res)
+        for min_val, max_val in args:
+            if min_val is None and max_val is None:
+                continue
 
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min=min_val, max=max_val, out=out)
-        self.assertEqual(m1_base, out)
+            X, Y_expected = self.generate_clamp_baseline(device, min_val, max_val)
 
-        m1.clamp_(min_val, max_val)
-        self.assertEqual(m1_base, m1)
+            Y_actual = torch.clamp(X, min_val, max_val)
+            self.assertEqual(Y_expected, Y_actual)
 
-    def test_clamp_min(self, device):
-        min_val = -1
-        m1, m1_base = self.generate_clamp_baseline(device, min_vals=min_val)
+            Y_out = torch.empty_like(X)
+            torch.clamp(X, min=min_val, max=max_val, out=Y_out)
+            self.assertEqual(Y_expected, Y_out)
 
-        m1_res = torch.clamp(m1, min=min_val)
-        self.assertEqual(m1_base, m1_res)
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min=min_val, out=out)
-        self.assertEqual(m1_base, out)
-
-    def test_clamp_max(self, device):
-        max_val = 1
-        m1, m1_base = self.generate_clamp_baseline(device, max_vals=max_val)
-
-        m1_res = torch.clamp(m1, max=max_val)
-        self.assertEqual(m1_base, m1_res)
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, max=max_val, out=out)
-        self.assertEqual(m1_base, out)
-
-    def test_clamp_propagates_nans(self, device):
-        min_val = -1
-        max_val = 1
-        m1, m1_base = self.generate_clamp_baseline(device, min_val, max_val, with_nans=True)
-
-        m1_res = torch.clamp(m1, min_val, max_val)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(m1_res))
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min_val, max_val, out=out)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(out))
-
-        m1.clamp_(min_val, max_val)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(m1))
-
-    def test_clamp_min_propagates_nans(self, device):
-        min_val = -1
-        m1, m1_base = self.generate_clamp_baseline(device, min_vals=min_val, with_nans=True)
-
-        m1_res = torch.clamp(m1, min=min_val)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(m1_res))
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min=min_val, out=out)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(out))
-
-    def test_clamp_max_propagates_nans(self, device):
-        max_val = 1
-        m1, m1_base = self.generate_clamp_baseline(device, max_vals=max_val, with_nans=True)
-
-        m1_res = torch.clamp(m1, max=max_val)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(m1_res))
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, max=max_val, out=out)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(out))
+            X.clamp_(min_val, max_val)
+            self.assertEqual(Y_expected, X)
 
     def test_clamp_raises_arg_errors(self, device):
-        m1 = torch.randn(100, dtype=torch.float, device=device)
+        X = torch.randn(100, dtype=torch.float, device=device)
         error_msg = 'At least one of \'min\' or \'max\' must not be None'
         with self.assertRaisesRegex(RuntimeError, error_msg):
-            m1.clamp()
+            X.clamp()
         with self.assertRaisesRegex(RuntimeError, error_msg):
-            m1.clamp_()
+            X.clamp_()
         with self.assertRaisesRegex(RuntimeError, error_msg):
-            torch.clamp(m1)
+            torch.clamp(X)
 
-    def test_clamp_with_tensors(self, device):
-        min_vals = torch.linspace(-1, 0, 100, device=device)  # [-1..0]
-        max_vals = torch.linspace(1, 0, 100, device=device)  # [1..0]
-        m1, m1_base = self.generate_clamp_baseline(device, min_vals, max_vals)
+    def test_clamp_propagates_nans(self, device):
+        # Create min/max argument product
+        args = product((torch.linspace(-1, 1, 100, device=device), -1, None),
+                       (torch.linspace(-1, 1, 100, device=device), 1, None))
 
-        m1_res = torch.clamp(m1, min_vals, max_vals)
-        self.assertEqual(m1_base, m1_res)
+        for min_val, max_val in args:
+            if min_val is None and max_val is None:
+                continue
 
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min=min_vals, max=max_vals, out=out)
-        self.assertEqual(m1_base, out)
+            X, Y_expected = self.generate_clamp_baseline(device, min_val, max_val, with_nans=True)
+            Y_expected = torch.isnan(Y_expected)
 
-        m1.clamp_(min_vals, max_vals)
-        self.assertEqual(m1_base, m1)
+            Y_actual = torch.clamp(X, min_val, max_val)
+            self.assertEqual(Y_expected, torch.isnan(Y_actual))
 
-    def test_clamp_with_tensors_min(self, device):
-        min_vals = torch.linspace(-1, 0, 100, device=device)  # [-1..0]
-        m1, m1_base = self.generate_clamp_baseline(device, min_vals=min_vals)
+            Y_out = torch.empty_like(X)
+            torch.clamp(X, min_val, max_val, out=Y_out)
+            self.assertEqual(Y_expected, torch.isnan(Y_out))
 
-        m1_res = torch.clamp(m1, min=min_vals)
-        self.assertEqual(m1_base, m1_res)
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min=min_vals, out=out)
-        self.assertEqual(m1_base, out)
-
-    def test_clamp_with_tensors_max(self, device):
-        max_vals = torch.linspace(1, 0, 100, device=device)  # [1..0]
-        m1, m1_base = self.generate_clamp_baseline(device, max_vals=max_vals)
-
-        m1_res = torch.clamp(m1, max=max_vals)
-        self.assertEqual(m1_base, m1_res)
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, max=max_vals, out=out)
-        self.assertEqual(m1_base, out)
-
-    def test_clamp_with_tensors_propagates_nans(self, device):
-        min_vals = torch.linspace(-1, 0, 100, device=device)  # [-1..0]
-        max_vals = torch.linspace(1, 0, 100, device=device)  # [1..0]
-        m1, m1_base = self.generate_clamp_baseline(device, min_vals, max_vals, with_nans=True)
-
-        m1_res = torch.clamp(m1, min_vals, max_vals)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(m1_res))
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min_vals, max_vals, out=out)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(out))
-
-        m1.clamp_(min_vals, max_vals)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(m1))
-
-    def test_clamp_with_tensors_min_propagates_nans(self, device):
-        min_vals = torch.linspace(-1, 0, 100, device=device)  # [-1..0]
-        m1, m1_base = self.generate_clamp_baseline(device, min_vals=min_vals, with_nans=True)
-
-        m1_res = torch.clamp(m1, min=min_vals)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(m1_res))
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min=min_vals, out=out)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(out))
-
-    def test_clamp_with_tensors_max_propagates_nans(self, device):
-        max_vals = torch.linspace(1, 0, 100, device=device)  # [1..0]
-        m1, m1_base = self.generate_clamp_baseline(device, max_vals=max_vals, with_nans=True)
-
-        m1_res = torch.clamp(m1, max=max_vals)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(m1_res))
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, max=max_vals, out=out)
-        self.assertEqual(torch.isnan(m1_base), torch.isnan(out))
-
-    def test_clamp_with_scalar_min_tensor_max(self, device):
-        min_vals = -1
-        max_vals = torch.linspace(1, 0, 100, device=device)  # [1..0]
-        m1, m1_base = self.generate_clamp_baseline(device, min_vals, max_vals)
-
-        m1_res = torch.clamp(m1, min_vals, max_vals)
-        self.assertEqual(m1_base, m1_res)
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min_vals, max_vals, out=out)
-        self.assertEqual(m1_base, out)
-
-    def test_clamp_with_tensor_min_scalar_max(self, device):
-        min_vals = torch.linspace(-1, 0, 100, device=device)  # [-1..0]
-        max_vals = 1
-        m1, m1_base = self.generate_clamp_baseline(device, min_vals, max_vals)
-
-        m1_res = torch.clamp(m1, min_vals, max_vals)
-        self.assertEqual(m1_base, m1_res)
-
-        out = torch.empty_like(m1)
-        torch.clamp(m1, min_vals, max_vals, out=out)
-        self.assertEqual(m1_base, out)
+            X.clamp_(min_val, max_val)
+            self.assertEqual(Y_expected, torch.isnan(X))
 
     def test_cat_empty_legacy(self, device):
         # FIXME: this is legacy behavior and should be removed
