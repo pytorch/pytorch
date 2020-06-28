@@ -10,7 +10,6 @@ import os
 # pylint: disable=unused-import
 from six.moves import range
 
-from google.protobuf import struct_pb2
 from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
 from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
@@ -51,7 +50,7 @@ def _draw_single_box(image, xmin, ymin, xmax, ymax, display_str, color='black', 
     return image
 
 
-def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
+def hparams(hparam_dict=None, metric_dict=None):
     """Outputs three `Summary` protocol buffers needed by hparams plugin.
     `Experiment` keeps the metadata of an experiment, such as the name of the
       hyperparameters and the name of the metrics.
@@ -63,8 +62,6 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
         and their values.
       metric_dict: A dictionary that contains names of the metrics
         and their values.
-      hparam_domain_discrete: (Optional[Dict[str, List[Any]]]) A dictionary that
-        contains names of the hyperparameters and all discrete values they can hold
 
     Returns:
       The `Summary` protobufs for Experiment, SessionStartInfo and
@@ -102,21 +99,6 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
         logging.warning('parameter: metric_dict should be a dictionary, nothing logged.')
         raise TypeError('parameter: metric_dict should be a dictionary, nothing logged.')
 
-    hparam_domain_discrete = hparam_domain_discrete or {}
-    if not isinstance(hparam_domain_discrete, dict):
-        raise TypeError(
-            "parameter: hparam_domain_discrete should be a dictionary, nothing logged."
-        )
-    for k, v in hparam_domain_discrete.items():
-        if (
-            k not in hparam_dict
-            or not isinstance(v, list)
-            or not all(isinstance(d, type(hparam_dict[k])) for d in v)
-        ):
-            raise TypeError(
-                "parameter: hparam_domain_discrete[{}] should be a list of same type as "
-                "hparam_dict[{}].".format(k, k)
-            )
     hps = []
 
 
@@ -126,68 +108,17 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             continue
         if isinstance(v, int) or isinstance(v, float):
             ssi.hparams[k].number_value = v
-
-            if k in hparam_domain_discrete:
-                domain_discrete = struct_pb2.ListValue(
-                    values=[
-                        struct_pb2.Value(number_value=d)
-                        for d in hparam_domain_discrete[k]
-                    ]
-                )
-            else:
-                domain_discrete = None
-
-            hps.append(
-                HParamInfo(
-                    name=k,
-                    type=DataType.Value("DATA_TYPE_FLOAT64"),
-                    domain_discrete=domain_discrete,
-                )
-            )
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_FLOAT64")))
             continue
 
         if isinstance(v, string_types):
             ssi.hparams[k].string_value = v
-
-            if k in hparam_domain_discrete:
-                domain_discrete = struct_pb2.ListValue(
-                    values=[
-                        struct_pb2.Value(string_value=d)
-                        for d in hparam_domain_discrete[k]
-                    ]
-                )
-            else:
-                domain_discrete = None
-
-            hps.append(
-                HParamInfo(
-                    name=k,
-                    type=DataType.Value("DATA_TYPE_STRING"),
-                    domain_discrete=domain_discrete,
-                )
-            )
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_STRING")))
             continue
 
         if isinstance(v, bool):
             ssi.hparams[k].bool_value = v
-
-            if k in hparam_domain_discrete:
-                domain_discrete = struct_pb2.ListValue(
-                    values=[
-                        struct_pb2.Value(bool_value=d)
-                        for d in hparam_domain_discrete[k]
-                    ]
-                )
-            else:
-                domain_discrete = None
-
-            hps.append(
-                HParamInfo(
-                    name=k,
-                    type=DataType.Value("DATA_TYPE_BOOL"),
-                    domain_discrete=domain_discrete,
-                )
-            )
+            hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_BOOL")))
             continue
 
         if isinstance(v, torch.Tensor):
