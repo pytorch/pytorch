@@ -66,6 +66,39 @@ class TestLiteScriptModule(unittest.TestCase):
         mobile_module_result = mobile_module.forward(*bundled_inputs[0])
         torch.testing.assert_allclose(script_module_result, mobile_module_result)
 
+    def test_generate_create_object(self):
+        class Foo():
+            def __init__(self):
+                return
+            def func(self, x: int, y: int):
+                return x + y
+
+        class MyTestModule(torch.nn.Module):
+            def forward(self, arg):
+                f = Foo()
+                return f.func(1, 2)
+
+
+        # script_module = torch.jit.script(MyTestModule())
+        # script_module._save_for_lite_interpreter("/Users/myuan/temp/test.bc")
+
+        # run "python ~/DB/scripts/show_bytecode_pickle.py ~/temp/test.bc", get:
+# (('__torch__.MyTestModule.forward',
+#   (('instructions',
+#     (('STOREN', 1, 2),
+#      ('DROPR', 1, 0),
+#      ('DROPR', 2, 0),
+#      ('CREATE_OBJECT', 0, 0),
+#      ('DROP', 0, 0),
+#      ('LOADC', 0, 0),
+#      ('LOADC', 1, 0),
+#      ('OP', 0, 0),
+#      ('RET', 0, 0))),
+#    ('operators', (('aten::add', 'int'),)),
+#    ('constants', (1, 2, None)),
+#    ('types', ('__torch__.Foo',)),
+#    ('register_size', 2))),)
+
 
 
 if __name__ == '__main__':
