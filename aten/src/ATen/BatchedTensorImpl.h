@@ -82,8 +82,12 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   int64_t storage_offset() const override;
 
  private:
+  // see NOTE: [BatchedTensorImpl levels invariant]
+  void checkInvariants() const;
+
   Tensor value_;
 
+  // Note: [BatchedTensorImpl levels invariant]
   // There is an invariant that the BatchDims must be stored in increasing `level`
   // order. That is, for i < j, bdims_[i].level must be less than bdims_[j].level.
   BatchDims bdims_;

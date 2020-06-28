@@ -1895,7 +1895,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         num_layers = [1, 1, 2, 3]
         bidirectional = [True, False, True, False]
-        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)] 
+        models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)]
         for model, input in models_and_inputs:
             self.run_test(model, input)
 
@@ -1960,7 +1960,7 @@ class TestONNXRuntime(unittest.TestCase):
         num_layers = [2, 3]
         batch_size = [3, 4]
         seq_len = [5, 7]
-        bidirectional = [True, False] 
+        bidirectional = [True, False]
         models_and_inputs = [get_GruNet_model_and_inputs(i, h, n, b, s, bi)
                              for i, h, n, b, s, bi in zip(input_size, hidden_size, num_layers, batch_size, seq_len, bidirectional)]
         for model, input in models_and_inputs:
@@ -2684,7 +2684,7 @@ class TestONNXRuntime(unittest.TestCase):
             # add is used for exporting full
             def forward(self, x):
                 return torch.full((3, 4), x)
-        x = torch.tensor(12)
+        x = torch.tensor(12.)
         self.run_test(FullModel(), x)
 
     def test_l1_norm(self):
