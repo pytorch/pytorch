@@ -31,8 +31,6 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "conv2d",
     "conv3d",
     "linear",
-    "addmm",
-    "matmul",
     "hardswish",
     "hardswish_",
     "elu",
@@ -353,8 +351,13 @@ bool isFunctionNode(
   return is_func_node;
 }
 
+bool isSingleInputGeneralShapeAtenFunction(Node* n) {
+  return isAtenFunc(n, _single_input_general_shape_aten_funcs);
+}
+
 bool isSingleInputGeneralValueAtenFunction(Node* n) {
-  return isAtenFunc(n, _single_input_general_value_aten_funcs);
+  return isAtenFunc(n, _single_input_general_value_aten_funcs) ||
+      isBinaryOpWithScalarInput(n);
 }
 
 bool isSingleInputGeneralCallFunction(Node* n) {
@@ -381,8 +384,8 @@ bool isSingleInputGeneralAtenFunction(Node* n) {
       std::back_inserter(fixed_qparams_aten_funcs),
       [](auto pair) { return pair.first; });
 
-  return isAtenFunc(n, _single_input_general_shape_aten_funcs) ||
-      isAtenFunc(n, _single_input_general_value_aten_funcs) ||
+  return isSingleInputGeneralValueAtenFunction(n) ||
+      isSingleInputGeneralShapeAtenFunction(n) ||
       isAtenFunc(n, fixed_qparams_aten_funcs);
 }
 
@@ -404,6 +407,10 @@ bool isPropagateQuantBinaryOp(Node* n) {
 
 bool isPropagateQuantOp(Node* n) {
   return isPropagateQuantSingleInputOp(n) || isPropagateQuantBinaryOp(n);
+}
+
+bool isBinaryOpWithScalarInput(Node* n) {
+  return isPropagateQuantBinaryOp(n) && isScalar(n->input(1));
 }
 
 c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(Node* n) {

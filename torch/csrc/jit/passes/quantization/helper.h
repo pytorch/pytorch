@@ -45,6 +45,8 @@ TORCH_API bool isScalar(Value* v);
 TORCH_API bool hitGraphInput(Value* value);
 
 // =========== helper functions for Node =========
+TORCH_API bool isSingleInputGeneralShapeAtenFunction(Node* n);
+
 TORCH_API bool isSingleInputGeneralValueAtenFunction(Node* n);
 
 TORCH_API bool isSingleInputGeneralCallFunction(Node* n);
@@ -66,6 +68,11 @@ TORCH_API bool isPropagateQuantBinaryOp(Node* n);
 // Check if this is the node that we'll quantize or not quantize depending on
 // whether the input of the node is quantized, example: aten::cat
 TORCH_API bool isPropagateQuantOp(Node* n);
+
+// Check if the node is a binary op like aten::add and aten::mul and
+// if the input 1 is a scalar, these ops will be quantized to
+// quantized::{op}_scalar
+TORCH_API bool isBinaryOpWithScalarInput(Node* n);
 
 TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
     Node* n);
