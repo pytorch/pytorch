@@ -456,15 +456,10 @@ class SubGraphCloneHelper {
 
 class InsertQuantDeQuantHelper {
  public:
+  InsertQuantDeQuantHelper(QuantType quant_type, bool debug)
+      : quant_type_(quant_type), debug_(debug) {}
+
   void run(Module& module, const std::string& method_name);
-
-  void setQuantType(QuantType quant_type) {
-    quant_type_ = quant_type;
-  }
-
-  void setDebug(bool debug) {
-    debug_ = debug;
-  }
 
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
@@ -1059,12 +1054,29 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
         insertDeQuantForAllUse(output->owningGraph(), output, output);
       }
     }
+
+    if (isBinaryOpWithScalarInput(n)) {
+      // Print warning for add_scalar/mul_scalar when debug is enabled
+      // since the quantization parameter for these ops depends on
+      // input and it's too complicated to encode the equations in
+      // the IR:
+      // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/quantized/cpu/qadd.cpp#L64-L74
+      if (debug_) {
+        TORCH_WARN_ONCE(
+            "debug option for add_scalar and mul_scalar is not supported, "
+            "please don't use debug option for models that uses these ops.");
+      }
+    }
   }
 }
 
 void InsertQuantDeQuantHelper::runWeightObserver(
     Module& module,
     const std::string& method_name) {
+  if (quant_type_ != QuantType::DYNAMIC) {
+    return;
+  }
+
   for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_methods);
     const auto& invoked_method_name = std::get<1>(invoked_methods);
@@ -1187,6 +1199,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
+  // TODO: add filter to the clamp patterns and remove this pass
   ReplicateClampScalarArgs(graph);
   propagateQuantizationOps(graph->block());
   RemoveRedundantDequantize(graph);
@@ -1318,12 +1331,8 @@ Module InsertQuantDeQuant(
     bool debug,
     QuantType quant_type) {
   Module module = input_module.clone(inplace);
-  InsertQuantDeQuantHelper h;
-  h.setQuantType(quant_type);
-  if (quant_type == QuantType::DYNAMIC) {
-    h.runWeightObserver(module, method_name);
-  }
-  h.setDebug(debug);
+  InsertQuantDeQuantHelper h(quant_type, debug);
+  h.runWeightObserver(module, method_name);
   h.run(module, method_name);
   h.cleanup(module);
   h.propagateQuantizationOps(module);

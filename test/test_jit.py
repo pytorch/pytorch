@@ -47,7 +47,7 @@ import torch.nn.functional as F
 # Testing utils
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
@@ -70,6 +70,7 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 
 # Standard library
 from collections import defaultdict, namedtuple, OrderedDict
+import copy
 from copy import deepcopy
 from itertools import product, chain
 import itertools
@@ -1164,7 +1165,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_cpp(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
@@ -1173,7 +1173,6 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
@@ -1184,7 +1183,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(RUN_CUDA, "covered by test_tensorexpr_cuda")
     @unittest.skipIf(IS_WINDOWS, "enable on windows")
     @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_tensorexpr_cpp(self):
         torch._C._run_tensorexpr_cpp_tests(run_cuda=False)
 
@@ -1192,7 +1190,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(not RUN_CUDA, "covered by test_tensorexpr")
     @unittest.skipIf(IS_WINDOWS, "enable on windows")
     @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_tensorexpr_cpp_cuda(self):
         torch._C._run_tensorexpr_cpp_tests(run_cuda=True)
 
@@ -2852,6 +2849,24 @@ def foo(x):
             traced = torch.jit.trace(fn, [torch.ones(2, 2)])
 
         FileCheck().check("goodbye").run(traced.graph)
+
+        def foo(x: int):
+            return x + 1
+
+        @torch.jit._script_if_tracing
+        def fee(x: int = 2):
+            return foo(1) + x
+
+        # test directly compiling function
+        fee_compiled = torch.jit.script(fee)
+        self.assertEqual(fee_compiled(), fee())
+
+        # test compiling it within another function
+        @torch.jit.script
+        def hum():
+            return fee(x=3)
+
+        self.assertEqual(hum(), 5)
 
     def test_big_int_literals(self):
         def ok():
@@ -4544,7 +4559,7 @@ a")
                 return result
 
         v = Vocabulary(list('uabcdefg'))
-        v.copy()
+        v.__copy__()
 
     def test_tuple_to_opt_list(self):
         @torch.jit.script
@@ -8730,6 +8745,24 @@ a")
             o2 = m.forward2(i)
             self.assertEqual(o2, v)
 
+    def test_script_sequential_sliced_iteration(self):
+        class seq_mod(nn.Module):
+            def __init__(self):
+                super(seq_mod, self).__init__()
+                self.layers = [nn.ReLU(), nn.ReLU(), nn.ReLU()]
+                self.layers = nn.Sequential(*self.layers)
+
+            def forward(self, input):
+                x = self.layers[0].forward(input)
+                for layer in self.layers[1:3]:
+                    x = layer.forward(x)
+                for layer in self.layers[2:]:
+                    x = layer.forward(x)
+                return x
+
+        seq = seq_mod()
+        self.checkModule(seq, [torch.tensor([-2, 1, -1, 2])])
+
     def test_script_sequential_orderdict(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -9190,7 +9223,8 @@ a")
 
         m = torch.jit.script(M())
         # test copy
-        m_c = m.copy()
+        copy.copy(m)
+        copy.deepcopy(m)
 
     def test_script_forward_method_replacement(self):
         # We want to support the use case of attaching a different `forward` method

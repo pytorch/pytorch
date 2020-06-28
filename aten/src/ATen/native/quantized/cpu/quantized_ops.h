@@ -59,7 +59,22 @@ using qadaptive_avg_pool2d_fn = void (*)(
     int64_t istrideC,
     int64_t istrideH,
     int64_t istrideW);
-
+using qadaptive_avg_pool3d_fn = void (*)(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t sizeC,
+    int64_t isizeD,
+    int64_t isizeH,
+    int64_t isizeW,
+    int64_t osizeD,
+    int64_t osizeH,
+    int64_t osizeW,
+    int64_t istrideB,
+    int64_t istrideC,
+    int64_t istrideD,
+    int64_t istrideH,
+    int64_t istrideW);
 using qavg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
@@ -154,6 +169,7 @@ DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
 DECLARE_DISPATCH(qelu_fn, qelu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
+DECLARE_DISPATCH(qadaptive_avg_pool3d_fn, qadaptive_avg_pool3d_ndhwc_stub);
 DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qavg_pool3d_fn, qavg_pool3d_nhwc_stub);
 DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub);
