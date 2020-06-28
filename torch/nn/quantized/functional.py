@@ -91,8 +91,27 @@ def adaptive_avg_pool2d(input, output_size):
                      double-integer tuple)
     """
     if not input.is_quantized:
-        raise ValueError("Input to 'quantized.adaptive_avg_pool2d' must be quantized!")
+        raise ValueError("Input to 'quantized.functional.adaptive_avg_pool2d' must be quantized!")
     return torch.nn.functional.adaptive_avg_pool2d(input, output_size)
+
+def adaptive_avg_pool3d(input, output_size):
+    # type: (Tensor, BroadcastingList2[int]) -> Tensor
+    r"""
+    Applies a 3D adaptive average pooling over a quantized input signal composed
+    of several quantized input planes.
+
+    .. note:: The input quantization paramteres propagate to the output.
+
+    See :class:`~torch.nn.quantized.AdaptiveAvgPool3d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or
+                     double-integer tuple)
+    """
+    if not input.is_quantized:
+        raise ValueError(
+            "Input to 'quantized.functional.adaptive_avg_pool3d' must be quantized!")
+    return torch.nn.functional.adaptive_avg_pool3d(input, output_size)
 
 def conv1d(input, weight, bias,
            stride=1, padding=0, dilation=1, groups=1,
@@ -412,12 +431,7 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     # type: (Tensor, float, float, bool) -> Tensor
-    r"""
-    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
-
-    Applies the quantized HardTanh function element-wise, with scale and
-    zero-point carried over from the input tensor. See :class:`~torch.nn.Hardtanh`
-    for more details.
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardtanh`.
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardtanh' must be quantized!")
@@ -427,26 +441,12 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
 
 def hardswish(input, scale, zero_point):
     # type: (Tensor, float, int) -> Tensor
-    r"""Applies the quantized version of the hardswish function, element-wise,
-    as described in the paper:
-
-    `Searching for MobileNetV3`_.
-
-    .. math::
-        \text{Hardswish}(x) = \begin{cases}
-            0 & \text{if~} x \le -3, \\
-            x & \text{if~} x \ge +3, \\
-            x^2/6 & \text{otherwise}
-        \end{cases}
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardswish`.
 
     Args:
         input: quantized input
-        scale, zero_point: Scale and zero point of the output tensor.
-
-    See :class:`~torch.nn.Hardswish` for more details.
-
-    .. _`Searching for MobileNetV3`:
-        https://arxiv.org/abs/1905.02244
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardswish' must be quantized!")
@@ -474,16 +474,13 @@ def threshold(input, threshold, value):
 
 def elu(input, scale, zero_point, alpha=1.):
     # type: (Tensor, float, int, float) -> Tensor
-    r"""
-    Applies the quantized ELU function element-wise:
-
-    .. math::
-        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
+    r"""This is the quantized version of :func:`~torch.nn.functional.elu`.
 
     Args:
         input: quantized input
-        scale, zero_point: Scale and zero point of the output tensor.
-        alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+        alpha: the alpha constant
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.elu' must be quantized!")
@@ -491,17 +488,7 @@ def elu(input, scale, zero_point, alpha=1.):
 
 def hardsigmoid(input):
     # type: (Tensor) -> Tensor
-    r"""
-    Applies the quantized element-wise function
-
-    .. math::
-        \text{Hardsigmoid}(x) = \begin{cases}
-            0 & \text{if~} x \le -3, \\
-            1 & \text{if~} x \ge +3, \\
-            x / 6 & \text{otherwise}
-        \end{cases}
-
-    See :class:`~torch.nn.Hardsigmoid` for more details.
+    r"""This is the quantized version of :func:`~torch.nn.functional.hardsigmoid`.
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardsigmoid' must be quantized!")

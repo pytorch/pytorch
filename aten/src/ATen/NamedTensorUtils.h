@@ -141,6 +141,13 @@ CAFFE2_API void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
 
 // result = m1 @ m2 + bias
 CAFFE2_API void propagate_names_for_addmm(
+    Tensor& result,
+    const Tensor& m1,
+    const Tensor& m2,
+    const Tensor& bias);
+
+// result = m1 @ m2 + bias
+CAFFE2_API void propagate_names_for_addmm_legacy(
     TensorImpl* result,
     /*const*/TensorImpl* m1,
     /*const*/TensorImpl* m2,
