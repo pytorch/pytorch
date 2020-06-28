@@ -24,11 +24,11 @@ class DistributedSampler(Sampler):
         rank (int, optional): Rank of the current process within :attr:`num_replicas`.
             By default, :attr:`rank` is retrieved from the current distributed
             group.
-        shuffle (bool, optional): If ``True``, sampler will shuffle the indices.
-            A seed other than ``0`` should also be given. The default is ``False``.
+        shuffle (bool, optional): If ``True`` (default), sampler will shuffle the
+            indices.
         seed (int, optional): random seed used to shuffle the sampler if
             :attr:`shuffle=True`. This number should be identical across all
-            processes in the distributed group. Default: ``0``.
+            processes in the distributed group. Default: ``1``.
 
     .. warning::
         In distributed mode, calling the :meth`set_epoch(epoch) <set_epoch>` method at
@@ -47,7 +47,7 @@ class DistributedSampler(Sampler):
         ...     train(loader)
     """
 
-    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=False, seed=0):
+    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True, seed=1):
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
