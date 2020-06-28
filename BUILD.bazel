@@ -3,7 +3,7 @@ load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "template_rule")
-load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources", "libtorch_common_sources")
+load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops")
@@ -1910,7 +1910,7 @@ cc_library(
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
         ],
-    )) + libtorch_core_sources + libtorch_common_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
+    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
         ":cpp_generated_code",
     ],
     copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
