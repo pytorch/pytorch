@@ -201,12 +201,14 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (!input.is_cuda() || !cudnn_enabled) {
     return false;
   }
-  if (deterministic && is_dilated()) {
-    // cudnn doesn't support deterministic dilated convolution fully yet
-    return false;
-  }
-  if (is_dilated()) {
-    return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
+  if (!cudnn_conv_use_channels_last(input, weight)) { // bypass dilation checks for channels-last convolution
+    if (deterministic && is_dilated()) {
+      // cudnn doesn't support deterministic dilated convolution fully yet
+      return false;
+    }
+    if (is_dilated()) {
+      return detail::getCUDAHooks().supportsDilatedConvolutionWithCuDNN() && !is_output_padding_big();
+    }
   }
   return !is_output_padding_big();
 }
@@ -233,7 +235,6 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.options().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
-     !is_dilated() && // doesn't support dilation
      !transposed && // or transposed tensors
      input.ndimension() == 4); // must be in NCHW format
 #endif
@@ -260,9 +261,7 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
-// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
-#if defined(C10_MOBILE) && !defined(__APPLE__)
+#if defined(C10_MOBILE)
   if (!transposed) {
     return (input.size(1) == groups) &&
             xnnpack::use_convolution2d(
@@ -418,6 +417,9 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
 // Use cudnn for FP16 depthwise convolutions
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  if (cudnn_conv_use_channels_last(input, weight) && use_cudnn(input, weight)) {
+    return true;
+  }
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     bool kernel_cond =  (cudnn_version >= 7600 &&
@@ -739,13 +741,13 @@ at::Tensor _convolution(
   } else if (params.use_mkldnn(input)) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(input.options().type_equal(weight.options())
-             || (input.is_mkldnn() && weight.scalar_type() == kFloat),
+             || (input.is_mkldnn() && weight.type().backend() == at::Backend::CPU && weight.scalar_type() == kFloat),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
-             ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor with float type");
-    TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options()))
-             || (input.is_mkldnn() && bias.scalar_type() == kFloat),
+             ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor");
+    TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())) 
+             || (input.is_mkldnn() && bias.type().backend() == at::Backend::CPU && bias.scalar_type() == kFloat),
              "Input type (", input.toString(), ") and bias type (", bias.toString(),
-             ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor with float type");
+             ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
     if (!input_is_mkldnn) {
       output = at::mkldnn_convolution(input.contiguous(), weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
                                       params.padding, params.stride, params.dilation, params.groups);

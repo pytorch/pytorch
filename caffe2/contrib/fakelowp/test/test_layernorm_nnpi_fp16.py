@@ -25,19 +25,19 @@ GLOW_LOWERED_BATCHNORM = False
 # Test the lowered LayerNorm op
 class LayerNorm(serial.SerializedTestCase):
 
-    @given(seed=st.integers(0, 65535))
-    @settings(max_examples=10)
-    def test_layernorm(self, seed):
+    @given(seed=st.integers(0, 65535),
+           batch_size=st.integers(min_value=1, max_value=50),
+           size=st.integers(min_value=2, max_value=128),
+           epsilon=st.floats(min_value=1e-4, max_value=1e-3),
+           elementwise_affine=st.booleans())
+    @settings(max_examples=100)
+    def test_layernorm(self, seed, batch_size, size, epsilon, elementwise_affine):
         np.random.seed(seed)
         # Reset the workspace
-        size = 4
-        input_channels = 4
-        batch_size = 1
-        axis = 1
-        epsilon = 1e-4
         workspace.ResetWorkspace()
+        axis = 1
 
-        dims = np.array(([batch_size, input_channels, size, size]))
+        dims = np.array(([batch_size, size]))
         X = np.random.uniform(size=dims).astype(np.float32) - 0.5
         gamma = np.random.randn(*X.shape[axis:]).astype(np.float32)
         beta = np.random.randn(*X.shape[axis:]).astype(np.float32)
@@ -49,11 +49,11 @@ class LayerNorm(serial.SerializedTestCase):
         pred_net.op.add().CopyFrom(
             core.CreateOperator(
                 "LayerNorm",
-                ["X", "gamma", "beta"],
+                ["X", "gamma", "beta"] if elementwise_affine else ["X"],
                 ["Y", "mean", "rstd"],
-                axis=1,
+                axis=axis,
                 epsilon=epsilon,
-                elementwise_affine=True
+                elementwise_affine=elementwise_affine
             )
         )
 
@@ -64,11 +64,11 @@ class LayerNorm(serial.SerializedTestCase):
         pred_net_ref.op.add().CopyFrom(
             core.CreateOperator(
                 "LayerNormFakeFP16NNPI",
-                ["X", "gamma", "beta"],
+                ["X", "gamma", "beta"] if elementwise_affine else ["X"],
                 ["Y", "mean", "rstd"],
-                axis=1,
+                axis=axis,
                 epsilon=epsilon,
-                elementwise_affine=True
+                elementwise_affine=elementwise_affine
             )
         )
 
@@ -94,6 +94,10 @@ class LayerNorm(serial.SerializedTestCase):
         workspace.RunNet(pred_net_ref.name)
         Y_c2 = workspace.FetchBlob("Y")
 
+        dims1 = np.array(([1, *dims]))
+        X_glow = X.reshape(dims1)
+        workspace.FeedBlob("X", X_glow)
+
         workspace.RunNet(pred_net_onnxified.name)
         Y_glow = workspace.FetchBlob("Y")
 
@@ -104,10 +108,11 @@ class LayerNorm(serial.SerializedTestCase):
                 {
                     "seed": seed,
                     "size": size,
-                    "input_channels": input_channels,
                     "batch_size": batch_size,
                     "epsilon": epsilon,
-                    "axis": axis,
+                    "gamma": gamma,
+                    "beta": beta,
+                    "elementwise_affine": elementwise_affine,
                     "X": X,
                     "Y_glow": Y_glow,
                     "Y_c2": Y_c2,
