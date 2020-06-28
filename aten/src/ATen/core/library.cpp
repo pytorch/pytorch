@@ -17,19 +17,16 @@ namespace {
 #endif
   }
 
-  std::ostream& operator<<(std::ostream& os, Library::Kind kind) {
+  const char* toString(Library::Kind kind) {
     switch (kind) {
       case Library::DEF:
-        os << "TORCH_LIBRARY";
-        break;
+        return "TORCH_LIBRARY";
       case Library::IMPL:
-        os << "TORCH_LIBRARY_IMPL";
-        break;
+        return "TORCH_LIBRARY_IMPL";
       case Library::FRAGMENT:
-        os << "TORCH_LIBRARY_FRAGMENT";
-        break;
+        return "TORCH_LIBRARY_FRAGMENT";
     }
-    return os;
+    return "(unknown)";
   }
 }
 
@@ -40,7 +37,7 @@ CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppS
   , debug_()
   {}
 
-#define ERROR_CONTEXT "(Error occurred while processing ", kind_, " block at ", file_, ":", line_, ")"
+#define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
 Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
@@ -62,8 +59,8 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
       case FRAGMENT:
         TORCH_CHECK(
           ns_.has_value(),
-          kind_, ": cannot define ", kind_, " with the wildcard namespace _ "
-          "(every ", kind_, " defines operators for a distinct namespace!)"
+          toString(kind_), ": cannot define ", toString(kind_), " with the wildcard namespace _ "
+          "(every ", toString(kind_), " defines operators for a distinct namespace!) "
           "Did you mean to use TORCH_LIBRARY_IMPL instead?  "
           ERROR_CONTEXT
         );
@@ -82,7 +79,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
 Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name) & {
   TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
     DEF_PRELUDE,
-    "Cannot define an operator inside of a ", kind_, " block.  "
+    "Cannot define an operator inside of a ", toString(kind_), " block.  "
     "All def()s should be placed in the (unique) TORCH_LIBRARY block for their namespace.  ",
     ERROR_CONTEXT
   );
@@ -104,7 +101,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
     TORCH_CHECK(false,
       *ns_opt == *ns_,
       "Explicitly provided namespace (", *ns_opt, ") in schema string "
-      "does not match namespace of enclsing ", kind_, " block (", *ns_, ").  "
+      "does not match namespace of enclosing ", toString(kind_), " block (", *ns_, ").  "
       "Move this definition to the (unique) TORCH_LIBRARY block corresponding to this namespace "
       "(and consider deleting the namespace from your schema string.)  ",
       ERROR_CONTEXT
@@ -173,8 +170,8 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
     TORCH_CHECK(*ns_opt == *ns_,
       IMPL_PRELUDE,
       "Explicitly provided namespace (", *ns_opt, ") in operator name "
-      "does not match namespace of enclosing ", kind_, " block (", *ns_, ").  "
-      "Move this definition to the ", kind_, " block corresponding to this namespace "
+      "does not match namespace of enclosing ", toString(kind_), " block (", *ns_, ").  "
+      "Move this definition to the ", toString(kind_), " block corresponding to this namespace "
       "(and consider deleting the namespace from your schema string.)  ",
       ERROR_CONTEXT
     );
@@ -188,8 +185,8 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
                 *f.dispatch_key_ != *dispatch_key_),
     IMPL_PRELUDE,
     "Explicitly provided dispatch key (", *f.dispatch_key_, ") is inconsistent "
-    "with the dispatch key of the enclosing ", kind_, " block (", *dispatch_key_, ").  "
-    "Please declare a separate ", kind_, " block for this dispatch key and "
+    "with the dispatch key of the enclosing ", toString(kind_), " block (", *dispatch_key_, ").  "
+    "Please declare a separate ", toString(kind_), " block for this dispatch key and "
     "move your impl() there.  "
     ERROR_CONTEXT
   );
@@ -210,7 +207,7 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
 
 Library& Library::_fallback(CppFunction&& f) & {
   TORCH_CHECK(kind_ == IMPL,
-    "fallback(...): Cannot define an operator inside of a ", kind_, " block.  "
+    "fallback(...): Cannot define an operator inside of a ", toString(kind_), " block.  "
     "Did you mean to call this function inside a TORCH_LIBRARY_IMPL block?  ",
     ERROR_CONTEXT);
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;

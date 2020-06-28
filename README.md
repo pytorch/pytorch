@@ -210,12 +210,12 @@ Each CUDA version only supports one particular XCode version. The following comb
 
 On Windows
 
-At least Visual Studio 2017 Update 3 (version 15.3.3 with the toolset 14.11) and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.
+At least Visual Studio 2017 version 15.6 with the toolset 14.13 and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.
 
-If the version of Visual Studio 2017 is higher than 15.4.5, installing of "VC++ 2017 version 15.4 v14.11 toolset" is strongly recommended.
-<br/> If the version of Visual Studio 2017 is lesser than 15.3.3, please update Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.4 v14.11 toolset".
-<br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.4 v14.11.
-<br/> "VC++ 2017 version 15.4 v14.11 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
+If the version of Visual Studio 2017 is higher than 15.6, installing of "VC++ 2017 version 15.6 v14.13 toolset" is strongly recommended.
+<br/> If the version of Visual Studio 2017 is lesser than 15.6, please update Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.6 v14.13 toolset".
+<br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.6 v14.13.
+<br/> "VC++ 2017 version 15.6 v14.13 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
 
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Be sure that CUDA with Nsight Compute is installed after Visual Studio 2017.
