@@ -23,7 +23,7 @@ Tensor& mkldnn_addmm_wraper_out(Tensor& result, const Tensor& bias,
 Tensor mkldnn_addmm_wraper(const Tensor& bias, const Tensor& input,
     const Tensor& weight, Scalar beta, Scalar alpha) {
   TORCH_CHECK(input.dim() == 2,
-      "mkldnn_linear__wraper: input needs to has dim 2, input dim ", input.dim());
+      "mkldnn_addmm_wraper: input needs to has dim 2, input dim ", input.dim());
   return at::mkldnn_linear(input, weight.t(), bias);
 }
 
@@ -31,9 +31,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, bias);
   }
-// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
-// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
-#if defined(C10_MOBILE) && !defined(__APPLE__)
+#if defined(C10_MOBILE)
   if (xnnpack::use_linear(input, weight, bias)) {
     return xnnpack::linear(input, weight, bias);
   }

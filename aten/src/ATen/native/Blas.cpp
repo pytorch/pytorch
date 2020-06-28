@@ -7,6 +7,9 @@ namespace at { namespace native {
 template<typename scalar_t>
 bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
 
+template<typename scalar_t>
+scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+
 constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda > std::max<int64_t>(1L, m);
 }
@@ -89,6 +92,40 @@ Tensor &mv_out(Tensor& result, const Tensor &self, const Tensor &vec) {
 Tensor mv(const Tensor &self, const Tensor &vec) {
   Tensor result = at::empty({self.size(0)}, self.options());
   return native::mv_out(result, self, vec);
+}
+
+Tensor dot(const Tensor &self, const Tensor &other){
+  at::NoNamesGuard guard;
+
+  TORCH_CHECK(
+      self.dim() == 1 && other.dim() == 1,
+      "1D tensors expected, got, ",
+      self.dim(), ", ",
+      other.dim(),
+      " tensors");
+
+  TORCH_CHECK(
+      self.scalar_type() == other.scalar_type(),
+      "dot : expected both vectors to have same dtype, but found ",
+      self.scalar_type(),
+      " and ",
+      other.scalar_type());
+
+  TORCH_CHECK(
+      self.numel() == other.numel(),
+      "inconsistent tensor size, expected tensor [",
+      self.numel(),
+      "] and src [",
+      other.numel(), "] to have the same number of elements, but got ",
+      self.numel(), " and ",
+      other.numel(),
+      " elements respectively");
+
+  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
+    Tensor result = at::empty({}, self.options());
+    result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
+    return result;
+  });
 }
 
 }}  // namespace at::native

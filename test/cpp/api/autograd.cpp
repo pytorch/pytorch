@@ -193,7 +193,7 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
 
   Variable x(torch::ones(1, torch::requires_grad()));
   MyFunction::apply(x).backward(torch::ones(1) , true, true);
-  ASSERT_VARIABLE_EQ(x.grad(), torch::full(1,2));
+  ASSERT_VARIABLE_EQ(x.grad(), torch::full(1, 2.));
 }
 
 TEST(CustomAutogradTest, NoGradCustomFunction) {
