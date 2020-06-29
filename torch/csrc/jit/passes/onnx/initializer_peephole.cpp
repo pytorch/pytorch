@@ -34,10 +34,10 @@ std::vector<at::Tensor> getValues(
   return inputTensorValues;
 }
 
-static void fuseConvBachNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
+static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      fuseConvBachNorm(child_block, valsToParamsMap);
+      fuseConvBatchNorm(child_block, valsToParamsMap);
     }
     if (it->kind() == onnx::Conv and
         it->next()->kind() == onnx::BatchNormalization) {
@@ -61,7 +61,7 @@ static void fuseConvBachNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
           !(bn_B.size(0) == bn_mean.size(0)) ||
           !(bn_mean.size(0) == bn_var.size(0)) || !(w_conv.dim() > 2) ||
           !(w_conv.size(0) == bn_scale.size(0))) {
-        return;
+        continue;
       }
 
       bn_var = bn_var.add(epsilon);
@@ -127,7 +127,7 @@ void buildParamsMapFromValueToParamsMap(
 
 void InitializerPeepholeONNX(Block* b, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
-  fuseConvBachNorm(b, valsToParamsMap);
+  fuseConvBatchNorm(b, valsToParamsMap);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
   return;
 }
