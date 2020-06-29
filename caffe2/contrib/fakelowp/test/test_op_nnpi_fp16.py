@@ -81,6 +81,9 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
         for _ in range(num_iterations):
             A = np.random.uniform(low=-100.0, high=100.0, size=dims).astype(np.float32)
             B = np.random.uniform(low=-100.0, high=100.0, size=dims).astype(np.float32)
+            # Avoid dividing by 0
+            B[np.abs(B) < 1e-3] = 1e-3
+
             workspace.FeedBlob("A", A)
             workspace.FeedBlob("B", B)
             # Run caffe2 net
