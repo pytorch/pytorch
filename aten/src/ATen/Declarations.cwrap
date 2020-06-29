@@ -149,9 +149,8 @@
 [[
   name: _th_equal
   cname: equal
-  cpu_bool: True
-  cpu_bfloat16: True
-  cpu_half: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants:
     - function
@@ -347,9 +346,10 @@
 ]]
 [[
   name: _th_dot
-  backend_types: {CUDA: [floating_point], CPU: [all]}
+  backend_types: {CUDA: [floating_point]}
   cname: dot
-  cpu_half: True
+  backends:
+    CUDA
   variants: function
   return: accreal
   arguments:

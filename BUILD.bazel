@@ -1264,6 +1264,7 @@ filegroup(
         "caffe2/quantization/server/fully_connected_dnnlowp_op.cc",
         "caffe2/quantization/server/fully_connected_fake_lowp_op.cc",
         "caffe2/quantization/server/group_norm_dnnlowp_op.cc",
+        "caffe2/quantization/server/int8_gen_quant_params.cc",
         "caffe2/quantization/server/kl_minimization.cc",
         "caffe2/quantization/server/lstm_unit_dnnlowp_op.cc",
         "caffe2/quantization/server/norm_minimization.cc",

@@ -56,6 +56,15 @@ void ProcessGroup::Work::finish(std::exception_ptr exception) {
   cv_.notify_all();
 }
 
+void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  completed_ = true;
+  exception_ = exception;
+  if (exception_) {
+    std::rethrow_exception(exception_);
+  }
+}
+
 ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }

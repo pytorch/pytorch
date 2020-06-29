@@ -287,7 +287,6 @@ class Vectorizer : public IRMutator {
 
   bool vectorize_inputs(std::vector<const Expr*>& inputs) {
     bool any_vectorized = false;
-    bool all_vectorized = true;
     std::vector<const Expr*> new_inputs;
 
     // Attempt to vectorize each input.
@@ -296,8 +295,6 @@ class Vectorizer : public IRMutator {
       new_inputs.push_back(new_in);
       if (new_in != in) {
         any_vectorized = true;
-      } else {
-        all_vectorized = false;
       }
     }
 
@@ -1631,7 +1628,6 @@ void LoopNest::rfactor(
   // buffer input with the temporary output buffer and removing other reductions
   // variables.
   SwapReduce sr(reduce_op, first_reduce);
-  auto root_block = dynamic_cast<Block*>(root_stmt());
   auto parent_block = dynamic_cast<Block*>(root_for->get_parent());
   if (!parent_block) {
     std::cerr << "Cannot rfactor a loop whose parent is not a block.\n";
