@@ -3,14 +3,14 @@
 
 namespace c10 {
 static auto default_dtype = caffe2::TypeMeta::Make<float>();
-static auto default_complex_dtype = caffe2::TypeMeta::Make<std::complex<float>>();
+static auto default_complex_dtype = caffe2::TypeMeta::Make<c10::complex<float>>();
 
 void set_default_dtype(caffe2::TypeMeta dtype) {
   default_dtype = std::move(dtype);
   if(dtype == caffe2::TypeMeta::Make<double>()) {
-    default_complex_dtype = std::move(caffe2::TypeMeta::Make<std::complex<double>>());
+    default_complex_dtype = std::move(caffe2::TypeMeta::Make<c10::complex<double>>());
   } else {
-    default_complex_dtype = std::move(caffe2::TypeMeta::Make<std::complex<float>>());
+    default_complex_dtype = std::move(caffe2::TypeMeta::Make<c10::complex<float>>());
   }
 }
 

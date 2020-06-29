@@ -208,15 +208,15 @@ Tensor run(
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
       padded_input_nhwc.data_ptr<float>(),                   // input
       output.data_ptr<float>(),                              // output
-      caffe2::xnnpack_threadpool());                         // threadpool
+      caffe2::pthreadpool_());                               // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
       "xnn_setup_convolution2d_nhwc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      context.op.get(),               // operator
-      caffe2::xnnpack_threadpool());  // threadpool
+      context.op.get(),         // operator
+      caffe2::pthreadpool_());  // threadpool
 
   TORCH_INTERNAL_ASSERT(
       xnn_status_success == run_status,
@@ -246,7 +246,7 @@ c10::intrusive_ptr<xnnpack::Conv2dOpContext>
           output_max);
 }
 
-Tensor Conv2dClampRun::operator()(
+Tensor conv2d_clamp_run(
     const Tensor& input,
     const c10::intrusive_ptr<xnnpack::Conv2dOpContext>& op_context) {
   return op_context->run(input);

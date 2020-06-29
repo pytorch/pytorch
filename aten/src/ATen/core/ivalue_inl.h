@@ -230,7 +230,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
-  Future(TypePtr type) : type_(type) {}
+  explicit Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
@@ -259,7 +259,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   void markCompleted(IValue value) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
+    TORCH_CHECK(
+        !completed(),
+        "Attempting to mark a completed Future as complete again. Note that "
+        "a Future can only be marked completed once.");
     completed_ = true;
     value_ = std::move(value);
 
@@ -283,17 +286,20 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   void setError(FutureError&& error) {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(!completed());
-    completed_ = true;
-    error_ = std::move(error);
+    setErrorInternal(std::move(error), lock);
+  }
 
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
-    finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
+  void setErrorIfNeeded(std::string errorMsg) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (completed_) {
+      // This should be rare and shouldn't cause log spew. Its important to
+      // log errors and thats why we have this log here.
+      LOG(INFO) << "Skipping setting following error on the Future since " <<
+        "it is already marked completed (this is not neccessarily an error): "
+        << errorMsg;
+      return;
+    } else {
+      setErrorInternal(FutureError(std::move(errorMsg)), lock);
     }
   }
 
@@ -304,6 +310,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     if (error_) {
       throw *error_;
     }
+    return value_;
+  }
+
+  // This accessor should only be used if we know that the future is
+  // completed() with no error.
+  const IValue& constValue() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(completed());
+    AT_ASSERT(!error_);
     return value_;
   }
 
@@ -323,9 +338,38 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     callbacks_.emplace_back(std::move(callback));
   }
 
+  /**
+   * Add a callback to the future, and return another Future to hold the return
+   * value of the callback. This is necessary when the callback provider needs
+   * to know for sure when the callback has finished.
+   */
+  c10::intrusive_ptr<Future> then(
+      std::function<IValue(void)> callback,
+      TypePtr type) {
+    auto fut = c10::make_intrusive<Future>(type);
+    // Cannot move capture std::function in lambda, because it cannot deduce
+    // the template type for std::function. Hence use std::bind to explicitly
+    // specify types.
+    addCallback(std::bind(
+        [fut](std::function<IValue(void)> cb) {
+          try {
+            fut->markCompleted(cb());
+          } catch (std::exception& e) {
+            fut->setError(e.what());
+          }
+        },
+        std::move(callback)));
+    return fut;
+  }
+
   // Check if the current future has completed
   bool completed() const{
     return completed_;
+  }
+
+  bool hasValue() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return completed_ && !error_;
   }
 
   bool hasError() const {
@@ -342,11 +386,28 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       std::ostream& out,
       const Future& v);
 
-  TypePtr type() const {
+  TypePtr elementType() const {
     return type_;
   }
 
  private:
+  void setErrorInternal(
+      FutureError error,
+      std::unique_lock<std::mutex>& lock) {
+    AT_ASSERT(!completed());
+    completed_ = true;
+    error_ = std::move(error);
+
+    std::vector<std::function<void(void)>> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+
+    finished_cv_.notify_all();
+    for (auto& callback : cbs) {
+      callback();
+    }
+  }
+
   mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
@@ -356,6 +417,15 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   std::vector<std::function<void(void)>> callbacks_;
   c10::optional<FutureError> error_;
 };
+
+// Input is a list of Futures with the same target type.
+// Output is a Future to the List of completed Futures.
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
+// Input is a List of Futures with the same target type.
+// Output is a Future that will be updated with a seen value.
+CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+    c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
@@ -432,6 +502,12 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<torch::jit::CompilationUnit> compilation_unit() {
     return type_.cu_;
   }
+
+  c10::intrusive_ptr<Object> copy() const;
+
+  c10::intrusive_ptr<Object> deepcopy() const;
+
+  c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
 
  private:
   void resizeObject(size_t slot);

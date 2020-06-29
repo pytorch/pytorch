@@ -17,7 +17,7 @@ static void fill_non_native_type(TensorIterator& iter, Scalar value_scalar) {
   using H = typename std::make_signed<decltype(value)>::type;  // Signed type has more acceleration
   // Reserve the representation of value. static_cast<H>(value) is implementation defined.
   H val = *reinterpret_cast<H*>(std::addressof(value));
-  cpu_kernel_vec(
+  cpu_kernel_vec</*check_dynamic_cast=*/false>(
       iter,
       [val]() -> H { return val; },
       [val]() { return Vec256<H>(val); });

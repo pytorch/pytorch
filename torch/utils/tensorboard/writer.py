@@ -268,7 +268,7 @@ class SummaryWriter(object):
         """Returns the directory where event files will be written."""
         return self.log_dir
 
-    def add_hparams(self, hparam_dict, metric_dict):
+    def add_hparams(self, hparam_dict, metric_dict, run_name=None):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
         Args:
@@ -281,6 +281,8 @@ class SummaryWriter(object):
               here should be unique in the tensorboard record. Otherwise the value
               you added by ``add_scalar`` will be displayed in hparam plugin. In most
               cases, this is unwanted.
+            run_name (str): Name of the run, to be included as part of the logdir.
+              If unspecified, will use current timestamp.
 
         Examples::
 
@@ -301,10 +303,9 @@ class SummaryWriter(object):
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
         exp, ssi, sei = hparams(hparam_dict, metric_dict)
 
-        logdir = os.path.join(
-            self._get_file_writer().get_logdir(),
-            str(time.time())
-        )
+        if not run_name:
+            run_name = str(time.time())
+        logdir = os.path.join(self._get_file_writer().get_logdir(), run_name)
         with SummaryWriter(log_dir=logdir) as w_hp:
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
@@ -700,7 +701,6 @@ class SummaryWriter(object):
     def add_graph(self, model, input_to_model=None, verbose=False):
         # prohibit second call?
         # no, let tensorboard handle it and show its warning message.
-        torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         """Add graph data to summary.
 
         Args:
@@ -709,6 +709,7 @@ class SummaryWriter(object):
                 variables to be fed.
             verbose (bool): Whether to print graph structure in console.
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         if hasattr(model, 'forward'):
             # A valid PyTorch model should have a 'forward' method
             self._get_file_writer().add_graph(graph(model, input_to_model, verbose))

@@ -1,50 +1,11 @@
 #include <algorithm>
 
-#include <cub/block/block_reduce.cuh>
-#include <cub/device/device_reduce.cuh>
-#include <cub/device/device_scan.cuh>
-
-#include "caffe2/core/common_gpu.h"
-#include "caffe2/core/context_gpu.h"
-#include "caffe2/core/operator.h"
+#include "caffe2/sgd/adagrad_fused_op_gpu.cuh"
 #include "caffe2/utils/math.h"
-
-#ifdef __HIP_PLATFORM_HCC__
-#define SEGREDUCE_MINBLOCKS 8
-#else
-#define SEGREDUCE_MINBLOCKS 16
-#endif
 
 namespace caffe2 {
 
 namespace {
-
-static inline __device__ void gpuAtomicAdd(float* address, float val) {
-  atomicAdd(address, val);
-}
-
-static inline __device__ void gpuAtomicAdd(c10::Half* address, c10::Half val) {
-#if (                         \
-    (CUDA_VERSION < 10000) || \
-    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
-  unsigned int* address_as_ui =
-      (unsigned int*)((char*)address - ((size_t)address & 2));
-  unsigned int old = *address_as_ui;
-  unsigned int assumed;
-
-  do {
-    assumed = old;
-    at::Half hsum;
-    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    hsum = hsum + val;
-    old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16)
-                              : (old & 0xffff0000) | hsum.x;
-    old = atomicCAS(address_as_ui, assumed, old);
-  } while (assumed != old);
-#else
-  atomicAdd(reinterpret_cast<__half*>(address), val);
-#endif
-}
 
 void inclusive_scan_wrapper(
     const int* length_data,
@@ -92,7 +53,8 @@ __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
     TParam* param_mom,
     const SIndex* indices,
     const T* __restrict__ grad,
-    const float* lr) {
+    const float* lr,
+    float weight_decay = 0.f) {
   const float LR = lr[0];
   // len_length blocks, each block process one segment
   int group = blockIdx.x; // the group-th segment
@@ -112,10 +74,11 @@ __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
           indices[line]; // the index-th row in the embedding table
       const size_t paramIdx = index * post + threadIdx.x; // index for param
 
-      float mom_new = grad[gradIdx] * grad[gradIdx] + param_mom[paramIdx];
+      float gi = grad[gradIdx] + weight_decay * param[paramIdx];
+
+      float mom_new = gi * gi + param_mom[paramIdx];
       param_mom[paramIdx] = mom_new;
-      float param_new =
-          LR * grad[gradIdx] / (sqrtf(mom_new) + epsilon) + param[paramIdx];
+      float param_new = LR * gi / (sqrtf(mom_new) + epsilon) + param[paramIdx];
       param[paramIdx] = param_new;
     }
   } else {
@@ -128,10 +91,12 @@ __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
             indices[line]; // the index row in the embedding table
         const size_t paramIdx = index * post + i; // index for param
 
-        float mom_new = grad[gradIdx] * grad[gradIdx] + param_mom[paramIdx];
+        float gi = grad[gradIdx] + weight_decay * param[paramIdx];
+
+        float mom_new = gi * gi + param_mom[paramIdx];
         param_mom[paramIdx] = mom_new;
         float param_new =
-            LR * grad[gradIdx] / (sqrtf(mom_new) + epsilon) + param[paramIdx];
+            LR * gi / (sqrtf(mom_new) + epsilon) + param[paramIdx];
         param[paramIdx] = param_new;
       }
     }
@@ -154,7 +119,8 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
     const T* __restrict__ grad,
     const T* __restrict__ weights,
     T* __restrict__ weights_grad_out,
-    const float* lr) {
+    const float* lr,
+    float weight_decay = 0.f) {
   const float LR = lr[0];
   // len_length blocks, each block process one segment
   int group = blockIdx.x; // the group-th segment
@@ -194,8 +160,10 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
       // TODO: trying to reduce the variable number (common subexpression
       // elimination).
       auto in_grad_temp = grad[gradIdx];
-      auto out_grad_temp = in_weight_temp * in_grad_temp;
       w_grad += in_grad_temp * param[paramIdx];
+
+      auto out_grad_temp =
+          in_weight_temp * in_grad_temp + weight_decay * param[paramIdx];
 
       // TODO: split it into two kernels to make it more similar to exact fusion
       // kernel (not Approx on CPUs).
@@ -212,108 +180,6 @@ __global__ void sparse_adagrad_fused_length_weighted_sum_gradient_kernel(
       weights_grad_out[line] = w_grad;
     }
     __syncthreads();
-  }
-}
-
-template <typename SIndex, typename TParam, typename T, bool ExactBlock = false>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
-#endif
-__global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_kernel(
-    const int* __restrict__ prefix_sum_length_data, // prefix of lengths
-                                                    // (offsets for the
-                                                    // segments)
-    int N, // number of rows (hash size) of embedding table
-    int post, // embedding dimension size
-    int len_length, // number of segments
-    const float epsilon,
-    TParam* param,
-    T* param_mom,
-    const SIndex* indices,
-    const T* __restrict__ grad,
-    const float* lr) {
-
-  const float LR = lr[0];
-  // len_length blocks, each block process one segment
-  int group = blockIdx.x; // the group-th segment
-  int start = group == 0
-      ? 0
-      : prefix_sum_length_data[group - 1]; // start offset of the segment
-  int end = prefix_sum_length_data[group]; // end offset of the segment
-  CUDA_KERNEL_ASSERT(start <= N);
-  CUDA_KERNEL_ASSERT(end <= N);
-
-  if (ExactBlock) {
-    // Specialize WarpReduce for type float
-    typedef cub::WarpReduce<float> WarpReduce;
-    // Allocate WarpReduce shared memory for 32 warps, 1024 / 32 = 32
-    __shared__ typename WarpReduce::TempStorage temp_storage[32];
-
-    const size_t gradIdx = group * post + threadIdx.x; // index for grad
-    for (int line = start + threadIdx.y; line < end; line += blockDim.y) {
-      // line: the idx in the indices
-      // threadIdx.x: index in the embedding dimension
-      const SIndex index =
-          indices[line]; // the index-th row in the embedding table
-      float sum_squares = 0.0;
-      __shared__ float row_sum_squares_avg;
-
-      // post == blockDim.x
-      const float x_ij = grad[gradIdx];
-      sum_squares += x_ij * x_ij;
-
-      // Return the warp-wide sums to each lane0 (threads 0, 32, 64, 96, ...)
-      int warp_id = (threadIdx.y * blockDim.x + threadIdx.x) / 32;
-      float reduce_result = WarpReduce(temp_storage[warp_id]).Sum(sum_squares);
-
-      if ((threadIdx.y * blockDim.x + threadIdx.x) % 32 == 0) {
-        row_sum_squares_avg = reduce_result / static_cast<float>(post);
-        // AtomicAdd when the embedding dim is larger than 32.
-        // param_mom[index] += row_sum_squares_avg;
-        gpuAtomicAdd(&param_mom[index], static_cast<T>(row_sum_squares_avg));
-      }
-      __syncthreads();
-
-      // update param
-      float step = LR / (sqrtf(param_mom[index]) + epsilon);
-      const size_t paramIdx = index * post + threadIdx.x; // index for param
-      param[paramIdx] = param[paramIdx] + grad[gradIdx] * step;
-    }
-  } else {
-    // TODO: Tuning NumThreads for sum_squares
-    typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
-    __shared__ BlockReduce::TempStorage temp_storage;
-    int valid = min(post, blockDim.x);
-
-    for (int line = start; line < end; ++line) {
-      // line: the idx in the indices
-      const SIndex index =
-          indices[line]; // the index row in the embedding table
-      float sum_squares = 0.0;
-      __shared__ float row_sum_squares_avg;
-
-      for (int i = threadIdx.x; i < post; i += blockDim.x) {
-        // i: index in the embedding dimension
-        const float x_ij = grad[group * post + i];
-        sum_squares += x_ij * x_ij;
-      }
-      float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
-
-      if (threadIdx.x == 0) {
-        row_sum_squares_avg = reduce_result / static_cast<float>(post);
-        float mom_new = param_mom[index] + static_cast<T>(row_sum_squares_avg);
-        param_mom[index] = mom_new;
-      }
-      __syncthreads();
-
-      // update param
-      float step = LR / (sqrtf(param_mom[index]) + epsilon);
-      for (int i = threadIdx.x; i < post; i += blockDim.x) {
-        const size_t paramIdx = index * post + i; // index for param
-        float param_new = param[paramIdx] + grad[group * post + i] * step;
-        param[paramIdx] = param_new;
-      }
-    }
   }
 }
 
@@ -336,7 +202,8 @@ __global__
         const T* __restrict__ grad,
         const T* __restrict__ weights,
         T* __restrict__ weights_grad_out,
-        const float* lr) {
+        const float* lr,
+        float weight_decay = 0.f) {
   const float LR = lr[0];
   // len_length blocks, each block process one segment
   int group = blockIdx.x; // the group-th segment
@@ -368,7 +235,8 @@ __global__
     __shared__ float row_sum_squares_avg;
 
     for (int i = threadIdx.x; i < post; i += blockDim.x) {
-      const float x_ij = grad[group * post + i];
+      const float x_ij =
+          grad[group * post + i] + weight_decay * param[index * post + i];
       sum_squares += x_ij * x_ij;
     }
     float reduce_result = BlockReduce(temp_storage2).Sum(sum_squares, valid);
@@ -389,11 +257,12 @@ __global__
       // TODO: trying to reduce the variable number (common subexpression
       // elimination).
       auto in_grad_temp = grad[gradIdx];
-      auto out_grad_temp = in_weight_temp * in_grad_temp;
       w_grad += in_grad_temp * param[paramIdx];
+      auto out_grad_temp =
+          in_weight_temp * in_grad_temp + weight_decay * param[paramIdx];
 
-      // TODO: split it into two kernels to make it more similar to exact fusion
-      // kernel (not Approx on CPUs).
+      // TODO: split it into two kernels to make it more similar to exact
+      // fusion kernel (not Approx on CPUs).
       param[paramIdx] = out_grad_temp * step + param[paramIdx];
     }
     w_grad = BlockReduce(temp_storage).Reduce(w_grad, cub::Sum());
@@ -416,7 +285,13 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
       const OperatorDef& operator_def,
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    VLOG(1) << "gradient optimization operator in use: "
+            << "CUDASparseAdagradFusedWithSparseLengthSumGradientOp"
+            << " weight_decay_=" << weight_decay_;
+
     const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
   }
@@ -517,7 +392,8 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
           momentOut,
           indices,
           grad,
-          lr);
+          lr,
+          weight_decay_);
     } else {
       // calling cuda kernel with ExactBlock = false
       sparse_adagrad_fused_length_sum_gradient_kernel<
@@ -534,7 +410,8 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
           momentOut,
           indices,
           grad,
-          lr);
+          lr,
+          weight_decay_);
     }
     return true;
   }
@@ -546,6 +423,7 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
 
  protected:
   T epsilon_;
+  T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, LENGTHS);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
@@ -559,7 +437,13 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
       const OperatorDef& operator_def,
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    VLOG(1) << "gradient optimization operator in use: "
+            << "CUDASparseAdagradFusedWithSparseLengthWeightedSumGradientOp"
+            << " weight_decay_=" << weight_decay_;
+
     const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
   }
@@ -666,7 +550,8 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           grad,
           weights,
           out_weight_grads,
-          lr);
+          lr,
+          weight_decay_);
     } else if (post > 64) {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -684,7 +569,8 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           grad,
           weights,
           out_weight_grads,
-          lr);
+          lr,
+          weight_decay_);
     } else if (post > 32) {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -702,7 +588,8 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           grad,
           weights,
           out_weight_grads,
-          lr);
+          lr,
+          weight_decay_);
     } else {
       sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -720,7 +607,8 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           grad,
           weights,
           out_weight_grads,
-          lr);
+          lr,
+          weight_decay_);
     }
     return true;
   }
@@ -732,6 +620,7 @@ class CUDASparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
 
  protected:
   T epsilon_;
+  T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, AUX_PARAM, INDICES, GRAD, LR, LENGTHS);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, AUX_GRAD);
 };
@@ -745,7 +634,13 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
       const OperatorDef& operator_def,
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    VLOG(1) << "gradient optimization operator in use: "
+            << "CUDARowWiseSparseAdagradFusedWithSparseLengthSumGradientOp"
+            << " weight_decay_=" << weight_decay_;
+
     const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
   }
@@ -781,7 +676,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
     CAFFE_ENFORCE_GT(Input(GRAD).dim(), 0);
 
     // Enforce:
-    // number of rows: input(embedding/momentum) == outputs(embedding/momentum)
+    // number of rows: input(embedding/momentum) ==
+    // outputs(embedding/momentum)
     CAFFE_ENFORCE_EQ(
         Input(PARAM).dim(0),
         Input(MOMENT_1).dim(0),
@@ -845,7 +741,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
           momentOut,
           indices,
           grad,
-          lr);
+          lr,
+          weight_decay_);
     } else {
       rowwise_sparse_adagrad_fused_length_sum_gradient_kernel<
           IndexType,
@@ -865,7 +762,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
               momentOut,
               indices,
               grad,
-              lr);
+              lr,
+              weight_decay_);
     }
 
     return true;
@@ -878,6 +776,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
 
  protected:
   T epsilon_;
+  T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, LENGTHS);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
@@ -891,7 +790,14 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
       const OperatorDef& operator_def,
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+    VLOG(1)
+        << "gradient optimization operator in use: "
+        << "CUDARowWiseSparseAdagradFusedWithSparseLengthWeightedSumGradientOp"
+        << " weight_decay_=" << weight_decay_;
+
     const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
   }
@@ -930,7 +836,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     CAFFE_ENFORCE_GT(Input(GRAD).dim(), 0);
 
     // Enforce:
-    // number of rows: input(embedding/momentum) == outputs(embedding/momentum)
+    // number of rows: input(embedding/momentum) ==
+    // outputs(embedding/momentum)
     CAFFE_ENFORCE_EQ(
         Input(PARAM).dim(0),
         Input(MOMENT_1).dim(0),
@@ -996,7 +903,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           grad,
           weights,
           out_weight_grads,
-          lr);
+          lr,
+          weight_decay_);
     } else if (post > 64) {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -1014,7 +922,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           grad,
           weights,
           out_weight_grads,
-          lr);
+          lr,
+          weight_decay_);
     } else if (post > 32) {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -1032,7 +941,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           grad,
           weights,
           out_weight_grads,
-          lr);
+          lr,
+          weight_decay_);
     } else {
       rowwise_sparse_adagrad_fused_length_weighted_sum_gradient_kernel<
           IndexType,
@@ -1050,7 +960,8 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
           grad,
           weights,
           out_weight_grads,
-          lr);
+          lr,
+          weight_decay_);
     }
 
     return true;
@@ -1063,10 +974,15 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
 
  protected:
   T epsilon_;
+  T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, AUX_PARAM, INDICES, GRAD, LR, LENGTHS);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, AUX_GRAD);
 };
 
+// For GPU, the implementation of the exact and approx (RowWise)SparseAdagrad
+// fusion are both approximate implementations.
+// When we don't have the duplicated indices, the outputs are the same as the
+// CPU implementation.
 REGISTER_CUDA_OPERATOR(
     SparseAdagradFusedWithSparseLengthsSumGradient,
     CUDASparseAdagradFusedWithSparseLengthsSumGradientOp<

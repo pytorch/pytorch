@@ -108,14 +108,17 @@ struct C10_EXPORT PassManager {
 
  public:
   // registerPass(pass) will register the pass provided and set the
-  // name/isRegistered functions appropriately
-  static void registerPass(GraphPass p) {
+  // name/isRegistered functions appropriately, it returns a bool value
+  // indicating whether the given pass is already registered previously.
+  static bool registerPass(GraphPass p) {
     if (!isRegistered()) {
       // If we don't already have a registered pass, register pass
       // hold on to its name, change isRegistered to true
       passID(registerPostPass(std::move(p)), true);
       isRegistered(true);
+      return false;
     }
+    return true;
   }
 
   // Calls ClearPostPass(passID())

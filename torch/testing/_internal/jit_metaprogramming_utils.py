@@ -290,6 +290,31 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
         return output
     return script_fn
 
+# make a new function where all non-tensor arguments in 'args' have been partially
+# applied, and all tensor arguments remain.
+# used to trace functions when some arguments are not tensors
+def partial_apply_nontensors(fn, args, **kwargs):
+    source = ['t' if isinstance(arg, torch.Tensor) else 's' for arg in args]
+
+    def new_fn(*tensors_):
+        tensors = iter(tensors_)
+        return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
+
+    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
+
+# create a trace function from input fn
+def create_traced_fn(self, fn):
+    def traced_fn(*inputs, **kwargs):
+        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
+        # `check_trace` is set to False because check_trace is run with @no_grad
+        # Also, `check_against_reference` already does all the checks
+        # against python function
+        traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
+        self.assertExportImport(traced.graph, inputs_tensors)
+        output = traced(*inputs_tensors)
+        traced_fn.last_graph = traced.graph_for(*inputs_tensors)
+        return output
+    return traced_fn
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
@@ -312,7 +337,7 @@ EXCLUDE_SCRIPT = {
     'test_to_sparse'
 }
 
-# generates a script function and set of example inputs 
+# generates a script function and set of example inputs
 # from a specified test in the format of nn_functional_tests
 def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name='', *extra_args):
     test_name = 'test_nn_' + name
@@ -494,7 +519,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
     elif 'target_fn' in kwargs:
         if torch.is_tensor(input):
             input = (input,)
-        input = input + (kwargs['target_fn'](),) 
+        input = input + (kwargs['target_fn'](),)
 
     args_variable, kwargs_variable = create_input(input)
     f_args_variable = deepcopy(unpack_variables(args_variable))

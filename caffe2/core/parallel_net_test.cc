@@ -8,7 +8,12 @@
 namespace caffe2 {
 
 // When measuring time, we relax the measured time by +- 40ms.
+#ifndef _WIN32
 const int kTimeThreshold = 40;
+#else
+// Even more so on Windows
+const int kTimeThreshold = 50;
+#endif
 
 // SleepOp basically sleeps for a given number of seconds.
 // We allow arbitrary inputs and at most one output so that we can

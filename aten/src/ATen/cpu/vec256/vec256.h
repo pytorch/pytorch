@@ -1,5 +1,8 @@
 #pragma once
 
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
 #include <ATen/cpu/vec256/intrinsics.h>
 
 #include <ATen/cpu/vec256/vec256_base.h>
@@ -47,7 +50,7 @@ std::ostream& operator<<(std::ostream& stream, const Vec256<T>& vec) {
 }
 
 
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -61,7 +64,7 @@ inline Vec256<double> cast<double, float>(const Vec256<float>& src) {
   return _mm256_castps_pd(src);
 }
 
-#if defined(__AVX2__)
+#if defined(CPU_CAPABILITY_AVX2)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -222,8 +225,8 @@ inline deinterleave2<float>(const Vec256<float>& a, const Vec256<float>& b) {
                         _mm256_permute2f128_ps(a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
 }
 
-#endif  // defined(__AVX2__)
+#endif  // defined(CPU_CAPABILITY_AVX2)
 
-#endif // defined(__AVX__) && !defined(_MSC_VER)
+#endif // (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 }}}

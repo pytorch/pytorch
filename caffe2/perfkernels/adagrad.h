@@ -24,9 +24,10 @@ static inline void adagrad_update_base_inlined(
     T* nh,
     float decay,
     float epsilon,
-    float lr) {
+    float lr,
+    float weight_decay = 0.f) {
   for (auto i = 0; i < N; ++i) {
-    float gi = g[i];
+    float gi = std::fma(weight_decay, w[i], g[i]);
     float hi = decay * h[i] + gi * gi;
     nh[i] = hi;
     nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
@@ -83,7 +84,8 @@ inline void adagrad_update_prefetch_inlined(
 #endif
 
     float epsilon,
-    float lr) {
+    float lr,
+    float weight_decay = 0.f) {
   auto i = 0;
 
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
@@ -97,6 +99,11 @@ inline void adagrad_update_prefetch_inlined(
     __m256 gi = _mm256_loadu_ps(g + i);
     __m256 hi = _mm256_loadu_ps(h + i);
     __m256 wi = _mm256_loadu_ps(w + i);
+#ifdef __AVX2__
+    gi = _mm256_fmadd_ps(_mm256_set1_ps(weight_decay), wi, gi);
+#else
+    gi = _mm256_add_ps(_mm256_mul_ps(_mm256_set1_ps(weight_decay), wi), gi);
+#endif
 
     __m256 nhi = _mm256_add_ps(hi, _mm256_mul_ps(gi, gi));
     _mm256_storeu_ps(nh + i, nhi);
@@ -108,7 +115,16 @@ inline void adagrad_update_prefetch_inlined(
 #endif
 
   adagrad_update_base_inlined(
-      N - i, w + i, g + i, h + i, nw + i, nh + i, 1.0f, epsilon, lr);
+      N - i,
+      w + i,
+      g + i,
+      h + i,
+      nw + i,
+      nh + i,
+      1.0f,
+      epsilon,
+      lr,
+      weight_decay);
 }
 
 } // namespace internal
@@ -147,7 +163,8 @@ void adagrad_update_prefetch(
     float* nh_n, // prefetch ptr
 
     float epsilon,
-    float lr);
+    float lr,
+    float weight_decay = 0.f);
 
 // Version with prefetching for embeddings and
 // momentum using fp16
@@ -163,7 +180,8 @@ void adagrad_fp16_update_prefetch(
     at::Half* nh,
     at::Half* nh_n, // prefetch ptr
     float epsilon,
-    float lr);
+    float lr,
+    float weight_decay = 0.f);
 
 // version without prefetching
 void adagrad_update(
@@ -175,7 +193,8 @@ void adagrad_update(
     float* nh,
     float epsilon,
     float decay,
-    float lr);
+    float lr,
+    float weight_decay = 0.f);
 
 } // namespace caffe2
 

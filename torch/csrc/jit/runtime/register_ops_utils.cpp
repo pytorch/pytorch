@@ -2,17 +2,6 @@
 
 namespace torch {
 namespace jit {
-c10::AliasAnalysisKind aliasAnalysisFromSchema() {
-  return c10::AliasAnalysisKind::FROM_SCHEMA;
-}
-
-c10::AliasAnalysisKind aliasAnalysisConservative() {
-  return c10::AliasAnalysisKind::CONSERVATIVE;
-}
-
-c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
-  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
-}
 
 template <>
 c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType) {
@@ -110,7 +99,7 @@ void listRemove<at::Tensor>(Stack* stack) {
   }
 }
 
-void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
+void checkImplicitTensorToNum(const at::Tensor& t, bool toInt) {
   if (t.requires_grad()) {
     throw std::runtime_error(
         "Cannot input a tensor that requires grad as a scalar argument");
@@ -132,6 +121,7 @@ IValue tensorToListRecursive(
     int64_t cur_dim,
     int64_t num_tensor_dims,
     TypePtr ty,
+    at::ScalarType scalar_ty,
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
     size_t element_size) {
@@ -145,7 +135,12 @@ IValue tensorToListRecursive(
       int64_t scalar = *(int64_t*)data;
       return IValue(scalar);
     } else if (ty == FloatType::get()) {
-      double scalar = *(double*)data;
+      TORCH_INTERNAL_ASSERT(
+          scalar_ty == at::ScalarType::Float ||
+              scalar_ty == at::ScalarType::Double,
+          "Unexpected scalar type for Tensor");
+      double scalar =
+          scalar_ty == at::ScalarType::Float ? *(float*)data : *(double*)data;
       return IValue(scalar);
     } else if (ty == BoolType::get()) {
       bool scalar = *(bool*)data;
@@ -153,7 +148,7 @@ IValue tensorToListRecursive(
     } else {
       TORCH_CHECK(
           false,
-          ty->python_str(),
+          ty->repr_str(),
           " is not one of the supported types for tolist: int, float, bool");
     }
   }
@@ -168,7 +163,14 @@ IValue tensorToListRecursive(
   // recursively on each slice of the tensor in the current dimension.
   for (int64_t i = 0, e = sizes[cur_dim]; i < e; ++i) {
     auto inner_result = tensorToListRecursive(
-        data, cur_dim + 1, num_tensor_dims, ty, sizes, strides, element_size);
+        data,
+        cur_dim + 1,
+        num_tensor_dims,
+        ty,
+        scalar_ty,
+        sizes,
+        strides,
+        element_size);
 
     if (inner_result.isList()) {
       result.emplace_back(inner_result.toList());
@@ -219,12 +221,12 @@ void loop(int n, int64_t& p, int64_t& r) {
 
 int nminussumofbits(int v) {
   long w = (long)v;
-  w -= (0xaaaaaaaa & w) >> 1;
-  w = (w & 0x33333333) + ((w >> 2) & 0x33333333);
-  w = (w + (w >> 4)) & 0x0f0f0f0f;
-  w += w >> 8;
-  w += w >> 16;
-  return v - (int)(w & 0xff);
+  w -= (0xaaaaaaaa & w) >> 1; // NOLINT
+  w = (w & 0x33333333) + ((w >> 2) & 0x33333333); // NOLINT
+  w = (w + (w >> 4)) & 0x0f0f0f0f; // NOLINT
+  w += w >> 8; // NOLINT
+  w += w >> 16; // NOLINT
+  return v - (int)(w & 0xff); // NOLINT
 }
 
 int64_t factorial(int n) {
@@ -380,7 +382,7 @@ void listMulIntLeftInPlace(Stack* stack) {
     list.clear();
   } else if (n > 1) {
     size_t list_size = list.size();
-    for (auto i = 1; i < n; i++) {
+    for (int64_t i = 1; i < n; i++) {
       for (size_t j = 0; j < list_size; j++) {
         list.push_back(list.get(j));
       }
@@ -398,7 +400,7 @@ void listMulIntLeft(Stack* stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (auto i = 0; i < n; i++) {
+  for (int64_t i = 0; i < n; i++) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }
@@ -415,7 +417,7 @@ void listMulIntRight(Stack* stack) {
   const auto size = list.size() * n;
   ret.reserve(size);
 
-  for (auto i = 0; i < n; i++) {
+  for (int64_t i = 0; i < n; i++) {
     for (IValue e : list) {
       ret.push_back(std::move(e));
     }

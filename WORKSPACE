@@ -113,6 +113,12 @@ new_local_repository(
     path = "third_party/sleef",
 )
 
+new_local_repository(
+    name = "fmt",
+    build_file = "//third_party:fmt.BUILD",
+    path = "third_party/fmt",
+)
+
 new_patched_local_repository(
     name = "tbb",
     patches = [
@@ -121,6 +127,12 @@ new_patched_local_repository(
     patch_strip = 1,
     build_file = "//third_party:tbb.BUILD",
     path = "third_party/tbb",
+)
+
+new_local_repository(
+    name = "tensorpipe",
+    build_file = "//third_party:tensorpipe.BUILD",
+    path = "third_party/tensorpipe",
 )
 
 http_archive(

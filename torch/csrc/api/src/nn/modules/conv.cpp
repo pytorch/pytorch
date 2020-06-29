@@ -51,7 +51,7 @@ Conv1dImpl::Conv1dImpl(
 Tensor Conv1dImpl::forward(const Tensor& input) {
   if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
     return F::detail::conv1d(
-      F::pad(input, F::PadFuncOptions(_padding_repeated_twice).mode(_get_pad_mode_from_conv_padding_mode(options.padding_mode()))),
+      F::pad(input, F::PadFuncOptions(_reversed_padding_repeated_twice).mode(_get_pad_mode_from_conv_padding_mode(options.padding_mode()))),
       weight, bias,
       options.stride(),
       /*padding=*/0,
@@ -87,7 +87,7 @@ Conv2dImpl::Conv2dImpl(
 Tensor Conv2dImpl::_conv_forward(const Tensor& input, const Tensor& weight) {
   if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
     return F::detail::conv2d(
-      F::pad(input, F::PadFuncOptions(_padding_repeated_twice).mode(_get_pad_mode_from_conv_padding_mode(options.padding_mode()))),
+      F::pad(input, F::PadFuncOptions(_reversed_padding_repeated_twice).mode(_get_pad_mode_from_conv_padding_mode(options.padding_mode()))),
       weight, bias,
       options.stride(),
       /*padding=*/0,
@@ -127,7 +127,7 @@ Conv3dImpl::Conv3dImpl(
 Tensor Conv3dImpl::forward(const Tensor& input) {
   if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
     return F::detail::conv3d(
-      F::pad(input, F::PadFuncOptions(_padding_repeated_twice).mode(_get_pad_mode_from_conv_padding_mode(options.padding_mode()))),
+      F::pad(input, F::PadFuncOptions(_reversed_padding_repeated_twice).mode(_get_pad_mode_from_conv_padding_mode(options.padding_mode()))),
       weight, bias,
       options.stride(),
       /*padding=*/0,

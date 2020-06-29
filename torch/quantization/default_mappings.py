@@ -16,17 +16,23 @@ DEFAULT_MODULE_MAPPING = {
     nn.ReLU: nnq.ReLU,
     nn.ReLU6: nnq.ReLU6,
     nn.Hardswish: nnq.Hardswish,
+    nn.ELU: nnq.ELU,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
     nn.LayerNorm: nnq.LayerNorm,
+    nn.GroupNorm: nnq.GroupNorm,
+    nn.InstanceNorm1d: nnq.InstanceNorm1d,
+    nn.InstanceNorm2d: nnq.InstanceNorm2d,
+    nn.InstanceNorm3d: nnq.InstanceNorm3d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
+    nni.ConvReLU1d: nniq.ConvReLU1d,
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
@@ -39,14 +45,12 @@ DEFAULT_MODULE_MAPPING = {
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
-    nnqat.Hardswish: nnq.Hardswish,
 }
 
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
     nn.Linear: nnqat.Linear,
     nn.Conv2d: nnqat.Conv2d,
-    nn.Hardswish: nnqat.Hardswish,
     # Intrinsic modules:
     nni.ConvBn2d: nniqat.ConvBn2d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,
@@ -58,6 +62,9 @@ DEFAULT_QAT_MODULE_MAPPING = {
 DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
+    nn.LSTMCell: nnqd.LSTMCell,
+    nn.RNNCell: nnqd.RNNCell,
+    nn.GRUCell: nnqd.GRUCell
 }
 
 # Whitelist for propagating the qconfig
@@ -75,3 +82,13 @@ DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
      _INCLUDE_QCONFIG_PROPAGATE_LIST) -
     _EXCLUDE_QCONFIG_PROPAGATE_LIST
 )
+
+DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
+    set(DEFAULT_MODULE_MAPPING.values())
+    | set(DEFAULT_QAT_MODULE_MAPPING.values())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
+    | set(DEFAULT_MODULE_MAPPING.keys())
+    | set(DEFAULT_QAT_MODULE_MAPPING.keys())
+    | set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys())
+    | _INCLUDE_QCONFIG_PROPAGATE_LIST
+) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
