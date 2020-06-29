@@ -686,6 +686,11 @@ public:
 
     auto perfResults = only_use_default ? onlyDefaultAlgorithm(args) : search::findAlgorithms(args, benchmark);
     for (auto &algoPerf : perfResults) {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
+      if (args.params.dataType == CUDNN_DATA_FLOAT && !args.params.allow_tf32) {
+        TORCH_INTERNAL_CHECK(algoPerf.mathType == CUDNN_FMA_MATH, "Inconsistent math type for TF32");
+      }
+#endif
       try {
         f(algoPerf);
         cache.insert(args.params, algoPerf);
