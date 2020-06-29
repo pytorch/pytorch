@@ -2676,7 +2676,7 @@ class AbstractTestCases:
             self._test_scatter_add_mult_index_base(self, lambda t: t)
 
         @staticmethod
-        def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, *, test_complex=False):
+        def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, reduction=None, *, test_complex=False):
             if test_complex:
                 dtypes = [torch.complex64, torch.complex128]
             else:
@@ -2699,7 +2699,10 @@ class AbstractTestCases:
                     src = cast(torch.randn(src_size, dtype=dtype))
 
                 base = cast(torch.randn(m, n, o, dtype=dtype))
-                actual = getattr(base.clone(), method)(dim, idx, src)
+                if reduction:
+                    actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+                else:
+                    actual = getattr(base.clone(), method)(dim, idx, src)
                 expected = base.clone()
                 for i in range(idx_size[0]):
                     for j in range(idx_size[1]):
@@ -2707,7 +2710,17 @@ class AbstractTestCases:
                             ii = [i, j, k]
                             ii[dim] = idx[i, j, k]
                             if method == 'scatter_' and not is_scalar:
-                                expected[tuple(ii)] = src[i, j, k]
+                                if reduction:
+                                    if reduction == "add":
+                                        expected[tuple(ii)] += src[i, j, k]
+                                    elif reduction == "subtract":
+                                        expected[tuple(ii)] -= src[i, j, k]
+                                    elif reduction == "multiply":
+                                        expected[tuple(ii)] *= src[i, j, k]
+                                    elif reduction == "divide":
+                                        expected[tuple(ii)] /= src[i, j, k]
+                                else:
+                                    expected[tuple(ii)] = src[i, j, k]
                             elif method == 'scatter_add_':
                                 expected[tuple(ii)] += src[i, j, k]
                             else:
@@ -2725,17 +2738,23 @@ class AbstractTestCases:
                         getattr(base.clone(), method)(dim, idx, src.type(torch.int))
 
                 # should throw an error when index dtype is not long
-                with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                with self.assertRaisesRegex(IndexError, 'Expected dtype int64 for index'):
                     getattr(base.clone(), method)(dim, idx.type(torch.int), src)
 
                 if test_bounds:
                     idx[0][0][0] = 34
                     with self.assertRaises(RuntimeError):
-                        getattr(base.clone(), method)(dim, idx, src)
+                        if reduction:
+                            getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+                        else:
+                            getattr(base.clone(), method)(dim, idx, src)
 
                 # test for empty index, should be a no-op
                 idx = cast(torch.LongTensor())
-                actual = getattr(base.clone(), method)(dim, idx, src)
+                if reduction:
+                    actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+                else:
+                    actual = getattr(base.clone(), method)(dim, idx, src)
                 self.assertEqual(actual, base, atol=0, rtol=0)
 
         def test_scatter(self):
@@ -2746,6 +2765,10 @@ class AbstractTestCases:
 
         def test_scatterFill(self):
             self._test_scatter_base(self, lambda t: t, 'scatter_', True)
+
+        def test_scatterReduce(self):
+            for method in ["add", "subtract", "multiply", "divide"]:
+                self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
 
         def test_masked_scatter(self):
             with warnings.catch_warnings(record=True) as w:
@@ -12539,6 +12562,116 @@ class TestTorchDeviceType(TestCase):
                     indices = torch.empty(indices_shape, dtype=torch.int64, device=device)
                     src = torch.randn(indices_shape, device=device)
                     self.assertEqual(dst, dst.put_(indices, src, accumulate=accumulate))
+
+    @onlyCPU
+    def test_scatter_reduce_operations_to_large_input(self, device):
+        index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+        test_data = [
+            (torch.zeros(4, 4, device=device, dtype=torch.float32),
+             torch.ones(2, 2, device=device, dtype=torch.float32),
+             torch.tensor([[0, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [0, 0, 0, 0]],
+                          device=device, dtype=torch.float32), "add"),
+            (torch.zeros(4, 4, device=device, dtype=torch.float32),
+             torch.ones(2, 2, device=device, dtype=torch.float32),
+             torch.tensor([[0, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(2, 2),
+             torch.tensor([[2, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(2, 2),
+             torch.tensor([[2, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "divide")
+        ]
+
+        for input, src, result, operation in test_data:
+            input.scatter_(0, index, src, reduce=operation)
+            self.assertEqual(input, result)
+
+    @onlyCPU
+    def test_scatter_reduce_scalar(self, device):
+        index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+        test_data = [
+            (torch.zeros(4, 4, device=device, dtype=torch.float32), 1,
+             torch.tensor([[0, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [0, 0, 0, 0]],
+                          device=device, dtype=torch.float32), "add"),
+            (torch.zeros(4, 4, device=device, dtype=torch.float32), 1,
+             torch.tensor([[0, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4), 2,
+             torch.tensor([[2, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4), 2,
+             torch.tensor([[2, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "divide")
+        ]
+
+        for input, src, result, operation in test_data:
+            input.scatter_(0, index, src, reduce=operation)
+            self.assertEqual(input, result)
+
+    # TODO: remove this after scatter_add_ is deprecated.
+    def test_scatter_add_non_unique_index(self, device):
+        height = 2
+        width = 65536
+        input = torch.ones(height, width, device=device)
+        index = torch.zeros(height, width, dtype=torch.long, device=device)
+        src = torch.ones(height, width, device=device)
+        input.scatter_add_(0, index, src)
+
+        self.assertEqual(input,
+                         torch.tensor([[3], [1]], device=device,
+                                      dtype=torch.float32).repeat(1, width))
+
+    @onlyCPU
+    def test_scatter_reduce_non_unique_index(self, device):
+        height = 2
+        width = 2
+        index = torch.zeros(height, width, dtype=torch.long, device=device)
+        test_data = [
+            (torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.tensor([[3], [1]], device=device, dtype=torch.float32).repeat(1, width), "add"),
+
+            (torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.tensor([[-1], [1]], device=device,
+                          dtype=torch.float32).repeat(1, width), "subtract"),
+
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([[8], [2]], device=device,
+                          dtype=torch.float32).repeat(1, width), "multiply"),
+
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([[0.5], [2]], device=device,
+                          dtype=torch.float32).repeat(1, width), "divide"),
+        ]
+
+        for input, src, result, operation in test_data:
+            input.scatter_(0, index, src, reduce=operation)
+            self.assertEqual(input, result)
+
 
     def test_scatter_to_large_input(self, device):
         input = torch.zeros(4, 4, device=device)
