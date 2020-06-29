@@ -241,8 +241,17 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
 
   // Calculate statistics for quantization of input Tensor
   // TODO: optimized kernel
-  float x_min = input_contig.min().item<float>();
-  float x_max = input_contig.max().item<float>();
+  float x_min;
+  float x_max;
+  if (input.numel() > 0) {
+    x_min = input_contig.min().item<float>();
+    x_max = input_contig.max().item<float>();
+  } else {
+    // On empty input, no output data will be generated,
+    // so use arbitrary qparams.
+    x_min = 0;
+    x_max = 0;
+  }
 
   auto q_params = quant_utils::ChooseQuantizationParams(
       /*min=*/x_min,
