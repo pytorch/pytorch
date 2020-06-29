@@ -107,7 +107,6 @@ inline std::ostream& _error_value(std::ostream& ss) {
 template <typename T>
 inline std::ostream& _error_value(std::ostream& ss, const T& t) {
   ss << wrapper<T>::call(t);
-// ss << wrap<T>(t);
   return ss;
 }
 

@@ -278,7 +278,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
     C10_THROW_ERROR(Error, ::c10::str(        \
         #cond " INTERNAL ASSERT FAILED at"    \
         C10_STRINGIZE(__FILE__)               \
-        ", "                                   \
+        ", ",                                  \
         ::c10::error_value(__VA_ARGS__)       \
     ));                                       \
   }
