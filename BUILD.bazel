@@ -1,8 +1,9 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "template_rule")
-load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
+load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops")
@@ -18,7 +19,6 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
-    "-DAT_PARALLEL_NATIVE=1",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -127,6 +127,7 @@ genrule(
         "aten/src/ATen/CPUType.h",
         "aten/src/ATen/CPUType.cpp",
         "aten/src/ATen/Functions.h",
+        "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/LegacyTHFunctionsCPU.h",
         "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
         "aten/src/ATen/NativeFunctions.h",
@@ -139,7 +140,7 @@ genrule(
         "aten/src/ATen/TypeDefault.h",
         "aten/src/ATen/TypeDefault.cpp",
         "aten/src/ATen/core/TensorBody.h",
-        "aten/src/ATen/core/TensorMethods.h",
+        "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
     cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)` aten/src/ATen/Declarations.cwrap aten/src/THCUNN/generic/THCUNN.h aten/src/ATen/nn.yaml aten/src/ATen/native/native_functions.yaml",
@@ -177,17 +178,7 @@ py_binary(
     ],
 )
 
-genrule(
-    name = "generated_code",
-    srcs = [
-        "aten/src/ATen/Declarations.yaml",
-    ],
-    outs = [
-        #"torch/csrc/autograd/generated/python_functions.h",
-        #"torch/csrc/autograd/generated/python_functions.cpp",
-        #"torch/csrc/autograd/generated/python_variable_methods.cpp",
-        #"torch/csrc/autograd/generated/python_torch_functions.cpp",
-        #"torch/csrc/autograd/generated/python_nn_functions.cpp",
+libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/VariableType.h",
         "torch/csrc/autograd/generated/VariableType_0.cpp",
         "torch/csrc/autograd/generated/VariableType_1.cpp",
@@ -201,6 +192,12 @@ genrule(
         "torch/csrc/autograd/generated/ProfiledType_3.cpp",
         "torch/csrc/autograd/generated/ProfiledType_4.cpp",
         # "torch/csrc/autograd/generated/ProfiledTypeEverything.cpp",
+        "torch/csrc/autograd/generated/TraceType_0.cpp",
+        "torch/csrc/autograd/generated/TraceType_1.cpp",
+        "torch/csrc/autograd/generated/TraceType_2.cpp",
+        "torch/csrc/autograd/generated/TraceType_3.cpp",
+        "torch/csrc/autograd/generated/TraceType_4.cpp",
+        # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
         "torch/csrc/autograd/generated/RegistrationDeclarations.h",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
@@ -208,9 +205,36 @@ genrule(
         "torch/csrc/jit/generated/generated_unboxing_wrappers_0.cpp",
         "torch/csrc/jit/generated/generated_unboxing_wrappers_1.cpp",
         "torch/csrc/jit/generated/generated_unboxing_wrappers_2.cpp",
+]
+
+libtorch_python_generated_sources = [
+        "torch/csrc/autograd/generated/python_functions.h",
+        "torch/csrc/autograd/generated/python_functions.cpp",
+        "torch/csrc/autograd/generated/python_variable_methods.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions.cpp",
+        "torch/csrc/autograd/generated/python_nn_functions.cpp",
+]
+
+genrule(
+    name = "all_generated_code",
+    srcs = [
+        "aten/src/ATen/Declarations.yaml",
     ],
+    outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
     cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --nn-path aten/src",
     tools = [":generate_code"],
+)
+
+filegroup(
+    name = "cpp_generated_code",
+    data = [":all_generated_code"],
+    srcs = libtorch_cpp_generated_sources,
+)
+
+filegroup(
+    name = "python_generated_code",
+    data = [":all_generated_code"],
+    srcs = libtorch_python_generated_sources,
 )
 
 exports_files(
@@ -275,6 +299,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_native_vulkan_stub",
+    srcs = glob(["aten/src/ATen/native/vulkan/stub/*.cpp"]),
+)
+
+filegroup(
     name = "ATen_QUANTIZED_SRCS",
     srcs = glob(
         [
@@ -296,7 +325,6 @@ filegroup(
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
         "aten/src/TH/THTensorEvenMoreMath.cpp",
-        "aten/src/TH/THTensorFill.cpp",
         "aten/src/TH/THTensorLapack.cpp",
         "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
@@ -516,6 +544,9 @@ template_rule(
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
         "@USE_BLAS@": "1",
+        "@AT_PARALLEL_OPENMP@": "0",
+        "@AT_PARALLEL_NATIVE@": "1",
+        "@AT_PARALLEL_NATIVE_TBB@": "0",
     },
 )
 
@@ -623,6 +654,7 @@ cc_library(
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
+        ":aten_native_vulkan_stub",
         ":aten_src_ATen_config",
         ":generated_cpp",
     ],
@@ -1186,9 +1218,9 @@ filegroup(
         "caffe2/perfkernels/adagrad.cc",
         "caffe2/perfkernels/embedding_lookup.cc",
         "caffe2/perfkernels/embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_conversion.cc",
         "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.cc",
         "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup_idx.cc",
+        "caffe2/perfkernels/fused_nbit_rowwise_conversion.cc",
         "caffe2/perfkernels/lstm_unit_cpu_common.cc",
         "caffe2/perfkernels/math_cpu_base.cc",
         "caffe2/perfkernels/typed_axpy.cc",
@@ -1232,6 +1264,7 @@ filegroup(
         "caffe2/quantization/server/fully_connected_dnnlowp_op.cc",
         "caffe2/quantization/server/fully_connected_fake_lowp_op.cc",
         "caffe2/quantization/server/group_norm_dnnlowp_op.cc",
+        "caffe2/quantization/server/int8_gen_quant_params.cc",
         "caffe2/quantization/server/kl_minimization.cc",
         "caffe2/quantization/server/lstm_unit_dnnlowp_op.cc",
         "caffe2/quantization/server/norm_minimization.cc",
@@ -1318,7 +1351,6 @@ filegroup(
         "caffe2/utils/smart_tensor_printer.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
-        "caffe2/utils/threadpool/ThreadPoolMobile.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
         "caffe2/utils/threadpool/pthreadpool_impl.cc",
     ],
@@ -1839,7 +1871,7 @@ cc_library(
             "torch/lib/c10d/ProcessGroupMPI.hpp",
             "torch/lib/c10d/ProcessGroupNCCL.hpp",
         ] + torch_cuda_headers,
-    ) + [":generated_code"],
+    ) + [":cpp_generated_code"],
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",
@@ -1879,7 +1911,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
-        ":generated_code",
+        ":cpp_generated_code",
     ],
     copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     defines = [
@@ -1891,6 +1923,14 @@ cc_library(
         ":torch_headers",
     ],
     alwayslink = True,
+)
+
+cc_library(
+    name = "shm",
+    srcs = glob(["torch/lib/libshm/*.cpp"]),
+    deps = [
+        ":torch",
+    ],
 )
 
 cc_library(
@@ -1912,6 +1952,26 @@ cc_library(
         ":aten_headers",
         ":c10_headers",
         ":caffe2_headers",
+    ],
+)
+
+cc_library(
+    name = "torch_python",
+    srcs = libtorch_python_core_sources + [":python_generated_code"],
+    hdrs = glob([
+        "torch/csrc/generic/*.cpp",
+    ]),
+    deps = [
+        ":torch",
+        ":shm",
+    ],
+)
+
+pybind_extension(
+    name = "_C",
+    srcs = ["torch/csrc/stub.c"],
+    deps = [
+        ":torch_python"
     ],
 )
 
@@ -1945,7 +2005,6 @@ cpp_api_tests = glob(["test/cpp/api/*.cpp"])
       srcs = [filename],
       deps = [
           ":test_support",
-          ":torch",
           "@com_google_googletest//:gtest_main",
       ],
   ) for filename in cpp_api_tests

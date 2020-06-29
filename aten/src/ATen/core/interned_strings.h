@@ -69,6 +69,9 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
+  _(prim, With)                      \
+  _(prim, Enter)                     \
+  _(prim, Exit)                      \
   _(aten, Bool)                      \
   _(aten, Int)                       \
   _(aten, FloatImplicit)             \
@@ -134,6 +137,10 @@ namespace c10 {
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
+  _(prim, is_cuda)                   \
+  _(aten, abs_)                      \
+  _(aten, absolute)                  \
+  _(aten, absolute_)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

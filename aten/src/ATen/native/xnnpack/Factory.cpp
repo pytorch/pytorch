@@ -21,13 +21,13 @@ Tensor empty_with_tail_padding(
   Tensor tensor(c10::make_intrusive<c10::TensorImpl>(
       c10::Storage{
           c10::Storage::use_byte_size_t(),
-          dtype,
           size_bytes,
           allocator_ptr->allocate(size_bytes),
           allocator_ptr,
           /*resizable=*/true,
       },
-      DispatchKeySet{DispatchKey::CPU}));
+      DispatchKeySet{DispatchKey::CPU},
+      dtype));
 
   return namedinference::propagate_names_if_nonempty(
       tensor.resize_(size, memory_format),

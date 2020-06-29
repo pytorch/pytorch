@@ -28,8 +28,7 @@
 // For now the search doesn't go beyond the function boundary because the
 // reference to op name string literals and c10 op registration/invocation
 // APIs are almost always in the same function. If we create helper function
-// around c10 API (e.g. the "call_unboxed_super_slow_temp_shim" method defined in aten/native), we could
-// simply add them to the regular expression used to identify c10 API.
+// around c10 API, we could simply add them to the regular expression used to identify c10 API.
 //
 // [Example]
 // In the following example, it finds out:
@@ -620,13 +619,18 @@ private:
           std::cerr << op << " ";
         }
         std::cerr << ") in a registration call in function: "
-                  << demangle(I->getFunction()->getName()) << std::endl;
+                  << demangle(I->getFunction()->getName())
+                  << " contextualNamespace: " << contextualNamespace
+                  << std::endl;
       }
       for (const auto& op : visitedOps) {
         opSchemaStrs->insert(op);
         if (visitedFunctions.empty()) {
           std::cerr << "[WARNING] could not find registered function for op: "
-                    << op << std::endl;
+                    << op << " in function: "
+                    << demangle(I->getFunction()->getName())
+                    << " contextualNamespace: " << contextualNamespace
+                    << std::endl;
         }
         for (const auto& func : visitedFunctions) {
           (*schemaStrToFunctions)[op].insert(func);
@@ -745,8 +749,12 @@ private:
       const std::string& contextualNamespace, Value* V) {
     std::vector<std::string> schemaStrs;
     extractStringValue(V, [&](const std::string& str) {
+      // NB: some operator names might contain namespace. If this occurs, we
+      // MUST NOT use the contextual namespace. Fortunately, it's easy to tell
+      // if a namespace is included: a double colon will be present.
       const std::string& schemaStr =
-          contextualNamespace.empty() ? str : contextualNamespace + str;
+          (contextualNamespace.empty() || str.find("::") != std::string::npos)
+          ? str : contextualNamespace + str;
       if (FunctionSchemaPatternLoc.pattern->match(schemaStr)) {
         schemaStrs.push_back(schemaStr);
       }

@@ -3,6 +3,8 @@
 differentiation of arbitrary scalar valued functions. It requires minimal
 changes to the existing code - you only need to declare :class:`Tensor` s
 for which gradients should be computed with the ``requires_grad=True`` keyword.
+As of now, we only support autograd for floating point :class:`Tensor` types (
+half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdouble).
 """
 import torch
 import warnings
@@ -71,7 +73,9 @@ def backward(
     all tensors that don't need gradient tensors).
 
     This function accumulates gradients in the leaves - you might need to zero
-    them before calling it.
+    ``.grad`` attributes or set them to ``None`` before calling it.
+    See :ref:`Default gradient layouts<default-grad-layouts>`
+    for details on the memory layout of accumulated gradients.
 
     .. note::
         Using this method with ``create_graph=True`` will create a reference cycle

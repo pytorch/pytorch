@@ -3,7 +3,6 @@
 #include <THC/THCTensorCopy.h>
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
-#include <THC/THCTensorMath.cuh>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCTensor.hpp>
 

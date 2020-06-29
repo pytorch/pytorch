@@ -4,8 +4,9 @@
 #include <memory>
 
 #include <c10/core/Device.h>
-#include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
+#include <c10/util/UniqueVoidPtr.h>
 
 namespace c10 {
 
@@ -218,5 +219,20 @@ struct AllocatorRegisterer {
   namespace {                                       \
   static AllocatorRegisterer<t> g_allocator_d(f); \
   }
+
+// An interface for reporting thread local memory usage
+// per device
+struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
+  MemoryReportingInfoBase();
+  virtual ~MemoryReportingInfoBase() {}
+
+  // Negative alloc_size corresponds to freeing of the memory
+  virtual void reportMemoryUsage(void* ptr, int64_t alloc_size, Device device) = 0;
+
+  virtual bool memoryProfilingEnabled() const = 0;
+};
+
+C10_API bool memoryProfilingEnabled();
+C10_API void reportMemoryUsageToProfiler(void* ptr, int64_t alloc_size, Device device);
 
 } // namespace c10

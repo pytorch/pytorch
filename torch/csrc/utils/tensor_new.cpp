@@ -18,6 +18,7 @@
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TracerMode.h>
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
@@ -116,13 +117,10 @@ Tensor new_with_storage(c10::DispatchKey dispatch_key, at::ScalarType scalar_typ
 }
 
 Tensor new_with_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, const Tensor& other) {
-  if (legacyExtractDispatchKey(other.key_set()) != dispatch_key) {
-    // In temporary expression lifetime we trust
-    throw TypeError("expected %s (got %s)", toString(dispatch_key), toString(other.key_set()).c_str());
-  }
-  if (other.scalar_type() != scalar_type) {
-    throw TypeError("expected %s (got %s)", toString(scalar_type), toString(other.scalar_type()));
-  }
+  TORCH_CHECK_TYPE(legacyExtractDispatchKey(other.key_set()) == dispatch_key, "expected ",
+                   toString(dispatch_key), " (got ", toString(legacyExtractDispatchKey(other.key_set())), ")");
+  TORCH_CHECK_TYPE(other.scalar_type() == scalar_type, "expected ",
+                   toString(scalar_type), " (got ", toString(other.scalar_type()), ")");
   return other.slice();
 }
 
@@ -288,7 +286,8 @@ Tensor internal_new_from_data(
   // here.
   Tensor tensor;
   {
-    at::AutoNonVariableTypeMode guard;
+    at::AutoNonVariableTypeMode guard;  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
         (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
@@ -334,7 +333,7 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
     TORCH_CHECK(dispatch_key == c10::DispatchKey::CPU
                 || dispatch_key == c10::DispatchKey::CUDA
                 || dispatch_key == c10::DispatchKey::HIP
-                || dispatch_key == c10::XLA(),
+                || c10::XLA().has(dispatch_key),
                 "new(): expected DispatchKey: ", c10::DispatchKey::CPU,
                 " or ", c10::DispatchKey::CUDA,
                 " or ", c10::DispatchKey::HIP,
@@ -488,6 +487,17 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, options(dispatch_key, scalar_type));
   } else if (r.idx == 1) {
+    THPObjectPtr dtype_attr(PyObject_GetAttrString(r.pyobject(0), "dtype"));
+    if (!dtype_attr) throw python_error();
+    at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
+        dtype_attr.get())->scalar_type;
+    TORCH_CHECK(
+        storage_scalar_type == scalar_type,
+        "Expected Storage of type ",
+        scalar_type,
+        " but got type ",
+        storage_scalar_type,
+        " for argument 1 'storage'");
     return new_with_storage(dispatch_key, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
@@ -535,6 +545,17 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, options(dispatch_key, scalar_type));
   } else if (r.idx == 1) {
+    THPObjectPtr dtype_attr(PyObject_GetAttrString(r.pyobject(0), "dtype"));
+    if (!dtype_attr) throw python_error();
+    at::ScalarType storage_scalar_type = reinterpret_cast<THPDtype*>(
+        dtype_attr.get())->scalar_type;
+    TORCH_CHECK(
+        storage_scalar_type == scalar_type,
+        "Expected Storage of type ",
+        scalar_type,
+        " but got type ",
+        storage_scalar_type,
+        " for argument 1 'storage'");
     return new_with_storage(dispatch_key, scalar_type, r.storage(0));
   } else if (r.idx == 2) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));

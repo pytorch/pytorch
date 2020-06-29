@@ -65,7 +65,8 @@ default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observ
                                          weight=default_weight_observer)
 float16_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
                                          weight=NoopObserver.with_args(dtype=torch.float16))
-per_channel_dynamic_qconfig = QConfigDynamic(weight=default_per_channel_weight_observer)
+per_channel_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                             weight=default_per_channel_weight_observer)
 
 default_qat_qconfig = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)
