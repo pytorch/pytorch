@@ -665,9 +665,9 @@ class ShapePropagator {
         return;
       }
       case prim::grad: {
-        auto tt = node->input()->type()->cast<TensorType>();
-        TORCH_INTERNAL_ASSERT(tt);
+        auto tt = node->input()->type()->expect<TensorType>();
         // grad may be undefined
+        // requires_grad may be required
         auto grad_type = tt->withRequiresGrad({})->withPossiblyUndefined();
         node->output()->setType(grad_type);
         return;
