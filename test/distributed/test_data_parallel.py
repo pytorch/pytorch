@@ -639,25 +639,65 @@ class TestDataParallel(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate_parameters_list_dict(self):
+        nested_net = nn.Module()
         net = nn.Module()
         net.alpha = nn.Parameter(torch.tensor(0.0))
-        net.beta = nn.ParameterList([nn.Parameter(torch.tensor(1.0)), nn.Parameter(torch.tensor(2.0))])
-        net.gamma = nn.ParameterDict({"g0": nn.Parameter(torch.tensor(3.0)), "g1": nn.Parameter(torch.tensor(4.0))})
-        net.cuda()
+        net.beta = nn.ParameterList([
+            nn.Parameter(torch.tensor(1.0)), nn.Parameter(torch.tensor(2.0)), nn.Parameter(torch.tensor(3.0))
+        ])
+        net.gamma = nn.ParameterDict({
+            "g0": nn.Parameter(torch.tensor(3.0)),
+            "g1": nn.Parameter(torch.tensor(4.0)),
+            "g2": nn.Parameter(torch.tensor(5.0)),
+        })
+
+        nested_net.net = net
+        nested_net.alpha = nn.Parameter(torch.tensor(10.0))
+        nested_net.beta = nn.ParameterList([
+            nn.Parameter(torch.tensor(11.0)), nn.Parameter(torch.tensor(12.0)), nn.Parameter(torch.tensor(13.0))
+        ])
+        nested_net.gamma = nn.ParameterDict({
+            "G0": nn.Parameter(torch.tensor(13.0)),
+            "G1": nn.Parameter(torch.tensor(14.0)),
+            "G2": nn.Parameter(torch.tensor(15.0)),
+        })
+
+        nested_net.cuda()
         for devices in [(0, 1), [0, 1]]:
-            replicas = dp.replicate(net, devices)
+            replicas = dp.replicate(nested_net, devices)
             for i, replica in enumerate(replicas):
                 self.assertIsInstance(replica.alpha, torch.Tensor, msg='replicated parameter should be Tensor')
                 self.assertEqual(replica.alpha.get_device(), i, msg='parameter on wrong device')
-                self.assertEqual(len(replica.beta), 2, msg='parameter list does not contain correct number of tensors')
+
+                self.assertIsInstance(replica.beta, list)
+                self.assertEqual(len(replica.beta), 3, msg='parameter list does not contain correct number of tensors')
                 for t in replica.beta:
                     self.assertIsInstance(t, torch.Tensor, msg='replicated parameter should be Tensor')
                     self.assertEqual(t.get_device(), i, msg='parameter on wrong device')
-                self.assertEqual(len(replica.gamma), 2, msg='parameter dict does not contain correct number of tensors')
-                for key in replica.gamma:                    
+
+                self.assertIsInstance(replica.gamma, OrderedDict)
+                self.assertEqual(len(replica.gamma), 3, msg='parameter dict does not contain correct number of tensors')
+                for key in replica.gamma:
                     t = replica.gamma[key]
                     self.assertIsInstance(t, torch.Tensor, msg='replicated parameter should be Tensor')
                     self.assertEqual(t.get_device(), i, msg='parameter on wrong device')
+
+                self.assertIsInstance(replica.net.alpha, torch.Tensor, msg='replicated parameter should be Tensor')
+                self.assertEqual(replica.net.alpha.get_device(), i, msg='parameter on wrong device')
+
+                self.assertIsInstance(replica.net.beta, list)
+                self.assertEqual(len(replica.net.beta), 3, msg='parameter list does not contain correct number of tensors')
+                for t in replica.net.beta:
+                    self.assertIsInstance(t, torch.Tensor, msg='replicated parameter should be Tensor')
+                    self.assertEqual(t.get_device(), i, msg='parameter on wrong device')
+
+                self.assertIsInstance(replica.net.gamma, OrderedDict)
+                self.assertEqual(len(replica.net.gamma), 3, msg='parameter dict does not contain correct number of tensors')
+                for key in replica.net.gamma:
+                    t = replica.net.gamma[key]
+                    self.assertIsInstance(t, torch.Tensor, msg='replicated parameter should be Tensor')
+                    self.assertEqual(t.get_device(), i, msg='parameter on wrong device')
+
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_zero_grad(self):

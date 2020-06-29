@@ -107,19 +107,32 @@ def replicate(network, devices, detach=False):
     module_copies = [[] for device in devices]
     module_indices = {}
     scriptmodule_skip_attr = {"_parameters", "_buffers", "_modules", "forward", "_c"}
+    # This is need to store parent module index of parameter list/dict modules
+    module_parent_indices = [[] for device in devices]
 
     for i, module in enumerate(modules):
         module_indices[module] = i
         for j in range(num_replicas):
-            replica = module._replicate_for_data_parallel()
-            # This is a temporary fix for DDP. DDP needs to access the 
-            # replicated model parameters. It used to do so through 
-            # `mode.parameters()`. The fix added in #33907 for DP stops the
-            # `parameters()` API from exposing the replicated parameters.
-            # Hence, we add a `_former_parameters` dict here to support DDP.
-            replica._former_parameters = OrderedDict()
-
+            if isinstance(module, ParameterList):
+                # For ParameterList modules we define replica as
+                # list to mimic list structure of ParameterList
+                replica = []
+            elif isinstance(module, ParameterDict):
+                # For ParameterDict modules we define replica as
+                # OrderedDict to mimic dict structure of ParameterDict
+                # We store the structure (i.e. OrderedDict) and its parent's index to
+                # handle set correctly `_former_parameters`
+                replica = OrderedDict()
+            else:
+                replica = module._replicate_for_data_parallel()
+                # This is a temporary fix for DDP. DDP needs to access the
+                # replicated model parameters. It used to do so through
+                # `mode.parameters()`. The fix added in #33907 for DP stops the
+                # `parameters()` API from exposing the replicated parameters.
+                # Hence, we add a `_former_parameters` dict here to support DDP.
+                replica._former_parameters = OrderedDict()
             module_copies[j].append(replica)
+            module_parent_indices[j].append(None)
 
     for i, module in enumerate(modules):
         for key, child in module._modules.items():
@@ -131,20 +144,32 @@ def replicate(network, devices, detach=False):
                 module_idx = module_indices[child]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
+                    if isinstance(child, (ParameterList, ParameterDict)):
+                        # remove existing child submodule if it is ParameterList/Dict
+                        # otherwise we can not set a non-Parameter attribute
+                        delattr(replica, key)
+
+                    # add parent index to setup _former_parameters for ParameterList/Dict
+                    module_parent_indices[j][module_idx] = i
                     setattr(replica, key, module_copies[j][module_idx])
-        if isinstance(module_copies[0][i], (ParameterList, ParameterDict)):
-            # if replica is ParameterList or ParameterDict we setup its _parameters as
-            # ordered dict of tensors
+        if isinstance(module, (ParameterList, ParameterDict)):
+            # if module is ParameterList/ParameterDict, its replica is list or OrderedDict
+            # with tensors corresponding to module's parameters.
+            module_idx = module_indices[module]
+            is_param_list = isinstance(module, ParameterList)
             for j in range(num_replicas):
                 replica = module_copies[j][i]
-                parameters = OrderedDict()
+                parent_idx = module_parent_indices[j][i]
+                replica_parent = module_copies[j][parent_idx]
                 for key, param in module._parameters.items():
                     param_idx = param_indices[param]
                     param = param_copies[j][param_idx]
-                    parameters[str(key)] = param
-                    # TODO: verify if this is correct
-                    replica._former_parameters[key] = param
-                replica._parameters = parameters
+                    if is_param_list:
+                        replica.append(param)
+                    else:
+                        replica[key] = param
+                    # expose the parameter for DDP
+                    replica_parent._former_parameters[key] = param
         else:
             for key, param in module._parameters.items():
                 if param is None:
