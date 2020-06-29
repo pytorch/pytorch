@@ -346,9 +346,10 @@
 ]]
 [[
   name: _th_dot
-  backend_types: {CUDA: [floating_point], CPU: [all]}
+  backend_types: {CUDA: [floating_point]}
   cname: dot
-  cpu_half: True
+  backends:
+    CUDA
   variants: function
   return: accreal
   arguments:

@@ -416,7 +416,6 @@ class TestCppExtensionJIT(common.TestCase):
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
 
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -448,7 +447,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(cpp_parameters["fc.weight"].grad, python_linear.weight.grad)
         self.assertEqual(cpp_parameters["fc.bias"].grad, python_linear.bias.grad)
 
-    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -546,7 +544,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertIn("buf", nb)
         self.assertEqual(nb[0][1], torch.eye(5))
 
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_up_to_date_attributes(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -569,7 +566,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(len(net._modules), 2)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op_with_cuda(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
