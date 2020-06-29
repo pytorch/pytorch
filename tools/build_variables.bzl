@@ -78,7 +78,32 @@ jit_core_sources = [
 ]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/tools/cpp_build/torch/CMakeLists.txt
-libtorch_core_sources = [
+# There are some common files used in both internal lite-interpreter and full-jit. Making a separate
+# list for the shared files.
+
+core_sources_common = [
+    "torch/csrc/autograd/profiler.cpp",
+    "torch/csrc/jit/frontend/edit_distance.cpp",
+    "torch/csrc/jit/frontend/string_to_type.cpp",
+    "torch/csrc/jit/mobile/type_parser.cpp",
+    "torch/csrc/jit/runtime/instruction.cpp",
+    "torch/csrc/jit/runtime/jit_exception.cpp",
+    "torch/csrc/jit/runtime/operator.cpp",
+    "torch/csrc/jit/runtime/print_handler.cpp",
+    "torch/csrc/jit/runtime/register_ops_utils.cpp",
+    "torch/csrc/jit/runtime/vararg_functions.cpp",
+    "torch/csrc/jit/serialization/unpickler.cpp",
+]
+
+jit_sources_common = [
+    "torch/csrc/jit/runtime/register_prim_ops.cpp",
+    "torch/csrc/jit/runtime/register_prim_ops_c10.cpp",
+    "torch/csrc/jit/runtime/register_special_ops.cpp",
+]
+
+libtorch_sources_common = core_sources_common + jit_sources_common
+
+core_sources_full = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/autograd.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
@@ -91,7 +116,6 @@ libtorch_core_sources = [
     "torch/csrc/autograd/functions/tensor.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
-    "torch/csrc/autograd/profiler.cpp",
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
@@ -109,7 +133,6 @@ libtorch_core_sources = [
     "torch/csrc/jit/frontend/versioned_symbols.cpp",
     "torch/csrc/jit/frontend/canonicalize_modified_loop.cpp",
     "torch/csrc/jit/frontend/convert_to_ssa.cpp",
-    "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/frontend/exit_transforms.cpp",
     "torch/csrc/jit/frontend/inline_loop_condition.cpp",
     "torch/csrc/jit/frontend/ir_emitter.cpp",
@@ -117,7 +140,6 @@ libtorch_core_sources = [
     "torch/csrc/jit/frontend/parser.cpp",
     "torch/csrc/jit/frontend/schema_matching.cpp",
     "torch/csrc/jit/frontend/script_type_parser.cpp",
-    "torch/csrc/jit/frontend/string_to_type.cpp",
     "torch/csrc/jit/frontend/sugared_value.cpp",
     "torch/csrc/jit/frontend/tracer.cpp",
     "torch/csrc/jit/ir/alias_analysis.cpp",
@@ -130,7 +152,6 @@ libtorch_core_sources = [
     "torch/csrc/jit/ir/subgraph_matcher.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/jit_log.cpp",
-    "torch/csrc/jit/mobile/type_parser.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
@@ -189,17 +210,11 @@ libtorch_core_sources = [
     "torch/csrc/jit/runtime/argument_spec.cpp",
     "torch/csrc/jit/runtime/autodiff.cpp",
     "torch/csrc/jit/runtime/graph_executor.cpp",
-    "torch/csrc/jit/runtime/instruction.cpp",
     "torch/csrc/jit/runtime/interpreter.cpp",
-    "torch/csrc/jit/runtime/jit_exception.cpp",
     "torch/csrc/jit/runtime/logging.cpp",
-    "torch/csrc/jit/runtime/operator.cpp",
-    "torch/csrc/jit/runtime/print_handler.cpp",
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_record.cpp",
-    "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
-    "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
     "torch/csrc/jit/serialization/import_source.cpp",
@@ -208,7 +223,6 @@ libtorch_core_sources = [
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/serialization/source_range_serialization.cpp",
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
-    "torch/csrc/jit/serialization/unpickler.cpp",
     "torch/csrc/jit/tensorexpr/bounds_inference.cpp",
     "torch/csrc/jit/tensorexpr/codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
@@ -233,6 +247,8 @@ libtorch_core_sources = [
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
 ]
+
+libtorch_core_sources = sorted(core_sources_common + core_sources_full)
 
 libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/autograd.cpp",
@@ -269,19 +285,18 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/utils.cpp",
 ]
 
-libtorch_core_jit_sources = [
+jit_sources_full = [
     "torch/csrc/jit/codegen/cuda/interface.cpp",
     "torch/csrc/jit/passes/lower_graph.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
-    "torch/csrc/jit/runtime/register_prim_ops.cpp",
-    "torch/csrc/jit/runtime/register_prim_ops_c10.cpp",
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
-    "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/runtime/register_string_ops.cpp",
     "torch/csrc/jit/passes/inline_fork_wait.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
 ]
+
+libtorch_core_jit_sources = sorted(jit_sources_common + jit_sources_full)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
