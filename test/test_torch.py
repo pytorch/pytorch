@@ -16196,7 +16196,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*([torch.float, torch.double] +
-                    (torch.testing.get_all_complex_dtypes() if TEST_WITH_ROCM else [])))
+                    ([] if TEST_WITH_ROCM else torch.testing.get_all_complex_dtypes())))
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
