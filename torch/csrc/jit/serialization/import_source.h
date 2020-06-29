@@ -22,7 +22,7 @@ struct TORCH_API SourceImporter {
   SourceImporter(
       // The compilation unit that will own the imported source
       std::shared_ptr<CompilationUnit> cu,
-      const std::vector<at::Tensor>* tensor_table,
+      const std::vector<at::IValue>* constant_table,
       SourceLoader loader,
       size_t version);
 
