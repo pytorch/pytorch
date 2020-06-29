@@ -164,6 +164,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasSgemm(
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }
+
 #ifndef __HIP_PLATFORM_HCC__
   template <>
   void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
@@ -177,7 +178,9 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
         lda, reinterpret_cast<const cuDoubleComplex*>(b), ldb, reinterpret_cast<const cuDoubleComplex*>(&beta),
         reinterpret_cast<cuDoubleComplex*>(c), ldc));
   }
+#endif
 
+#ifndef __HIP_PLATFORM_HCC__
   template <>
   void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();

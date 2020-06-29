@@ -36,6 +36,8 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 #ifndef __HIP_PLATFORM_HCC__
   template <>
   void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
+#endif
+#ifndef __HIP_PLATFORM_HCC__
   template <>
   void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
 #endif
