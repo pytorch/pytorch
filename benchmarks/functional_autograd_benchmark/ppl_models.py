@@ -83,7 +83,7 @@ def get_robust_regression(device):
         # We need to compute the first and second gradient of this score with respect
         # to beta_value.
         beta_score = dist.StudentT(nu_value, mu, sigma_constrained_value).log_prob(Y).sum() \
-                            + beta.log_prob(beta_value)
+            + beta.log_prob(beta_value)
 
         return nu_score.sum() + sigma_score.sum() + beta_score.sum()
 
