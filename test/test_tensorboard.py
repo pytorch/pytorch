@@ -465,6 +465,13 @@ class TestTensorBoardSummary(BaseTestCase):
         mt = {'accuracy': 0.1}
         self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
 
+    def test_hparams_domain_discrete(self):
+        hp = {"lr": 0.1, "bool_var": True, "string_var": "hi"}
+        mt = {"accuracy": 0.1}
+        hp_domain = {"lr": [0.1], "bool_var": [True], "string_var": ["hi"]}
+        # only smoke test. Because protobuf map serialization is nondeterministic.
+        summary.hparams(hp, mt, hp_domain)
+
     def test_mesh(self):
         v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
         c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
