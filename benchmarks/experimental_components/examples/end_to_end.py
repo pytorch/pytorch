@@ -80,7 +80,7 @@ _DTYPE_STR_TO_DTYPE = {
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pr", type=str, default=_PR_LIST[0], choices=_PR_LIST)
-    parser.add_argument("--num_gpus", type=int, default=8)
+    parser.add_argument("--num_gpus", type=int, default=None)
     parser.add_argument("--test_variance", action="store_true")
 
     # (Implementation details)
@@ -90,7 +90,10 @@ def parse_args():
     parser.add_argument("--DETAIL_result_file", type=str, default=None)
     parser.add_argument("--DETAIL_seed", type=int, default=None)
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.num_gpus is None:
+        args.num_gpus = torch.cuda.device_count()
+    return args
 
 
 _SUBPROCESS_CMD_TEMPLATE = (
@@ -307,9 +310,10 @@ def construct_table(results, device_str, test_variance):
 
         layout:
             Indicates that `x` is not contiguous due to permutation. Invoking
-            `x.permute(steps)` (e.g. x.permute((2, 0, 1)) if steps = [2, 0, 1])
-            would produce a Tensor whose shape matches memory order. (Though still
-            not contiguous if `steps` contains non-one elements.)
+            `x.permute(layout)` (e.g. x.permute((2, 0, 1)) if layout = [2, 0, 1])
+            would produce a Tensor with physical memory layout matching logical
+            memory layout. (Though still not contiguous if `steps` contains
+            non-one elements.)
         """))
 
     print(f"\nComplete results in: {result_log_file}")
