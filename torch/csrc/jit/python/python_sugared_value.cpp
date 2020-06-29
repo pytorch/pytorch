@@ -219,6 +219,16 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
+SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
+  if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
+    auto dict = getSugaredDict(loc, m);
+    auto mods = dict->getModules();
+    return mods;
+  }
+  throw ErrorReport(loc)
+      << "Only ModuleList or Sequential modules can be used as tuple";
+}
+
 SugaredValuePtr ModuleValue::getitem(
     const SourceRange& loc,
     Function& m,
@@ -740,7 +750,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
-  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
+      obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {

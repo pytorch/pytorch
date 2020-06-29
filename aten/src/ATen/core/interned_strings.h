@@ -69,6 +69,9 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
+  _(prim, With)                      \
+  _(prim, Enter)                     \
+  _(prim, Exit)                      \
   _(aten, Bool)                      \
   _(aten, Int)                       \
   _(aten, FloatImplicit)             \
