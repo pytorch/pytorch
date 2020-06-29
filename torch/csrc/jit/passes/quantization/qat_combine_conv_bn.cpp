@@ -121,7 +121,7 @@ graph(%self, %x):
 }
 
 std::pair<std::string, std::string> getBeforeAndAfterPatterns(
-    std::string conv_name, std::string bn_name) {
+    const std::string& conv_name, const std::string& bn_name) {
 
   // A pattern to match a nn.Conv2d -> nn.BatchNorm2d call with
   // exact module names.
@@ -196,12 +196,12 @@ graph(%self, %input):
 
 void QATCombineConvBatchNorm2dHelper::transform(Module& module) {
 
-  for (auto graph_to_conv_bn_names : conv_bn_names_) {
+  for (const auto& graph_to_conv_bn_names : conv_bn_names_) {
     std::shared_ptr<Graph> g = graph_to_conv_bn_names.first;
-    for (const auto conv_bn_name : graph_to_conv_bn_names.second) {
+    for (const auto& conv_bn_name : graph_to_conv_bn_names.second) {
 
-      std::string conv_name = std::get<0>(conv_bn_name);
-      std::string bn_name = std::get<1>(conv_bn_name);
+      const std::string& conv_name = std::get<0>(conv_bn_name);
+      const std::string& bn_name = std::get<1>(conv_bn_name);
       auto patterns = getBeforeAndAfterPatterns(conv_name, bn_name);
 
       // TODO before land: reuse better

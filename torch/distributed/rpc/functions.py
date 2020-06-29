@@ -4,26 +4,30 @@ import functools
 def async_execution(fn):
     r"""
     A decorator for a function indicating that the return value of the function
-    is guaranteed to be a ``torch.futures.Future`` object and this function can
-    run asynchronously on the RPC callee. More specifically, the callee extracts
-    the ``torch.futures.Future`` returned by the wrapped function and installs
-    subsequent processing steps as a callback to that ``Future``. The installed
-    callback will read the value from the ``Future`` when completed and send the
+    is guaranteed to be a :class:`~torch.futures.Future` object and this
+    function can run asynchronously on the RPC callee. More specifically, the
+    callee extracts the :class:`~torch.futures.Future` returned by the wrapped
+    function and installs subsequent processing steps as a callback to that
+    :class:`~torch.futures.Future`. The installed callback will read the value
+    from the :class:`~torch.futures.Future` when completed and send the
     value back as the RPC response. That also means the returned
-    ``torch.futures.Future`` only exists on the callee side and is never sent
-    through RPC. This decorator is useful when the wrapped function's (``fn``)
-    execution needs to pause and resume due to, e.g., containing
+    :class:`~torch.futures.Future` only exists on the callee side and is never
+    sent through RPC. This decorator is useful when the wrapped function's
+    (``fn``) execution needs to pause and resume due to, e.g., containing
     :meth:`~torch.distributed.rpc.rpc_async` or waiting for other signals.
 
     .. note:: This decorator must be the outmost one when combined with other
         decorators. Otherwise, RPC will not be able to detect the attributes
         installed by this decorator.
 
+    .. warning:: `autograd profiler <https://pytorch.org/docs/stable/autograd.html#profiler>`_
+        does not work with ``async_execution`` functions.
+
     Example::
-        The returned ``torch.futures.Future`` object can come from
-        ``rpc.rpc_async``, ``Future.then(cb)``, or ``torch.futures.Future``
-        constructor. The example below shows directly using the ``Future``
-        returned by ``Future.then(cb)``.
+        The returned :class:`~torch.futures.Future` object can come from
+        ``rpc.rpc_async``, ``Future.then(cb)``, or :class:`~torch.futures.Future`
+        constructor. The example below shows directly using the
+        :class:`~torch.futures.Future` returned by ``Future.then(cb)``.
 
         >>> from torch.distributed import rpc
         >>>
@@ -53,20 +57,20 @@ def async_execution(fn):
         When combined with TorchScript decorators (or any other decorators),
         this decorator must be the outmost one.
 
+        >>> from torch import Tensor
+        >>> from torch.futures import Future
         >>> from torch.distributed import rpc
         >>>
         >>> # omitting setup and shutdown RPC
         >>>
         >>> # On worker0
         >>> @torch.jit.script
-        >>> def script_add(x, y):
-        >>>     # type: (Tensor, Tensor) -> Tensor
+        >>> def script_add(x: Tensor, y: Tensor) -> Tensor:
         >>>     return x + y
         >>>
         >>> @rpc.functions.async_execution
         >>> @torch.jit.script
-        >>> def async_add(to, x, y):
-        >>>     # type: (str, Tensor, Tensor) -> Future[Tensor]
+        >>> def async_add(to: str, x: Tensor, y: Tensor) -> Future[Tensor]:
         >>>     return rpc.rpc_async(to, script_add, (x, y))
         >>>
         >>> ret = rpc.rpc_sync(

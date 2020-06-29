@@ -25,18 +25,17 @@ GENERATED_COMMENT = CodeTemplate(
     "@" + "generated from ${filename}")
 
 FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<decltype(${function_name}), &${function_name}>(DispatchKey::BackendSelect)
-  .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  m.impl_UNBOXED("aten::${op_name_with_overload_name}", ${function_name});
 """)
 
 FUNCTION_DEFINITION = CodeTemplate("""\
 // ${schema_string}
 Tensor ${function_name}(${method_formals}) {
-  static OperatorHandle OP = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${name}", "${overload_name}");
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::${name}", "${overload_name}")
+    .typed<${cpp_signature}>();
   ${dispatch_key_init}
-  return OP.callWithDispatchKey<${formals_types}>(_dk, ${actuals});
+  return op.callWithDispatchKey(_dk, ${actuals});
 }
 """)
 
@@ -60,10 +59,13 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
 
                 name = option['name']
+                op_name_with_overload_name = option['name']
                 if option.get('overload_name', '') != '':
                     name = "{0}_{1}".format(name, option['overload_name'])
+                    op_name_with_overload_name = "{0}.{1}".format(op_name_with_overload_name, option['overload_name'])
 
                 func_reg = FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
+                                                            op_name_with_overload_name=op_name_with_overload_name,
                                                             function_name=name)
 
                 dispatch_key_init = gen_dispatch_key_init('_dk', option['formals_list'])
@@ -74,7 +76,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                                                             name=option['name'],
                                                             overload_name=option['overload_name'],
                                                             dispatch_key_init=dispatch_key_init,
-                                                            formals_types=option['formals_types_with_return'],
+                                                            cpp_signature=option['cpp_signature'],
                                                             actuals=option['actuals'])
 
                 backend_select_function_registrations.append(func_reg)

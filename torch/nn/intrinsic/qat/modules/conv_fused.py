@@ -9,49 +9,6 @@ from torch.nn import init
 from torch.nn.modules.utils import _pair
 from torch.nn.parameter import Parameter
 
-# Runs the conv forward with scaled weights and unscales the weights.
-#
-# Note: this is implemented as a standalone function to match the
-#   rules of graph mode quantization, which will mimic this code.
-#   In particular, the inputs and outputs of this function should be
-#   observed, and no intermediate values of this function should be
-#   observed.
-def _conv_forward_and_unscale(conv_obj, input, scaled_weight, scale_factor):
-    # type: (nn.Conv2d, Tensor, Tensor, Tensor) -> Tensor
-    conv = conv_obj._conv_forward(input, scaled_weight)
-    conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
-    # TODO: figure out how to fix scripting without this
-    bias = conv_obj.bias
-    if bias is not None:
-        conv_orig = conv_orig + bias.reshape([1, -1, 1, 1])
-    return conv_orig
-
-def _conv_forward_and_unscale_2(input,
-                                scaled_weight,
-                                bias,
-                                stride,
-                                padding,
-                                dilation,
-                                groups,
-                                padding_mode,
-                                _reversed_padding_repeated_twice,
-                                scale_factor):
-    # type:(Tensor, Tensor, Optional[Tensor], Tuple[int, int], Tuple[int, int], Tuple[int, int], int, str, List[int], Tensor) -> Tensor
-
-    # copy of _conv_forward
-    if padding_mode != 'zeros':
-        conv = F.conv2d(F.pad(input, _reversed_padding_repeated_twice, mode=padding_mode),
-                        scaled_weight, bias, stride,
-                        _pair(0), dilation, groups)
-    else:
-        conv = F.conv2d(input, scaled_weight, bias, stride,
-                        padding, dilation, groups)
-
-    conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
-    if bias is not None:
-        conv_orig = conv_orig + bias.reshape([1, -1, 1, 1])
-    return conv_orig
-
 class _ConvBnNd(nn.modules.conv._ConvNd):
 
     _version = 2
