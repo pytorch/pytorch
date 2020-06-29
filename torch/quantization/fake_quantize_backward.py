@@ -20,7 +20,7 @@ class _FakeQuantizeWithBackward(FakeQuantize):
     r""" Simulate the quantize and dequantize operations in training time.
     See documentation for parent module torch.quantization.FakeQuantize.
 
-    * :attr:`quant_backward` controls the application of fake quantization on tensor gradients in
+    * :attr:`quantize_backward` controls the application of fake quantization on tensor gradients in
       the backward pass. This quantization is always done dynamically, and uses affine per-tensor
       quantization on unsigned 8-bit ints.
 
@@ -29,8 +29,8 @@ class _FakeQuantizeWithBackward(FakeQuantize):
                            and zero-point.
         quant_min (int): The minimum allowable quantized value.
         quant_max (int): The maximum allowable quantized value.
-        quant_forward (bool): If true, quantize on the forward pass. (default: True)
-        quant_backward (bool): If true, quantize on the backward pass. (default: False)
+        quantize_forward (bool): If true, quantize on the forward pass. (default: True)
+        quantize_backward (bool): If true, quantize on the backward pass. (default: False)
         observer_kwargs (optional): Arguments for the observer module
 
     Attributes:
@@ -39,12 +39,13 @@ class _FakeQuantizeWithBackward(FakeQuantize):
 
     """
     def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
-                 quant_forward=True, quant_backward=False, **observer_kwargs):
+                 quantize_forward=True, quantize_backward=False, **observer_kwargs):
         super(_FakeQuantizeWithBackward, self).__init__(observer, quant_min, quant_max, **observer_kwargs)
-        self.enable_fake_quant(quant_forward)
-        self.quant_backward = quant_backward
+        self.enable_fake_quant(quantize_forward)
+        self.quantize_backward = quantize_backward
 
     def forward(self, X):
-        if self.quant_backward:
+        X = super(_FakeQuantizeWithBackward, self).forward(X)
+        if self.quantize_backward:
             X = QuantizeBackwardFunction.apply(X)
-        return super(_FakeQuantizeWithBackward, self).forward(X)
+        return X
