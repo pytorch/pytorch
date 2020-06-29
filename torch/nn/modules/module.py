@@ -60,7 +60,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
     .. warning ::
 
         This adds global state to the `nn.module` module
-        and it is only intended for debugging/profiling purposes. 
+        and it is only intended for debugging/profiling purposes.
 
     The hook will be called every time before :func:`forward` is invoked.
     It should have the following signature::
@@ -92,7 +92,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     .. warning ::
 
         This adds global state to the `nn.module` module
-        and it is only intended for debugging/profiling purposes. 
+        and it is only intended for debugging/profiling purposes.
 
     The hook will be called every time after :func:`forward` has computed an output.
     It should have the following signature::
@@ -124,7 +124,7 @@ def register_module_backward_hook(
 
     .. warning ::
         This adds global state to the `nn.module` module
-        and it is only intended for debugging/profiling purposes. 
+        and it is only intended for debugging/profiling purposes.
 
         The current implementation will not have the presented behavior
         for complex :class:`Module` that perform many operations.
@@ -977,7 +977,7 @@ class Module:
                     error_msgs.append('While copying the parameter named "{}", '
                                       'whose dimensions in the model are {} and '
                                       'whose dimensions in the checkpoint are {}, '
-                                      'an exception occured : {}.'
+                                      'an exception occurred : {}.'
                                       .format(key, param.size(), input_param.size(), ex.args))
             elif strict:
                 missing_keys.append(key)
@@ -1329,7 +1329,7 @@ class Module:
     def extra_repr(self) -> str:
         r"""Set the extra representation of the module
 
-        To print customized extra information, you should reimplement
+        To print customized extra information, you should re-implement
         this method in your own modules. Both single-line and multi-line
         strings are acceptable.
         """
