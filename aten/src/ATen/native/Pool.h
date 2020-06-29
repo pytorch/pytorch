@@ -67,8 +67,12 @@ pool2d_shape_check(
               "dilation should be greater than zero, but got ",
               "dilationH: ", dilationH, " dilationW: ", dilationW);
 
-  TORCH_CHECK(input.numel() > 0 && (ndim == 3 || ndim == 4),
-              "non-empty 3D or 4D input tensor expected but got ndim: ", ndim);
+  bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
+  TORCH_CHECK(
+              (ndim == 3 && valid_dims) ||
+              (ndim == 4 && valid_dims && input.size(3) != 0),
+              "3D or 4D (batch mode) input tensor expected but got ndim: ", ndim);
+  
   TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
               "pad should be smaller than half of kernel size, but got ",
               "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);

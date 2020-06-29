@@ -241,12 +241,15 @@ void avg_pool2d_out_cuda_template(
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
   const auto memory_format = input_.suggest_memory_format();
+  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
   if (memory_format == at::MemoryFormat::ChannelsLast){
-    TORCH_CHECK(input_.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+    // Expect tensor in NHWC format and allow 0-dim only for N.
+    TORCH_CHECK((input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
+      "4D (batch mode) tensor expected for input with channels_last layout");
   } else {
-    TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
+    TORCH_CHECK((input_.ndimension() == 3 && valid_dims) ||
+                (input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
+      "3D or 4D (batch mode) tensor expected for input");
   }
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
@@ -374,13 +377,16 @@ Tensor& avg_pool2d_backward_out_cuda_template(
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
     "divisor must be not zero");
 
-  const auto memory_format = input_.suggest_memory_format(); 
+  const auto memory_format = input_.suggest_memory_format();
+  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
   if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input_.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+    TORCH_CHECK((input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
+      "4D (batch mode) tensor expected for input with channels_last layout");
   } else {
-    TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
+    TORCH_CHECK(
+      (input_.ndimension() == 3 && valid_dims) ||
+      (input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
+      "3D or 4D (batch mode) tensor expected for input");
   }
 
   const Tensor input = input_.contiguous(memory_format);
