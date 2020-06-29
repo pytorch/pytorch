@@ -181,7 +181,7 @@ fi
 
 # Patch required to build xla
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  git clone --recursive https://github.com/pytorch/xla.git
+  git clone --recursive -b r1.6 https://github.com/pytorch/xla.git
   ./xla/scripts/apply_patches.sh
 fi
 
