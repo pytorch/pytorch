@@ -269,17 +269,8 @@ void insertQuantizationOps(
     dequant = insertDeQuant(g, quant->output(), original_val);
   }
   observer_out->replaceAllUsesWith(original_val);
-  std::vector<Use> uses = original_val->uses();
-  // TODO: use replaceAllUsesAfterNodeWith?
+
   original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
-  /*
-  for (const auto& use : uses) {
-    auto* user = use.user;
-    if (user != quant && user != observer && user != choose_qparams) {
-      //user->replaceInputWith(original_val, dequant->output());
-      user->replaceAllUsesAfterNodeWith(dequant, dequant->output());
-    }
-  }*/
 }
 
 // find the observer for Value `v` and return the name of the observer
