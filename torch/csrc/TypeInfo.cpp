@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/tensor_dtypes.h>
 
 #include <c10/util/Exception.h>
 
@@ -164,21 +165,44 @@ static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
   });
 }
 
+static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(at::kHalf, self->type, "digits10", [] {
+    return PyFloat_FromDouble(
+        std::pow(10, -std::numeric_limits<at::scalar_value_type<scalar_t>::type>::digits10));
+  });
+}
+
 PyObject* THPFInfo_str(THPFInfo* self) {
+  auto type = self->type;
+  std::string primary_name, legacy_name;
+  std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(type);
   std::ostringstream oss;
-  oss << "finfo(type=torch.float" << PyFloat_AsDouble(THPDTypeInfo_bits(self, nullptr));
-  oss << ", eps=" << PyFloat_AsDouble(THPFInfo_eps(self, nullptr));
-  oss << ", max=" << PyFloat_AsDouble(THPFInfo_max(self, nullptr));
+
+  if (type == at::ScalarType::BFloat16) {
+    oss << "finfo(dtype=" << primary_name << ")";
+    return THPUtils_packString(oss.str().c_str());
+  }
+
+  oss << "finfo(resolution=" << PyFloat_AsDouble(THPFInfo_resolution(self, nullptr));
   oss << ", min=" << PyFloat_AsDouble(THPFInfo_min(self, nullptr));
-  oss << ", tiny=" << PyFloat_AsDouble(THPFInfo_tiny(self, nullptr)) << ")";
+  oss << ", max=" << PyFloat_AsDouble(THPFInfo_max(self, nullptr));
+  oss << ", eps=" << PyFloat_AsDouble(THPFInfo_eps(self, nullptr));
+  oss << ", tiny=" << PyFloat_AsDouble(THPFInfo_tiny(self, nullptr));
+  oss << ", dtype=" << primary_name << ")";
+
   return THPUtils_packString(oss.str().c_str());
 }
 
 PyObject* THPIInfo_str(THPIInfo* self) {
+  auto type = self->type;
+  std::string primary_name, legacy_name;
+  std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(type);
   std::ostringstream oss;
-  oss << "iinfo(type=torch.int" << PyFloat_AsDouble(THPDTypeInfo_bits(self, nullptr));
+
+  oss << "iinfo(min=" << PyFloat_AsDouble(THPIInfo_min(self, nullptr));
   oss << ", max=" << PyFloat_AsDouble(THPIInfo_max(self, nullptr));
-  oss << ", min=" << PyFloat_AsDouble(THPIInfo_min(self, nullptr)) << ")";
+  oss << ", dtype=" << primary_name << ")";
+
   return THPUtils_packString(oss.str().c_str());
 }
 
@@ -188,6 +212,7 @@ static struct PyGetSetDef THPFInfo_properties[] = {
     {"max", (getter)THPFInfo_max, nullptr, nullptr, nullptr},
     {"min", (getter)THPFInfo_min, nullptr, nullptr, nullptr},
     {"tiny", (getter)THPFInfo_tiny, nullptr, nullptr, nullptr},
+    {"resolution", (getter)THPFInfo_resolution, nullptr, nullptr, nullptr},
     {nullptr}};
 
 static PyMethodDef THPFInfo_methods[] = {

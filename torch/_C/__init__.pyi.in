@@ -68,6 +68,7 @@ class finfo:
     max: _float
     eps: _float
     tiny: _float
+    resolution: _float
 
     @overload
     def __init__(self, dtype: _dtype) -> None: ...
