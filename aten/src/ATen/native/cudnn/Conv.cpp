@@ -661,7 +661,7 @@ public:
     } else {
       perfResults[0].mathType = CUDNN_DEFAULT_MATH;
 #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
-      if (!args.params.allow_tf32) {
+      if (args.params.dataType == CUDNN_DATA_FLOAT && !args.params.allow_tf32) {
         perfResults[0].mathType = CUDNN_FMA_MATH;
       }
 #endif
