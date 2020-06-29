@@ -281,7 +281,9 @@ void avg_pool2d_out_cuda_template(
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0; 
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
+  // don't run the kernel if no elements are present.
+  if (count != 0) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "avg_pool2d_out_cuda_frame",
     [&] {
       AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "avg_pool2d_out_cuda_frame", [&] {
@@ -329,10 +331,10 @@ void avg_pool2d_out_cuda_template(
           default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous"); 
         }
       });
-    }
-  );
+    });
 
-  AT_CUDA_CHECK(cudaGetLastError());
+    AT_CUDA_CHECK(cudaGetLastError());
+  }
 
   if (input.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
@@ -410,6 +412,9 @@ Tensor& avg_pool2d_backward_out_cuda_template(
     outputHeight, outputWidth);
 
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }
 
   const int32_t count = safe_downcast<int32_t, int64_t>(input.numel());
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
