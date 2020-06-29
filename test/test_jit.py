@@ -8682,6 +8682,73 @@ a")
         with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             M()
 
+    def test_modulelist_grandparent_inherit_methods(self):
+        class CustomModuleInterface(torch.nn.Module):
+            def __init__(self):
+                super(CustomModuleInterface, self).__init__()
+
+
+        class CustomModuleList(CustomModuleInterface, torch.nn.ModuleList):
+            def __init__(self, modules=None):
+                CustomModuleInterface.__init__(self)
+                torch.nn.ModuleList.__init__(self, modules)
+
+
+        class CustomSequential(CustomModuleInterface, torch.nn.Sequential):
+            def __init__(self, modules=None):
+                CustomModuleInterface.__init__(self)
+                torch.nn.Sequential.__init__(self, modules)
+
+        class CustomModuleDict(CustomModuleInterface, torch.nn.ModuleDict):
+            def __init__(self, modules=None):
+                CustomModuleInterface.__init__(self)
+                torch.nn.ModuleDict.__init__(self, modules)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.submod = torch.nn.ReLU()
+                self.modulelist = CustomModuleList([self.submod])
+                self.sequential = CustomSequential(self.submod)
+                self.moduledict = CustomModuleDict({"submod": self.submod})
+
+            def forward(self, inputs):
+                assert self.modulelist[0] is self.submod, "__getitem__ failing for ModuleList"
+                assert len(self.modulelist) == 1, "__len__ failing for ModuleList"
+                # for module in self.modulelist:
+                    # assert module is self.submod, "__iter__ failing for ModuleList"
+
+                assert self.sequential[0] is self.submod, "__getitem__ failing for Sequential"
+                assert len(self.sequential) == 1, "__len__ failing for Sequential"
+                # for module in self.sequential:
+                    # assert module is self.submod, "__iter__ failing for Sequential"
+
+                assert self.moduledict["submod"] is self.submod, "__getitem__ failing for ModuleDict"
+                assert len(self.moduledict) == 1, "__len__ failing for ModuleDict"
+                # for module in self.moduledict:
+                    # assert module is self.submod, "__iter__ failing for ModuleDict"
+
+                # Test `__contains__()`
+                #
+                # PROBLEM: this throws:
+                # ```
+                # Tried to access nonexistent attribute or method '__contains__' of type '__torch__.DPER3ModuleDict'.
+                # Did you forget to initialize an attribute in __init__()?
+                # ```
+                # assert "submod" in self.moduledict, "__contains__ fails for ModuleDict"
+
+                # for key in self.moduledict.keys():
+                    # assert key == "submod", "keys() fails for ModuleDict"
+
+                # for item in self.moduledict.items():
+                    # assert item[0] == "submod", "items() fails for ModuleDict"
+                    # assert item[1] is self.submod, "items() fails for ModuleDict"
+
+                # for value in self.moduledict.values():
+                    # assert value is self.submod, "values() fails for ModuleDict"
+
+                return inputs
+
     def test_script_module_list_sequential(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, mod_list):
