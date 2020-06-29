@@ -23,6 +23,9 @@ static bool has_level(const Tensor& self, int64_t level) {
 
 // Returns a Tensor with batch dim with level `level` turned into a regular dimension,
 // as well as a logical dim index of where said dimension is in the returned tensor.
+// A call to this function is always followed by a call to `movedim`.
+//
+// Preconditions: A BatchDim with level `level` must exist inside `batched`.
 //
 // The reason why we want to return the index of where said dimension is in the returned
 // tensor is because we want to keep track of which dimension used to be the batch
@@ -35,17 +38,16 @@ static bool has_level(const Tensor& self, int64_t level) {
 // always have to exist at (physical) index 0. When we undo the batch dimension,
 // we want to move it to dimension 1 (as specified by out_dims). So we return the
 // index at which the batch dim appears so that we can move it to the correct place.
-// later down the line.
-static std::pair<Tensor,int64_t> remove_existing_batch_dim(const Tensor& self, int64_t level) {
-  const auto* batched = maybeGetBatched(self);
-  TORCH_INTERNAL_ASSERT(batched != nullptr);
+// later down the line via a call to `movedim`.
+static std::pair<Tensor,int64_t> remove_existing_batch_dim(
+    const BatchedTensorImpl* batched, int64_t level) {
   auto bdims = batched->bdims();
   if (bdims.size() == 1) {
     TORCH_INTERNAL_ASSERT(bdims[0].level() == level);
     return std::make_pair(batched->value(), bdims[0].dim());
   }
   BatchDims new_bdims;
-  int64_t newly_exposed_physical_dim;
+  int64_t newly_exposed_physical_dim = -1;
   new_bdims.reserve(bdims.size() - 1);
   for (const auto& bdim : bdims) {
     if (bdim.level() == level) {
@@ -54,6 +56,9 @@ static std::pair<Tensor,int64_t> remove_existing_batch_dim(const Tensor& self, i
       new_bdims.push_back(bdim);
     }
   }
+  // Because a BatchDim with level `level` must exist inside `batched,
+  // we should have found a `newly_exposed_logical_dim`.
+  TORCH_INTERNAL_ASSERT(newly_exposed_physical_dim != -1);
   int64_t num_batch_dims_before_newly_exposed_physical_dim = std::count_if(
       new_bdims.begin(), new_bdims.end(),
       [&](const BatchDim& bdim) {
@@ -112,9 +117,13 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
     return self.expand(expanded_sizes);
   }
 
+  // Must be batched if has_level(self, /*any_level*/)
+  const auto* batched = maybeGetBatched(self);
+  TORCH_INTERNAL_ASSERT(batched != nullptr);
+
   Tensor self_without_bdim;
   int64_t newly_exposed_logical_dim;
-  std::tie(self_without_bdim, newly_exposed_logical_dim) = remove_existing_batch_dim(self, level);
+  std::tie(self_without_bdim, newly_exposed_logical_dim) = remove_existing_batch_dim(batched, level);
   return movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
 }
 
