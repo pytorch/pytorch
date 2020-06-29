@@ -100,7 +100,9 @@ def get_ignored_functions():
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
         torch.empty,
+        torch.empty_meta,
         torch.empty_strided,
+        torch.empty_quantized,
         torch.eye,
         torch.from_file,
         torch.full,
@@ -140,6 +142,8 @@ def get_ignored_functions():
         torch.autocast_decrement_nesting,
         torch.nn.functional.hardswish,
         torch.is_vulkan_available,
+        torch.is_deterministic,
+        torch.set_deterministic
     )
 
 def get_testing_overrides():
@@ -563,10 +567,6 @@ def get_testing_overrides():
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
-        torch.quantized_group_norm: lambda input, num_groups, weight, bias, eps, output_scale, output_zero_point: -1,
-        torch.quantized_instance_norm: lambda input, weight, bias, eps, output_scale, output_zero_point: -1,
-        torch.quantized_layer_norm: lambda input, normalized_shape, weight, bias, eps, output_scale, output_zero_point: -1,
-
         torch.quantized_gru_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                    col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
 
@@ -582,6 +582,8 @@ def get_testing_overrides():
         torch.randint_like: lambda input, low, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.real: lambda input, out=None: -1,
+        torch.view_as_real: lambda input: -1,
+        torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
         torch.relu: lambda input, inplace=False: -1,
         torch.remainder: lambda input, other, out=None: -1,

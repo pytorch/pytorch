@@ -48,6 +48,7 @@ namespace jit {
   _(UnifyTypes)                        \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
+  _(LoopPeeler)                        \
   _(InsertBailOuts)                    \
   _(PeepholeOptimize)                  \
   _(RecordFunction)                    \
@@ -65,6 +66,7 @@ namespace jit {
   _(QualifiedName)                     \
   _(ClassImport)                       \
   _(ScriptObject)                      \
+  _(ExtraFilesHookPreference)          \
   _(SaveExtraFilesHook)                \
   _(TypeTags)                          \
   _(DCE)                               \
@@ -102,8 +104,13 @@ namespace jit {
   _(GraphExecutor)               \
   _(ModuleConversion)            \
   _(Interp)                      \
+  _(GPU_IrGraphGenerator)        \
   _(GPU_FusionDispatch)          \
   _(GPU_FusionSimpleArith)       \
+  _(GPU_FusionExprEvalConstants) \
+  _(GPU_FusionExprEvalBindings)  \
+  _(GPU_FusionExprEvalBasic)     \
+  _(GPU_FusionExprEvalComplex)   \
   _(GPU_FusionSimpleTypePromote) \
   _(GPU_FusionMutator)           \
   _(GPU_FusionRegister)          \
@@ -127,11 +134,13 @@ namespace jit {
   _(GPU_FusionBinaryOps)         \
   _(GPU_FusionTernaryOps)        \
   _(GPU_FusionCompoundOps)       \
+  _(GPU_FusionCastOps)           \
   _(GPU_FusionAdvancedComputeAt) \
   _(GPU_FusionScalarInputs)      \
   _(GPU_FusionRFactorReplay)     \
   _(GPU_FusionReduction)         \
-  _(GPU_FusionReduction2)
+  _(GPU_FusionReduction2)        \
+  _(GPU_FusionSimpleBCast)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
