@@ -25,7 +25,7 @@ template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void nanprod_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, out_t>(iter, func_wrapper<out_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
     return (::isnan(a) ? acc_t{1} : a) * (::isnan(b) ? acc_t{1} : b);
-  }));
+  }), 1);
 }
 
 static void sum_kernel_cuda(TensorIterator& iter) {
