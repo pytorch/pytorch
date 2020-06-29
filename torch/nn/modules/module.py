@@ -325,7 +325,7 @@ class Module:
         else:
             self._parameters[name] = param
 
-    def add_module(self, name: str, module: 'Module') -> None:
+    def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
