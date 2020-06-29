@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/passes/onnx/initializer_peephole.h>
+#include <torch/csrc/jit/passes/onnx/initializer_based_peephole.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/torch.h>
 
