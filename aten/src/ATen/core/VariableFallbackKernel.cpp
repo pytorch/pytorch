@@ -1,10 +1,11 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <torch/library.h>
 
 /*
  * This file implements a variable fallback kernel for custom operators.
- * Since tensors always have the VariableTensorId set, but custom operators
- * usually don't have a kernel registered for VariableTensorId, the dispatcher
+ * Since tensors always have the Autograd set, but custom operators
+ * usually don't have a kernel registered for Autograd, the dispatcher
  * will call into this fallback kernel instead.
  * Note that this is not a correct autograd implementation. It will just
  * fallthrough to the custom operator implementation.
@@ -20,21 +21,15 @@
 
 using c10::OperatorHandle;
 using c10::Stack;
-using c10::TensorTypeId;
-using c10::TensorTypeSet;
+using c10::DispatchKey;
+using c10::DispatchKeySet;
 using c10::Dispatcher;
 using c10::KernelFunction;
 
 namespace {
 
-void variable_fallback_kernel(const OperatorHandle& op, Stack* stack) {
-    at::AutoNonVariableTypeMode _var_guard(true);
-    Dispatcher::singleton().callBoxed(op, stack);
+TORCH_LIBRARY_IMPL(_, Autograd, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
-
-static auto registry = Dispatcher::singleton().registerBackendFallbackKernel(
-    TensorTypeId::VariableTensorId,
-    KernelFunction::makeFromBoxedFunction<&variable_fallback_kernel>()
-);
 
 }

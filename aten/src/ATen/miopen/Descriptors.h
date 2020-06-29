@@ -61,7 +61,7 @@ public:
   T* desc() const { return desc_.get(); }
   T* desc() { return desc_.get(); }
 
-  // Use mut_desc() to access the underlying desciptor pointer
+  // Use mut_desc() to access the underlying descriptor pointer
   // if you intend to modify what it points to (e.g., using
   // miopenSetFooDescriptor).  This will ensure that the descriptor
   // is initialized.  Code in this file will use this function.
@@ -124,7 +124,7 @@ struct ConvolutionDescriptor
                       &miopenDestroyConvolutionDescriptor>
 {
   void set(miopenDataType_t dataType, miopenConvolutionMode_t c_mode,  int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups) {
-    MIOPEN_CHECK(miopenInitConvolutionDescriptor(mut_desc(), c_mode, pad[0], pad[1], stride[0], stride[1], upscale[0], upscale[1]));
+    MIOPEN_CHECK(miopenInitConvolutionNdDescriptor(mut_desc(), dim, pad, stride, upscale, c_mode));
     MIOPEN_CHECK(miopenSetConvolutionGroupCount(mut_desc(), groups));
   }
 };

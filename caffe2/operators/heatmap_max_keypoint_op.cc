@@ -140,7 +140,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       }
       assert(std::abs(delta(0)) <= MAX_DELTA);
       assert(std::abs(delta(1)) <= MAX_DELTA);
-      // find maximum of detla scores
+      // find maximum of delta scores
       keypoints(k, 0 * keypoint_count + j) =
           x0 + (0.5 + maxX + delta(0)) * xLen / heatmap_size;
       keypoints(k, 1 * keypoint_count + j) =
@@ -166,6 +166,15 @@ using HeatmapMaxKeypointOpFloatCPU =
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     HeatmapMaxKeypoint,
     "_caffe2::HeatmapMaxKeypoint("
+      "Tensor heatmaps, "
+      "Tensor bboxes_in, "
+      "bool should_output_softmax = True"
+    ") -> Tensor keypoints",
+    HeatmapMaxKeypointOpFloatCPU);
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    HeatmapMaxKeypoint2,
+    "__caffe2::HeatmapMaxKeypoint("
       "Tensor heatmaps, "
       "Tensor bboxes_in, "
       "bool should_output_softmax = True"

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include <memory>
+#include <mutex>
 
 #include <nccl.h>
 
@@ -57,6 +58,9 @@ class NCCLComm {
   NCCLComm() : NCCLComm(nullptr) {}
 
   ~NCCLComm() noexcept {
+    // Add lock in this destructor, as aborted_ needs to be read after memory
+    // barrier here.
+    std::unique_lock<std::mutex> lock(mutex_);
     if (ncclComm_ && !aborted_) {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
       // Use ncclCommAbort instead of ncclCommDestroy here since
@@ -76,29 +80,33 @@ class NCCLComm {
     auto comm = std::make_shared<NCCLComm>();
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank));
+    comm->ncclId_ = commId;
     return comm;
+  }
+
+  ncclUniqueId getNcclId() {
+    return ncclId_;
   }
 
   // Must not be copyable
   NCCLComm(const NCCLComm&) = delete;
   NCCLComm& operator=(const NCCLComm&) = delete;
 
+  // Do not support move assignment as there is no valid use case
+  NCCLComm& operator=(NCCLComm&& other) = delete;
+
   // Move constructable
   NCCLComm(NCCLComm&& other) {
+    // Using other's lock, as it reads other's states
+    // Can not use this.mutex_, as this object is being constructed.
+    std::unique_lock<std::mutex> lock(other.mutex_);
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
-  }
-
-  // Move assignable
-  NCCLComm& operator=(NCCLComm&& other) {
-    std::swap(ncclComm_, other.ncclComm_);
-    std::swap(aborted_, other.aborted_);
-    std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
-    return *this;
   }
 
   ncclComm_t getNcclComm() {
+    std::unique_lock<std::mutex> lock(mutex_);
     if (aborted_) {
       throw std::runtime_error("NCCL communicator was aborted.");
     }
@@ -106,6 +114,7 @@ class NCCLComm {
   }
 
   void ncclCommAbort() {
+    std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_) {
       // Should not abort twice.
@@ -127,10 +136,12 @@ class NCCLComm {
   }
 
   bool isAborted() const {
+    std::unique_lock<std::mutex> lock(mutex_);
     return aborted_;
   }
 
   ncclResult_t checkForNcclError() {
+    std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (ncclAsyncErr_ != ncclSuccess) {
       return ncclAsyncErr_;
@@ -145,8 +156,11 @@ class NCCLComm {
 
  protected:
   ncclComm_t ncclComm_;
+  // Unique nccl_id for this communicator.
+  ncclUniqueId ncclId_;
   bool aborted_;
   ncclResult_t ncclAsyncErr_;
+  mutable std::mutex mutex_;
 };
 
 } // namespace c10d

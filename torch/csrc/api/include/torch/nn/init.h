@@ -8,24 +8,6 @@ namespace torch {
 namespace nn {
 namespace init {
 
-// This enum class is deprecated and will be removed in 1.5
-enum class Nonlinearity {
-  Linear,
-  Conv1D,
-  Conv2D,
-  Conv3D,
-  ConvTranspose1D,
-  ConvTranspose2D,
-  ConvTranspose3D,
-  Sigmoid,
-  Tanh,
-  ReLU,
-  LeakyReLU
-};
-
-// This enum class is deprecated and will be removed in 1.5
-enum class FanMode { FanIn, FanOut };
-
 using NonlinearityType = c10::variant<
   enumtype::kLinear,
   enumtype::kConv1D,
@@ -37,18 +19,12 @@ using NonlinearityType = c10::variant<
   enumtype::kSigmoid,
   enumtype::kTanh,
   enumtype::kReLU,
-  enumtype::kLeakyReLU,
-
-  // Support for this enum class is deprecated and will be removed in 1.5.
-  Nonlinearity
+  enumtype::kLeakyReLU
 >;
 
 using FanModeType = c10::variant<
   enumtype::kFanIn,
-  enumtype::kFanOut,
-
-  // Support for this enum class is deprecated and will be removed in 1.5.
-  FanMode
+  enumtype::kFanOut
 >;
 
 } // namespace init

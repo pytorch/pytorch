@@ -26,16 +26,8 @@ bool WeightedSumOp<CUDAContext>::RunOnDevice() {
 
 template <>
 bool SumOp<CUDAContext>::RunOnDevice() {
-  if (Input(0).IsType<float>()) {
-    return DoRunWithType<float, float>();
-  } else if (Input(0).IsType<at::Half>()) {
-    return DoRunWithType<at::Half, at::Half>();
-  } else if (Input(0).IsType<int32_t>()) {
-    return DoRunWithType<int32_t, int32_t>();
-  } else {
-    CAFFE_THROW("Unsupported inputs");
-  }
-  return false;
+  return DispatchHelper<TensorTypes<float, int32_t, int64_t>>::call(
+      this, Input(0));
 }
 
 REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);
@@ -100,7 +92,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
     for (int j = 0; j < InputSize(); j++) {
       Tensor cpu_X(CPU);
       cpu_X.ResizeLike(Input(j));
-      // Hack to cause allocaiton happen here, so it won't happen
+      // Hack to cause allocation happen here, so it won't happen
       // when we do CopyFrom. We need the mutex then because host->gpu
       // copies seem to possibly lock with NCCL.
       cpu_X.mutable_data<float>();

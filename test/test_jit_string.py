@@ -1,5 +1,5 @@
 from test_jit import JitTestCase
-
+from torch.testing._internal.common_utils import run_tests
 
 class TestScript(JitTestCase):
     def test_str_ops(self):
@@ -263,9 +263,14 @@ class TestScript(JitTestCase):
         self.checkScript(test_rpartition, ())
 
         def test_split():
-            # type: () -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str]]
+            """
+             type: () -> Tuple[List[str], List[str], List[str], List[str], List[str],
+                               List[str], List[str], List[str], List[str], List[str], List[str]]
+            """
             return (
                 "a a a a a".split(),
+                "a  a a   a a".split(),
+                "   a a\ta \v a \v\f\n a \t   ".split(),
                 " a a a a a ".split(" "),
                 "a a a a a ".split(" ", 10),
                 "a a a a a ".split(" ", -1),
@@ -276,6 +281,14 @@ class TestScript(JitTestCase):
                 " a*a a*a a ".split("a*", 10),
             )
         self.checkScript(test_split, ())
+
+        # test raising error for empty separator
+        def test_split_empty_separator():
+            s = "test"
+            return s.split("")
+
+        self.checkScriptRaisesRegex(test_split_empty_separator, (), Exception,
+                                    "empty separator")
 
         def test_rsplit():
             # type: () -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str], List[str]]
@@ -310,3 +323,17 @@ class TestScript(JitTestCase):
 
         for i in range(len(inputs) - 1):
             self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
+
+        def test_str_join():
+            return (
+                ",".join(["a"]),
+                ",".join(["a", "b", "c"]),
+                ",".join(["aa", "bb", "cc"]),
+                ",".join(["a,a", "bb", "c,c"]),
+                "**a**".join(["b", "c", "d", "e"]),
+                "".join(["a", "b", "c"]),
+            )
+        self.checkScript(test_str_join, ())
+
+if __name__ == '__main__':
+    run_tests()

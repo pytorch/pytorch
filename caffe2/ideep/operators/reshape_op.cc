@@ -12,7 +12,7 @@ class IDEEPReshapeOp final : public IDEEPOperator {
 
   IDEEPReshapeOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        new_shape_(OperatorBase::GetRepeatedArgument<int>("shape")) {}
+        new_shape_(OperatorBase::GetRepeatedArgument<itensor::dim>("shape")) {}
 
   bool RunOnDevice() override {
     ideep::tensor::dims actual_new_shape = new_shape_;

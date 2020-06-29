@@ -261,4 +261,22 @@ class GetRoIAlignGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(RoIAlign, GetRoIAlignGradient);
 
+template <typename T>
+using RoIAlignGradientCPUOp = RoIAlignGradientOp<T, CPUContext>;
+
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    RoIAlignGradient,
+    "_caffe2::RoIAlignGradient("
+    "    Tensor features,"
+    "    Tensor rois,"
+    "    Tensor grad,"
+    "    str order,"
+    "    float spatial_scale,"
+    "    int pooled_h,"
+    "    int pooled_w,"
+    "    int sampling_ratio,"
+    "    bool aligned"
+    ") -> Tensor",
+    caffe2::RoIAlignGradientCPUOp<float>);

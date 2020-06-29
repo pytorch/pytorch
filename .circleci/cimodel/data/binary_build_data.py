@@ -5,9 +5,6 @@ for "smoketest" builds.
 Each subclass of ConfigNode represents a layer of the configuration hierarchy.
 These tree nodes encapsulate the logic for whether a branch of the hierarchy
 should be "pruned".
-
-In addition to generating config.yml content, the tree is also traversed
-to produce a visualization of config dimensions.
 """
 
 from collections import OrderedDict
@@ -34,15 +31,13 @@ def get_processor_arch_name(cuda_version):
 
 LINUX_PACKAGE_VARIANTS = OrderedDict(
     manywheel=[
-        "2.7m",
-        "2.7mu",
-        "3.5m",
         "3.6m",
         "3.7m",
+        "3.8m",
     ],
     conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
-        "2.7m",
+        "3.7m",
     ],
 )
 
@@ -52,7 +47,14 @@ CONFIG_TREE_DATA = OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
         conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
-            "2.7",
+            "3.7",
+        ],
+    )),
+    windows=(dimensions.CUDA_VERSIONS, OrderedDict(
+        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+        conda=dimensions.STANDARD_PYTHON_VERSIONS,
+        libtorch=[
+            "3.7",
         ],
     )),
 )
@@ -72,6 +74,11 @@ LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
         "gcc5.4_cxx11-abi",
     ],
 )
+
+WINDOWS_LIBTORCH_CONFIG_VARIANTS = [
+    "debug",
+    "release",
+]
 
 
 class TopLevelNode(ConfigNode):
@@ -107,6 +114,8 @@ class PackageFormatConfigNode(ConfigNode):
     def get_children(self):
         if self.find_prop("os_name") == "linux":
             return [LinuxGccConfigNode(self, v) for v in LINUX_GCC_CONFIG_VARIANTS[self.find_prop("package_format")]]
+        elif self.find_prop("os_name") == "windows" and self.find_prop("package_format") == "libtorch":
+            return [WindowsLibtorchConfigNode(self, v) for v in WINDOWS_LIBTORCH_CONFIG_VARIANTS]
         else:
             return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
 
@@ -128,6 +137,16 @@ class LinuxGccConfigNode(ConfigNode):
         return [ArchConfigNode(self, v) for v in cuda_versions]
 
 
+class WindowsLibtorchConfigNode(ConfigNode):
+    def __init__(self, parent, libtorch_config_variant):
+        super(WindowsLibtorchConfigNode, self).__init__(parent, "LIBTORCH_CONFIG_VARIANT=" + str(libtorch_config_variant))
+
+        self.props["libtorch_config_variant"] = libtorch_config_variant
+
+    def get_children(self):
+        return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
+
+
 class ArchConfigNode(ConfigNode):
     def __init__(self, parent, cu):
         super(ArchConfigNode, self).__init__(parent, get_processor_arch_name(cu))
@@ -145,8 +164,6 @@ class PyVersionConfigNode(ConfigNode):
         self.props["pyver"] = pyver
 
     def get_children(self):
-
-        smoke = self.find_prop("smoke")
         package_format = self.find_prop("package_format")
         os_name = self.find_prop("os_name")
 

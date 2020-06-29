@@ -439,7 +439,7 @@ def Train(args):
         stepsz = int(30 * args.epoch_size / total_batch_size / num_shards)
 
         if args.float16_compute:
-            # TODO: merge with multi-prceision optimizer
+            # TODO: merge with multi-precision optimizer
             opt = optimizer.build_fp16_sgd(
                 model,
                 args.base_learning_rate,
@@ -711,7 +711,7 @@ def main():
     parser.add_argument("--distributed_interfaces", type=str, default="",
                         help="Network interfaces to use for distributed run")
 
-    parser.add_argument("--first_iter_timeout", type=int, default=600,
+    parser.add_argument("--first_iter_timeout", type=int, default=1200,
                         help="Timeout (secs) of the first iteration "
                         "(default: %(default)s)")
     parser.add_argument("--timeout", type=int, default=60,

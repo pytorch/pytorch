@@ -91,11 +91,11 @@ class TanHOperatorTester {
   }
 
   inline float outputScale() const {
-    return 1.0f / 256.0f;
+    return 1.0f / 128.0f;
   }
 
   inline uint8_t outputZeroPoint() const {
-    return 0;
+    return 128;
   }
 
   inline TanHOperatorTester& qmin(uint8_t qmin) {

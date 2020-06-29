@@ -6,9 +6,9 @@
 // External API
 //
 
-void pthreadpool_compute_1d(
-    pthreadpool_t threadpool,
-    pthreadpool_function_1d_t function,
+void legacy_pthreadpool_compute_1d(
+    legacy_pthreadpool_t threadpool,
+    legacy_pthreadpool_function_1d_t function,
     void* argument,
     size_t range) {
   if (threadpool == nullptr) {
@@ -27,18 +27,31 @@ void pthreadpool_compute_1d(
           range);
 }
 
-size_t pthreadpool_get_threads_count(pthreadpool_t threadpool) {
+void legacy_pthreadpool_parallelize_1d(
+    const legacy_pthreadpool_t threadpool,
+    const legacy_pthreadpool_function_1d_t function,
+    void* const argument,
+    const size_t range,
+    uint32_t) {
+  legacy_pthreadpool_compute_1d(threadpool, function, argument, range);
+}
+
+size_t legacy_pthreadpool_get_threads_count(legacy_pthreadpool_t threadpool) {
+  // The current fix only useful when XNNPACK calls legacy_pthreadpool_get_threads_count with nullptr.
+  if (threadpool == nullptr) {
+    return 1;
+  }
   return reinterpret_cast<caffe2::ThreadPool*>(threadpool)->getNumThreads();
 }
 
-pthreadpool_t pthreadpool_create(size_t threads_count) {
+legacy_pthreadpool_t legacy_pthreadpool_create(size_t threads_count) {
   std::mutex thread_pool_creation_mutex_;
   std::lock_guard<std::mutex> guard(thread_pool_creation_mutex_);
 
-  return reinterpret_cast<pthreadpool_t>(new caffe2::ThreadPool(threads_count));
+  return reinterpret_cast<legacy_pthreadpool_t>(new caffe2::ThreadPool(threads_count));
 }
 
-void pthreadpool_destroy(pthreadpool_t pthreadpool) {
+void legacy_pthreadpool_destroy(legacy_pthreadpool_t pthreadpool) {
   if (pthreadpool) {
     caffe2::ThreadPool* threadpool =
         reinterpret_cast<caffe2::ThreadPool*>(pthreadpool);

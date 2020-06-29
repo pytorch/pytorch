@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
-import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
+import cimodel.data.simple.util.docker_constants as pytorch_docker_constants
+
 from yaml import load
 
 try:
@@ -18,11 +19,12 @@ def load_tags_for_projects(workflow_config):
     return {
         v["ecr_gc_job"]["project"]: v["ecr_gc_job"]["tags_to_keep"]
         for v in workflow_config["workflows"]["ecr_gc"]["jobs"]
+        if isinstance(v, dict) and "ecr_gc_job" in v
     }
 
 
 def check_version(job, tags, expected_version):
-    valid_versions = [int(v) for v in tags[job].split(",")]
+    valid_versions = tags[job].split(",")
     if expected_version not in valid_versions:
         raise RuntimeError(
             "We configured {} to use Docker version {}; but this "
@@ -35,7 +37,7 @@ def check_version(job, tags, expected_version):
 
 def validate_docker_version():
     tags = load_tags_for_projects(load_config())
-    check_version("pytorch", tags, pytorch_build_definitions.DOCKER_IMAGE_VERSION)
+    check_version("pytorch", tags, pytorch_docker_constants.DOCKER_IMAGE_TAG)
     check_version("caffe2", tags, caffe2_build_definitions.DOCKER_IMAGE_VERSION)
 
 

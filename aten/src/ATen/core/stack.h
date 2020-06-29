@@ -72,9 +72,8 @@ template <typename... Types>
 static inline void pop(Stack& stack, Types&... args) {
   size_t i = 0;
   constexpr size_t N = sizeof...(args);
-  int result[N] = {
+  (void)std::initializer_list<int>{
       (args = std::move(peek(stack, i++, N)).template to<Types>(), 0)...};
-  (void)result;
   drop(stack, N);
 }
 template <typename Type>
@@ -91,7 +90,7 @@ static inline void push_one(Stack& stack, c10::TensorOptions options) {
 
 template <typename... Types>
 static inline void push(Stack& stack, Types&&... args) {
-  (void)std::initializer_list<int>{(push_one(stack, args), 0)...};
+  (void)std::initializer_list<int>{(push_one(stack, std::forward<Types>(args)), 0)...};
 }
 template <class T>
 static inline void push_list_elements(Stack& stack, const c10::List<T>& elements) {

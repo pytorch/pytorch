@@ -14,8 +14,6 @@ try:
 except (ImportError, NameError, AttributeError):
     TORCH_AVAILABLE = False
 
-PY3 = sys.version_info >= (3, 0)
-
 # System Environment Information
 SystemEnv = namedtuple('SystemEnv', [
     'torch_version',
@@ -42,10 +40,9 @@ def run(command):
                          stderr=subprocess.PIPE, shell=True)
     output, err = p.communicate()
     rc = p.returncode
-    if PY3:
-        enc = locale.getpreferredencoding()
-        output = output.decode(enc)
-        err = err.decode(enc)
+    enc = locale.getpreferredencoding()
+    output = output.decode(enc)
+    err = err.decode(enc)
     return rc, output.strip(), err.strip()
 
 
@@ -70,9 +67,11 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 def get_conda_packages(run_lambda):
     if get_platform() == 'win32':
-        grep_cmd = r'findstr /R "torch soumith mkl magma"'
+        system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+        findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
+        grep_cmd = r'{} /R "torch numpy cudatoolkit soumith mkl magma"'.format(findstr_cmd)
     else:
-        grep_cmd = r'grep "torch\|soumith\|mkl\|magma"'
+        grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma"'
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, conda + ' list | ' + grep_cmd)
     if out is None:
@@ -120,7 +119,10 @@ def get_running_cuda_version(run_lambda):
 def get_cudnn_version(run_lambda):
     """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
     if get_platform() == 'win32':
-        cudnn_cmd = 'where /R "%CUDA_PATH%\\bin" cudnn*.dll'
+        system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+        cuda_path = os.environ.get('CUDA_PATH', "%CUDA_PATH%")
+        where_cmd = os.path.join(system_root, 'System32', 'where')
+        cudnn_cmd = '{} /R "{}\\bin" cudnn*.dll'.format(where_cmd, cuda_path)
     elif get_platform() == 'darwin':
         # CUDA libraries and drivers can be found in /usr/local/cuda/. See
         # https://docs.nvidia.com/cuda/cuda-installation-guide-mac-os-x/index.html#install
@@ -177,7 +179,10 @@ def get_mac_version(run_lambda):
 
 
 def get_windows_version(run_lambda):
-    return run_and_read_all(run_lambda, 'wmic os get Caption | findstr /v Caption')
+    system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+    wmic_cmd = os.path.join(system_root, 'System32', 'Wbem', 'wmic')
+    findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
+    return run_and_read_all(run_lambda, '{} os get Caption | {} /v Caption'.format(wmic_cmd, findstr_cmd))
 
 
 def get_lsb_version(run_lambda):
@@ -219,16 +224,17 @@ def get_os(run_lambda):
 
 
 def get_pip_packages(run_lambda):
+    """Returns `pip list` output. Note: will also find conda-installed pytorch
+    and numpy packages."""
     # People generally have `pip` as `pip` or `pip3`
     def run_with_pip(pip):
         if get_platform() == 'win32':
-            grep_cmd = r'findstr /R "numpy torch"'
+            system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+            findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
+            grep_cmd = r'{} /R "numpy torch"'.format(findstr_cmd)
         else:
             grep_cmd = r'grep "torch\|numpy"'
         return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
-
-    if not PY3:
-        return 'pip', run_with_pip('pip')
 
     # Try to figure out if the user is running pip or pip3.
     out2 = run_with_pip('pip')

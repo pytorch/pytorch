@@ -26,7 +26,7 @@
 namespace at { namespace cuda { namespace {
 
 template <typename Handle_t, void Create(Handle_t *), void Destroy(Handle_t)>
-struct DeviceThreadHandlePool {
+struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThreadHandlePool<Handle_t, Create, Destroy>> {
 
     struct Handle {
     Handle_t handle;
@@ -82,9 +82,8 @@ struct DeviceThreadHandlePool {
     // so in the common case handle access doesn't incur either handle creation or a mutex lock.
     class PoolWindow
     {
-    DeviceThreadHandlePool &parent;
     public:
-    PoolWindow(DeviceThreadHandlePool &parent): parent(parent) {}
+    PoolWindow(std::shared_ptr<DeviceThreadHandlePool> parent): weak_parent(std::move(parent)) {}
     ~PoolWindow(){ release(); }
 
     Handle_t reserve(int device)
@@ -95,19 +94,21 @@ struct DeviceThreadHandlePool {
 
         // otherwise, either grab a handle from the pool if one is available,
         // or if not, create a new one.
-        std::lock_guard<std::mutex> guard(parent.mutex);
+        auto parent = weak_parent.lock();
+        TORCH_CHECK(parent, "Cannot create handle during program termination");
+        std::lock_guard<std::mutex> guard(parent->mutex);
 
-        if(parent.available_handles[device].size() > 0)
+        if(parent->available_handles[device].size() > 0)
         {
-        my_handles[device] = parent.available_handles[device].back();
-        parent.available_handles[device].pop_back();
+        my_handles[device] = parent->available_handles[device].back();
+        parent->available_handles[device].pop_back();
         }
         else
         {
         // In local testing, I do observe that emplace_back sometimes routes through temporaries
         // that incur move-constructor and destructor calls.  See comments in Handle above.
-        parent.created_handles[device].emplace_back(true /*create*/);
-        my_handles[device] = parent.created_handles[device].back().handle;
+        parent->created_handles[device].emplace_back(true /*create*/);
+        my_handles[device] = parent->created_handles[device].back().handle;
         }
 
         return my_handles[device];
@@ -117,12 +118,21 @@ struct DeviceThreadHandlePool {
     // Stores the per-device handles currently owned by this thread
     std::unordered_map<int, Handle_t> my_handles;
 
+    std::weak_ptr<DeviceThreadHandlePool> weak_parent;
+
     // Called by the destructor.  Releases this thread's handles back into the pool.
     void release() {
         if(my_handles.size() > 0) {
-            std::lock_guard<std::mutex> guard(parent.mutex);
+            auto parent = weak_parent.lock();
+            if (!parent) {
+                // If this thread exits after atexit handlers have completed, the
+                // cuda context itself may be invalid, so we must leak the handles.
+                return;
+            }
+
+            std::lock_guard<std::mutex> guard(parent->mutex);
             for(auto d_h : my_handles)
-                parent.available_handles[d_h.first].push_back(d_h.second);
+                parent->available_handles[d_h.first].push_back(d_h.second);
         }
     }
     };
@@ -134,7 +144,7 @@ struct DeviceThreadHandlePool {
     PoolWindow *newPoolWindow() {
         // The returned pointer will be owned by a thread local variable
         // so that different threads does not share the same PoolWindow.
-        return new PoolWindow(*this);
+        return new PoolWindow(this->shared_from_this());
     }
 };
 

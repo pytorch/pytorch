@@ -777,9 +777,11 @@ class TestCaffe2End2End(TestCase):
         np.random.seed(seed=0)
         try:
             c2_init_net, c2_predict_net, value_info, debug_str = self.model_downloader.get_c2_model_dbg(net_name)
-        except (OSError, IOError) as e:
+        except Exception as e:
             # catch IOError/OSError that is caused by FileNotFoundError and PermissionError
             # This is helpful because sometimes we get errors due to gfs not available
+            # get_c2_model_dbg wraps URLError/HTTPErrors into generic Exception
+            # Skip the tests if model can not be downloaded due to the any of the above
             print("\n_test_net exception: ", e)
             self.skipTest(str(e))
 
@@ -799,42 +801,69 @@ class TestCaffe2End2End(TestCase):
         onnx_outputs = c2_ir.run(inputs)
         self.assertSameOutputs(c2_outputs, onnx_outputs, decimal=decimal)
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_alexnet(self):
         self._test_net('bvlc_alexnet', decimal=4)
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_resnet50(self):
         self._test_net('resnet50')
 
     @unittest.skipIf(
-        os.environ.get('JENKINS_URL'),
+        os.environ.get('JENKINS_URL') or os.environ.get('SKIP_IN_FB'),
         'Taking too long to download!')
     def test_vgg16(self):
         self._test_net('vgg16')
 
     @unittest.skipIf(
-        os.environ.get('JENKINS_URL'),
+        os.environ.get('JENKINS_URL') or os.environ.get('SKIP_IN_FB'),
         'Taking too long to download!')
     def test_zfnet(self):
         self._test_net('zfnet')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_inception_v1(self):
         self._test_net('inception_v1', decimal=2)
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_inception_v2(self):
         self._test_net('inception_v2')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_squeezenet(self):
         self._test_net('squeezenet')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_densenet121(self):
         self._test_net('densenet121')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_bvlc_googlenet(self):
         self._test_net('bvlc_googlenet')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_bvlc_reference_caffenet(self):
         self._test_net('bvlc_reference_caffenet')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_bvlc_reference_rcnn_ilsvrc13(self):
         self._test_net('bvlc_reference_rcnn_ilsvrc13')
 
