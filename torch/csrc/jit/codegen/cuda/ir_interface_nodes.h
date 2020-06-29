@@ -29,6 +29,8 @@ struct TORCH_CUDA_API Bool : public Val {
   Bool(bool _value)
       : Val(ValType::Scalar, DataType::Bool), maybe_value_{_value} {}
 
+  Bool(const Bool* src, IrCloner* ir_cloner);
+
   Bool(const Bool& other) = delete;
   Bool& operator=(const Bool& other) = delete;
 
@@ -66,6 +68,8 @@ struct TORCH_CUDA_API Float : public Val {
   Float(ScalarType _value)
       : Val(ValType::Scalar, DataType::Float), maybe_value_{_value} {}
 
+  Float(const Float* src, IrCloner* ir_cloner);
+
   Float(const Float& other) = delete;
   Float& operator=(const Float& other) = delete;
 
@@ -101,6 +105,8 @@ struct TORCH_CUDA_API Half : public Val {
   Half(float _value)
       : Val(ValType::Scalar, DataType::Half), maybe_value_{_value} {}
 
+  Half(const Half* src, IrCloner* ir_cloner);
+
   Half(const Half& other) = delete;
   Half& operator=(const Half& other) = delete;
 
@@ -135,6 +141,8 @@ struct TORCH_CUDA_API Int : public Val {
   Int(ScalarType _value)
       : Val(ValType::Scalar, DataType::Int), maybe_value_{_value} {}
 
+  Int(const Int* src, IrCloner* ir_cloner);
+
   Int(const Int& other) = delete;
   Int& operator=(const Int& other) = delete;
 
@@ -162,6 +170,7 @@ struct TransformIter;
 struct OptOutMutator;
 struct LoopNestGenerator;
 struct GPULower;
+
 /*
  * TensorView is our primitive Tensor Type used in code generation. It can be
  * thought of as representing physical memory, however, its dimensionality is
@@ -179,6 +188,7 @@ struct GPULower;
  * changing dimension.
  */
 struct TORCH_CUDA_API TensorView : public Val {
+ public:
   ~TensorView() = default;
 
   TensorView(const TensorView& other) = delete;
@@ -193,6 +203,8 @@ struct TORCH_CUDA_API TensorView : public Val {
 
   TensorView(const std::shared_ptr<Value>& jit_value)
       : TensorView(jit_value->type()->cast<c10::TensorType>()) {}
+
+  TensorView(const TensorView* src, IrCloner* ir_cloner);
 
   TensorDomain* domain() const {
     return domain_;
@@ -332,6 +344,7 @@ struct TORCH_CUDA_API TensorView : public Val {
   int getComputeAtRelPos(int pos);
   void setThisComputeAtAxis();
 
+ private:
   TensorDomain* domain_ = nullptr;
   TensorView* compute_at_view_ = nullptr;
   // compute at axis in compute at view

@@ -170,13 +170,13 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph)->copy();
 
   auto execute_lambda = [&]() {
-    auto nInputs = graph->inputs().size();
+    const auto nInputs = graph->inputs().size();
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
     // shape inference in graph
     // update shape information per the new inputs;
     EraseShapeInformation(graph);
-    for (decltype(nInputs) i = 0; i < nInputs; i++) {
+    for (size_t i = 0; i < nInputs; i++) {
       graph->inputs()[i]->setType(inputs[i].type());
     }
     // shape inference
@@ -191,7 +191,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     // we need to construct outputs;
     std::vector<at::Tensor> outputs;
     for (const auto* output : graph->outputs()) {
-      auto type = output->type()->expect<TensorType>();
+      const auto type = output->type()->expect<TensorType>();
       // Expect output to be tensor;
       TORCH_CHECK(
           type && type->isComplete(),
@@ -210,7 +210,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
       const auto sizes = extractSizes(type);
       const auto strides = extractStrides(type);
 
-      auto tensor = at::empty_strided(sizes, strides, options);
+      const auto tensor = at::empty_strided(sizes, strides, options);
       outputs.push_back(tensor);
 
       // TODO: unsafe broadcast assumption. We assume all output from fusion has

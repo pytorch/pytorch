@@ -301,7 +301,7 @@ BestEffortReplay::BestEffortReplay(
       continue;
     }
 
-    if (t_expr->nOutputs() != r_expr->nOutputs()) {
+    if (t_expr->outputs().size() != r_expr->outputs().size()) {
       TORCH_INTERNAL_ASSERT(!has_rfactor, err_str);
       continue;
     }
@@ -344,7 +344,7 @@ BestEffortReplay::BestEffortReplay(
     }
 
     // Add outputs to map.
-    for (size_t i = 0; i < t_expr->nOutputs(); i++) {
+    for (size_t i = 0; i < t_expr->outputs().size(); i++) {
       auto t_out = t_expr->output(i);
       auto r_out = r_expr->output(i);
       if (t_out->getValType() == ValType::IterDomain &&

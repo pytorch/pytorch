@@ -1,10 +1,10 @@
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-
-#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/mutator.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
+#include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/mutator.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -18,6 +18,12 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+
+Statement::Statement(const Statement* src, IrCloner* ir_cloner) {
+  ir_cloner->registerClone(src, this);
+  name_ = src->name_;
+  fusion_ = ir_cloner->fusion();
+}
 
 Val* Statement::asVal() {
   TORCH_INTERNAL_ASSERT(isVal(), "Cannot cast to Val as this is not a Val.");
@@ -45,6 +51,9 @@ Val::Val(ValType _vtype, DataType _dtype, bool register_val)
   if (register_val)
     this->name_ = this->fusion_->registerVal(this);
 }
+
+Val::Val(const Val* src, IrCloner* ir_cloner)
+    : Statement(src, ir_cloner), vtype_(src->vtype_), dtype_(src->dtype_) {}
 
 // Traverse origin of all values involved in constructing the provided val.
 // Check if all values involved are constant values, meaning the provided
@@ -130,6 +139,9 @@ Expr* Val::getOrigin() {
   return (fusion_->origin(this));
 }
 
+Scope::Scope(const Scope* src, IrCloner* ir_cloner)
+    : exprs_(ir_cloner->clone(src->exprs_)) {}
+
 void Scope::insert_before(Expr* ref, Expr* expr) {
   auto it = exprs_.begin();
   while (it != exprs_.end()) {
@@ -183,76 +195,6 @@ void Scope::clear() {
   this->exprs_ = std::vector<Expr*>();
 }
 
-bool IRInputOutput::hasInput(const Val* input) const {
-  for (auto val : inputs_)
-    if (val == input)
-      return true;
-  return false;
-}
-
-bool IRInputOutput::hasOutput(const Val* output) const {
-  for (auto val : outputs_)
-    if (val == output)
-      return true;
-  return false;
-}
-
-void IRInputOutput::replaceInput(Val* replace, Val* with) {
-  bool changed = false;
-  for (decltype(inputs_.size()) i{0}; i < inputs_.size(); i++) {
-    if (inputs_[i] == replace) {
-      inputs_[i] = with;
-      changed = true;
-      break;
-    }
-  }
-  TORCH_INTERNAL_ASSERT(
-      changed,
-      "Error detected when trying to replace input ",
-      replace,
-      " with ",
-      with,
-      " .");
-}
-
-void IRInputOutput::replaceOutput(Val* replace, Val* with) {
-  bool changed = false;
-  for (decltype(outputs_.size()) i{0}; i < outputs_.size(); i++) {
-    if (outputs_[i] == replace) {
-      outputs_[i] = with;
-      changed = true;
-      break;
-    }
-  }
-  TORCH_INTERNAL_ASSERT(
-      changed,
-      "Error detected when trying to replace output ",
-      replace,
-      " with ",
-      with,
-      " .");
-}
-
-void IRInputOutput::removeInput(Val* val) {
-  auto it = inputs_.begin();
-  for (; it != inputs_.end(); ++it) {
-    if ((*it) == val)
-      break;
-  }
-  TORCH_INTERNAL_ASSERT(it != inputs_.end());
-  inputs_.erase(it);
-}
-
-void IRInputOutput::removeOutput(Val* val) {
-  auto it = outputs_.begin();
-  for (; it != outputs_.end(); ++it) {
-    if ((*it) == val)
-      break;
-  }
-  TORCH_INTERNAL_ASSERT(it != outputs_.end());
-  outputs_.erase(it);
-}
-
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
 Expr::Expr(ExprType _type) : type_{_type} {
@@ -260,6 +202,25 @@ Expr::Expr(ExprType _type) : type_{_type} {
   if (fusion == nullptr)
     TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
   this->fusion_ = fusion;
+}
+
+Expr::Expr(const Expr* src, IrCloner* ir_cloner)
+    : Statement(src, ir_cloner),
+      type_(src->type_),
+      inputs_(ir_cloner->clone(src->inputs_)),
+      outputs_(ir_cloner->clone(src->outputs_)) {}
+
+bool Expr::sameAs(const Expr* const other) const {
+  if (getExprType() != other->getExprType())
+    return false;
+  if (inputs().size() != other->inputs().size() ||
+      outputs().size() != other->outputs().size())
+    return false;
+  for (size_t i = 0; i < inputs().size(); i++) {
+    if (!input(i)->sameAs(other->input(i)))
+      return false;
+  }
+  return true;
 }
 
 } // namespace fuser

@@ -24,6 +24,7 @@ constexpr auto kCgNamespace = "CudaCodeGen";
 constexpr auto kKernelName = "kernel";
 
 namespace {
+
 // See NOTE [ USE OF NVRTC AND DRIVER API ]
 static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
@@ -162,7 +163,7 @@ std::pair<std::string, std::string> codeGeneration(Fusion* fusion) {
 
   std::string func_name = std::string(kCgNamespace) + "::" + kKernelName;
   return std::make_pair(func_name, str_stream.str());
-};
+}
 
 bool validateKernelArgTensor(
     const at::Tensor& arg,

@@ -10,7 +10,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct Fusion;
+class Fusion;
 
 struct Statement;
 

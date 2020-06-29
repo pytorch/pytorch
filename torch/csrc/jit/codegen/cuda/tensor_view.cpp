@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
@@ -37,6 +38,14 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
 
   this->name_ = fusion_->registerVal(this);
 }
+
+TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner),
+      domain_(ir_cloner->clone(src->domain_)),
+      compute_at_view_(ir_cloner->clone(src->compute_at_view_)),
+      relative_compute_at_axis_(src->relative_compute_at_axis_),
+      this_compute_at_axis_(src->this_compute_at_axis_),
+      memory_type_(src->memory_type_) {}
 
 bool TensorView::hasReduction() const {
   return domain()->hasReduction();

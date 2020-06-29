@@ -16,7 +16,7 @@ struct Statement;
 struct Val;
 struct Expr;
 
-struct Fusion;
+class Fusion;
 
 enum class ValType;
 

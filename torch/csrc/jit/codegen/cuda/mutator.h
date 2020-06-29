@@ -11,7 +11,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct Fusion;
+class Fusion;
 
 /*
  * Mutators are the mechanism used to modify IR nodes. Since most nodes are

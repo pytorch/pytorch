@@ -48,7 +48,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct Fusion;
+class Fusion;
 
 // Hierarchal dispatch functions for handle
 struct Statement;

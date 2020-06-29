@@ -306,7 +306,7 @@ void IrGraphGenerator::generateScheduleGraph() {
 
 void IrGraphGenerator::handle(const Statement* s) {
   OptInConstDispatch::handle(s);
-};
+}
 
 void IrGraphGenerator::handle(const Val* v) {
   if (!visited(v)) {
@@ -316,14 +316,14 @@ void IrGraphGenerator::handle(const Val* v) {
     }
     OptInConstDispatch::handle(v);
   }
-};
+}
 
 void IrGraphGenerator::handle(const Expr* e) {
   if (!visited(e)) {
     visited_.insert(e);
     OptInConstDispatch::handle(e);
   }
-};
+}
 
 void IrGraphGenerator::handle(const TensorDomain* td) {
   graph_def_ << "    " << getid(td) << " [label=\"TensorDomain\", "

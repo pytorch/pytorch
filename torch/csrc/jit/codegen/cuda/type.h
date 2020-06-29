@@ -26,6 +26,7 @@ enum class ValType {
 enum class DataType { Bool, Float, Half, Int, Null };
 
 enum class ExprType {
+  Invalid,
   UnaryOp,
   BinaryOp,
   TernaryOp,

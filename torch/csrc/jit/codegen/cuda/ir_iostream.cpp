@@ -8,21 +8,20 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-namespace {
 // Make sure we can inline something, before we attempt to.
-void check_inlineable(const IRInputOutput* irio) {
-  for (auto inp : irio->inputs())
+static void checkInlineable(const Expr* expr) {
+  for (auto input : expr->inputs()) {
     TORCH_CHECK(
-        inp->isScalar(),
+        input->isScalar(),
         "Printing inline computations involving values other than scalars is not currently supported.");
+  }
   TORCH_CHECK(
-      irio->nOutputs() == 1,
+      expr->outputs().size() == 1,
       "Cannot print inline computations if there's more than one output.");
   TORCH_CHECK(
-      irio->output(0)->isScalar(),
+      expr->output(0)->isScalar(),
       "Printing inline computations involving values other than scalars is not currently supported.");
 }
-} // namespace
 
 void IRPrinter::handle(const Statement* s) {
   OptInConstDispatch::handle(s);
@@ -44,11 +43,14 @@ void IRPrinter::handle(const Expr* e) {
 void IRPrinter::printHeader(Fusion* fusion, const std::string& kernel_name_) {
   os << "__global__ void " << kernel_name_ << "(";
 
-  std::deque<Val*> vals;
-  for (decltype(fusion->nInputs()) i{0}; i < fusion->nInputs(); i++)
-    vals.push_back(fusion->input(i));
-  for (decltype(fusion->nOutputs()) i{0}; i < fusion->nOutputs(); i++)
-    vals.push_back(fusion->output(i));
+  std::vector<Val*> vals;
+
+  for (auto val : fusion->inputs()) {
+    vals.push_back(val);
+  }
+  for (auto val : fusion->outputs()) {
+    vals.push_back(val);
+  }
 
   for (Val* val : vals) {
     switch (val->getValType().value()) {
@@ -104,7 +106,7 @@ void IRPrinter::handle(Fusion* fusion) {
 
 void IRPrinter::handle(const TensorDomain* td) {
   os << "[ ";
-  for (std::vector<const IterDomain*>::size_type i = 0; i < td->nDims(); i++) {
+  for (size_t i = 0; i < td->nDims(); i++) {
     handle(td->axis(i));
     if (i != td->nDims() - 1)
       os << ", ";
@@ -242,21 +244,15 @@ void IRPrinter::handle(const NamedScalar* i) {
   os << i->name();
 }
 
-namespace {
-
-bool isTV(const Val* val) {
-  return (
-      val->getValType().value() == ValType::TensorView ||
-      val->getValType().value() == ValType::TensorIndex);
+static bool isTV(const Val* val) {
+  return val->getValType().value() == ValType::TensorView ||
+      val->getValType().value() == ValType::TensorIndex;
 }
 
 // Check if we're a TensorView op that we can generate code for.
-bool isTVOp(const Expr* expr) {
-  if (expr->nOutputs() == 1 && isTV(expr->output(0)))
-    return true;
-  return false;
+static bool isTVOp(const Expr* expr) {
+  return expr->outputs().size() == 1 && isTV(expr->outputs().front());
 }
-} // namespace
 
 void IRPrinter::handle(const UnaryOp* uop) {
   bool istvop = isTVOp(uop);
@@ -270,7 +266,7 @@ void IRPrinter::handle(const UnaryOp* uop) {
     }
     os << " = ";
   } else {
-    check_inlineable(uop);
+    checkInlineable(uop);
   }
 
   if (auto inline_uop = inline_op_str(uop->getUnaryOpType())) {
@@ -319,7 +315,7 @@ void IRPrinter::handle(const BinaryOp* bop) {
 
     os << " = ";
   } else {
-    check_inlineable(bop);
+    checkInlineable(bop);
   }
 
   if (auto inline_bop = inline_op_str(bop->getBinaryOpType())) {
@@ -364,7 +360,7 @@ void IRPrinter::handle(const TernaryOp* top) {
 
     os << " = ";
   } else {
-    check_inlineable(top);
+    checkInlineable(top);
   }
 
   os << top->getTernaryOpType() << "(";

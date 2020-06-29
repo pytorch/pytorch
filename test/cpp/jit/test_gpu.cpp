@@ -426,6 +426,150 @@ void testGPU_FusionClear() {
   TORCH_CHECK(output_ref.equal(output));
 }
 
+void testGPU_FusionCopy() {
+  Fusion original_fusion;
+
+  // Create the test IR
+  {
+    FusionGuard fg(&original_fusion);
+
+    auto tv0 = makeDummyTensor(3);
+    auto tv1 = makeDummyTensor(3);
+    auto tv2 = add(tv1, new Float(2.0));
+    auto tv3 = sub(add(tv0, mul(tv2, tv2)), tv2);
+
+    original_fusion.addInput(tv0);
+    original_fusion.addInput(tv1);
+    original_fusion.addOutput(tv3);
+
+    tv3->reorder({{0, 2}, {2, 0}});
+    tv3->split(-1, 4);
+    tv3->reorder({{2, 0}, {3, 1}, {0, 3}});
+
+    tv0->computeAt(tv3, -1);
+    tv1->computeAt(tv3, -1);
+
+    tv3->axis(0)->parallelize(ParallelType::BIDx);
+    tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  // Test copy before lowering
+  Fusion clone = original_fusion;
+
+  // Compare IR dumps
+  std::stringstream original_ir;
+  std::stringstream clone_ir;
+  original_ir << original_fusion;
+  clone_ir << clone;
+  ASSERT_EQ(original_ir.str(), clone_ir.str());
+
+  // Lower original fusion
+  std::stringstream original_kernel;
+  {
+    GPULower lower(&original_fusion);
+    lower.printKernel(original_kernel);
+  }
+
+  // Make sure the "before lowering" clone was not mutated
+  // while lowering the original fusion IR
+  std::stringstream before_lowering_ir;
+  before_lowering_ir << clone;
+  ASSERT_EQ(original_ir.str(), before_lowering_ir.str());
+
+  // Test copy after lowering (including assignment operator)
+  Fusion before_lowering = clone;
+  clone = original_fusion;
+
+  // Compare IR dumps
+  std::stringstream original_lowered_ir;
+  std::stringstream clone_lowered_ir;
+  original_lowered_ir << original_fusion;
+  clone_lowered_ir << clone;
+  ASSERT_EQ(original_lowered_ir.str(), clone_lowered_ir.str());
+
+  // Lower the "before lowering" and compare kernels
+  std::stringstream clone_kernel;
+  {
+    GPULower lower(&before_lowering);
+    lower.printKernel(clone_kernel);
+  }
+  ASSERT_EQ(original_kernel.str(), clone_kernel.str());
+}
+
+void testGPU_FusionMove() {
+  Fusion fusion;
+
+  // Create the test IR
+  {
+    FusionGuard fg(&fusion);
+
+    auto tv0 = makeDummyTensor(3);
+    auto tv1 = makeDummyTensor(3);
+    auto tv2 = add(tv1, new Float(2.0));
+    auto tv3 = sub(add(tv0, mul(tv2, tv2)), tv2);
+
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+    fusion.addOutput(tv3);
+
+    tv3->reorder({{0, 2}, {2, 0}});
+    tv3->split(-1, 4);
+    tv3->reorder({{2, 0}, {3, 1}, {0, 3}});
+
+    tv0->computeAt(tv3, -1);
+    tv1->computeAt(tv3, -1);
+
+    tv3->axis(0)->parallelize(ParallelType::BIDx);
+    tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  std::stringstream original_ir;
+  original_ir << fusion;
+
+  // Test move before lowering
+  Fusion another_fusion = std::move(fusion);
+
+  // Check that the original fusion is "empty"
+  //
+  // IMPORTANT: these checks assume knowledge of the internal
+  //    implementation of the move operations. General uses
+  //    should only assume that the moved-from object is in
+  //    a valid, but unspecified state. This is similar to the
+  //    standard library containers:
+  //    https://en.cppreference.com/w/cpp/utility/move
+  //
+  TORCH_CHECK(fusion.exprs().empty());
+  TORCH_CHECK(fusion.vals().empty());
+  TORCH_CHECK(fusion.inputs().empty());
+  TORCH_CHECK(fusion.outputs().empty());
+
+  // clear() has no pre-conditions so it's valid to call on a moved-from object
+  fusion.clear();
+
+  // Compare IR dumps
+  std::stringstream another_ir;
+  another_ir << another_fusion;
+  ASSERT_EQ(original_ir.str(), another_ir.str());
+
+  // Lower the fusion IR
+  std::stringstream kernel;
+  {
+    GPULower lower(&another_fusion);
+    lower.printKernel(kernel);
+  }
+
+  std::stringstream lowered_ir;
+  lowered_ir << another_fusion;
+
+  // Test move assignment after lowering
+  fusion = std::move(another_fusion);
+
+  // Compare IR dumps
+  std::stringstream moved_lowered_ir;
+  moved_lowered_ir << fusion;
+  ASSERT_EQ(lowered_ir.str(), moved_lowered_ir.str());
+}
+
 void testGPU_FusionSimpleArith() {
   std::stringstream ss1, ss2;
 

@@ -48,7 +48,7 @@ struct TypeHash {
  * us mechanisms for dependency analysis and DCE including safety checks.
  */
 
-struct Fusion;
+class Fusion;
 struct TensorView;
 
 namespace cuda {
@@ -105,17 +105,19 @@ struct InputsOf : public IterVisitor {
  *
  * The Fusion owns the whole IR graph (Vals and Exprs)
  */
-class TORCH_CUDA_API Fusion : public IRInputOutput {
+class TORCH_CUDA_API Fusion final {
  public:
   Fusion() = default;
 
-  Fusion(const Fusion& other) = delete;
-  Fusion& operator=(const Fusion& other) = delete;
+  Fusion(const Fusion& other);
+  Fusion(Fusion&& other) noexcept;
 
-  Fusion(Fusion&& other) = delete;
-  Fusion& operator=(Fusion&& other) = delete;
+  Fusion& operator=(const Fusion& other);
+  Fusion& operator=(Fusion&& other) noexcept;
 
   ~Fusion();
+
+  friend void swap(Fusion& a, Fusion& b) noexcept;
 
   void clear() noexcept;
 
@@ -231,6 +233,20 @@ class TORCH_CUDA_API Fusion : public IRInputOutput {
     return it != values_map_.end() ? it->second : value;
   }
 
+  const auto& inputs() const {
+    return inputs_;
+  }
+
+  const auto& outputs() const {
+    return outputs_;
+  }
+
+  bool hasInput(const Val* val) const;
+  bool hasOutput(const Val* val) const;
+
+  void replaceInput(Val* replace, Val* with);
+  void replaceOutput(Val* replace, Val* with);
+
  private:
   // Return an int that monotonically increases for each val/expr, some are
   // explicitly incremented by type.
@@ -261,6 +277,10 @@ class TORCH_CUDA_API Fusion : public IRInputOutput {
 
   // Map a subset of values to the lowered equivalent (ex. sizes)
   std::unordered_map<Val*, Val*> values_map_;
+
+  // Fusion inputs and outputs
+  std::vector<Val*> inputs_;
+  std::vector<Val*> outputs_;
 };
 
 } // namespace fuser

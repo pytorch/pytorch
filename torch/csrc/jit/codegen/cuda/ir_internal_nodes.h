@@ -33,6 +33,8 @@ struct TORCH_CUDA_API UnaryOp : public Expr {
   ~UnaryOp() = default;
   UnaryOp(UnaryOpType _type, Val* _out, Val* _in);
 
+  UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
+
   UnaryOp(const UnaryOp& other) = delete;
   UnaryOp& operator=(const UnaryOp& other) = delete;
 
@@ -67,6 +69,8 @@ struct TORCH_CUDA_API UnaryOp : public Expr {
 struct TORCH_CUDA_API BinaryOp : public Expr {
   ~BinaryOp() = default;
   BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs);
+
+  BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
 
   BinaryOp(const BinaryOp& other) = delete;
   BinaryOp& operator=(const BinaryOp& other) = delete;
@@ -105,6 +109,8 @@ struct TORCH_CUDA_API BroadcastOp : public Expr {
   ~BroadcastOp() = default;
   BroadcastOp(Val* _out, Val* _in);
 
+  BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
+
   BroadcastOp(const BroadcastOp& other) = delete;
   BroadcastOp& operator=(const BroadcastOp& other) = delete;
 
@@ -135,6 +141,8 @@ struct TORCH_CUDA_API BroadcastOp : public Expr {
 struct TORCH_CUDA_API ReductionOp : public Expr {
   ~ReductionOp() = default;
   ReductionOp(BinaryOpType _reduction_op_type, Val* _init, Val* _out, Val* _in);
+
+  ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
   ReductionOp(const ReductionOp& other) = delete;
   ReductionOp& operator=(const ReductionOp& other) = delete;
@@ -173,6 +181,8 @@ struct TORCH_CUDA_API ReductionOp : public Expr {
 struct TORCH_CUDA_API TernaryOp : public Expr {
   ~TernaryOp() = default;
   TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* _in3);
+
+  TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
 
   TernaryOp(const TernaryOp& other) = delete;
   TernaryOp& operator=(const TernaryOp& other) = delete;
@@ -226,6 +236,8 @@ struct TORCH_CUDA_API IterDomain : public Val {
       bool _reduction_domain = false,
       bool _rfactor_domain = false,
       bool _broadcast_domain = false);
+
+  IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
   bool sameAs(const IterDomain* const other) const;
 
@@ -333,6 +345,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
   bool is_rfactor_domain_ = false;
   bool is_broadcast_domain_ = false;
 };
+
 /*
  * TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
  * logical axis in its associated tensor. TensorDomain does not directly hold
@@ -347,6 +360,8 @@ struct TORCH_CUDA_API IterDomain : public Val {
  * a tensor domain.
  */
 struct TORCH_CUDA_API TensorDomain : public Val {
+ public:
+  TensorDomain() = delete;
   ~TensorDomain() = default;
 
   TensorDomain(const TensorDomain& other) = delete;
@@ -355,7 +370,7 @@ struct TORCH_CUDA_API TensorDomain : public Val {
   TensorDomain(TensorDomain&& other) = delete;
   TensorDomain& operator=(TensorDomain&& other) = delete;
 
-  TensorDomain(std::vector<IterDomain*> _domain);
+  explicit TensorDomain(std::vector<IterDomain*> _domain);
 
   TensorDomain(
       std::vector<IterDomain*> _root_domain,
@@ -365,6 +380,8 @@ struct TORCH_CUDA_API TensorDomain : public Val {
       std::vector<IterDomain*> _root_domain,
       std::vector<IterDomain*> _rfactor_domain,
       std::vector<IterDomain*> _domain);
+
+  TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
 
   std::vector<IterDomain*>::size_type nDims() const {
     return domain_.size();
@@ -460,6 +477,8 @@ struct TORCH_CUDA_API Split : public Expr {
 
   Split(IterDomain* _outer, IterDomain* _inner, IterDomain* _in, Int* _factor);
 
+  Split(const Split* src, IrCloner* ir_cloner);
+
   IterDomain* outer() const {
     return outer_;
   }
@@ -491,6 +510,8 @@ struct TORCH_CUDA_API Split : public Expr {
 struct TORCH_CUDA_API Merge : public Expr {
   ~Merge() = default;
   Merge(IterDomain* _out, IterDomain* _outer, IterDomain* _inner);
+
+  Merge(const Merge* src, IrCloner* ir_cloner);
 
   Merge(const Merge& other) = delete;
   Merge& operator=(const Merge& other) = delete;
@@ -532,6 +553,8 @@ struct TORCH_CUDA_API ForLoop : public Expr {
       IterDomain* _iter_domain,
       const std::vector<Expr*>& _body = {},
       Expr* parent_scope = nullptr);
+
+  ForLoop(const ForLoop* src, IrCloner* ir_cloner);
 
   ForLoop(const ForLoop& other) = delete;
   ForLoop& operator=(const ForLoop& other) = delete;
@@ -583,6 +606,8 @@ struct TORCH_CUDA_API IfThenElse : public Expr {
       const std::vector<Expr*>& _if_body = {},
       const std::vector<Expr*>& _else_body = {},
       Expr* _parent_scope = nullptr);
+
+  IfThenElse(const IfThenElse* src, IrCloner* ir_cloner);
 
   IfThenElse(const IfThenElse& other) = delete;
   IfThenElse& operator=(const IfThenElse& other) = delete;
@@ -657,6 +682,8 @@ struct TORCH_CUDA_API TensorIndex : public Val {
         "Cannot index with a value other than an int.");
   }
 
+  TensorIndex(const TensorIndex* src, IrCloner* ir_cloner);
+
   std::vector<Val*>::size_type nDims() const {
     return indices_.size();
   }
@@ -700,6 +727,8 @@ struct TORCH_CUDA_API Allocate : public Expr {
 
   Allocate(Val* _tv, Val* size);
 
+  Allocate(const Allocate* src, IrCloner* ir_cloner);
+
   DataType buf_type() const;
   Val* extent() const {
     return extent_;
@@ -728,6 +757,8 @@ struct TORCH_CUDA_API NamedScalar : public Val {
 
   NamedScalar(std::string _name, DataType dtype)
       : Val(ValType::NamedScalar, dtype), name_(_name) {}
+
+  NamedScalar(const NamedScalar* src, IrCloner* ir_cloner);
 
   NamedScalar(const NamedScalar& other) = delete;
   NamedScalar& operator=(const NamedScalar& other) = delete;
