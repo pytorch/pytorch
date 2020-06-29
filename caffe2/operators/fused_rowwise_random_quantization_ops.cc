@@ -170,7 +170,7 @@ In Advances in Neural Information Processing Systems, pp. 1508-1518. 2017.
 )DOC")
     .Input(0, "input", "Float32 input data")
     .Output(0, "output", "Fused bitwidth, tail, min, max and quantized data")
-    .Arg("bitwidth", "How many bits to quantiz per data (defaults to 8).")
+    .Arg("bitwidth", "How many bits to quantize per data (defaults to 8).")
     .Arg("random", "random or not (True). False is set up for unittest.");
 NO_GRADIENT(FloatToFusedRandRowwiseQuantized);
 

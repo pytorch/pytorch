@@ -115,7 +115,7 @@ def checkpoint(function, *args, **kwargs):
     :func:`torch.no_grad` manner, i.e., not storing the intermediate
     activations. Instead, the forward pass saves the inputs tuple and the
     :attr:`function` parameter. In the backwards pass, the saved inputs and
-    :attr:`function` is retreived, and the forward pass is computed on
+    :attr:`function` is retrieved, and the forward pass is computed on
     :attr:`function` again, now tracking the intermediate activations, and then
     the gradients are calculated using these activation values.
 
@@ -128,6 +128,14 @@ def checkpoint(function, *args, **kwargs):
         than the one during forward, e.g., due to some global variable, the
         checkpointed version won't be equivalent, and unfortunately it can't be
         detected.
+
+    .. warning::
+        If checkpointed segment contains tensors detached from the computational
+        graph by `detach()` or `torch.no_grad()`, the backward pass will raise an
+        error. This is because `checkpoint` makes all the outputs require 
+        gradients which causes issues when a tensor is defined to have no 
+        gradient in the model. To circumvent this, detach the tensors outside of 
+        the `checkpoint` function.
 
     .. warning:
         At least one of the inputs needs to have :code:`requires_grad=True` if

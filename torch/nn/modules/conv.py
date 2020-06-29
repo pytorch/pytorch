@@ -1,28 +1,60 @@
 # coding=utf-8
 import math
+import warnings
+
 import torch
+from torch import Tensor
 from torch.nn.parameter import Parameter
 from .. import functional as F
 from .. import init
 from .module import Module
-from .utils import _single, _pair, _triple
-from ..._jit_internal import List
+from .utils import _single, _pair, _triple, _reverse_repeat_tuple
+
+from ..common_types import _size_1_t, _size_2_t, _size_3_t
+from typing import Optional, List, Tuple
 
 
 class _ConvNd(Module):
 
-    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias',
+    __constants__ = ['stride', 'padding', 'dilation', 'groups',
                      'padding_mode', 'output_padding', 'in_channels',
                      'out_channels', 'kernel_size']
+    __annotations__ = {'bias': Optional[torch.Tensor]}
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride,
-                 padding, dilation, transposed, output_padding,
-                 groups, bias, padding_mode):
+    _in_channels: int
+    out_channels: int
+    kernel_size: Tuple[int, ...]
+    stride: Tuple[int, ...]
+    padding: Tuple[int, ...]
+    dilation: Tuple[int, ...]
+    transposed: bool
+    output_padding: Tuple[int, ...]
+    groups: int
+    padding_mode: str
+    weight: Tensor
+    bias: Optional[Tensor]
+
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: _size_1_t,
+                 stride: _size_1_t,
+                 padding: _size_1_t,
+                 dilation: _size_1_t,
+                 transposed: bool,
+                 output_padding: _size_1_t,
+                 groups: int,
+                 bias: Optional[Tensor],
+                 padding_mode: str) -> None:
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
             raise ValueError('out_channels must be divisible by groups')
+        valid_padding_modes = {'zeros', 'reflect', 'replicate', 'circular'}
+        if padding_mode not in valid_padding_modes:
+            raise ValueError("padding_mode must be one of {}, but got padding_mode='{}'".format(
+                valid_padding_modes, padding_mode))
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
@@ -33,6 +65,11 @@ class _ConvNd(Module):
         self.output_padding = output_padding
         self.groups = groups
         self.padding_mode = padding_mode
+        # `_reversed_padding_repeated_twice` is the padding to be passed to
+        # `F.pad` if needed (e.g., for non-zero padding types that are
+        # implemented as two ops: padding + conv). `F.pad` accepts paddings in
+        # reverse order than the dimension.
+        self._reversed_padding_repeated_twice = _reverse_repeat_tuple(self.padding, 2)
         if transposed:
             self.weight = Parameter(torch.Tensor(
                 in_channels, out_channels // groups, *kernel_size))
@@ -45,7 +82,7 @@ class _ConvNd(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
@@ -116,14 +153,14 @@ class Conv1d(_ConvNd):
           of size
           :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
 
-    .. note::
+    Note:
 
         Depending of the size of your kernel, several (of the last)
         columns of the input might be lost, because it is a valid
         `cross-correlation`_, and not a full `cross-correlation`_.
         It is up to the user to add proper padding.
 
-    .. note::
+    Note:
 
         When `groups == in_channels` and `out_channels == K * in_channels`,
         where `K` is a positive integer, this operation is also termed in
@@ -133,7 +170,14 @@ class Conv1d(_ConvNd):
         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
         :math:`(C_\text{in}=C_{in}, C_\text{out}=C_{in} \times K, ..., \text{groups}=C_{in})`.
 
-    .. include:: cudnn_deterministic.rst
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
+
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -142,12 +186,14 @@ class Conv1d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
         groups (int, optional): Number of blocked connections from input
             channels to output channels. Default: 1
-        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
+        bias (bool, optional): If ``True``, adds a learnable bias to the
+            output. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
@@ -159,14 +205,15 @@ class Conv1d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`.
+            :math:`(\text{out\_channels},
+            \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`.
             The values of these weights are sampled from
             :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
+            :math:`k = \frac{groups}{C_\text{in} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape
             (out_channels). If :attr:`bias` is ``True``, then the values of these weights are
             sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
+            :math:`k = \frac{groups}{C_\text{in} * \text{kernel\_size}}`
 
     Examples::
 
@@ -181,9 +228,18 @@ class Conv1d(_ConvNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_1_t,
+        stride: _size_1_t = 1,
+        padding: _size_1_t = 0,
+        dilation: _size_1_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'  # TODO: refine this type
+    ):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
         padding = _single(padding)
@@ -192,10 +248,9 @@ class Conv1d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
 
-    def forward(self, input):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv1d(F.pad(input, expanded_padding, mode='circular'),
+    def forward(self, input: Tensor) -> Tensor:
+        if self.padding_mode != 'zeros':
+            return F.conv1d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
         return F.conv1d(input, self.weight, self.bias, self.stride,
@@ -249,14 +304,14 @@ class Conv2d(_ConvNd):
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
 
-    .. note::
+    Note:
 
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    .. note::
+    Note:
 
         When `groups == in_channels` and `out_channels == K * in_channels`,
         where `K` is a positive integer, this operation is also termed in
@@ -266,18 +321,29 @@ class Conv2d(_ConvNd):
         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
         :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
 
-    .. include:: cudnn_deterministic.rst
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
+
 
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
-        padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
+        padding (int or tuple, optional): Zero-padding added to both sides of
+            the input. Default: 0
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
-        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
+        groups (int, optional): Number of blocked connections from input
+            channels to output channels. Default: 1
+        bias (bool, optional): If ``True``, adds a learnable bias to the
+            output. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
@@ -293,17 +359,18 @@ class Conv2d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
-                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
-                         The values of these weights are sampled from
-                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
-        bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
-                         then the values of these weights are
-                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
+            :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
+            The values of these weights are sampled from
+            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+        bias (Tensor):   the learnable bias of the module of shape
+            (out_channels). If :attr:`bias` is ``True``,
+            then the values of these weights are
+            sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
 
-    Examples::
+    Examples:
 
         >>> # With square kernels and equal stride
         >>> m = nn.Conv2d(16, 33, 3, stride=2)
@@ -320,9 +387,18 @@ class Conv2d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_2_t,
+        stride: _size_2_t = 1,
+        padding: _size_2_t = 0,
+        dilation: _size_2_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'  # TODO: refine this type
+    ):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
         padding = _pair(padding)
@@ -332,16 +408,14 @@ class Conv2d(_ConvNd):
             False, _pair(0), groups, bias, padding_mode)
 
     def _conv_forward(self, input, weight):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[1] + 1) // 2, self.padding[1] // 2,
-                                (self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv2d(F.pad(input, expanded_padding, mode='circular'),
+        if self.padding_mode != 'zeros':
+            return F.conv2d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
                             weight, self.bias, self.stride,
                             _pair(0), self.dilation, self.groups)
         return F.conv2d(input, weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return self._conv_forward(input, self.weight)
 
 class Conv3d(_ConvNd):
@@ -384,14 +458,14 @@ class Conv3d(_ConvNd):
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the height dimension and the third `int` for the width dimension
 
-    .. note::
+    Note:
 
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    .. note::
+    Note:
 
         When `groups == in_channels` and `out_channels == K * in_channels`,
         where `K` is a positive integer, this operation is also termed in
@@ -401,7 +475,14 @@ class Conv3d(_ConvNd):
         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
         :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
 
-    .. include:: cudnn_deterministic.rst
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
+
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -409,7 +490,7 @@ class Conv3d(_ConvNd):
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
-        padding_mode (string, optional). Accepted values `zeros` and `circular` Default: `zeros`
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
@@ -436,11 +517,11 @@ class Conv3d(_ConvNd):
                          :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
                          then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -457,9 +538,18 @@ class Conv3d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_3_t,
+        stride: _size_3_t = 1,
+        padding: _size_3_t = 0,
+        dilation: _size_3_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'
+    ):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
@@ -468,19 +558,27 @@ class Conv3d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode)
 
-    def forward(self, input):
-        if self.padding_mode == 'circular':
-            expanded_padding = ((self.padding[2] + 1) // 2, self.padding[2] // 2,
-                                (self.padding[1] + 1) // 2, self.padding[1] // 2,
-                                (self.padding[0] + 1) // 2, self.padding[0] // 2)
-            return F.conv3d(F.pad(input, expanded_padding, mode='circular'),
+    def forward(self, input: Tensor) -> Tensor:
+        if self.padding_mode != 'zeros':
+            return F.conv3d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride, _triple(0),
                             self.dilation, self.groups)
         return F.conv3d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 
-class _ConvTransposeMixin(object):
+class _ConvTransposeNd(_ConvNd):
+    def __init__(self, in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, transposed, output_padding,
+                 groups, bias, padding_mode):
+        if padding_mode != 'zeros':
+            raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
+
+        super(_ConvTransposeNd, self).__init__(
+            in_channels, out_channels, kernel_size, stride,
+            padding, dilation, transposed, output_padding,
+            groups, bias, padding_mode)
+
     def _output_padding(self, input, output_size, stride, padding, kernel_size):
         # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
         if output_size is None:
@@ -520,7 +618,7 @@ class _ConvTransposeMixin(object):
         return ret
 
 
-class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
+class ConvTranspose1d(_ConvTransposeNd):
     r"""Applies a 1D transposed convolution operator over an input image
     composed of several input planes.
 
@@ -553,14 +651,14 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
           its own set of filters (of size
           :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`).
 
-    .. note::
+    Note:
 
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    .. note::
+    Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv1d` and a :class:`~torch.nn.ConvTranspose1d`
@@ -572,7 +670,13 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
-    .. include:: cudnn_deterministic.rst
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -601,16 +705,26 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
                          :math:`\text{kernel\_size})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
+                         :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels).
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
+                         :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True,
-                 dilation=1, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_1_t,
+        stride: _size_1_t = 1,
+        padding: _size_1_t = 0,
+        output_padding: _size_1_t = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: _size_1_t = 1,
+        padding_mode: str = 'zeros'
+    ):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
         padding = _single(padding)
@@ -620,8 +734,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
-    def forward(self, input, output_size=None):
-        # type: (Tensor, Optional[List[int]]) -> Tensor
+    def forward(self, input: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
@@ -631,7 +744,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
             output_padding, self.groups, self.dilation)
 
 
-class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
+class ConvTranspose2d(_ConvTransposeNd):
     r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes.
 
@@ -678,7 +791,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    .. note::
+    Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv2d` and a :class:`~torch.nn.ConvTranspose2d`
@@ -690,7 +803,14 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
-    .. include:: cudnn_deterministic.rst
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
+
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -722,11 +842,11 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
                          :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -754,9 +874,19 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True,
-                 dilation=1, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_2_t,
+        stride: _size_2_t = 1,
+        padding: _size_2_t = 0,
+        output_padding: _size_2_t = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: int = 1,
+        padding_mode: str = 'zeros'
+    ):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
         padding = _pair(padding)
@@ -766,8 +896,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
-    def forward(self, input, output_size=None):
-        # type: (Tensor, Optional[List[int]]) -> Tensor
+    def forward(self, input: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
 
@@ -778,7 +907,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
             output_padding, self.groups, self.dilation)
 
 
-class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
+class ConvTranspose3d(_ConvTransposeNd):
     r"""Applies a 3D transposed convolution operator over an input image composed of several input
     planes.
     The transposed convolution operator multiplies each input value element-wise by a learnable kernel,
@@ -820,14 +949,14 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the height dimension and the third `int` for the width dimension
 
-    .. note::
+    Note:
 
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
-    .. note::
+    Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
@@ -839,7 +968,14 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
-    .. include:: cudnn_deterministic.rst
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
+
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -875,11 +1011,11 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
                          :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
                          If :attr:`bias` is ``True``, then the values of these weights are
                          sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
 
     Examples::
 
@@ -897,9 +1033,19 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True,
-                 dilation=1, padding_mode='zeros'):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: _size_3_t,
+        stride: _size_3_t = 1,
+        padding: _size_3_t = 0,
+        output_padding: _size_3_t = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: _size_3_t = 1,
+        padding_mode: str = 'zeros'
+    ):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
@@ -909,8 +1055,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode)
 
-    def forward(self, input, output_size=None):
-        # type: (Tensor, Optional[List[int]]) -> Tensor
+    def forward(self, input: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose3d')
 
@@ -919,6 +1064,29 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         return F.conv_transpose3d(
             input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
+
+
+# TODO: Deprecate and remove the following alias `_ConvTransposeMixin`.
+#
+# `_ConvTransposeMixin` was a mixin that was removed.  It is meant to be used
+# with `_ConvNd` to construct actual module classes that implements conv
+# transpose ops:
+#
+#   class MyConvTranspose(_ConvNd, _ConvTransposeMixin):
+#       ...
+#
+# In PyTorch, it has been replaced by `_ConvTransposeNd`, which is a proper
+# subclass of `_ConvNd`.  However, some user code in the wild still (incorrectly)
+# use the internal class `_ConvTransposeMixin`.  Hence, we provide this alias
+# for BC, because it is cheap and easy for us to do so, even though that
+# `_ConvTransposeNd` is really not a mixin anymore (but multiple inheritance as
+# above would still work).
+class _ConvTransposeMixin(_ConvTransposeNd):
+    def __init__(self, *args, **kwargs):
+        warnings.warn(
+            "_ConvTransposeMixin is a deprecated internal class. "
+            "Please consider using public APIs.")
+        super(_ConvTransposeMixin, self).__init__(*args, **kwargs)
 
 
 # TODO: Conv2dLocal

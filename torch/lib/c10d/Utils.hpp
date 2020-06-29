@@ -300,8 +300,10 @@ inline at::Tensor newLikeFlat(
   }
   at::DeviceGuard gpuGuard(device);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
+  std::vector<int64_t> strides{static_cast<int64_t>(t.numel())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  return at::empty(sizes, t.options());
+  strides.insert(strides.end(), t.strides().begin(), t.strides().end());
+  return at::empty_strided(sizes, strides, t.options().memory_format(c10::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -361,7 +363,7 @@ using SizeType = uint64_t;
 // `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
 // `errno` to `EINVAL` in child process on some macos
 // (https://stackoverflow.com/a/20295079), and thus `errno` should really only
-// be inspected if an error occured.
+// be inspected if an error occurred.
 //
 // `success_cond` is an expression used to check if an error has happend. So for
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output

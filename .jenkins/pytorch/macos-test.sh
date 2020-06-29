@@ -4,7 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 conda install -y six
-pip install -q hypothesis "librosa>=0.6.2" psutil
+pip install -q hypothesis "librosa>=0.6.2" "numba<=0.49.1" psutil
 
 # TODO move this to docker
 pip install unittest-xml-reporting
@@ -54,7 +54,17 @@ test_python_all() {
   # using the address associated with the loopback interface.
   export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
-  python test/run_test.py --verbose
+
+  if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+    DETERMINE_FROM=$(mktemp)
+    file_diff_from_base "$DETERMINE_FROM"
+  fi
+
+  # Increase default limit on open file handles from 256 to 1024
+  ulimit -n 1024
+
+  python test/run_test.py --verbose --exclude test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --determine-from="$DETERMINE_FROM"
+
   assert_git_not_dirty
 }
 

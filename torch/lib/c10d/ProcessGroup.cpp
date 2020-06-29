@@ -56,10 +56,29 @@ void ProcessGroup::Work::finish(std::exception_ptr exception) {
   cv_.notify_all();
 }
 
+void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  completed_ = true;
+  exception_ = exception;
+  if (exception_) {
+    std::rethrow_exception(exception_);
+  }
+}
+
 ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
 
 ProcessGroup::~ProcessGroup() {}
+
+// This is introduced so that implementors of ProcessGroup would not need to
+// have this implmentation.
+std::shared_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& /* usused */,
+    std::vector<at::Tensor>& /* usused */,
+    const AllgatherOptions& /* usused */) {
+  throw std::runtime_error(
+      "no support for allgather_coalesced in this process group");
+}
 
 } // namespace c10d

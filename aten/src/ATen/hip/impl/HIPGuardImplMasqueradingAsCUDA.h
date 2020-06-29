@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/hip/HIPConfig.h>
+#include <ATen/hip/HIPConfig.h>
 
 // The includes of HIPGuard.h
 #include <c10/hip/impl/HIPGuardImpl.h>
@@ -27,7 +27,7 @@ namespace c10 { namespace hip {
 // HIP occurs; instead, anywhere we see "CUDA", it actually means "HIP".
 // For example, when you use HIPified PyTorch, you say x.cuda() to
 // move a tensor onto ROCm device.  We call this situation "HIP
-// maquerading as CUDA".
+// masquerading as CUDA".
 //
 // This leads to a very awkward situation when we want to call c10_hip
 // code from PyTorch, since c10_hip is expecting things to be called

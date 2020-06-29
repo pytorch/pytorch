@@ -138,7 +138,7 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     OpSchema()
         .SetDoc("Mirror Caffe2 BatchMatMul operator")
         .Input(0, "X", "tensor of shape (dim0, dim1 ... M, K)", "T")
-        .Input(1, "Y", "tensor of shpae (dim0, dim2 ... K, N)", "T")
+        .Input(1, "Y", "tensor of shape (dim0, dim2 ... K, N)", "T")
         .Output(0, "Z", "tensor of shape (dim0, dim1 ... M, N)", "T")
         .TypeConstraint(
             "T",

@@ -131,7 +131,7 @@ class TestPooling(hu.HypothesisTestCase):
             assume(engine != "CUDNN")
         # some case here could be calculated with global pooling, but instead
         # calculated with general implementation, slower but should still
-        # be corect.
+        # be correct.
         op = core.CreateOperator(
             op_type,
             ["X"],

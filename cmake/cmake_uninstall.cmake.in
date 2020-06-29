@@ -2,9 +2,9 @@ if(NOT EXISTS "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
   message(FATAL_ERROR "Cannot find install manifest: @CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
 endif(NOT EXISTS "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
 
-if (NOT DEFINED CMAKE_INSTALL_PREFIX)
+if(NOT DEFINED CMAKE_INSTALL_PREFIX)
   set (CMAKE_INSTALL_PREFIX "@CMAKE_INSTALL_PREFIX@")
-endif ()
+endif()
  message(${CMAKE_INSTALL_PREFIX})
 
 file(READ "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt" files)

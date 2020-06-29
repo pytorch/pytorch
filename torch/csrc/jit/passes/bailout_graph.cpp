@@ -1,8 +1,9 @@
-#include <torch/csrc/jit/function.h>
-#include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
+#include <ATen/core/function.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
@@ -59,7 +60,7 @@ struct BailOutGraphBuilderForNode {
     }
   }
 
-  Value *getInputForValue(Value *v) {
+  Value* getInputForValue(Value* v) {
     TORCH_INTERNAL_ASSERT(this->old_to_new_.count(v));
     return this->old_to_new_[v];
   }
@@ -129,7 +130,6 @@ struct BailOutGraphBuilderForNode {
     auto one = copy_graph_->insertConstant({1});
     updated_max_trip_count =
         copy_graph_->insert(aten::sub, {updated_max_trip_count, one});
-    TORCH_INTERNAL_ASSERT(old_to_new_.count(outer_node->inputs()[0]) != 0);
     auto cur_plus_one = copy_graph_->insert(aten::add, {one, cur_iter});
 
     // We need to be careful when mapping `block_outputs` to continuation
@@ -291,7 +291,7 @@ struct BailOutInserter {
         const auto& live_inputs = liveness_sets_[*it];
 
         // guarded inputs come first
-        // currently, there's always one guaded input
+        // currently, there's always one guarded input
         bailout_node->addInput(it->input());
         for (auto li : live_inputs) {
           // Guarded inputs have already been added
@@ -385,8 +385,10 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
       bailout_index == orig_bailout_node->i(attr::index));
   BailOutGraphBuilderForNode bg(orig, target);
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
-  GRAPH_DUMP("bailout_graph ", bailout_graph);
+
   removeBailouts(bailout_graph->block());
+  ClearProfilingInformation(bailout_graph);
+  GRAPH_DUMP("bailout_graph ", bailout_graph);
   return bailout_graph;
 }
 

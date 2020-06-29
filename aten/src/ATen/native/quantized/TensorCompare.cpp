@@ -4,7 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/cpu/TensorCompareKernel.h>
+#include <ATen/native/TensorCompare.h>
 #include <c10/util/Exception.h>
 
 namespace at {

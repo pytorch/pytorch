@@ -73,8 +73,10 @@ __global__ void gatherKthValue(
     bool inRange = (i < inputSliceSize);
     scalar_t v = inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride])
                          : static_cast<scalar_t>(0);
-    bool isKValue = inRange && THCNumerics<scalar_t>::eq_with_nan(v, kValue);
-
+    bool isKValue = inRange &&
+        ((v == kValue) ||
+         (THCNumerics<scalar_t>::isnan(v) &&
+          THCNumerics<scalar_t>::isnan(kValue)));
     if (isKValue) {
       kValueIndex = i;
       foundKValue = true;
@@ -177,7 +179,7 @@ void kthvalue_cuda_template(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-// this does not reduce to median with dim beause we don't want to copy twice
+// this does not reduce to median with dim because we don't want to copy twice
 template <typename scalar_t>
 Tensor median_cuda_template(const Tensor& self) {
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");

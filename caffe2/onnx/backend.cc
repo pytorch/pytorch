@@ -1657,7 +1657,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
     }
   }
 
-  // TODO: avoid extra copy by directly feed initialiers to backend blobs
+  // TODO: avoid extra copy by directly feed initializers to backend blobs
   OnnxToCaffe2(
       &rep->init_net(),
       &rep->pred_net(),

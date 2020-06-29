@@ -110,4 +110,12 @@ const std::shared_ptr<ProcessGroup>& ProcessGroupRoundRobin::next() {
   return processGroup;
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::allgather_base(
+    at::Tensor& /*unused */,
+    at::Tensor& /*unused */,
+    const AllgatherOptions& /*unused */) {
+  throw std::runtime_error(
+      "no support for allgather_base in RoundRobin process group");
+}
+
 } // namespace c10d

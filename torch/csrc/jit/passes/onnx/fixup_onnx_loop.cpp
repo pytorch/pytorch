@@ -5,14 +5,14 @@
 namespace torch {
 namespace jit {
 
-namespace onnx{
+namespace onnx {
 using namespace ::c10::onnx;
 }
 
 Node* CreateCastToBoolNode(Value* val, Graph* graph) {
   Node* cast_node = graph->create(onnx::Cast);
   cast_node->addInput(val);
-  cast_node->i_(attr::to, /*Bool*/9);
+  cast_node->i_(attr::to, /*Bool*/ 9);
   return cast_node;
 }
 
@@ -74,7 +74,7 @@ namespace {
 bool IsErasableSequence(const Node* loop_node, size_t i) {
   AT_ASSERT(loop_node->blocks().size() == 1);
   auto* sub_block = loop_node->blocks()[0];
-  auto* out_node = sub_block->outputs()[i-1]->node();
+  auto* out_node = sub_block->outputs()[i - 1]->node();
   auto* in_val = sub_block->inputs()[i];
 
   if (out_node->kind() != ::c10::onnx::SequenceInsert) {
@@ -106,9 +106,9 @@ bool IsErasableSequence(const Node* loop_node, size_t i) {
 }
 } // anonymous namespace
 
-// ONNX::Loop does not support Sequence type as loop-carried dependencies. Only tensors are supported.
-// This pass converts Sequence loop-carried dependencies to scan_outputs.
-// In opset 11, only the below pattern is supported.
+// ONNX::Loop does not support Sequence type as loop-carried dependencies. Only
+// tensors are supported. This pass converts Sequence loop-carried dependencies
+// to scan_outputs. In opset 11, only the below pattern is supported.
 //
 // PTIR graph:
 //  ...
@@ -143,19 +143,22 @@ void ConvertSequenceDependencies(Block* block) {
 
       std::vector<size_t> idx_to_remove;
       // loop sub-block inputs are  (iter, cond, loop-carried dependencies)
-      // loop sub-block outputs are (      cond, loop-carried dependencies, scan outputs)
-      // loop inputs are            (iter, cond, loop-carried dependencies)
-      // loop outputs are           (            loop-carried dependencies, scan outputs)
+      // loop sub-block outputs are (      cond, loop-carried dependencies, scan
+      // outputs) loop inputs are            (iter, cond, loop-carried
+      // dependencies) loop outputs are           (            loop-carried
+      // dependencies, scan outputs)
       for (size_t i = 2; i < sub_block->inputs().size(); ++i) {
         if (IsErasableSequence(loop_node, i)) {
-          auto* seq_node = sub_block->outputs()[i-1]->node();
+          auto* seq_node = sub_block->outputs()[i - 1]->node();
           // Replace sequence output with the inserted element.
           auto inserted_value = seq_node->input(1);
-          sub_block->return_node()->replaceInputWith(seq_node->output(), inserted_value);
+          sub_block->return_node()->replaceInputWith(
+              seq_node->output(), inserted_value);
 
           // Split the added scan_output back to expected tensor sequence.
-          auto loop_output = loop_node->output(i-2);
-          Node* split_node = loop_node->owningGraph()->create(onnx::SplitToSequence);
+          auto loop_output = loop_node->output(i - 2);
+          Node* split_node =
+              loop_node->owningGraph()->create(onnx::SplitToSequence);
           loop_output->replaceAllUsesWith(split_node->output());
           split_node->i_(attr::keepdims, 0);
           split_node->addInput(loop_output);
@@ -180,7 +183,8 @@ void ConvertSequenceDependencies(Block* block) {
         loop_node->removeInput(idx);
 
         // Swap output order. Move all scan outputs to the back.
-        sub_block->return_node()->addInput(sub_block->return_node()->inputs().at(idx - 1));
+        sub_block->return_node()->addInput(
+            sub_block->return_node()->inputs().at(idx - 1));
         sub_block->return_node()->removeInput(idx - 1);
 
         auto loop_out = loop_node->addOutput();
@@ -188,13 +192,11 @@ void ConvertSequenceDependencies(Block* block) {
         loop_node->outputs().at(idx - 2)->replaceAllUsesWith(loop_out);
         loop_node->eraseOutput(idx - 2);
       }
-
     }
-
   }
 }
 
-static void FuseSequenceSplitConcat(Block *b) {
+static void FuseSequenceSplitConcat(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       FuseSequenceSplitConcat(child_block);
@@ -208,10 +210,15 @@ static void FuseSequenceSplitConcat(Block *b) {
       auto split_node = it->input()->node();
       auto concat_node = *it;
 
-      const auto split_axis = split_node->hasAttribute(attr::axis) ? split_node->i(attr::axis) : 0;
-      const auto split_keepdims = split_node->hasAttribute(attr::keepdims) ? split_node->i(attr::keepdims) : 1;
+      const auto split_axis =
+          split_node->hasAttribute(attr::axis) ? split_node->i(attr::axis) : 0;
+      const auto split_keepdims = split_node->hasAttribute(attr::keepdims)
+          ? split_node->i(attr::keepdims)
+          : 1;
       const auto concat_axis = concat_node->i(attr::axis);
-      const auto concat_new_axis = concat_node->hasAttribute(attr::new_axis) ? concat_node->i(attr::new_axis) : 0;
+      const auto concat_new_axis = concat_node->hasAttribute(attr::new_axis)
+          ? concat_node->i(attr::new_axis)
+          : 0;
       const bool has_input_split = split_node->inputs().size() == 2;
 
       if (has_input_split) {
@@ -235,7 +242,10 @@ void FixupONNXLoops(std::shared_ptr<Graph>& graph) {
   FixupONNXLoops(graph->block());
   ConvertSequenceDependencies(graph->block());
   FuseSequenceSplitConcat(graph->block());
-  EliminateDeadCode(graph->block(), true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
+  EliminateDeadCode(
+      graph->block(),
+      true,
+      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 } // namespace jit

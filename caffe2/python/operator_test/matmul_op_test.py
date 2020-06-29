@@ -226,7 +226,6 @@ class TestBatchMatMul(serial.SerializedTestCase):
         **hu.gcs
     )
     def test_numpy_batch_matmul(self, C_1, C_2, M, K, N, trans_a, trans_b, gc, dc):
-        np.set_printoptions(threshold=np.nan)
         dtype = np.float32
         batch_dims = np.random.randint(
             low=0,
@@ -249,7 +248,6 @@ class TestBatchMatMul(serial.SerializedTestCase):
         **hu.gcs
     )
     def test_numpy_batch_matmul_1d(self, K, gc, dc):
-        np.set_printoptions(threshold=np.nan)
         dtype = np.float32
         X = np.random.rand(K).astype(dtype) - 0.5
         # TODO: test trans_a and trans_b
@@ -264,7 +262,6 @@ class TestBatchMatMul(serial.SerializedTestCase):
         **hu.gcs
     )
     def test_numpy_batch_matmul_1d_2d(self, K, N, gc, dc):
-        np.set_printoptions(threshold=np.nan)
         dtype = np.float32
         X = np.random.rand(K).astype(dtype) - 0.5
         # TODO: test trans_a and trans_b
@@ -279,7 +276,6 @@ class TestBatchMatMul(serial.SerializedTestCase):
         **hu.gcs
     )
     def test_numpy_batch_matmul_2d_1d(self, M, K, gc, dc):
-        np.set_printoptions(threshold=np.nan)
         dtype = np.float32
         X = np.random.rand(*[M, K]).astype(dtype) - 0.5
         # TODO: test trans_a and trans_b

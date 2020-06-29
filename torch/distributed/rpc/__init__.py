@@ -6,11 +6,9 @@ import sys
 import torch
 import torch.distributed as dist
 
-from . import backend_registry
-
 
 def is_available():
-    return sys.version_info >= (3, 0) and hasattr(torch._C, "_rpc_init")
+    return hasattr(torch._C, "_rpc_init")
 
 
 if is_available() and not torch._C._rpc_init():
@@ -18,46 +16,49 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from .api import _init_rpc_backend, _require_initialized
+    from . import api, backend_registry, functions, _set_profiler_node_id
     from .api import *  # noqa: F401
+    from .backend_registry import BackendType
+    from .server_process_global_profiler import (
+        _server_process_global_profile,
+    )
     import torch.distributed.autograd as dist_autograd
 
     def init_rpc(
         name,
-        backend=backend_registry.BackendType.PROCESS_GROUP,
+        backend=BackendType.PROCESS_GROUP,
         rank=-1,
         world_size=None,
         rpc_backend_options=None,
     ):
         r"""
         Initializes RPC primitives such as the local RPC agent
-        and distributed autograd.
-
-        Initializes the local RPC agent which immediately makes the current
-        process ready to send and receive RPCs. This method also properly
-        initializes a default process group backend that uses gloo for
-        collective communication.
+        and distributed autograd, which immediately makes the current
+        process ready to send and receive RPCs.
 
         Arguments:
-            backend (Enum): type of RPC backend implementation. Currently,
-                process group backend is the only available backend
-                implementation. (default: ``RpcBackend.PROCESS_GROUP``).
+            backend (BackendType, optional): The type of RPC backend
+                implementation. Supported values include
+                ``BackendType.PROCESS_GROUP`` (the default) and
+                ``BackendType.TENSORPIPE``. See :ref:`rpc-backends` for more
+                information.
             name (str): a globally unique name of this node. (e.g.,
                 ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
-                Name can only contain number, alphabet, underscore, and/or dash,
-                and must be shorter than 128 characters.
+                Name can only contain number, alphabet, underscore, colon,
+                and/or dash, and must be shorter than 128 characters.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
-            rpc_backend_options (RpcBackendOptions): The options passed to
-                RpcAgent consturctor. It contains RpcAgent specific
-                initialization configurations. By default, it contains
-                ``rpc_timeout = timedelta(seconds=60)``,
-                ``init_method = "env://"``, ``num_send_recv_threads = 4`` for
-                process group agent. If using the default
-                ``rpc_backend_options``, RPC would initialize the underlying
-                process group backend using ``init_method = "env://"``,
-                meaning that environment variables ``MASTER_ADDRESS`` and
-                ``MASTER_PORT`` needs to be set properly.
+            rpc_backend_options (RpcBackendOptions, optional): The options
+                passed to the RpcAgent constructor. It must be an agent-specific
+                subclass of :class:`~torch.distributed.rpc.RpcBackendOptions`
+                and contains agent-specific initialization configurations. By
+                default, for all agents, it sets the default timeout to 60
+                seconds and performs the rendezvous with an underlying process
+                group initialized using ``init_method = "env://"``,
+                meaning that environment variables ``MASTER_ADDR`` and
+                ``MASTER_PORT`` need to be set properly. See
+                :ref:`rpc-backends` for more information and find which options
+                are available.
         """
 
         if not rpc_backend_options:
@@ -67,6 +68,10 @@ if is_available():
             )
 
         # Rendezvous.
+        # This rendezvous state sometimes is destroyed before all processes
+        # finishing handshaking. To avoid that issue, we make it global to
+        # keep it alive.
+        global rendezvous_iterator
         rendezvous_iterator = torch.distributed.rendezvous(
             rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
@@ -80,15 +85,15 @@ if is_available():
         # other nodes might not have been initialized.
         dist_autograd._init(rank)
 
+        _set_profiler_node_id(rank)
         # Initialize RPC.
-        _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
+        api._init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
 
 
-    @_require_initialized
+    @api._require_initialized
     def _get_debug_info():
         from . import _rref_context_get_debug_info
-        from .api import _agent
         info = _rref_context_get_debug_info()
-        info.update(_agent.get_debug_info())
+        info.update(api._get_current_rpc_agent().get_debug_info())
         info.update(dist_autograd._get_debug_info())
         return info
