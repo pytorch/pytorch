@@ -8723,7 +8723,7 @@ a")
                 for module in self.sequential:
                     assert module is self.submod, "__iter__ failing for Sequential"
 
-                # assert self.moduledict["submod"] is self.submod, "__getitem__ failing for ModuleDict"
+                assert self.moduledict["submod"] is self.submod, "__getitem__ failing for ModuleDict"
                 assert len(self.moduledict) == 1, "__len__ failing for ModuleDict"
                 for module in self.moduledict:
                     assert module is self.submod, "__iter__ failing for ModuleDict"

@@ -235,6 +235,26 @@ SugaredValuePtr ModuleValue::getitem(
     Value* idx) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
     return getSugaredDict(loc, m)->getModules()->getitem(loc, m, idx);
+  } else if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
+    if (idx->type()->kind() == c10::TypeKind::StringType) {
+      auto sd = getSugaredDict(loc, m);
+      auto idx_str = toIValue(idx)->toStringRef();
+      auto keys_iter = sd->keys_;
+      auto module_values_iter = sd->modules_;
+      for (size_t i = 0; i < keys_iter->tup_.size(); ++i) {
+        auto key = keys_iter->tup_.at(i);
+        auto key_str = toIValue(key->asValue(loc, m))->toStringRef();
+        if (key_str == idx_str) {
+          std::shared_ptr<SugaredValue> module_sugared_value =
+              module_values_iter->tup_.at(i);
+          auto module_value =
+              std::dynamic_pointer_cast<ModuleValue>(module_sugared_value);
+          return module_value;
+        }
+      }
+      throw ErrorReport(loc)
+          << "Key Error, " << idx_str;
+    }
   }
   throw ErrorReport(loc)
       << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
