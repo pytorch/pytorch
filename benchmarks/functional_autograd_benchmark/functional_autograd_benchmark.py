@@ -71,6 +71,7 @@ def run_once(model, inp, task, extra=None):
 def run_model(model_getter, args, task):
     if args.gpu == -1:
         device = "cpu"
+
         def noop(*args):
             return args
         do_sync = noop
