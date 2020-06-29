@@ -28,6 +28,7 @@ from jit.test_torchbind import TestTorchbind  # noqa: F401
 from jit.test_op_normalization import TestOpNormalization  # noqa: F401
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
+from jit.test_with import TestWith  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -46,7 +47,7 @@ import torch.nn.functional as F
 # Testing utils
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
@@ -69,6 +70,7 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 
 # Standard library
 from collections import defaultdict, namedtuple, OrderedDict
+import copy
 from copy import deepcopy
 from itertools import product, chain
 import itertools
@@ -127,8 +129,8 @@ def doAutodiffCheck(testname):
         'test_nn_batch_norm',
         'test_nn_max_pool2d_with_indices',
         # AutogradJitGenerated
-        'test___rtruediv___constant',
-        'test___rtruediv___scalar_constant',
+        'test___rdiv___constant',
+        'test___rdiv___scalar_constant',
         'test_split',
         'test_split_dim',
         'test_split_dim_neg0',
@@ -1163,7 +1165,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_cpp(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
@@ -1172,7 +1173,6 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
@@ -1183,7 +1183,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(RUN_CUDA, "covered by test_tensorexpr_cuda")
     @unittest.skipIf(IS_WINDOWS, "enable on windows")
     @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_tensorexpr_cpp(self):
         torch._C._run_tensorexpr_cpp_tests(run_cuda=False)
 
@@ -1191,7 +1190,6 @@ graph(%Ra, %Rb):
     @unittest.skipIf(not RUN_CUDA, "covered by test_tensorexpr")
     @unittest.skipIf(IS_WINDOWS, "enable on windows")
     @unittest.skipIf(not torch._C._has_tensorexpr_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
-    @skipIfRocm
     def test_tensorexpr_cpp_cuda(self):
         torch._C._run_tensorexpr_cpp_tests(run_cuda=True)
 
@@ -2712,27 +2710,6 @@ class TestScript(JitTestCase):
         with self.assertRaises(RuntimeError):
             m.foo = 6
 
-    def test_script_packedsequence(self):
-        class ExperimentalLSTM(torch.nn.Module):
-            def __init__(self, input_dim, hidden_dim):
-                super().__init__()
-
-            def forward(self, input):
-                # type: (Tensor)
-                packed = torch.nn.utils.rnn.pack_padded_sequence(
-                    input=input, lengths=torch.tensor([1, 2]), enforce_sorted=False
-                )
-                output, lengths = torch.nn.utils.rnn.pad_packed_sequence(
-                    sequence=packed, total_length=2
-                )
-                # lengths is flipped, so is output
-                return output[0]
-
-        lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
-
-        with torch.jit._disable_emit_hooks():
-            self.checkModule(lstm, [torch.ones(2, 2)])
-
     def test_class_attribute(self):
         class M(torch.jit.ScriptModule):
             FOO = 0
@@ -2872,6 +2849,24 @@ def foo(x):
             traced = torch.jit.trace(fn, [torch.ones(2, 2)])
 
         FileCheck().check("goodbye").run(traced.graph)
+
+        def foo(x: int):
+            return x + 1
+
+        @torch.jit._script_if_tracing
+        def fee(x: int = 2):
+            return foo(1) + x
+
+        # test directly compiling function
+        fee_compiled = torch.jit.script(fee)
+        self.assertEqual(fee_compiled(), fee())
+
+        # test compiling it within another function
+        @torch.jit.script
+        def hum():
+            return fee(x=3)
+
+        self.assertEqual(hum(), 5)
 
     def test_big_int_literals(self):
         def ok():
@@ -4564,7 +4559,7 @@ a")
                 return result
 
         v = Vocabulary(list('uabcdefg'))
-        v.copy()
+        v.__copy__()
 
     def test_tuple_to_opt_list(self):
         @torch.jit.script
@@ -8750,6 +8745,24 @@ a")
             o2 = m.forward2(i)
             self.assertEqual(o2, v)
 
+    def test_script_sequential_sliced_iteration(self):
+        class seq_mod(nn.Module):
+            def __init__(self):
+                super(seq_mod, self).__init__()
+                self.layers = [nn.ReLU(), nn.ReLU(), nn.ReLU()]
+                self.layers = nn.Sequential(*self.layers)
+
+            def forward(self, input):
+                x = self.layers[0].forward(input)
+                for layer in self.layers[1:3]:
+                    x = layer.forward(x)
+                for layer in self.layers[2:]:
+                    x = layer.forward(x)
+                return x
+
+        seq = seq_mod()
+        self.checkModule(seq, [torch.tensor([-2, 1, -1, 2])])
+
     def test_script_sequential_orderdict(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -9087,6 +9100,55 @@ a")
         self.assertEqual(eager_seq, script_seq)
         self.assertEqual(eager_lengths, script_lengths)
 
+        class ExperimentalLSTM(torch.nn.Module):
+            def __init__(self, input_dim, hidden_dim):
+                super().__init__()
+
+            def forward(self, input):
+                # type: (Tensor)
+                packed = pack_padded_sequence(
+                    input=input, lengths=torch.tensor([1, 2]), enforce_sorted=False
+                )
+                output, lengths = pad_packed_sequence(
+                    sequence=packed, total_length=2
+                )
+                # lengths is flipped, so is output
+                return output[0]
+
+        lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
+
+        with torch.jit._disable_emit_hooks():
+            self.checkModule(lstm, [torch.ones(2, 2)])
+
+    def test_script_pad_sequence_pack_sequence(self):
+        from torch.nn.utils.rnn import pad_sequence, pack_sequence, pad_packed_sequence
+
+        def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0):
+            # type: (List[Tensor], bool, float) -> Tensor
+            return pad_sequence(tensor_list, batch_first, padding_value)
+
+        def pack_sequence_func(tensor_list, enforce_sorted=True):
+            # type: (List[Tensor], bool) -> Tensor
+            return pad_packed_sequence(pack_sequence(tensor_list, enforce_sorted))[0]
+
+        ones3 = torch.ones(3, 5)
+        ones4 = torch.ones(4, 5)
+        ones5 = torch.ones(5, 5)
+        tensor1 = torch.tensor([1, 2, 3])
+        tensor2 = torch.tensor([4, 5])
+        tensor3 = torch.tensor([6])
+        with torch.jit._disable_emit_hooks():
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5],))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True, 2.5))
+            self.checkScript(pack_sequence_func,
+                             ([tensor1, tensor2, tensor3],))
+            self.checkScript(pack_sequence_func,
+                             ([tensor1, tensor2, tensor3], False))
+
     def test_script_get_tracing_state(self):
         def test_if_tracing(x):
             if torch._C._get_tracing_state():
@@ -9161,7 +9223,8 @@ a")
 
         m = torch.jit.script(M())
         # test copy
-        m_c = m.copy()
+        copy.copy(m)
+        copy.deepcopy(m)
 
     def test_script_forward_method_replacement(self):
         # We want to support the use case of attaching a different `forward` method
@@ -15067,8 +15130,8 @@ class TestJitGeneratedFunctional(JitTestCase):
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
 # and we have to disable the failing tests here instead.
 UBSAN_BLACKLISTED_TESTS = [
-    "test___rtruediv___constant",
-    "test___rtruediv___scalar_constant",
+    "test___rdiv___constant",
+    "test___rdiv___scalar_constant",
     "test_addcdiv",
     "test_addcdiv_broadcast_all",
     "test_addcdiv_broadcast_rhs",

@@ -9,6 +9,7 @@
 #include <torch/nn/modules/container/modulelist.h>
 #include <torch/nn/modules/container/named_any.h>
 #include <torch/nn/modules/container/sequential.h>
+#include <torch/nn/modules/container/parameterdict.h>
 
 // Layers
 #include <torch/nn/modules/adaptive.h>
