@@ -201,8 +201,10 @@ void unpackQuantizedWeightsHelper(
     } else {
       TORCH_INTERNAL_ASSERT(itr->second.isTensor());
       at::Tensor packed_weight = itr->second.toTensor();
-      auto op = Dispatcher::singleton().findSchemaOrThrow(unpack_fn.c_str(), "")
-        .typed<std::tuple<at::Tensor, c10::optional<at::Tensor>> (at::Tensor)>();
+      auto op = Dispatcher::singleton()
+                    .findSchemaOrThrow(unpack_fn.c_str(), "")
+                    .typed<std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+                        at::Tensor)>();
       // Temporary hack: when the `Profiler` dispatch key is inserted, this call
       // will fail since the `unpack()` ops return multiple values, however the
       // boxing code currently does not support this. Instead, exclude the

@@ -5,6 +5,12 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
 
+// This file defines hacky_wrapper_for_legacy_signatures, which takes a kernel written in a legacy way
+// (e.g. with TensorOptions packed) and wraps it into a kernel with the signature expected by
+// the PyTorch operator library. The intention is to ultimately rewrite kernels to take the new signature
+// and then delete this file. This transition process can happen kernel-by-kernel, since this wrapper
+// is a no-op for kernels that already have a non-legacy signature.
+
 namespace c10 {
 namespace impl {
 
@@ -22,15 +28,10 @@ inline c10::optional<MemoryFormat> process_memory_format(const TensorOptions& op
 
 namespace detail {
 
-// scatter_tensor_options takes a function pointer that potentially takes a TensorOptions argument.
+// with_scattered_tensor_options takes a function pointer that potentially takes a TensorOptions argument.
 // If it does, then it creates a new function pointer that takes scattered arguments, internally
 // gathers those arguments, and then calls the underlying function pointer. If the underlying
 // function pointer does not take a TensorOptions argument, it is passed through unmodified.
-// Note that naming can be confusing here. scatter_tensor_options is a transformation on the function
-// that scatters its parameters, but if seen in the call stack of a running program, it actually takes
-// scattered arguments and gathers them into a TensorOptions object.
-// GatheredParameterTypes: function parameters where TensorOptions is packed as a TensorOptions argument
-// ScatteredParameterTypes: function parameters where TensorOptions doesn't exist but we have ScalarType, DeviceType and Layout parameters
 
 template<class Type, class Enable = void> struct is_tensoroptions_arg : std::false_type {};
 template<class Type> struct is_tensoroptions_arg<Type, std::enable_if_t<std::is_same<TensorOptions, std::decay_t<Type>>::value>> : std::true_type {};
@@ -45,24 +46,25 @@ inline constexpr bool has_tensoroptions_arg() {
     return num_tensoroptions_args > 0;
 }
 
+// sanity checks
 static_assert(has_tensoroptions_arg<int (int64_t, const TensorOptions&)>(), "");
 static_assert(has_tensoroptions_arg<int (int64_t, TensorOptions)>(), "");
 static_assert(!has_tensoroptions_arg<int (int64_t, std::string)>(), "");
 
-template<class FuncPtr, class ParametersBeforeTensorOptions, class ParametersAfterTensorOptions> struct scatter_tensor_options_;
+template<class FuncPtr, class ParametersBeforeTensorOptions, class ParametersAfterTensorOptions> struct with_scattered_tensor_options_;
 
 template<class FuncPtr, class Enable = void>
-struct scatter_tensor_options final {};
+struct with_scattered_tensor_options final {};
 
 template<class UnderlyingFuncPtr>
-struct scatter_tensor_options<UnderlyingFuncPtr, std::enable_if_t<!has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
+struct with_scattered_tensor_options<UnderlyingFuncPtr, std::enable_if_t<!has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
     // FuncType does not have TensorOptions arguments.
     // Don't wrap anything but just return the base pointer.
     using FuncPtr = UnderlyingFuncPtr;
 };
 
 template<class UnderlyingFuncPtr>
-struct scatter_tensor_options<UnderlyingFuncPtr, std::enable_if_t<has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
+struct with_scattered_tensor_options<UnderlyingFuncPtr, std::enable_if_t<has_tensoroptions_arg<typename UnderlyingFuncPtr::FuncType>()>> final {
 private:
     // FuncType has TensorOptions arguments.
     // Return a function pointer to a wrapper function that replaces those with expanded arguments.
@@ -78,12 +80,13 @@ private:
     using parameters_after_tensoroptions =
         guts::typelist::drop_t<gathered_parameter_types, tensoroptions_arg_index + 1>;
 
+    using wrapper = with_scattered_tensor_options_<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>;
 public:
-    using FuncPtr = TORCH_FN_TYPE((scatter_tensor_options_<UnderlyingFuncPtr, parameters_before_tensoroptions, parameters_after_tensoroptions>::wrapper));
+    using FuncPtr = TORCH_FN_TYPE(&wrapper::wrapper);
 };
 
 template<class FuncPtr, class... ParametersBeforeTensorOptions, class... ParametersAfterTensorOptions>
-struct scatter_tensor_options_<FuncPtr, guts::typelist::typelist<ParametersBeforeTensorOptions...>, guts::typelist::typelist<ParametersAfterTensorOptions...>> final {
+struct with_scattered_tensor_options_<FuncPtr, guts::typelist::typelist<ParametersBeforeTensorOptions...>, guts::typelist::typelist<ParametersAfterTensorOptions...>> final {
     static decltype(auto) wrapper(
                 ParametersBeforeTensorOptions... parameters_before,
                 optional<ScalarType> scalar_type,
@@ -103,7 +106,7 @@ struct scatter_tensor_options_<FuncPtr, guts::typelist::typelist<ParametersBefor
 
 template<class FuncPtr>
 constexpr auto hacky_wrapper_for_legacy_signatures(FuncPtr) {
-    return typename detail::scatter_tensor_options<FuncPtr>::FuncPtr();
+    return typename detail::with_scattered_tensor_options<FuncPtr>::FuncPtr();
 };
 
 }

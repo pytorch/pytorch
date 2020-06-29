@@ -1,16 +1,16 @@
 #include <TH/THAllocator.h>
 
-/* stuff for mapped files */
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 #include <atomic>
 #if ATOMIC_INT_LOCK_FREE == 2
 #define TH_ATOMIC_IPC_REFCOUNT 1
 #endif
 
 #include <c10/core/CPUAllocator.h>
+
+/* stuff for mapped files */
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #if defined(HAVE_MMAP)
 #include <sys/types.h>
