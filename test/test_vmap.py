@@ -353,7 +353,7 @@ class TestVmapAPI(TestCase):
     def test_not_enough_in_dims_err_msg(self):
         x = torch.randn(3)
         y = torch.randn(3)
-        msg = 'expected one `in_dim` per input \(got \w+ inputs\)'
+        msg = r'expected one `in_dim` per input \(got \w+ inputs\)'
 
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, (0,))(x, y)
@@ -420,7 +420,7 @@ class TestVmapAPI(TestCase):
         def foo(x):
             return x * x
 
-        msg = "Got in_dim=-?\w for input 0, but input 0 is a Tensor of dimensionality \w"
+        msg = r'Got in_dim=-?\w for input 0, but input 0 is a Tensor of dimensionality \w'
         with self.assertRaisesRegex(ValueError, msg):
             vmap(foo)(torch.randn([]))
         with self.assertRaisesRegex(ValueError, msg):
