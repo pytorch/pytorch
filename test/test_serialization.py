@@ -673,6 +673,15 @@ class TestSerialization(TestCase, SerializationMixin):
 
         test(io.BytesIO())
 
+    # Ensure large zip64 serialization works properly
+    def test_serialization_2gb_file(self):
+        big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
+
+        with BytesIOContext() as f:
+            torch.save(big_model, f)
+            f.seek(0)
+            state = torch.load(f)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super(TestSerialization, self).run(*args, **kwargs)
