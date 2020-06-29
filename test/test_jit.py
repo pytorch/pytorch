@@ -6770,17 +6770,21 @@ a")
             return torch.tensor(s), torch.tensor([s, s])
 
         # need to clear function cache so we re run shape analysis
-        foo.__disable_jit_function_caching__ = True
-
+        # foo.__disable_jit_function_caching__ = True
         with set_default_dtype(torch.double):
             self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
-            FileCheck().check("Double").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                FileCheck().check("Double").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
         with set_default_dtype(torch.float):
+            del torch.jit._jit_caching_layer[foo]
             self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
-            FileCheck().check("Float").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                FileCheck().check("Float").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
         with set_default_dtype(torch.half):
+            del torch.jit._jit_caching_layer[foo]
             self.assertEqual(torch.jit.script(foo)(1.), foo(1.), exact_dtype=True)
-            FileCheck().check("Half").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                FileCheck().check("Half").check_same("aten::tensor").run(torch.jit.last_executed_optimized_graph())
 
 
     def test_empty_like_memory_format_bc(self):
