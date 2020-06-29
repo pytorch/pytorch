@@ -834,11 +834,6 @@ struct PythonPrintImpl {
   }
 
   static bool containsNonASCIIString(const IValue& val) {
-    // TODO: This change breaks forward compatibility.
-    // Temporarily turning off serialization (torch.save only) of non ASCII
-    // string literals. We will turn it on a week.
-    return false;
-
     bool hasNonASCII = false;
     auto checkSubvalue = [&hasNonASCII](const IValue& val) {
       if (val.isString()) {
