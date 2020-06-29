@@ -18291,6 +18291,26 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].real, a.real[5:])
         self.assertEqual(a[5:].imag, a.imag[5:])
 
+    @onlyOnCPUAndCUDA
+    @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
+    @suppress_warnings
+    def test_set_real_imag(self, device, dtypes):
+        x = torch.randn(10, dtype=dtypes[0], device=device)
+
+        new_real = _make_tensor((10,), dtypes[1], device)
+        new_imag = _make_tensor((10,), dtypes[1], device)
+
+        x.real = new_real
+        x.imag = new_imag
+
+        if dtypes[1].is_complex:
+            self.assertEqual(x.real, new_real.real, exact_dtype=False)
+            self.assertEqual(x.imag, new_imag.real, exact_dtype=False)
+
+        else:
+            self.assertEqual(x.real, new_real, exact_dtype=False)
+            self.assertEqual(x.imag, new_imag, exact_dtype=False)
+
     def test_diagonal_view(self, device) -> None:
         t = torch.ones((5, 5), device=device)
         v = torch.diagonal(t)
@@ -18615,7 +18635,7 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
         return torch.ones(*shape, dtype=_convert_t(dtype, device), device=device)
 
     # Returns a tensor with random integer values
-    if not dtype.is_floating_point:
+    if not (dtype.is_floating_point or dtype.is_complex):
         t = torch.randint(0, 10, shape, device=device)
         if dtype != torch.uint8:
             t = t - 5  # generate negative values also
