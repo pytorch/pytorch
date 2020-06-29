@@ -92,14 +92,13 @@ RegisterOperators reg_rpc_ops(
          aliasAnalysisFromSchema()),
      Operator(
          "aten::dist_backward(int context_id, Tensor[] roots, bool retain_graph=False) -> ()",
-         [](Stack& stack) {
+         [](Stack* stack) {
            bool retain_graph = pop(stack).toBool();
            auto roots_list = pop(stack).toTensorList();
            int64_t context_id = pop(stack).toInt();
            torch::autograd::variable_list roots(
                roots_list.begin(), roots_list.end());
            dist_autograd::backward(context_id, roots, retain_graph);
-           return 0;
          },
          aliasAnalysisConservative()),
      Operator(
