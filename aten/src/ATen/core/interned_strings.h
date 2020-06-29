@@ -188,6 +188,7 @@ namespace c10 {
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
+  _(prim, grad)                      \
   _(aten, zero_)                     \
   _(aten, fill_)                     \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
