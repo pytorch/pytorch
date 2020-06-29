@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-import numpy as np
 import copy
 from torch.quantization.fake_quantize import FakeQuantize
 from torch.quantization.fake_quantize_backward import _FakeQuantizeWithBackward
@@ -15,7 +14,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-NP_RANDOM_SEED = 1776
+TORCH_RANDOM_SEED = 1776
 tolerance = 1e-6
 
 class TestQATBackward(TestCase):
@@ -33,7 +32,7 @@ class TestQATBackward(TestCase):
             scale, zero_point = torch._choose_qparams_per_tensor(X, reduce_range=False)
             return torch.fake_quantize_per_tensor_affine(X, scale, zero_point, 0, 255)
 
-        np.random.seed(NP_RANDOM_SEED)
+        torch.manual_seed(TORCH_RANDOM_SEED)
         X, (_, _, torch_type) = X
         quant_min = torch.iinfo(torch_type).min
         quant_max = torch.iinfo(torch_type).max
@@ -47,19 +46,19 @@ class TestQATBackward(TestCase):
 
         X = to_tensor(X, device)
         X.requires_grad_()
-        X_prime = copy.deepcopy(X)
-        X_prime.requires_grad_()
+        X_ref = copy.deepcopy(X)
+        X_ref.requires_grad_()
 
         Y = fake_with_backward(X)
-        Y_prime = fake_reference(X_prime) if quantize_forward else X_prime
+        Y_ref = fake_reference(X_ref) if quantize_forward else X_ref
 
-        self.assertEqual(Y, Y_prime, rtol=tolerance, atol=tolerance)
+        self.assertEqual(Y, Y_ref, rtol=tolerance, atol=tolerance)
 
         dout = torch.rand(X.shape, dtype=torch.float).to(device)
 
         Y.backward(dout)
-        Y_prime.backward(dout)
+        Y_ref.backward(dout)
 
-        dX_prime = fake_quantize_tensor(X_prime.grad) if quantize_backward else X_prime.grad
+        dX_ref = fake_quantize_tensor(X_ref.grad) if quantize_backward else X_ref.grad
 
-        self.assertEqual(X.grad, dX_prime, rtol=tolerance, atol=tolerance)
+        self.assertEqual(X.grad, dX_ref, rtol=tolerance, atol=tolerance)
