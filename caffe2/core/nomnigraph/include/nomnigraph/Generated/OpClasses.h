@@ -1,3 +1,4 @@
+#include <utility>
 
 class Relu : public NeuralNetOperator {
  public:
@@ -50,15 +51,15 @@ class Conv : public NeuralNetOperator {
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    kernelShape_ = std::move(kernelShape);
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    pads_ = std::move(pads);
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
   void setGroup(int group) {
@@ -66,7 +67,7 @@ class Conv : public NeuralNetOperator {
   }
 
   void setDilations(vector<int> dilations) {
-    dilations_ = dilations;
+    dilations_ = std::move(dilations);
   }
 
  private:
@@ -125,15 +126,15 @@ class ConvRelu : public NeuralNetOperator {
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    kernelShape_ = std::move(kernelShape);
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    pads_ = std::move(pads);
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
   void setGroup(int group) {
@@ -141,7 +142,7 @@ class ConvRelu : public NeuralNetOperator {
   }
 
   void setDilations(vector<int> dilations) {
-    dilations_ = dilations;
+    dilations_ = std::move(dilations);
   }
 
  private:
@@ -192,15 +193,15 @@ class ConvTranspose : public NeuralNetOperator {
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    kernelShape_ = std::move(kernelShape);
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    pads_ = std::move(pads);
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
   void setGroup(int group) {
@@ -208,7 +209,7 @@ class ConvTranspose : public NeuralNetOperator {
   }
 
   void setDilations(vector<int> dilations) {
-    dilations_ = dilations;
+    dilations_ = std::move(dilations);
   }
 
  private:
@@ -247,15 +248,15 @@ class AveragePool : public NeuralNetOperator {
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    kernelShape_ = std::move(kernelShape);
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    pads_ = std::move(pads);
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
  private:
@@ -298,15 +299,15 @@ class AveragePoolRelu : public NeuralNetOperator {
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    kernelShape_ = std::move(kernelShape);
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    pads_ = std::move(pads);
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
  private:
@@ -343,15 +344,15 @@ class MaxPool : public NeuralNetOperator {
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    kernelShape_ = std::move(kernelShape);
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    pads_ = std::move(pads);
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
  private:
@@ -394,15 +395,15 @@ class MaxPoolRelu : public NeuralNetOperator {
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    kernelShape_ = std::move(kernelShape);
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    pads_ = std::move(pads);
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
  private:
@@ -449,7 +450,7 @@ class Send : public NeuralNetOperator {
   }
 
   void setDestination(string destination) {
-    destination_ = destination;
+    destination_ = std::move(destination);
   }
 
  private:
@@ -470,7 +471,7 @@ class Receive : public NeuralNetOperator {
   }
 
   void setSource(string source) {
-    source_ = source;
+    source_ = std::move(source);
   }
 
  private:

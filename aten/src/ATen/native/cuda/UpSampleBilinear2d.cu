@@ -263,6 +263,10 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   Tensor grad_output = grad_output_.contiguous();
 
   grad_input.resize_({nbatch, channels, input_height, input_width});
+  if (grad_input.numel() == 0) {
+    return;
+  }
+  
   // A contiguous tensor is required for the kernel launch config
   grad_input.contiguous();
   // initialization to zero is required here. As we launch one thread per output

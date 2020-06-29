@@ -393,5 +393,15 @@ Tensor nll_loss_backward_cpu(
   return grad_input;
 }
 
+Tensor & nll_loss_out(Tensor & output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  Tensor total_weight = at::empty({0}, self.options());
+  return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
+}
+
+Tensor nll_loss(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  return std::get<0>(at::nll_loss_forward(self, target, weight, reduction, ignore_index));
+}
+
+
 } // namespace native
 } // namespace at

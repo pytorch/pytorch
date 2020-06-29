@@ -13,7 +13,6 @@
 #include <aten/src/ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#include <thrust/tuple.h>
 #include <thrust/pair.h>
 #else
 #include <cmath>
@@ -39,6 +38,16 @@
 #endif
 
 namespace at { namespace native {
+
+namespace detail {
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
+#else
+template <typename T1, typename T2> using pair = std::pair<T1, T2>;
+#endif
+
+} // namespace detail
 
 template <typename scalar_t, typename index_t, typename combine_t>
 struct WelfordData {
@@ -95,13 +104,14 @@ struct WelfordOps {
     auto ret = (divisor > 0) ?
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;
-#if defined(__CUDACC__) || defined(__HIPCC__)
-    thrust::tuple<scalar_t, scalar_t> results((scalar_t) ret, (scalar_t) mean);
-#else
-    std::tuple<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
-#endif
+    detail::pair<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
     return results;
   }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline __device__ acc_t warp_shfl_down(acc_t acc, int offset) const {
     return {
@@ -133,6 +143,10 @@ struct MeanOps {
     return a * factor;
   }
 
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -158,6 +172,10 @@ struct AbsMinOps {
     return a;
   }
 
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -178,6 +196,10 @@ struct AbsMaxOps {
 
   inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -201,6 +223,10 @@ struct NormOps {
 
   inline C10_DEVICE acc_t project(acc_t a) const {
     return compat_pow(a, acc_t(1.0)/norm_);
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -227,6 +253,11 @@ struct NormZeroOps {
     return a;
   }
 
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -246,6 +277,10 @@ struct NormOneOps {
 
   inline C10_DEVICE acc_t project(acc_t a) const {
     return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -269,6 +304,10 @@ struct NormTwoOps {
     return device_sqrt(a);
   }
 
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -277,12 +316,6 @@ struct NormTwoOps {
 };
 
 namespace detail {
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
-#else
-template <typename T1, typename T2> using pair = std::pair<T1, T2>;
-#endif
 
 template <typename scalar_t>
 struct LessOrNan {
@@ -299,13 +332,13 @@ struct GreaterOrNan {
 };
 
 template <typename comp_t>
-struct ArgReductionOps {
+struct MinMaxReductionOps {
   using scalar_t = typename binary_function_traits<comp_t>::arg1_t;
   using index_t = int64_t;
   using arg_t = detail::pair<scalar_t, index_t>;
 
-  static C10_DEVICE index_t project(arg_t arg) {
-    return arg.second;
+  static C10_DEVICE arg_t project(arg_t arg) {
+    return arg;
   }
 
   static C10_DEVICE arg_t reduce(arg_t arg, scalar_t val, int64_t idx) {
@@ -316,12 +349,27 @@ struct ArgReductionOps {
     return comp_t{}(a.first, b.first) ? a : b;
   }
 
+  static C10_DEVICE arg_t translate_idx(arg_t a, int64_t base_idx) {
+    return {a.first, a.second + base_idx};
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   static C10_DEVICE arg_t warp_shfl_down(arg_t arg, int offset) {
     return arg_t(WARP_SHFL_DOWN(arg.first, offset),
                  WARP_SHFL_DOWN(arg.second, offset));
   }
 #endif
+};
+
+template <typename comp_t>
+struct ArgReductionOps : public MinMaxReductionOps<comp_t> {
+  using typename MinMaxReductionOps<comp_t>::scalar_t;
+  using typename MinMaxReductionOps<comp_t>::index_t;
+  using typename MinMaxReductionOps<comp_t>::arg_t;
+
+  static C10_DEVICE index_t project(arg_t arg) {
+    return arg.second;
+  }
 };
 
 } // namespace detail
@@ -334,6 +382,16 @@ struct ArgMaxOps :
 template <typename scalar_t>
 struct ArgMinOps :
   public detail::ArgReductionOps<detail::LessOrNan<scalar_t>> {
+};
+
+template <typename scalar_t>
+struct MinOps :
+  public detail::MinMaxReductionOps<detail::LessOrNan<scalar_t>> {
+};
+
+template <typename scalar_t>
+struct MaxOps :
+  public detail::MinMaxReductionOps<detail::GreaterOrNan<scalar_t>> {
 };
 
 }} // namespace at::native

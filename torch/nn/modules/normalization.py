@@ -6,6 +6,9 @@ from ._functions import CrossMapLRN2d as _cross_map_lrn2d
 from .. import functional as F
 from .. import init
 
+from torch import Tensor, Size
+from typing import Union, List
+
 
 class LocalResponseNorm(Module):
     r"""Applies local response normalization over an input signal composed
@@ -36,15 +39,19 @@ class LocalResponseNorm(Module):
 
     """
     __constants__ = ['size', 'alpha', 'beta', 'k']
+    size: int
+    alpha: float
+    beta: float
+    k: float
 
-    def __init__(self, size, alpha=1e-4, beta=0.75, k=1.):
+    def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.) -> None:
         super(LocalResponseNorm, self).__init__()
         self.size = size
         self.alpha = alpha
         self.beta = beta
         self.k = k
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.local_response_norm(input, self.size, self.alpha, self.beta,
                                      self.k)
 
@@ -53,25 +60,32 @@ class LocalResponseNorm(Module):
 
 
 class CrossMapLRN2d(Module):
+    size: int
+    alpha: float
+    beta: float
+    k: float
 
-    def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
+    def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1) -> None:
         super(CrossMapLRN2d, self).__init__()
         self.size = size
         self.alpha = alpha
         self.beta = beta
         self.k = k
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return _cross_map_lrn2d.apply(input, self.size, self.alpha, self.beta,
                                       self.k)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
+
+
+_shape_t = Union[int, List[int], Size]
 
 
 class LayerNorm(Module):
     r"""Applies Layer Normalization over a mini-batch of inputs as described in
-    the paper `Layer Normalization`_ .
+    the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
 
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
@@ -81,6 +95,8 @@ class LayerNorm(Module):
     :attr:`normalized_shape`.
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
+    The standard-deviation is calculated via the biased estimator, equivalent to
+    `torch.var(input, unbiased=False)`.
 
     .. note::
         Unlike Batch Normalization and Instance Normalization, which applies
@@ -123,12 +139,13 @@ class LayerNorm(Module):
         >>> m = nn.LayerNorm(10)
         >>> # Activating the module
         >>> output = m(input)
-
-    .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
-    __constants__ = ['normalized_shape', 'weight', 'bias', 'eps', 'elementwise_affine']
+    __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
+    normalized_shape: _shape_t
+    eps: float
+    elementwise_affine: bool
 
-    def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
+    def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True) -> None:
         super(LayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
@@ -143,23 +160,23 @@ class LayerNorm(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         if self.elementwise_affine:
             init.ones_(self.weight)
             init.zeros_(self.bias)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.layer_norm(
             input, self.normalized_shape, self.weight, self.bias, self.eps)
 
-    def extra_repr(self):
+    def extra_repr(self) -> Tensor:
         return '{normalized_shape}, eps={eps}, ' \
             'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
 
 
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs as described in
-    the paper `Group Normalization`_ .
+    the paper `Group Normalization <https://arxiv.org/abs/1803.08494>`__
 
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
@@ -169,6 +186,8 @@ class GroupNorm(Module):
     separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
+    The standard-deviation is calculated via the biased estimator, equivalent to
+    `torch.var(input, unbiased=False)`.
 
     This layer uses statistics computed from input data in both training and
     evaluation modes.
@@ -196,13 +215,14 @@ class GroupNorm(Module):
         >>> m = nn.GroupNorm(1, 6)
         >>> # Activating the module
         >>> output = m(input)
-
-    .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
     """
-    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine', 'weight',
-                     'bias']
+    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
+    num_groups: int
+    num_channels: int
+    eps: float
+    affine: bool
 
-    def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
+    def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True) -> None:
         super(GroupNorm, self).__init__()
         self.num_groups = num_groups
         self.num_channels = num_channels
@@ -216,16 +236,16 @@ class GroupNorm(Module):
             self.register_parameter('bias', None)
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         if self.affine:
             init.ones_(self.weight)
             init.zeros_(self.bias)
 
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.group_norm(
             input, self.num_groups, self.weight, self.bias, self.eps)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return '{num_groups}, {num_channels}, eps={eps}, ' \
             'affine={affine}'.format(**self.__dict__)
 

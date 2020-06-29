@@ -14,6 +14,7 @@ namespace {
 
 #define MAX_THREADS 512
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest2d_out_frame(
@@ -57,6 +58,7 @@ __global__ void upsample_nearest2d_out_frame(
   }
 }
 
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest2d_backward_out_frame(
@@ -81,14 +83,14 @@ __global__ void upsample_nearest2d_backward_out_frame(
 
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y =
-      nearest_neighbor_compute_source_index(height_scale, dst_y, src_dim_h);
-  int src_y_up = nearest_neighbor_compute_source_index(
+      nearest_neighbor_bw_compute_source_index(height_scale, dst_y, src_dim_h);
+  int src_y_up = nearest_neighbor_bw_compute_source_index(
       height_scale, dst_y + 1, src_dim_h + 1);
 
   int dst_x = dst_idx % dst_dim_w;
   int src_x =
-      nearest_neighbor_compute_source_index(width_scale, dst_x, src_dim_w);
-  int src_x_up = nearest_neighbor_compute_source_index(
+      nearest_neighbor_bw_compute_source_index(width_scale, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_bw_compute_source_index(
       width_scale, dst_x + 1, src_dim_w + 1);
 
   for (int b = 0; b < dim_b; b++) {
@@ -145,6 +147,10 @@ static void upsample_nearest2d_out_cuda_template(
   Tensor input = input_.contiguous();
   output.resize_({nbatch, channels, output_height, output_width});
 
+  if (input.numel() == 0) {
+    return;
+  }
+
   int nc = nbatch * channels;
 
   const int max_threads = std::min<int>(
@@ -178,8 +184,7 @@ static void upsample_nearest2d_out_cuda_template(
       "input tensor has spatial dimension larger than the kernel capacity");
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "upsample_nearest2d_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.data_ptr<scalar_t>();
@@ -248,6 +253,10 @@ static void upsample_nearest2d_backward_out_cuda_template(
   Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_({nbatch, channels, input_height, input_width});
 
+  if (grad_input.numel() == 0) {
+    return;
+  }
+
   // upsample_2d_shape_check makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
@@ -257,8 +266,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
   TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.data_ptr<scalar_t>();

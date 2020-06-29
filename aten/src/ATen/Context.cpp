@@ -16,7 +16,7 @@
 #include <TH/TH.h> // for USE_LAPACK
 
 #ifdef USE_FBGEMM
-#include "fbgemm/Fbgemm.h"
+#include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
 
 namespace at {
@@ -57,6 +57,25 @@ bool Context::deterministicCuDNN() const {
 
 void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
+}
+
+bool Context::deterministic() const {
+  return _deterministic;
+}
+
+void Context::setDeterministic(bool b) {
+  _deterministic = b;
+}
+
+void Context::alertNotDeterministic(c10::string_view const& caller) {
+  if (globalContext().deterministic()) {
+    TORCH_CHECK(false,
+      caller, " does not have a deterministic implementation, but you set "
+      "'torch.set_deterministic(True)'. You can turn off determinism just "
+      "for this operation if that's acceptable for your application. You "
+      "can also file an issue at https://github.com/pytorch/pytorch/issues "
+      "to help us prioritize adding deterministic support for this operation.");
+  }
 }
 
 bool Context::benchmarkCuDNN() const {
@@ -141,6 +160,22 @@ const std::vector<at::QEngine>& Context::supportedQEngines() const {
   return supported_qengines;
 }
 
+bool Context::isXNNPACKAvailable() const {
+#ifdef USE_XNNPACK
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool Context::releaseWeightsWhenPrepacking() const {
+  return release_original_weights;
+}
+
+void Context::setReleaseWeightsWhenPrepacking(bool e) {
+  release_original_weights = e;
+}
+
 bool Context::setFlushDenormal(bool on) {
   return at::cpu::set_flush_denormal(on);
 }
@@ -148,19 +183,5 @@ bool Context::setFlushDenormal(bool on) {
 Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
-
-struct LegacyDeviceTypeInit : public LegacyDeviceTypeInitInterface {
-  LegacyDeviceTypeInit(LegacyDeviceTypeInitArgs) {}
-  void initCPU() const override {
-    globalContext();
-  }
-  void initCUDA() const override {
-    globalContext().lazyInitCUDA();
-  }
-  void initHIP() const override {
-    globalContext().lazyInitHIP();
-  }
-};
-REGISTER_LEGACY_TYPE_INIT(LegacyDeviceTypeInit);
 
 } // namespace at

@@ -6,7 +6,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/reducer_functors.h"
-#include "caffe2/perfkernels/fused_8bit_rowwise_conversion.h"
+#include "caffe2/perfkernels/fused_nbit_rowwise_conversion.h"
 #include "caffe2/utils/math.h"
 
 C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(Fused8BitRowwiseQuantizedToFloat);
@@ -35,9 +35,9 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
 
     const auto& input = Input(DATA_FLOAT);
 
-    const auto input_rows = input.size(0);
-    const auto input_columns = input.size(1);
-    CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix");
+    CAFFE_ENFORCE_GT(input.dim(), 0, "Input's dimension must be at least 1");
+    const auto input_rows = input.size_to_dim(input.dim() - 1);
+    const auto input_columns = input.size(input.dim() - 1);
 
     // The "fused" representation stores the scale and bias with the row-wise
     // quantized data in one tensor. Since we quantize with 8 bits (1 byte) and
@@ -45,8 +45,9 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
     // bytes of each row for scale (4 bytes) and bias (4 bytes).
     // | ... int8 data ... | scale       | bias       |
     // | number_of_columns |  sizeof(Tsb)| sizeof(Tsb)|
-    const std::vector<std::int64_t> output_dimensions = {
-        input_rows, input_columns + 2 * static_cast<std::int64_t>(sizeof(Tsb))};
+    auto output_dimensions = input.sizes().vec();
+    output_dimensions[input.dim() - 1] =
+        input_columns + 2 * static_cast<std::int64_t>(sizeof(Tsb));
     auto* output = Output(
         DATA_FUSED_SCALE_BIAS_INT8,
         output_dimensions,
@@ -54,7 +55,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
 
     const auto* input_data = input.template data<T>();
     auto* output_data = output->template mutable_data<std::uint8_t>();
-    const auto output_columns = output->size(1);
+    const auto output_columns = output->size(output->dim() - 1);
 
     bool is_float = std::is_same<T, float>::value;
     bool out_sb_half = std::is_same<Tsb, at::Half>::value;
@@ -62,7 +63,8 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
     if (!HAS_CONVERT) {
       CAFFE_ENFORCE(is_float, "convert can be nullptr only if T is float");
       if (out_sb_half) {
-        FloatToFused8BitRowwiseQuantizedSBHalf(
+        FloatToFusedNBitRowwiseQuantizedSBHalf(
+            8,
             reinterpret_cast<const float*>(input_data),
             input_rows,
             input_columns,
@@ -82,8 +84,12 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
       for (size_t row = 0; row < input_rows; ++row) {
         convert(tmp.data(), input_data + row * input_columns, input_columns);
         if (out_sb_half) {
-          FloatToFused8BitRowwiseQuantizedSBHalf(
-              tmp.data(), 1, input_columns, output_data + row * output_columns);
+          FloatToFusedNBitRowwiseQuantizedSBHalf(
+              8,
+              tmp.data(),
+              1,
+              input_columns,
+              output_data + row * output_columns);
         } else {
           FloatToFused8BitRowwiseQuantized(
               tmp.data(), 1, input_columns, output_data + row * output_columns);
@@ -115,16 +121,17 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
 
     const auto& input = Input(DATA_FUSED_SCALE_BIAS_INT8);
 
-    const auto input_rows = input.size(0);
-    const auto input_columns = input.size(1);
-    CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix");
+    CAFFE_ENFORCE_GT(input.dim(), 0, "Input's dimension must be at least 1");
+    const auto input_rows = input.size_to_dim(input.dim() - 1);
+    const auto input_columns = input.size(input.dim() - 1);
 
     // The last 2*sizeof(Tsb) bytes per row are the scale and the bias.
     // The rest of input_columns is the number of values in the original row.
-    const std::vector<std::int64_t> output_dimensions = {
-        input_rows, input_columns - 2 * static_cast<std::int64_t>(sizeof(Tsb))};
+    auto output_dimensions = input.sizes().vec();
+    output_dimensions[input.dim() - 1] =
+        input_columns - 2 * static_cast<std::int64_t>(sizeof(Tsb));
     auto* output = Output(DATA_FLOAT, output_dimensions, at::dtype<T>());
-    const auto output_columns = output->size(1);
+    const auto output_columns = output->size(output->dim() - 1);
 
     const auto* input_data = input.template data<std::uint8_t>();
     T* output_data = output->template mutable_data<T>();
@@ -136,7 +143,8 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
       CAFFE_ENFORCE(is_float, "convert can be nullptr only if T is float");
 
       if (in_sb_half) {
-        Fused8BitRowwiseQuantizedSBHalfToFloat(
+        FusedNBitRowwiseQuantizedSBHalfToFloat(
+            8,
             input_data,
             input_rows,
             input_columns,
@@ -155,8 +163,12 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
       vector<float> tmp(input_columns);
       for (size_t row = 0; row < input_rows; ++row) {
         if (in_sb_half) {
-          Fused8BitRowwiseQuantizedSBHalfToFloat(
-              input_data + row * input_columns, 1, input_columns, tmp.data());
+          FusedNBitRowwiseQuantizedSBHalfToFloat(
+              8,
+              input_data + row * input_columns,
+              1,
+              input_columns,
+              tmp.data());
         } else {
           Fused8BitRowwiseQuantizedToFloat(
               input_data + row * input_columns, 1, input_columns, tmp.data());

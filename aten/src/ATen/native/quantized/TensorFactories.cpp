@@ -10,21 +10,25 @@ namespace native {
 // We explicitly pass in scale and zero_point because we don't have the infra
 // ready to support quantizer in python frontend, once that is ready, we'll
 // change to use quantizer
-Tensor empty_affine_quantized_cpu(
+Tensor empty_affine_quantized(
     IntArrayRef size,
-    const TensorOptions& options,
+    const TensorOptions& options_,
     double scale,
     int64_t zero_point,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+  TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
-  return new_qtensor_cpu(
+  return new_qtensor(
       size,
       options,
       make_per_tensor_affine_quantizer(
-          scale, zero_point, typeMetaToScalarType(options.dtype())),
-      optional_memory_format.value_or(MemoryFormat::Contiguous));
+          scale, zero_point, typeMetaToScalarType(options.dtype())));
 }
 
 Tensor empty_per_channel_affine_quantized_cpu(
@@ -32,23 +36,24 @@ Tensor empty_per_channel_affine_quantized_cpu(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis,
-    const TensorOptions& options,
+    const TensorOptions& options_,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
   TORCH_CHECK(
       options.dtype() == kQInt8 || options.dtype() == kQUInt8,
       "Supported data type for tensor creation is int8 or uint8");
-  return new_qtensor_cpu(
+  return new_qtensor(
       size,
       options,
       make_per_channel_affine_quantizer(
-          scales,
-          zero_points,
-          axis,
-          typeMetaToScalarType(options.dtype())),
-      optional_memory_format.value_or(MemoryFormat::Contiguous));
+          scales, zero_points, axis, typeMetaToScalarType(options.dtype())));
 }
 
 // Provide better error message if dtype is wrong
@@ -69,6 +74,29 @@ Tensor empty_per_channel_affine_quantized_other_backends_stub(
     const TensorOptions&,
     c10::optional<c10::MemoryFormat>) {
   TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
+}
+
+// Create an empty quantized Tensor with size, based on the options
+// and quantization parameters of the input quantized Tensor
+Tensor empty_quantized(IntArrayRef size, const Tensor& qtensor) {
+  Tensor output;
+  if (qtensor.qscheme() == kPerTensorAffine) {
+    output = at::_empty_affine_quantized(size, qtensor.options(),
+                                         qtensor.q_scale(),
+                                         qtensor.q_zero_point());
+  } else if (qtensor.qscheme() == kPerChannelAffine) {
+    output = at::_empty_per_channel_affine_quantized(
+        size,
+        qtensor.q_per_channel_scales(),
+        qtensor.q_per_channel_zero_points(),
+        qtensor.q_per_channel_axis(),
+        qtensor.options());
+  } else {
+    TORCH_CHECK(false,
+                "QScheme not supported by empty_quantized:",
+                toString(qtensor.qscheme()));
+  }
+  return output;
 }
 
 } // namespace native

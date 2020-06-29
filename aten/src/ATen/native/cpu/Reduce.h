@@ -214,7 +214,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
           in += stride;
         }
       }, {begin, end});
-      return acc;
+      return ops.translate_idx(acc, sub_iter.view_offsets()[0]);
     };
     acc_t total_acc = init;
     auto numel = sub_iter.numel();
@@ -244,7 +244,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
 }
 
 template <typename func_t, typename vec_func_t>
-void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, double ident=0) {
+void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, double ident = 0) {
   using traits = binary_function_traits<func_t>;
   static_assert(
     all_same<

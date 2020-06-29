@@ -1,6 +1,7 @@
 #ifndef THC_ATOMICS_INC
 #define THC_ATOMICS_INC
 
+#include <c10/util/complex.h>
 #include <THC/THC.h>
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>
@@ -136,9 +137,32 @@ static inline  __device__ void gpuAtomicAdd(at::Half *address, at::Half val) {
 
 }
 
+static inline __device__ void gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
+    unsigned int * address_as_ui =
+      (unsigned int *) ((char *)address - ((size_t)address & 2));
+    unsigned int old = *address_as_ui;
+    unsigned int assumed;
+
+    do {
+      assumed = old;
+      at::BFloat16 bsum;
+      bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      bsum = THCNumerics<at::BFloat16>::add(bsum, val);
+      old = (size_t)address & 2 ? (old & 0xffff) | (bsum.x << 16) : (old & 0xffff0000) | bsum.x;
+      old = atomicCAS(address_as_ui, assumed, old);
+    } while (assumed != old);
+}
+
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
-static inline  __device__  void atomicAdd(double *address, double val) {
+static inline __device__ void atomicAdd(double* address, double val)
+#if defined(__clang__) && defined(__CUDA__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wgcc-compat"
+    __attribute__((enable_if(true, "")))
+#pragma GCC diagnostic pop
+#endif
+{
   unsigned long long int* address_as_ull = (unsigned long long int*)address;
   unsigned long long int old = *address_as_ull;
   unsigned long long int assumed;
@@ -178,6 +202,12 @@ static inline __device__ void gpuAtomicAdd(float *address, float val) {
   atomicAdd(address, val);
 }
 
+template<typename T>
+static inline __device__ void gpuAtomicAdd(c10::complex<T> *address, c10::complex<T> val) {
+  gpuAtomicAdd(&address->real_, val.real_);
+  gpuAtomicAdd(&address->imag_, val.imag_);
+}
+
 /* Note [gpuAtomicAdd vs atomicAdd]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * We are trying to standardize inside the PyTorch backend on using gpuAtomicAdd()
@@ -187,6 +217,10 @@ static inline __device__ void gpuAtomicAdd(float *address, float val) {
  * continue to provide atomicAdd overloads. 
  */
 static inline __device__ void atomicAdd(at::Half *address, at::Half val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline __device__ void atomicAdd(at::BFloat16 *address, at::BFloat16 val) {
   gpuAtomicAdd(address, val);
 }
 

@@ -1,7 +1,8 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <c10/util/C++17.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
 
 namespace torch {
@@ -48,14 +49,14 @@ RpcWithAutograd::RpcWithAutograd(
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
 }
 
-Message RpcWithAutograd::toMessage() && {
+Message RpcWithAutograd::toMessageImpl() && {
   auto messageId = wrappedMessage_.id();
-  auto messageType = wrappedMessage_.type();
+  auto wrappedMessageType = wrappedMessage_.type();
 
   auto payload = std::move(wrappedMessage_).movePayload();
   TORCH_INTERNAL_ASSERT(!payload.empty());
 
-  std::vector<at::IValue> ivalues{messageType,
+  std::vector<at::IValue> ivalues{wrappedMessageType,
                                   autogradMetadata_.autogradContextId,
                                   autogradMetadata_.autogradMessageId,
                                   fromWorkerId_};
@@ -68,19 +69,9 @@ Message RpcWithAutograd::toMessage() && {
   // We shouldn't have any tensors!
   TORCH_INTERNAL_ASSERT(tensorTable.empty());
 
-  // Append the payload.
-  payload.insert(
-      payload.end(), additionalPayload.begin(), additionalPayload.end());
-
-  // Add size of the additional payload.
-  int64_t indexToWrite = payload.size();
-  payload.resize(payload.size() + sizeof(int64_t));
-  const int64_t additionalPayloadSize = additionalPayload.size();
-  torch::utils::THP_encodeInt64Buffer(
-      reinterpret_cast<uint8_t*>(payload.data()) + indexToWrite,
-      &additionalPayloadSize,
-      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
-      1);
+  // This wraps additionalPayload into payload and takes care of resizing,
+  // encoding.
+  rpc::writeWrappedPayload(payload, additionalPayload);
 
   return Message(
       std::move(payload), std::move(tensors_), messageType_, messageId);
@@ -98,27 +89,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   // Decode message type, autograd context id, autograd message id and worker
   // id from which we received this message.
   auto payload = message.payload();
-
-  // Read the autograd payload remove it from the payload.
-  int64_t autogradPayLoadSize;
-  size_t indexToRead = payload.size() - sizeof(int64_t);
-  TORCH_INTERNAL_ASSERT(indexToRead >= 0);
-  torch::utils::THP_decodeInt64Buffer(
-      &autogradPayLoadSize,
-      reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
-      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
-      1);
-  payload.resize(indexToRead);
-
-  // Now read the entire autograd payload and unpickle.
-  TORCH_INTERNAL_ASSERT(payload.size() > autogradPayLoadSize)
-  auto autogradPayLoadBegin =
-      static_cast<const char*>(message.payload().data()) + payload.size() -
-      autogradPayLoadSize;
-  std::vector<torch::Tensor> tensorTable;
-  IValue tuple = jit::unpickle(
-      autogradPayLoadBegin, autogradPayLoadSize, nullptr, &tensorTable);
-  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  auto tupleElements = rpc::readWrappedPayload(payload, message);
 
   // Gather all the fields.
   TORCH_INTERNAL_ASSERT(tupleElements.size() == 4);
@@ -127,7 +98,6 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   AutogradMetadata autogradMetadata(
       tupleElements[1].toInt(), tupleElements[2].toInt());
   worker_id_t workerId = tupleElements[3].toInt();
-  payload.resize(payload.size() - autogradPayLoadSize);
 
   // Create new message type and build wrapped RPC.
   Message wrappedMessage(
@@ -160,6 +130,11 @@ const AutogradMetadata& RpcWithAutograd::autogradMetadata() const {
 RpcCommandBase& RpcWithAutograd::wrappedRpc() {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
   return *wrappedRpc_;
+}
+
+void RpcWithAutograd::setWrappedRpc(
+    std::unique_ptr<RpcCommandBase> wrappedRpc) {
+  wrappedRpc_ = std::move(wrappedRpc);
 }
 
 std::unique_ptr<RpcCommandBase> RpcWithAutograd::moveWrappedRpc() && {

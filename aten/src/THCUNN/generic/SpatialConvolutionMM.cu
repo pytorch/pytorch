@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/div_rtn.h>
+#include <ATen/cuda/CUDABlas.h>
 
 static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
                          THCState *state,
@@ -14,7 +15,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
- 
+
   if (weight != NULL) {
     THCUNN_argCheck(state, !weight->is_empty() && (weight->dim() == 2 || weight->dim() == 4), 5, weight,
                     "non-empty 2D or 4D weight tensor expected, but got: %s");
@@ -43,7 +44,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
   } else if (ndim == 4) {
     valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0 && input->size(3) != 0;
   }
-         
+
 
   THCUNN_argCheck(state, (!input->is_empty() || valid_empty) && (ndim == 3 || ndim == 4), 2, input,
                   "non-empty 3D or 4D input tensor expected but got: %s");
@@ -82,7 +83,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
       int64_t nOutputPlane = weight->size(0);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
+      int64_t nOutputPlane = bias->dim() == 0 ? 1 : bias->size(0);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     }
     THCUNN_check_dim_size(state, gradOutput, ndim, dimh, outputHeight);
@@ -96,8 +97,7 @@ static THCTensor* THNN_(newViewWeightMM2d)(THCState *state, THCTensor *weight) {
     int64_t s1 = weight->size(0);
     int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3);
     THCTensor *old_weight = weight;
-    weight = THCTensor_(newWithStorage2d)(state, THTensor_getStoragePtr(weight), weight->storage_offset(),
-                                          s1, -1, s2, -1);
+    weight = THTensor_wrap(weight).view({s1, s2}).unsafeReleaseTensorImpl();
     THCTensor_(free)(state, old_weight);
   }
   return weight;
@@ -198,7 +198,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
       #elif defined(THC_REAL_IS_BFLOAT16)
-      THCudaBlas_Bgemm(  
+      THCudaBlas_Bgemm(
       #endif
           state,
           't', 'n',
@@ -215,12 +215,12 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
 
     // Extract columns:
     at::native::im2col<scalar_t>(
-      THCState_getCurrentStream(state),
+      c10::cuda::getCurrentCUDAStream(),
       THCTensor_(data)(state, input_n),
       nInputPlane, inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
-      1, 1, 
+      1, 1,
       columns->data<scalar_t>()
     );
 
@@ -355,7 +355,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 
     // Unpack columns back into input:
     at::native::col2im<scalar_t, accreal>(
-      THCState_getCurrentStream(state),
+      c10::cuda::getCurrentCUDAStream(),
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
       1, 1, THCTensor_(data)(state, gradInput_n)
@@ -458,12 +458,12 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
       // Extract columns:
       at::native::im2col<scalar_t>(
-        THCState_getCurrentStream(state),
+        c10::cuda::getCurrentCUDAStream(),
         THCTensor_(data)(state, input_n),
         nInputPlane, inputHeight, inputWidth,
         outputHeight, outputWidth,
         kH, kW, padH, padW, dH, dW,
-        1, 1, 
+        1, 1,
         columns->data<scalar_t>()
       );
 
@@ -503,12 +503,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
       // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
       #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-      #ifdef THC_REAL_IS_FLOAT
-      THCudaBlas_Sgemv(
-      #elif defined(THC_REAL_IS_DOUBLE)
-      THCudaBlas_Dgemv(
-      #endif
-          state,
+      at::cuda::blas::gemv<scalar_t>(
           't',
           k_, m_,
           scale,

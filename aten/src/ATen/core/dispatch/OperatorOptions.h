@@ -3,9 +3,6 @@
 #include <cstdint>
 
 namespace c10 {
-namespace impl {
-class OperatorEntry;
-}
 
 enum class AliasAnalysisKind : uint8_t {
   INTERNAL_SPECIAL_CASE,
@@ -29,33 +26,5 @@ inline const char* toString(AliasAnalysisKind aliasAnalysisKind) {
                   ? "INTERNAL_SPECIAL_CASE"
                   : "UNKNOWN";
 }
-
-struct OperatorOptions final {
-public:
-  bool isDefaultAliasAnalysisKind() const {
-    return aliasAnalysisKind_ == c10::nullopt;
-  }
-
-  AliasAnalysisKind aliasAnalysis() const {
-    return !isDefaultAliasAnalysisKind()
-      ? *aliasAnalysisKind_
-      : AliasAnalysisKind::CONSERVATIVE;
-  }
-
-  void setAliasAnalysis(AliasAnalysisKind v) {
-    aliasAnalysisKind_ = v;
-  }
-
-  friend bool operator==(const OperatorOptions& lhs, const OperatorOptions& rhs) {
-    return lhs.aliasAnalysisKind_ == rhs.aliasAnalysisKind_;
-  }
-
-  friend bool operator!=(const OperatorOptions& lhs, const OperatorOptions& rhs) {
-    return !(lhs == rhs);
-  }
-
-private:
- c10::optional<AliasAnalysisKind> aliasAnalysisKind_;
-};
 
 } // namespace c10

@@ -5,6 +5,7 @@ import datetime
 import boto3
 import pytz
 import sys
+import re
 
 
 def save_to_s3(project, data):
@@ -146,6 +147,14 @@ def chunks(chunkable, n):
     for i in range(0, len(chunkable), n):
         yield chunkable[i : i + n]
 
+SHA_PATTERN = re.compile(r'^[0-9a-f]{40}$')
+def looks_like_git_sha(tag):
+    """Returns a boolean to check if a tag looks like a git sha
+
+    For reference a sha1 is 40 characters with only 0-9a-f and contains no
+    "-" characters
+    """
+    return re.match(SHA_PATTERN, tag) is not None
 
 stable_window_tags = []
 for repo in repos(client):
@@ -165,8 +174,11 @@ for repo in repos(client):
         tag = tags[0]
         created = image["imagePushedAt"]
         age = now - created
-        # new images build on circle ci use workflow ID as tag, which has 4 "-"
-        if tag.isdigit() or tag.count("-") == 4 or tag in ignore_tags:
+        if any([
+                looks_like_git_sha(tag),
+                tag.isdigit(),
+                tag.count("-") == 4,  # TODO: Remove, this no longer applies as tags are now built using a SHA1
+                tag in ignore_tags]):
             window = stable_window
             if tag in ignore_tags:
                 stable_window_tags.append((repositoryName, tag, "", age, created))
@@ -176,16 +188,16 @@ for repo in repos(client):
             window = unstable_window
 
         if tag in ignore_tags:
-            print("Ignoring tag {} (age: {})".format(tag, age))
+            print("Ignoring tag {}:{} (age: {})".format(repositoryName, tag, age))
             continue
         if age < window:
-            print("Not deleting manifest for tag {} (age: {})".format(tag, age))
+            print("Not deleting manifest for tag {}:{} (age: {})".format(repositoryName, tag, age))
             continue
 
         if args.dry_run:
-            print("(dry run) Deleting manifest for tag {} (age: {})".format(tag, age))
+            print("(dry run) Deleting manifest for tag {}:{} (age: {})".format(repositoryName, tag, age))
         else:
-            print("Deleting manifest for tag {} (age: {})".format(tag, age))
+            print("Deleting manifest for tag{}:{} (age: {})".format(repositoryName, tag, age))
             digest_to_delete.append(image["imageDigest"])
 
     # Issue batch delete for all images to delete for this repository

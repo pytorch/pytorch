@@ -3,23 +3,7 @@
 #else
 
 #include <ATen/core/Reduction.h>
-
-THC_API void THNN_(BCECriterion_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *output,
-                  int64_t reduction,
-                  THCTensor *weights);         // [OPTIONAL]
-
-THC_API void THNN_(BCECriterion_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int64_t reduction,
-                  THCTensor *weights);         // [OPTIONAL]
+#include <ATen/Generator.h>
 
 THC_API void THNN_(ClassNLLCriterion_updateOutput)(
                   THCState *state,
@@ -205,7 +189,7 @@ THC_API void THNN_(RReLU_updateOutput)(
                   double upper,
                   bool train,
                   bool inplace,
-                  void *generator);
+                  c10::optional<at::Generator> generator);
 
 THC_API void THNN_(RReLU_updateGradInput)(
                   THCState *state,

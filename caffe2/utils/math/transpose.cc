@@ -229,36 +229,36 @@ CAFFE2_SPECIALIZED_TRANSPOSE(std::int32_t, std::uint16_t)
 CAFFE2_SPECIALIZED_TRANSPOSE(std::int64_t, std::uint16_t)
 #undef CAFFE2_SPECIALIZED_TRANSPOSE
 
-#define CAFFE2_SPECIALIZED_NCHW2NHWC(T)                       \
-  template <>                                                 \
-  C10_EXPORT void NCHW2NHWC<T, CPUContext>(                   \
-      const int N,                                            \
-      const int C,                                            \
-      const int HxW,                                          \
-      const T* X,                                             \
-      T* Y,                                                   \
-      CPUContext* /* context */) {                            \
-    const int stride = C * HxW;                               \
-    for (int i = 0; i < N; ++i) {                             \
-      Transpose2D<T>(C, HxW, X + i * stride, Y + i * stride); \
-    }                                                         \
+#define CAFFE2_SPECIALIZED_NCHW2NHWC(T)                    \
+  template <>                                              \
+  C10_EXPORT void NCHW2NHWC<T, CPUContext>(                \
+      const int N,                                         \
+      const int C,                                         \
+      const int HxW,                                       \
+      const T* X,                                          \
+      T* Y,                                                \
+      CPUContext* /* context */) {                         \
+    const int stride = C * HxW;                            \
+    for (int i = 0; i < N; ++i) {                          \
+      Transpose2D(C, HxW, X + i * stride, Y + i * stride); \
+    }                                                      \
   }
 CAFFE2_SPECIALIZED_NCHW2NHWC(float)
 #undef CAFFE2_SPECIALIZED_NCHW2NHWC
 
-#define CAFFE2_SPECIALIZED_NHWC2NCHW(T)                       \
-  template <>                                                 \
-  C10_EXPORT void NHWC2NCHW<T, CPUContext>(                   \
-      const int N,                                            \
-      const int C,                                            \
-      const int HxW,                                          \
-      const T* X,                                             \
-      T* Y,                                                   \
-      CPUContext* /* context */) {                            \
-    const int stride = HxW * C;                               \
-    for (int i = 0; i < N; ++i) {                             \
-      Transpose2D<T>(HxW, C, X + i * stride, Y + i * stride); \
-    }                                                         \
+#define CAFFE2_SPECIALIZED_NHWC2NCHW(T)                    \
+  template <>                                              \
+  C10_EXPORT void NHWC2NCHW<T, CPUContext>(                \
+      const int N,                                         \
+      const int C,                                         \
+      const int HxW,                                       \
+      const T* X,                                          \
+      T* Y,                                                \
+      CPUContext* /* context */) {                         \
+    const int stride = HxW * C;                            \
+    for (int i = 0; i < N; ++i) {                          \
+      Transpose2D(HxW, C, X + i * stride, Y + i * stride); \
+    }                                                      \
   }
 CAFFE2_SPECIALIZED_NHWC2NCHW(float)
 #undef CAFFE2_SPECIALIZED_NHWC2NCHW

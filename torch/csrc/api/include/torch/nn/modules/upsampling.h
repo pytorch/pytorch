@@ -14,11 +14,20 @@
 namespace torch {
 namespace nn {
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Upsample ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 /// Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D
 /// (volumetric) data.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Upsample to learn
+/// about the exact behavior of this module.
 ///
-/// See https://pytorch.org/docs/stable/nn.html#Upsample to learn more
-/// about the exact semantics of this module.
+/// See the documentation for `torch::nn::UpsampleOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// Upsample model(UpsampleOptions().scale_factor({3}).mode(torch::kLinear).align_corners(false));
+/// ```
 class TORCH_API UpsampleImpl : public Cloneable<UpsampleImpl> {
  public:
   explicit UpsampleImpl(const UpsampleOptions& options_ = {});
@@ -35,9 +44,10 @@ class TORCH_API UpsampleImpl : public Cloneable<UpsampleImpl> {
 };
 
 /// A `ModuleHolder` subclass for `UpsampleImpl`.
-/// See the documentation for `UpsampleImpl` class to learn what
-/// methods it provides, or the documentation for `ModuleHolder` to learn about
-/// PyTorch's module storage semantics.
+/// See the documentation for `UpsampleImpl` class to learn what methods it
+/// provides, and examples of how to use `Upsample` with `torch::nn::UpsampleOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(Upsample);
 
 } // namespace nn
