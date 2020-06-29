@@ -7,7 +7,7 @@
 #include <c10/core/Storage.h>
 #include <ATen/core/Generator.h>
 #include <c10/util/Deprecated.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/NativeFunctions.h> // TODO: try to delete this
 #include <ATen/DeviceGuard.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/Reduction.h>
@@ -15,17 +15,32 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
 #include <ATen/TracerMode.h>
-
-#include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/TypeDefault.h>
-#include <ATen/CPUType.h>
-#include <ATen/QuantizedCPUType.h>
+#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 
 namespace at {
 
 using native::tensor;
 
 ${function_declarations}
+
+// Special C++ only overloads for std()-like functions (See gh-40287)
+// These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
+// So, for example std(0) would select the std(unbiased=False) overload
+inline Tensor var(const Tensor& self, int dim) {
+  return at::native::var(self, IntArrayRef{dim});
+}
+
+inline std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim) {
+  return at::native::var_mean(self, IntArrayRef{dim});
+}
+
+inline Tensor std(const Tensor& self, int dim) {
+  return at::native::std(self, IntArrayRef{dim});
+}
+
+inline std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim) {
+  return at::native::std_mean(self, IntArrayRef{dim});
+}
 
 inline Tensor from_blob(
     void* data,
@@ -94,10 +109,5 @@ inline Tensor from_blob(
 inline int64_t numel(const Tensor& tensor) {
   return tensor.numel();
 }
-
-// function definitions are all static inline because
-// they are one-line statically dispatched functions that
-// invoke the actual dynamic dispatch on the correct argument
-${function_definitions}
 
 }

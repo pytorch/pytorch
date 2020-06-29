@@ -19,7 +19,7 @@ EPOCH_DEPRECATION_WARNING = (
     "https://github.com/pytorch/pytorch/issues/new/choose."
 )
 
-SAVE_STATE_WARNING = "Please also save or load the state of the optimzer when saving or loading the scheduler."
+SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when saving or loading the scheduler."
 
 class _LRScheduler(object):
 

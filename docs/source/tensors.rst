@@ -162,11 +162,14 @@ view of a storage and defines numeric operations on it.
 
    .. autoattribute:: is_cuda
    .. autoattribute:: is_quantized
+   .. autoattribute:: is_meta
    .. autoattribute:: device
    .. autoattribute:: grad
       :noindex:
    .. autoattribute:: ndim
    .. autoattribute:: T
+   .. autoattribute:: real
+   .. autoattribute:: imag
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -292,6 +295,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: fill_
    .. automethod:: flatten
    .. automethod:: flip
+   .. automethod:: fliplr
+   .. automethod:: flipud
    .. automethod:: float
    .. automethod:: floor
    .. automethod:: floor_

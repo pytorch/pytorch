@@ -983,3 +983,47 @@ class TestClassType(JitTestCase):
 
         with self.assertRaises(torch.jit.Error):
             script_module.calls_unused_indirectly()
+
+    def test_self_referential_method(self):
+        """
+        Test that a scripted class can have a method that refers to the class itself
+        in its type annotations.
+        """
+        @torch.jit.script
+        class Meta(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            def method(self, other: List['Meta']) -> 'Meta':
+                return Meta(len(other))
+
+        class ModuleWithMeta(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.meta = Meta(a)
+
+            def forward(self):
+                new_obj = self.meta.method([self.meta])
+                return new_obj.a
+
+        self.checkModule(ModuleWithMeta(5), ())
+
+    def test_type_annotation(self):
+        """
+        Test that annotating container attributes with types works correctly
+        """
+        @torch.jit.script
+        class CompetitiveLinkingTokenReplacementUtils:
+            def __init__(self):
+                self.my_list : List[Tuple[float, int, int]] = []
+                self.my_dict : Dict[int, int] = {}
+
+        @torch.jit.script
+        def foo():
+            y = CompetitiveLinkingTokenReplacementUtils()
+            new_dict : Dict[int, int] = {1: 1, 2: 2}
+            y.my_dict = new_dict
+
+            new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
+            y.my_list = new_list
+            return y
