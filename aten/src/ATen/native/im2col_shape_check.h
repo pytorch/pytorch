@@ -37,9 +37,11 @@ static inline void col2im_shape_check(
       dilation_width);
 
   int64_t ndim = input.ndimension();
+  // allow dim=0 only the batch dimension.
   TORCH_CHECK(
-      input.numel() != 0 && (ndim == 2 || ndim == 3),
-      "Expected non-empty 2D or 3D input tensor, but got input of sizes",
+      (ndim == 2 && input.size(1) != 0) ||
+      (ndim == 3 && input.size(1) != 0 && input.size(2) != 0),
+      "2D or 3D (batch mode) tensor expected for input, but got input of size ",
       input.sizes());
 
   int64_t batch_dim = (ndim == 3) ? 0 : -1;
@@ -155,9 +157,11 @@ static inline void im2col_shape_check(
 
   int64_t ndim = input.ndimension();
 
+  // allow dim=0 only the batch dimension.
   TORCH_CHECK(
-      input.numel() != 0 && (ndim == 3 || ndim == 4),
-      "Expected non-empty 3D or 4D input tensor, but got input of size ",
+      (ndim == 3 && input.size(1) != 0 && input.size(2) != 0) ||
+      (ndim == 4 && input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0),
+      "3D or 4D (batch mode) expected for input, but got input of size ",
       input.sizes());
 
   int64_t dim_batch = 0;

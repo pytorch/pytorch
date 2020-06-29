@@ -9412,6 +9412,16 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, device=device)
             mod(inp)
 
+    def test_Unfold_empty(self, device):
+        inp = torch.randn(0, 3, 3, 4)
+        unfold = torch.nn.Unfold(kernel_size=(2, 3))
+        self._test_module_empty_input(unfold, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
+            inp = torch.randn(3, 0, 3, 4)
+            unfold = torch.nn.Unfold(kernel_size=(2, 3))
+            unfold(inp)
+
     def test_BatchNorm_empty(self, device):
         mod = torch.nn.BatchNorm2d(3).to(device)
         inp = torch.randn(0, 3, 2, 2, device=device)
