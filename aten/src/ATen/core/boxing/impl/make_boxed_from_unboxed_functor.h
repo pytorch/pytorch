@@ -42,7 +42,10 @@ using supported_primitive_arg_types = guts::typelist::typelist<
     at::Tensor,
     at::Scalar,
     c10::QScheme,
-    c10::ScalarType
+    c10::ScalarType,
+    c10::Device,
+    c10::Layout,
+    c10::MemoryFormat
   >;
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
@@ -52,7 +55,11 @@ using supported_primitive_arg_types = guts::typelist::typelist<
       }, /* else */ [] {
         // TODO This is called for each operator call and potentially expensive.
         // This check should be moved to operator registration time instead.
-        TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as input argument");
+        TORCH_CHECK(
+          c10::isCustomClassRegistered<T>(),
+          "Tried to use undefined class ",
+          c10::util::get_fully_qualified_type_name<T>(),
+          " as input argument");
       });
     }
   };
@@ -142,7 +149,7 @@ using supported_primitive_arg_types = guts::typelist::typelist<
       }, /* else */ [] {
         // TODO This is called for each operator call and potentially expensive.
         // This check should be moved to operator registration time instead.
-        TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class as output");
+        TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class ", c10::util::get_fully_qualified_type_name<T>(), " as output");
       });
     }
   };

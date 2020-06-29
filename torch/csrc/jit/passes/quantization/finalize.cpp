@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/quantization/finalize.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/quantization/quantization_patterns.h>
@@ -29,6 +29,20 @@ graph(%a_dequant, %w_quant, %b):
 }
 
 void insertPrepackUnpackForConv(std::shared_ptr<Graph>& graph) {
+  std::string conv1d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv1d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv1d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv1d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv1d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv1d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
   std::string conv2d_with_quant = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %w_dequant = aten::dequantize(%w_quant)
@@ -58,6 +72,7 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         return (%r) )";
 
   std::vector<std::vector<std::string>> patterns_and_replacements = {
+      {conv1d_with_quant, conv1d_with_quant_prepack},
       {conv2d_with_quant, conv2d_with_quant_prepack},
       {conv3d_with_quant, conv3d_with_quant_prepack}};
   for (const auto& item : patterns_and_replacements) {
@@ -71,9 +86,9 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
 
 } // namespace
 
-void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
+void QuantFusion(std::shared_ptr<Graph>& graph, QuantType quant_type) {
   std::vector<QuantFusionInfo> patterns;
-  if (is_dynamic) {
+  if (quant_type == QuantType::DYNAMIC) {
     patterns = dynamic_quant_fusion_pattern_and_replacements();
   } else {
     patterns = quant_fusion_pattern_and_replacements();
@@ -81,7 +96,7 @@ void QuantFusion(std::shared_ptr<Graph>& graph, bool is_dynamic) {
   for (const auto& info : patterns) {
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(info.pattern, info.replacement);
-    rewriter.runOnGraph(graph, info.filter);
+    rewriter.runOnGraph(graph, info.filters);
   }
 }
 
@@ -104,17 +119,18 @@ void FoldQuantizedPrepackingOps(Module& module) {
   auto filter_fn = [](const Node* n) -> bool {
     return (
         (n->kind() == Symbol::fromQualString("quantized::linear_prepack")) ||
+        n->kind() == Symbol::fromQualString("quantized::conv1d_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv2d_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv3d_prepack"));
   };
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-Module Finalize(Module& module, bool is_dynamic) {
+Module Finalize(Module& module, QuantType quant_type) {
   auto graph = module.get_method("forward").graph();
   InsertPrepackUnpack(graph);
-  ConstantPropagation(graph);
-  QuantFusion(graph, is_dynamic);
+  GRAPH_DUMP("Before QuantFusion:", graph);
+  QuantFusion(graph, quant_type);
   auto frozen = freeze_module(module);
   FoldQuantizedPrepackingOps(frozen);
   return frozen;

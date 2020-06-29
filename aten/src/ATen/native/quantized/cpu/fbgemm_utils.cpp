@@ -122,7 +122,6 @@ Tensor MakeStridedQTensorCPU(
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
-      dtype,
       size_bytes,
       allocator->allocate(size_bytes),
       allocator,
@@ -130,6 +129,7 @@ Tensor MakeStridedQTensorCPU(
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage,
       at::DispatchKeySet(at::DispatchKey::QuantizedCPU),
+      dtype,
       quantizer);
   get_qtensorimpl(tensor)->set_sizes_and_strides(sizes, strides);
   return tensor;

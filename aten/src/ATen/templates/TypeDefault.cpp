@@ -13,6 +13,7 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <torch/library.h>
 
 namespace {
@@ -62,7 +63,7 @@ TORCH_LIBRARY(aten, m) {
   m.def("replace(str self, str old, str new, int max=-1) -> str");
   m.def("partition(str self, str separator) -> (str, str, str)");
   m.def("rpartition(str self, str separator) -> (str, str, str)");
-  m.def("split.str(str self, str separator=' ', int max=-1) -> str[]");
+  m.def("split.str(str self, str? separator=None, int max=-1) -> str[]");
   m.def("rsplit(str self, str separator=' ', int max=-1) -> str[]");
   m.def("join(str self, str[] values) -> str");
 
@@ -73,6 +74,10 @@ TORCH_LIBRARY(aten, m) {
   m.def("Int.float(float a) -> int");
   m.def("Int.Scalar(Scalar a) -> int");
   m.def("Int.str(str a) -> int");
+
+  // Distributed Ops
+  // Implementations located in torch/csrc/jit/runtime/register_distributed_ops.cpp
+  m.def("get_gradients(int context_id) -> Dict(Tensor, Tensor)");
 }
 
 }  // namespace at

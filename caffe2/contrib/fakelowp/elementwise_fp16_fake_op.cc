@@ -46,10 +46,10 @@ struct FP16PairWiseCPUFunctor : public OP {
     return true;
   }
 };
-
 } // namespace
 
 REGISTER_CPU_OPERATOR(SumFakeFp16, SumFP16FP16AccOp<CPUContext>);
+OPERATOR_SCHEMA(SumFakeFp16).NumInputs(1, INT_MAX).NumOutputs(1, INT_MAX);
 
 REGISTER_CPU_OPERATOR(
     AddFakeFp16,
@@ -57,6 +57,7 @@ REGISTER_CPU_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         FP16PairWiseCPUFunctor<AddFunctor<CPUContext>>>);
+OPERATOR_SCHEMA(AddFakeFp16).NumInputs(2).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(
     DivFakeFp16,
@@ -64,6 +65,7 @@ REGISTER_CPU_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         FP16PairWiseCPUFunctor<DivFunctor<CPUContext>>>);
+OPERATOR_SCHEMA(DivFakeFp16).NumInputs(2).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(
     MulFakeFp16,
@@ -71,6 +73,7 @@ REGISTER_CPU_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         FP16PairWiseCPUFunctor<MulFunctor<CPUContext>>>);
+OPERATOR_SCHEMA(MulFakeFp16).NumInputs(2).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(
     SubFakeFp16,
@@ -78,5 +81,6 @@ REGISTER_CPU_OPERATOR(
         TensorTypes<float>,
         CPUContext,
         FP16PairWiseCPUFunctor<SubFunctor<CPUContext>>>);
+OPERATOR_SCHEMA(SubFakeFp16).NumInputs(2).NumOutputs(1);
 
 } // namespace caffe2
