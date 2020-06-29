@@ -310,9 +310,8 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     }
     return inputs;
   } else if (isListAdd(n)) {
-    // We need to propagate dequantize of n->input(0) only if it is
-    // also produced by dequantize. i.e. the dequantize check and propagation
-    // for n->input(0) is optional. This is handled in insert_quant_dequant.cpp
+    // We need to propagate dequantize of n->input(0) if it is
+    // not an empty list
     if (isEmptyList(n->input(0)->node())) {
       return {n->input(1)};
     } else {
