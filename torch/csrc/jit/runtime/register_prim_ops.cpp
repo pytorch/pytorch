@@ -26,6 +26,56 @@ namespace {
 
 RegisterOperators reg(
     {Operator(
+         "aten::len.str(str s) -> int",
+         [](Stack& stack) {
+           auto string = pop(stack).toStringRef();
+           push(stack, static_cast<int64_t>(string.size()));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::list(str t) -> str[]",
+         [](Stack& stack) {
+           auto str = pop(stack).toStringRef();
+           c10::List<std::string> chars;
+           chars.reserve(str.size());
+           for (auto c : str) {
+             chars.push_back(std::string(1, c));
+           }
+           push(stack, std::move(chars));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     // only used internally in range() translation
+     Operator(
+         "aten::__range_length(int lo, int hi, int step) -> int",
+         [](Stack& stack) {
+           int64_t lo, hi, step;
+           pop(stack, lo, hi, step);
+           // error handling when step_val = 0 during runtime
+           if (step == 0) {
+             throw std::runtime_error("range() arg 3 must not be zero");
+           }
+           if (step > 0 && lo < hi) {
+             push(stack, 1 + (hi - 1 - lo) / step);
+           } else if (step < 0 && lo > hi) {
+             push(stack, 1 + (lo - 1 - hi) / (0 - step));
+           } else {
+             push(stack, 0);
+           }
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::__derive_index(int index, int start, int step) -> int",
+         [](Stack& stack) {
+           int64_t index, start, step;
+           pop(stack, index, start, step);
+           push(stack, start + index * step);
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::TupleUnpack(Any tup) -> ...",
          [](Stack& stack) {
            tupleUnpack(stack);

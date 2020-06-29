@@ -760,14 +760,6 @@ RegisterOperators reg2({
     DEFINE_STRING_OP(aten::add, a + b, str),
 #undef DEFINE_STRING_OP
     Operator(
-        "aten::len.str(str s) -> int",
-        [](Stack& stack) {
-          auto string = pop(stack).toStringRef();
-          push(stack, static_cast<int64_t>(string.size()));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
         "aten::__getitem__.str(str s, int index) -> str",
         [](Stack& stack) {
           auto index = pop(stack).toInt();
@@ -775,19 +767,6 @@ RegisterOperators reg2({
           auto norm_index = normalizeIndex(index, string.size());
           char c = string.at(norm_index);
           push(stack, std::string(&c, 1));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::list(str t) -> str[]",
-        [](Stack& stack) {
-          auto str = pop(stack).toStringRef();
-          c10::List<std::string> chars;
-          chars.reserve(str.size());
-          for (auto c : str) {
-            chars.push_back(std::string(1, c));
-          }
-          push(stack, std::move(chars));
           return 0;
         },
         aliasAnalysisFromSchema()),
