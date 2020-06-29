@@ -57,120 +57,8 @@
 #define ASSERT_HOST_DEVICE_LAMBDA(type)
 #endif
 
-static constexpr int launch_size_1d = 512;
-static constexpr int launch_size_nd = 128;
-static constexpr int launch_bound2 = 4;
-
 
 namespace at { namespace native {
-
-// See [NOTE: Complex Operator Unification]
-// std::complex and thrust::complex don't work with some !needs_dynamic_casting optimizations.
-// They always currently map to !needs_dynamic_casting even though we sometimes rely on the ability
-// to reinterpret_cast between these representations.
-// In order to separate these concerns, we have a check for non-c10 complex separately.
-template<typename func_t, int nargs=function_traits<func_t>::arity>
-struct uses_non_c10_complex {
-  constexpr static bool check() {
-    using traits = function_traits<func_t>;
-    using type = typename traits::template arg<nargs - 1>::type;
-    constexpr bool non_c10_complex =
-        std::is_same<std::complex<float>, type>::value
-        || std::is_same<std::complex<double>, type>::value
-        || std::is_same<thrust::complex<float>, type>::value
-        || std::is_same<thrust::complex<double>, type>::value;
-
-    return c10::guts::if_constexpr<non_c10_complex>([]() {
-      return true;
-    }, /* else */ []() {
-      return uses_non_c10_complex<func_t, nargs - 1>::check();
-    });
-  }
-};
-
-template<typename func_t>
-struct uses_non_c10_complex<func_t, 0> {
-  constexpr static bool check() {
-    using traits = function_traits<func_t>;
-    using type = typename traits::result_type;
-    constexpr bool non_c10_complex =
-        std::is_same<std::complex<float>, type>::value
-        || std::is_same<std::complex<double>, type>::value
-        || std::is_same<thrust::complex<float>, type>::value
-        || std::is_same<thrust::complex<double>, type>::value;
-
-    return non_c10_complex;
-  }
-};
-
-// NOTE: @zasdfgbnm is currently working on rewriting the gpu loops.
-// Some of the old codes has been moved to namespace legacy, and
-// new codes will be put into namespace modern. These two namespaces
-// will coexists for a while until the rewrite is done. Once the rewrite
-// is done, we will remove the legacy and modern namespace and everything
-// will be in at::native directly.
-namespace legacy {
-
-template<int nt, int vt, typename func_t>
-C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
-__global__ void elementwise_kernel(int N, func_t f) {
-  int tid = threadIdx.x;
-  int nv = nt * vt;
-  int idx = nv * blockIdx.x + tid;
-  #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx < N) {
-      f(idx);
-      idx += nt;
-    }
-  }
-}
-
-template<int nt, int vt, typename func_t>
-static void launch_kernel(int64_t N, const func_t& f) {
-  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
-  if (N == 0) {
-    return;
-  }
-  dim3 block(nt);
-  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
-  auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <typename traits, typename func_t, typename index_t, size_t... INDEX>
-C10_HOST_DEVICE typename traits::result_type
-invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
-            std::index_sequence<INDEX...>) {
-  return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
-}
-
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
-invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i) {
-  using Indices = std::make_index_sequence<traits::arity>;
-  return invoke_impl<traits>(f, data, strides, i, Indices{});
-}
-
-template <typename traits, typename func_t, typename index_t, size_t... I>
-C10_HOST_DEVICE typename traits::result_type
-invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i,
-            std::index_sequence<I...>) {
-  return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])...);
-}
-
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
-invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
-  using Indices = std::make_index_sequence<traits::arity>;
-  return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
-}
-
-} // namespace legacy
-
-// See the note for namespace legacy above.
-namespace modern {
 
 template<typename func_t, typename policy_t>
 __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
@@ -207,18 +95,25 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
     auto input_calc = TrivialOffsetCalculator<traits::arity>();
     auto output_calc = TrivialOffsetCalculator<1>();
-    auto policy = memory::policies::unroll<array_t, decltype(input_calc), decltype(output_calc)>(data, remaining, input_calc, output_calc);
+    auto loader = memory::LoadWithoutCast();
+    auto storer = memory::StoreWithoutCast();
+    auto policy = memory::policies::unroll<array_t, decltype(input_calc), decltype(output_calc),
+                                           memory::LoadWithoutCast, memory::StoreWithoutCast>(
+      data, remaining, input_calc, output_calc, loader, storer);
     elementwise_kernel_helper(f, policy);
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
     elementwise_kernel_helper(f, memory::policies::vectorized<vec_size, array_t>(data));
   }
 }
 
-template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
+template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
-__global__ void unrolled_elementwise_kernel(int N, func_t f, array_t data, inp_calc_t ic, out_calc_t oc) {
+__global__ void unrolled_elementwise_kernel(int N, func_t f, array_t data,
+                                            inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s)
+{
   int remaining = N - block_work_size * blockIdx.x;
-  elementwise_kernel_helper(f, memory::policies::unroll<array_t, inp_calc_t, out_calc_t>(data, remaining, ic, oc));
+  auto policy = memory::policies::unroll<array_t, inp_calc_t, out_calc_t, loader_t, storer_t>(data, remaining, ic, oc, l, s);
+  elementwise_kernel_helper(f, policy);
 }
 
 // this function assume trivial 1d and no dynamic casting
@@ -229,8 +124,6 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
-  auto input_calc = TrivialOffsetCalculator<traits::arity>();
-  auto output_calc = TrivialOffsetCalculator<1>();
 
   switch (vec_size) {
   case 4:
@@ -239,26 +132,30 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   case 2:
     vectorized_elementwise_kernel<2, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
     break;
-  case 1:
-    unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, input_calc, output_calc);
+  case 1: {
+    auto input_calc = TrivialOffsetCalculator<traits::arity>();
+    auto output_calc = TrivialOffsetCalculator<1>();
+    auto loader = memory::LoadWithoutCast();
+    auto storer = memory::StoreWithoutCast();
+    unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, input_calc, output_calc, loader, storer);
     break;
+  }
   default:
     TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
   }
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
-static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t data, inp_calc_t ic, out_calc_t oc) {
+template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
+static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t data,
+                                          inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s)
+{
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
-  unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc);
+  unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc, l, s);
   AT_CUDA_CHECK(cudaGetLastError());
 }
-
-} // namespace modern
-
 
 template <typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
@@ -279,64 +176,32 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
 
   bool contiguous = iter.is_contiguous();
   bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
-  bool non_c10_complex = uses_non_c10_complex<func_t>::check();
 
-  if (!non_c10_complex) {
-    if (contiguous && !dynamic_casting) {
-      modern::launch_vectorized_kernel(numel, f, data);
-      return;
-    }
-
-    if (!dynamic_casting) {
-      // !contiguous
+  if (!dynamic_casting) {
+    if (contiguous) {
+      launch_vectorized_kernel(numel, f, data);
+    } else {
       auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
       auto output_offset_calculator = make_output_offset_calculator(iter);
-      modern::launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator);
-      return;
-    }
-  }
-
-  at::detail::Array<ScalarType, ntensors> dtypes;
-  for (int i = 0; i < ntensors; i++) {
-    dtypes[i] = iter.tensor(i).scalar_type();
-  }
-
-  if (iter.is_trivial_1d()) {
-    auto inner_strides = iter.get_inner_strides();
-    at::detail::Array<int, ntensors> strides;
-    for (int i = 0; i < ntensors; i++) {
-      strides[i] = inner_strides[i];
-    }
-
-    // TODO: can non_c10_complex go through the other path?  Need to verify.
-    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-        void* out = data[0] + strides[0] * idx;
-        arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
-        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
-      });
-    } else {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-        arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
-        *out = legacy::invoke(f, &data.data[1], &strides.data[1], idx);
-      });
+      auto loader = memory::LoadWithoutCast();
+      auto storer = memory::StoreWithoutCast();
+      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
     }
   } else {
-    auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
-    // TODO: can non_c10_complex go through the other path?  Need to verify.
-    if (needs_dynamic_casting<func_t>::check(iter) || non_c10_complex) {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        void* out = data[0] + offsets[0];
-        arg0_t result = legacy::invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
-        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
-      });
+    at::detail::Array<ScalarType, traits::arity> dtypes;
+    for (int i = 0; i < traits::arity; i++) {
+      dtypes[i] = iter.tensor(i + 1).scalar_type();
+    }
+    auto loader = memory::LoadWithCast<traits::arity>(dtypes);
+    auto storer = memory::StoreWithCast(iter.tensor(0).scalar_type());
+    if (contiguous) {
+      auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
+      auto output_offset_calculator = TrivialOffsetCalculator<1>();
+      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
     } else {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-        *out = legacy::invoke(f, &data.data[1], &offsets.data[1], 1);
-      });
+      auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
+      auto output_offset_calculator = make_output_offset_calculator(iter);
+      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
     }
   }
 }

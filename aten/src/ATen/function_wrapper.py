@@ -132,7 +132,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 
 # add non-virtual declaration to Tensor.cpp
-C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
+TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 ${return_type} Tensor::${api_name}(${method_formals}) const {
@@ -141,22 +141,8 @@ ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${schema_order_cpp_signature}>();
-    return op.call(${schema_order_method_actuals});
-#endif
-}
-""")
-UNBOXEDONLY_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-
-// ${schema_string}
-${return_type} Tensor::${api_name}(${method_formals}) const {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_method_body}
-#else
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${cpp_signature}>();
-    return op.call(${method_actuals});
+        .typed<${tensor_method_cpp_signature}>();
+    return op.call(${tensor_method_actuals});
 #endif
 }
 """)
@@ -172,7 +158,7 @@ C10_DEPRECATED CAFFE2_API ${return_type} ${api_name}(${formals_with_defaults});
 """)
 
 # add method definition in Functions.h
-C10_FUNCTION_DEFINITION = CodeTemplate("""\
+FUNCTION_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 ${return_type} ${api_name}(${formals}) {
@@ -181,22 +167,8 @@ ${return_type} ${api_name}(${formals}) {
 #else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${schema_order_cpp_signature}>();
-    return op.call(${schema_order_actuals});
-#endif
-}
-""")
-UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
-
-// ${schema_string}
-${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-        .typed<${cpp_signature}>();
-    return op.call(${actuals});
+        .typed<${function_cpp_signature}>();
+    return op.call(${function_actuals});
 #endif
 }
 """)
@@ -494,6 +466,10 @@ FunctionOption = TypedDict('FunctionOption', {
     # visible and is mangled with the overload name
     'type_wrapper_name': str,
     'arguments': List[THFormal],
+    # 'schema_order_arguments' is like 'arguments' but keeps them in the
+    # order they are defined in the JIT function schema while
+    # 'arguments' does some modifications (e.g. reorders out arguments
+    # and packs TensorOptions)
     'schema_order_arguments': List[THFormal],
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
@@ -523,6 +499,11 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals': List[str],
     'formals_types': List[str],
     'cpp_signature': str,
+    # 'schema_order_cpp_signature' is like 'cpp_signature' but keeps them in the
+    # order they are defined in the JIT function schema while
+    # 'cpp_signature' does some modifications (e.g. reorders out arguments
+    # and packs TensorOptions)
+    'schema_order_cpp_signature': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -541,7 +522,6 @@ FunctionOption = TypedDict('FunctionOption', {
     # options should be List[FunctionOption]
     'options': Any,
     'schema_string': str,
-    'requires_tensor': bool,
     'return_call': str,
     'return_type': str,
     'return': ReturnDecl,
@@ -562,6 +542,10 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('arguments', List[AtFormal]),
+    # 'schema_order_arguments' is like 'arguments' but keeps them in the
+    # order they are defined in the JIT function schema while
+    # 'arguments' does some modifications (e.g. reorders out arguments
+    # and packs TensorOptions)
     ('schema_order_arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
@@ -571,7 +555,6 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('inplace', bool),
     ('is_factory_method', bool),
     ('abstract', bool),
-    ('requires_tensor', bool),
     ('device_guard', bool),
     ('with_gil', bool),
     ('deprecated', bool),
@@ -946,7 +929,7 @@ def create_generic(top_env, declarations):
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
 
     def native_get_formals(option, schema_order, include_constants=False):
-        # type: (FunctionOption, bool) -> List[AtFormal]
+        # type: (FunctionOption, bool, bool) -> List[AtFormal]
         seen = set()  # type: Set[str]
         pos_args = []
         kwd_args = []
@@ -1069,9 +1052,9 @@ def create_generic(top_env, declarations):
         option['formals_types'] = [f['type'] for f in option['formals_list']]
 
         option['cpp_signature'] = "{} ({})".format(option['return_type'], ", ".join(option['formals_types']))
-        option['schema_order_cpp_signature'] = option['cpp_signature']\
-            .replace('const TensorOptions &',
-                     'optional<ScalarType>, optional<Layout> layout, optional<Device> device, optional<bool> pin_memory')
+        option['schema_order_cpp_signature'] = "{} ({})".format(
+            option['return_type'],
+            ", ".join([f['type'] for f in schema_order_formals]))
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
@@ -1142,15 +1125,22 @@ def create_generic(top_env, declarations):
                     option, actuals=option['method_actuals'])
 
             if option['use_c10_dispatcher'] == 'full':
-                method_definition = C10_TENSOR_METHOD_DEFINITION
+                tensor_method_actuals = option['schema_order_method_actuals']
+                tensor_method_cpp_signature = option['schema_order_cpp_signature']
             else:
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                method_definition = UNBOXEDONLY_TENSOR_METHOD_DEFINITION
+                tensor_method_actuals = option['method_actuals']
+                tensor_method_cpp_signature = option['cpp_signature']
+
+            method_definition = TENSOR_METHOD_DEFINITION.substitute(
+                option, static_dispatch_method_body=static_dispatch_method_body,
+                tensor_method_actuals=tensor_method_actuals,
+                tensor_method_cpp_signature=tensor_method_cpp_signature
+            )
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body),
-                definition=method_definition.substitute(
-                    option, static_dispatch_method_body=static_dispatch_method_body))
+                definition=method_definition)
 
         def gen_namespace_function(option, multidispatch_formals):
             # type: (Any, List[AtFormal]) -> FunctionCode
@@ -1187,12 +1177,17 @@ def create_generic(top_env, declarations):
                     option, actuals=option['actuals'])
 
             if option['use_c10_dispatcher'] == 'full':
-                fn_definition = C10_FUNCTION_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body)
+                function_actuals = option['schema_order_actuals']
+                function_cpp_signature = option['schema_order_cpp_signature']
             else:
                 assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                fn_definition = UNBOXEDONLY_FUNCTION_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body)
+                function_actuals = option['actuals']
+                function_cpp_signature = option['cpp_signature']
+
+            fn_definition = FUNCTION_DEFINITION.substitute(
+                option, static_dispatch_function_body=static_dispatch_function_body,
+                function_actuals=function_actuals,
+                function_cpp_signature=function_cpp_signature)
 
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
@@ -1305,7 +1300,6 @@ def create_generic(top_env, declarations):
             is_factory_method=is_factory_method,
             # See Note [Abstract ATen methods]
             abstract=abstract,
-            requires_tensor=option.get('requires_tensor', False),
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option['deprecated'],
