@@ -57,6 +57,10 @@ c10::IValue getFunctionTuple(const Function& func) {
   std::vector<std::string> method_names;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
+    TORCH_CHECK(
+        isOpSupportedInMobile(ins.op),
+        toString(ins.op),
+        " is not supported in mobile module.");
     if (ins.op == OP || ins.op == OPN) {
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
