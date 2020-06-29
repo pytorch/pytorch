@@ -314,7 +314,6 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
         concrete_type_builder = infer_concrete_type_builder(nn_module)
         concrete_type_builder.set_poisoned()
         concrete_type = concrete_type_builder.build()
-
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
@@ -351,6 +350,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             else:
                 # use the default recursive rule to compile the module
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
+                if isinstance(orig_value, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):
+                    scripted.define("def __len__(self):\n   return {}\n".format(len(scripted)))
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
