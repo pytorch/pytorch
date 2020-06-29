@@ -45,5 +45,9 @@ trap "docker logout ${registry}" EXIT
 
 docker push "${image}:${tag}"
 
+# TODO: Get rid of duplicate tagging once ${DOCKER_TAG} becomes the default
+docker tag "${image}:${tag}" "${image}:${DOCKER_TAG}"
+docker push "${image}:${DOCKER_TAG}"
+
 docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
 aws s3 cp "${IMAGE_NAME}:${tag}.tar" "s3://ossci-linux-build/pytorch/base/${IMAGE_NAME}:${tag}.tar" --acl public-read

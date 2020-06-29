@@ -105,6 +105,7 @@ class VulkanTensor final {
   }
 
   std::vector<int64_t> sizes() const;
+  std::vector<int64_t> strides() const;
   int64_t dim() const;
   int64_t numel() const;
 

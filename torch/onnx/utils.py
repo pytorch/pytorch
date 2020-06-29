@@ -550,9 +550,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                     val_use_external_data_format, model_file_location)
 
             if enable_onnx_checker and \
-                operator_export_type is OperatorExportTypes.ONNX_ATEN_FALLBACK and \
+                operator_export_type is OperatorExportTypes.ONNX and \
                     not val_use_external_data_format:
-                # Only run checker if enabled and we are not using ATEN fallback and
+                # Only run checker if enabled and we are using ONNX export type and
                 # large model format export in not enabled.
                 _check_onnx_proto(proto)
 
@@ -917,7 +917,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
-                           and sould start with a letter and contain only \
+                           and should start with a letter and contain only \
                            alphanumerical characters"
                            .format(symbolic_name))
     ns, op_name = symbolic_name.split('::')

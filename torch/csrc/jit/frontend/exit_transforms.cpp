@@ -303,6 +303,16 @@ struct ExitTransformer {
     return ExitPair(has_exited, exit_vals);
   }
 
+  // Recursively transforms the With node.
+  ExitPair transformWith(Node* node) {
+    auto body_block = node->blocks().at(0);
+    auto exit_block = node->blocks().at(1);
+
+    auto body_pair = transformExits(body_block);
+
+    return body_pair;
+  }
+
   // Guards the remaining nodes in the block with an if node that takes
   // the has exited value as its conditional
   ExitPair guardBlockNodes(
@@ -397,6 +407,7 @@ struct ExitTransformer {
     Block* prev_target_block = target_block_;
     updateTargetBlock(block);
     ExitPair exit_pair = constructWontExitPair();
+
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       Node* node = *it;
       it++;
@@ -413,6 +424,9 @@ struct ExitTransformer {
         } break;
         case prim::If: {
           exit_pair = transformIf(node);
+        } break;
+        case prim::With: {
+          exit_pair = transformWith(node);
         } break;
         case prim::Function: {
           // exits of closure declaration stay local to the closure
@@ -600,6 +614,259 @@ void inlineConsecutiveIfs(Block* block) {
   }
 }
 
+// This class facilitates depth-first iteration over all nodes in a graph.
+class DepthFirstGraphNodeIterator {
+  using BlockIteratorPair = std::pair<Block*, graph_node_list_iterator>;
+
+  // The graph being iterated over.
+  std::shared_ptr<Graph> graph_;
+
+  // A stack of all blocks that need to be revisited when the current block has
+  // been processed, as well as the corresponding nodes that should be returned
+  // when those blocks are revisited. Think of it as the standard DFS stack.
+  std::vector<BlockIteratorPair> block_stack_;
+
+  // The {block, node} pair that is currently being processed. current_.first is
+  // the block, current_.second is the iterator.
+  BlockIteratorPair current_;
+
+ public:
+  // Constructor.
+  DepthFirstGraphNodeIterator(std::shared_ptr<Graph>& graph)
+      : graph_(graph),
+        current_({graph->block(), graph->block()->nodes().begin()}) {}
+
+  // Get the next Node in the graph. \returns nullptr if there are no nodes
+  // left.
+  Node* next() {
+    // current_it always points to the next node that should be returned. If it
+    // points to the end of the current block, that means there are no nodes
+    // left in the graph to visit. This is because the only time an end iterator
+    // is pushed to block_stack is if current block is the root block of the
+    // graph.
+    Node* node = current_.second != (current_.first)->nodes().end()
+        ? *(current_.second)
+        : nullptr;
+
+    if (node) {
+      // Advance current.second because there may be more nodes in
+      // current_block.
+      ++current_.second;
+
+      // If there are no more nodes, set the current block and iterator to those
+      // from the top of the stack; the one that was being iterated over when
+      // the current block was encountered.
+      if (current_.second == current_.first->nodes().end() &&
+          !block_stack_.empty()) {
+        current_ = block_stack_.back();
+        block_stack_.pop_back();
+      }
+
+      // Handle If, Loop and With nodes in special ways because are the only
+      // ones that own more blocks.
+      if (node->kind() == prim::If) {
+        auto* then_block = node->blocks().at(0);
+        auto* else_block = node->blocks().at(1);
+
+        bool then_block_empty =
+            then_block->nodes().begin() == then_block->nodes().end();
+        bool else_block_empty =
+            else_block->nodes().begin() == else_block->nodes().end();
+
+        if (!then_block_empty || !else_block_empty) {
+          // If either of the then or else blocks have nodes, the current block
+          // and iterator position need to be saved on the stack to resume
+          // processing later.
+          block_stack_.push_back({current_.first, current_.second});
+        }
+
+        if (!then_block_empty && else_block_empty) {
+          // Set current_ to {then_block, then_block.begin()} and push nothing
+          // to the stack since the else block is empty.
+          current_.first = then_block;
+          current_.second = then_block->nodes().begin();
+        } else if (then_block_empty && !else_block_empty) {
+          // Set current_ to {else_block, else_block.begin()} and push nothing
+          // to the stack since the current block is already on the stack.
+          current_.first = else_block;
+          current_.second = else_block->nodes().begin();
+        } else if (!then_block_empty && !else_block_empty) {
+          // Set current_ to {then_block, then_block.begin()} and push the
+          // else_block to the stack so that it will be processed after.
+          block_stack_.push_back({else_block, else_block->nodes().begin()});
+          current_.first = then_block;
+          current_.second = then_block->nodes().begin();
+        }
+      } else if (node->kind() == prim::Loop || node->kind() == prim::With) {
+        auto* body_block = node->blocks().at(0);
+
+        bool body_block_empty =
+            body_block->nodes().begin() == body_block->nodes().end();
+
+        if (!body_block_empty) {
+          // If body_block is not empty, push the current block onto the stack
+          // to resume processing it later and set current_ to {body_block,
+          // body_block.begin()}.
+          block_stack_.push_back({current_.first, current_.second});
+
+          current_.first = body_block;
+          current_.second = body_block->nodes().begin();
+        }
+      }
+    } else {
+      // There are no more nodes in the current block. Resume processing of the
+      // block on the top of the stack if there is one.
+      if (!block_stack_.empty()) {
+        current_ = block_stack_.back();
+        block_stack_.pop_back();
+      }
+    }
+
+    return node;
+  }
+};
+// Adds prim::With nodes to a graph to help handle early exits between
+// prim::Enter and prim::Exit nodes. More specifically, it transforms
+// IR that looks like this:
+//
+//   %a = prim::Enter(%b)
+//   <code>
+//   %c = prim::Exit(%b)
+//
+// to this:
+//
+//   %a = prim::Enter(%b)
+//   = prim::With()
+//     block0():
+//       <code>
+//     -> ()
+//     block1():
+//       %c = prim::Exit(%b)
+//     -> ()
+//
+static void convertEnterExitNodesToWithBlocks(std::shared_ptr<Graph>& graph) {
+  // First, find all Enter-Exit pairs up front to avoid iterator invalidation
+  // issues later when moving nodes around. Do this by iterating through the
+  // nodes of the graph while keeping a stack of encountered Enter nodes. Each
+  // time an Exit node is seen, its corresponding Enter node must be at the
+  // top of the stack. Pop it and record the pair.
+  std::vector<std::pair<Node*, Node*>> enter_exit_pairs;
+  std::vector<Node*> enter_node_stack;
+
+  DepthFirstGraphNodeIterator it(graph);
+  Node* node = it.next();
+
+  while (node) {
+    if (node->kind() == prim::Enter) {
+      enter_node_stack.emplace_back(node);
+    } else if (node->kind() == prim::Exit) {
+      // enter_node_stack should not be empty.
+      TORCH_INTERNAL_ASSERT(!enter_node_stack.empty());
+      // The input to this Exit node should be the same as that of the Enter
+      // node on the top of the enter_node_stack.
+      TORCH_INTERNAL_ASSERT(
+          enter_node_stack.back()->input(0) == node->input(0));
+      // Record the pair.
+      enter_exit_pairs.emplace_back(enter_node_stack.back(), node);
+      enter_node_stack.pop_back();
+    }
+
+    node = it.next();
+  }
+
+  // The stack should not be empty; an Exit should have been found for every
+  // Enter.
+  TORCH_INTERNAL_ASSERT(enter_node_stack.empty());
+
+  // Now, add a With block for each Enter-Exit pair. The innermost pairs were
+  // found first, so they will be converted first.
+  for (auto& pair : enter_exit_pairs) {
+    Node* enter = pair.first;
+    Node* exit = pair.second;
+
+    auto* with = graph->create(prim::With, /*num_outputs=*/0);
+    auto* body_block = with->addBlock();
+    auto* exit_block = with->addBlock();
+
+    // Insert the With after the Enter.
+    Node* cur = enter->next();
+    Node* insert_point = body_block->param_node();
+
+    // Move all of the nodes between the Enter and Exit into the body block.
+    while (cur != exit) {
+      auto* next = cur->next();
+      cur->moveAfter(insert_point);
+      insert_point = insert_point->next();
+      cur = next;
+    }
+
+    // Move the Exit node into the exit block.
+    exit->moveAfter(exit_block->param_node());
+    with->insertAfter(enter);
+  }
+}
+
+// Removes prim::With nodes from a graph. More specifically, it transforms
+// IR that looks like this:
+//
+//   %a = prim::Enter(%b)
+//   = prim::With()
+//     block0():
+//       <code>
+//     -> ()
+//     block1():
+//       %c = prim::Exit(%b)
+//      ->()
+//
+// to this:
+//   %a = prim::Enter(%b)
+//   <code>
+//   %c = prim::Exit(%b)
+//
+static void convertWithBlocksToEnterExitNodes(std::shared_ptr<Graph>& graph) {
+  // First, find all With blocks to avoid iterator invalidation issues when
+  // moving nodes around later.
+  std::vector<Node*> with_nodes;
+
+  DepthFirstGraphNodeIterator it(graph);
+  Node* node = it.next();
+
+  while (node) {
+    if (node->kind() == prim::With) {
+      with_nodes.emplace_back(node);
+    }
+    node = it.next();
+  }
+
+  // For each With node:
+  for (auto& node : with_nodes) {
+    auto* body_block = node->blocks().at(0);
+    auto* exit_block = node->blocks().at(1);
+
+    std::vector<Node*> to_append;
+
+    // Record all nodes that need to be appended after the Enter that precedes
+    // the With block to avoid iterator invalidation issues later when moving
+    // nodes around.
+    for (auto body_node : body_block->nodes()) {
+      to_append.emplace_back(body_node);
+    }
+
+    for (auto exit_node : exit_block->nodes()) {
+      to_append.emplace_back(exit_node);
+    }
+
+    Node* cur = node->prev();
+
+    // Move all nodes inside the with block outside of it.
+    for (auto& node : to_append) {
+      node->moveAfter(cur);
+      cur = node;
+    }
+    node->destroy();
+  }
+}
+
 // This pass takes in a graph where LoopContinuation & ReturnStmts exist in the
 // graph and erases them in the graph, correctly setting block outputs.
 // prim::LoopContinuation(*vals) means that the values are targeting the most
@@ -677,11 +944,13 @@ void inlineConsecutiveIfs(Block* block) {
 //     -> (%44, %i)
 
 void TransformExits(std::shared_ptr<Graph>& graph) {
+  convertEnterExitNodesToWithBlocks(graph);
   ExitTransformer e_loop(graph);
   e_loop.transformLoopContinuations();
   ExitTransformer e_ret(graph);
   e_ret.transformReturnStmts();
   inlineConsecutiveIfs(graph->block());
+  convertWithBlocksToEnterExitNodes(graph);
 }
 } // namespace jit
 } // namespace torch
