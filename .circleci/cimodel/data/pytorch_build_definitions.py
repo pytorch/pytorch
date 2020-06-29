@@ -1,14 +1,14 @@
 from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.simple.util.branch_filters import gen_filter_dict
-from cimodel.data.simple.util.docker_constants import gen_docker_image_path
+from cimodel.data.simple.util.docker_constants import gen_docker_image_path, DOCKER_IMAGE_TAG, DOCKER_IMAGE_TAG_ROCM
 
-from dataclasses import dataclass, field
-from typing import List, Optional
 
 
 @dataclass
@@ -18,6 +18,7 @@ class Conf:
     parms_list_ignored_for_docker_image: Optional[List[str]] = None
     pyver: Optional[str] = None
     cuda_version: Optional[str] = None
+    rocm_version: Optional[str] = None
     # TODO expand this to cover all the USE_* that we want to test for
     #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
     # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
@@ -49,7 +50,9 @@ class Conf:
 
         cuda_parms = []
         if self.cuda_version:
-            cuda_parms.extend(["cuda" + self.cuda_version, "cudnn7"])
+            cuda_parms.extend([f"cuda{self.cuda_version}", "cudnn7"])
+        if self.rocm_version:
+            cuda_parms.extend([f"rocm{self.rocm_version}"])
         result = leading + ["linux", self.distro] + cuda_parms + self.parms
         if not for_docker and self.parms_list_ignored_for_docker_image is not None:
             result = result + self.parms_list_ignored_for_docker_image
@@ -60,7 +63,9 @@ class Conf:
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
 
-        return miniutils.quote(gen_docker_image_path(base_build_env_name))
+        image_path = gen_docker_image_path(base_build_env_name,
+                                           DOCKER_IMAGE_TAG if self.rocm_version is None else DOCKER_IMAGE_TAG_ROCM)
+        return miniutils.quote(image_path)
 
     def get_build_job_name_pieces(self, build_or_test):
         return self.get_parms(False) + [build_or_test]
@@ -84,7 +89,11 @@ class Conf:
             resource_class = "large"
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
+            if self.rocm_version is not None:
+                resource_class = "pytorch/amd-gpu"
             parameters["resource_class"] = resource_class
+        if phase == "build" and self.rocm_version is not None:
+            parameters["resource_class"] = "xlarge"
         return parameters
 
     def gen_workflow_job(self, phase):
@@ -200,8 +209,12 @@ def instantiate_configs():
             parms_list = ["py" + fc.find_prop("pyver")]
 
         cuda_version = None
+        rocm_version = None
         if compiler_name == "cuda":
             cuda_version = fc.find_prop("compiler_version")
+
+        elif compiler_name == "rocm":
+            rocm_version = fc.find_prop("compiler_version")
 
         elif compiler_name == "android":
             android_ndk_version = fc.find_prop("compiler_version")
@@ -244,6 +257,7 @@ def instantiate_configs():
             parms_list_ignored_for_docker_image,
             python_version,
             cuda_version,
+            rocm_version,
             is_xla,
             vulkan,
             restrict_phases,
