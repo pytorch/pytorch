@@ -2335,10 +2335,12 @@ class TestQuantizeJitOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        # TODO: the checks are problematic, we need to split all checks
+        print(m.graph)
         FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
-                   .check_count("quantized::conv2d", 2, exactly=True) \
-                   .check("aten::dequantize") \
+                   .run(m.graph)
+        FileCheck().check_count("quantized::conv2d", 2, exactly=True) \
+                   .run(m.graph)
+        FileCheck().check_count("aten::dequantize", 1, exactly=True) \
                    .run(m.graph)
 
         FileCheck().check("quantized::add_scalar") \
