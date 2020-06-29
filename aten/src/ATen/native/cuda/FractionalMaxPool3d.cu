@@ -10,6 +10,7 @@
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
 #include <THC/THCAtomics.cuh>
+#include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -70,8 +71,8 @@ __global__ void fractional_max_pool3d_out_frame(
         static_cast<accscalar_t>(samples[batch][plane][2]),
         outputW, input.size(4), output.size(4), poolSizeW);
 
-      scalar_t maxVal = at::numeric_limits<scalar_t>::lowest();
-      int64_t maxIndex = -1;
+      scalar_t maxVal = at::numeric_limits<scalar_t>::lower_bound();
+      int64_t maxIndex = poolT * input.size(3) * input.size(4) + poolH * input.size(4) + poolW;
 
       for(int64_t t = poolT; t < poolT + poolSizeT; ++ t) {
         for (int64_t h = poolH; h < poolH + poolSizeH; ++h) {
@@ -79,7 +80,7 @@ __global__ void fractional_max_pool3d_out_frame(
             for (int64_t w = poolW; w < poolW + poolSizeW; ++w) {
               scalar_t val = input[batch][plane][t][h][w];
               // for consistency with THNN, favor the first max
-              if (val > maxVal) {
+              if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
                 maxIndex = t * input.size(3) *
                   input.size(4) + h * input.size(4) + w;
                 maxVal = val;
@@ -90,7 +91,7 @@ __global__ void fractional_max_pool3d_out_frame(
               int64_t w = i + poolW;
               scalar_t val = input[batch][plane][t][h][w];
               // for consistency with THNN, favor the first max
-              if (val > maxVal) {
+              if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
                 maxIndex = t * input.size(3) * input.size(4) +
                   h * input.size(4) + w;
                 maxVal = val;
@@ -99,9 +100,6 @@ __global__ void fractional_max_pool3d_out_frame(
           }
         }
       }
-
-      assert(maxVal != at::numeric_limits<scalar_t>::lowest());
-      assert(maxIndex != -1);
 
       indices[batch][plane][outputT][outputH][outputW] = maxIndex;
       output[batch][plane][outputT][outputH][outputW] = maxVal;

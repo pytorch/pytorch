@@ -5,7 +5,7 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
 #include <torch/custom_class.h>
@@ -327,7 +327,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       bias_ptr,
       output.data_ptr<float>(),
       rows_w /* output_stride */,
-      caffe2::mobile_pthreadpool() /* threadpool */);
+      caffe2::pthreadpool_() /* threadpool */);
 
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,
@@ -446,13 +446,13 @@ class QLinearDynamicFp16 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("linear_dynamic", QLinearDynamicInt8<false>::run);
-  m.impl("linear_relu_dynamic", QLinearDynamicInt8<true>::run);
-  m.impl("linear_dynamic_fp16", QLinearDynamicFp16<false>::run);
+  m.impl("linear_dynamic", TORCH_FN(QLinearDynamicInt8<false>::run));
+  m.impl("linear_relu_dynamic", TORCH_FN(QLinearDynamicInt8<true>::run));
+  m.impl("linear_dynamic_fp16", TORCH_FN(QLinearDynamicFp16<false>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl("linear_dynamic", QLinearDynamicInt8<false>::run);
+  m.impl("linear_dynamic", TORCH_FN(QLinearDynamicInt8<false>::run));
 }
 
 } // namespace
