@@ -22,10 +22,30 @@ graph(%a_dequant, %w_quant, %b):
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::linear(%a_dequant, %w_dequant, %b_unpacked)
         return (%r) )";
+  std::string linear_fp16_with_cast = R"(
+graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %default_param, %non_blocking):
+        %fp16_tensor = aten::to(%w, %dtype_fp16, %default_param, %default_param, %non_blocking)
+        %fp32_tensor = aten::to(%fp16_tensor, %dtype_fp32, %default_param, %default_param, %non_blocking)
+        %r = aten::linear(%a_dq, %fp32_tensor, %b)
+        return (%r) )";
+  std::string linear_fp16_with_prepack = R"(
+graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %default_param, %non_blocking):
+        %packed_params = quantized::linear_prepack_fp16(%w, %b)
+        %w_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack_fp16(%packed_params)
+        %r = aten::linear(%a_dq, %w_unpacked, %b_unpacked)
+        return (%r) )";
 
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
-  rewriter.runOnGraph(graph);
+  std::vector<std::vector<std::string>> patterns_and_replacements = {
+      {linear_with_quant, linear_with_quant_prepack},
+      {linear_fp16_with_cast, linear_fp16_with_prepack}};
+
+  for (const auto& entry : patterns_and_replacements) {
+    SubgraphRewriter rewriter;
+    const auto& pattern = entry[0];
+    const auto& replacement = entry[1];
+    rewriter.RegisterRewritePattern(pattern, replacement);
+    rewriter.runOnGraph(graph);
+  }
 }
 
 void insertPrepackUnpackForConv(std::shared_ptr<Graph>& graph) {
