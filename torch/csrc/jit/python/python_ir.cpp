@@ -658,6 +658,14 @@ void initPythonIRBindings(PyObject* module_) {
                                  : py::cast<py::none>(Py_None);
           })
       .def(
+          "undefined",
+          [](Type& t) {
+            auto undef =
+                t.shared_from_this()->expect<TensorType>()->undefined();
+            return undef.has_value() ? py::cast(*undef)
+                                     : py::cast<py::none>(Py_None);
+          })
+      .def(
           "sizes",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {
