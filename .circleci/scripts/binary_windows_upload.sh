@@ -19,10 +19,11 @@ PIP_UPLOAD_FOLDER=${PIP_UPLOAD_FOLDER:-nightly/}
 CONDA_UPLOAD_CHANNEL=$(echo "${PIP_UPLOAD_FOLDER}" | sed 's:/*$::')
 BACKUP_BUCKET="s3://pytorch-backup"
 
-retry conda install -yq anaconda-client awscli
+retry pip install -q awscli
 pushd /root/workspace/final_pkgs
 # Upload the package to the final location
 if [[ "$PACKAGE_TYPE" == conda ]]; then
+  retry conda install -yq anaconda-client
   retry anaconda -t "${CONDA_PYTORCHBOT_TOKEN}" upload  "$(ls)" -u "pytorch-${CONDA_UPLOAD_CHANNEL}" --label main --no-progress --force
   # Fetch  platform (eg. win-64, linux-64, etc.) from index file
   # Because there's no actual conda command to read this
