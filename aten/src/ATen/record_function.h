@@ -84,7 +84,7 @@ struct TORCH_API RecordFunction {
   RecordFunction(
       RecordScope scope = RecordScope::FUNCTION);
 
-  template<typename F>
+  template <typename F>
   void before(
       F fn,
       const std::vector<c10::IValue>* args,
