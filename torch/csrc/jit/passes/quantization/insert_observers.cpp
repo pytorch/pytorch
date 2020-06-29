@@ -1107,10 +1107,9 @@ void InsertObserversHelper::preprocess(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
-  // must do constant propagation first before replacement
-  replaceConvolutionWithAtenConv(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
+  replaceConvolutionWithAtenConv(graph);
 }
 
 void InsertObserversHelper::analyze(
