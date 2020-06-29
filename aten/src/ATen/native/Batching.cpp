@@ -21,14 +21,21 @@ static bool has_level(const Tensor& self, int64_t level) {
   return it != bdims.end();
 }
 
-// Returns a Tensor with batch dim with level `level` turned into a regular tensor,
+// Returns a Tensor with batch dim with level `level` turned into a regular dimension,
 // as well as a logical dim index of where said dimension is in the returned tensor.
 //
-// For example, given
-// self=BatchedTensor([2, 3, 5], bdims=[(lvl=0, dim=1), (lvl=1, dim=2)]), level=1
-// we would return pair(BatchedTensor([2, 3, 5], bdims=[(lvl=0,dim=1)]), 1)
-// because we'd turn the batch dim at (physical) dim 2 into a regular tensor dimension.
-// Said tensor dimension has a logical dim of 1 in the returned Tensor.
+// The reason why we want to return the index of where said dimension is in the returned
+// tensor is because we want to keep track of which dimension used to be the batch
+// dimension so that we can move it to the correct logical dimension specified by
+// `out_dims` in vmap. For example, if we had
+// >>> x = torch.randn(2, 3, 5)
+// >>> vmap(lambda x: x, in_dims=0, out_dims=1)(x)
+// then right when we are about to exit the vmap block, x is a BatchedTensor with a
+// batch dimension at (physical) index 0. Note that the batch dimension doesn't
+// always have to exist at (physical) index 0. When we undo the batch dimension,
+// we want to move it to dimension 1 (as specified by out_dims). So we return the
+// index at which the batch dim appears so that we can move it to the correct place.
+// later down the line.
 static std::pair<Tensor,int64_t> remove_existing_batch_dim(const Tensor& self, int64_t level) {
   const auto* batched = maybeGetBatched(self);
   TORCH_INTERNAL_ASSERT(batched != nullptr);
