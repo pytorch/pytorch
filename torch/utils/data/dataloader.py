@@ -8,6 +8,7 @@ in `./_utils/worker.py`.
 import threading
 import itertools
 import warnings
+import copy
 
 import multiprocessing as python_multiprocessing
 import torch
@@ -100,6 +101,8 @@ class DataLoader(object):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
+        device (device, optional): If not ``None``, the tensors in the mini-batches
+            will be moved to a particular device (default: ``None``).
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -123,7 +126,7 @@ class DataLoader(object):
                  batch_sampler=None, num_workers=0, collate_fn=None,
                  pin_memory=False, drop_last=False, timeout=0,
                  worker_init_fn=None, multiprocessing_context=None,
-                 generator=None):
+                 generator=None, device=None):
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
@@ -133,12 +136,17 @@ class DataLoader(object):
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
 
+
         self.dataset = dataset
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
+
+        if isinstance(device, string_classes):
+            device = torch.device(device)
+        self.device = device
 
         # Arg-check dataset related before checking samplers because we want to
         # tell users that iterable-style datasets are incompatible with custom
@@ -324,6 +332,69 @@ class DataLoader(object):
         else:
             return len(self._index_sampler)
 
+    def to(self, device=None, pin_memory=None):
+        """Returns a DataLoader instance which moves mini-batches to a device.
+
+        Arguments:
+            device (device, optional): Specifies the device to which the new data loader
+                instance should move tensors in mini-batches. If ``None``, the setting of
+                the current data loader instance is used. (default: ``None``)
+            pin_memory (bool, optional): Specifies the pin_memory parameter
+                of the new data loader instance.
+                If ``None``, the setting of the current data loader instance
+                is used. (default: ``None``)
+
+        Returns:
+            Returns ``self`` if already configured with the correct device and pin_memory
+            parameters. Otherwise, returns a copy of ``self`` with the correct parameters.
+        """
+        if device is None:
+            device = self.device
+        if pin_memory is None:
+            pin_memory = self.pin_memory
+        if isinstance(device, string_classes):
+            device = torch.device(device)
+
+        if device == self.device and pin_memory == self.pin_memory:
+            return self
+        else:
+            dataloader = copy.copy(self)
+            dataloader.device = device
+            dataloader.pin_memory = pin_memory
+            return dataloader
+
+    def cuda(self, pin_memory=True):
+        """Returns a data-loader which moves mini-batches to cuda.
+
+        Arguments:
+            pin_memory (bool, optional): Specifies the pin_memory parameter of
+                the new data loader instance. Defaults to ``True``,
+                as it is usually desirable to make use of CUDA pinned memory,
+                when working with CUDA tensors.
+                If ``None``, the setting of the current data loader instance
+                is used. (default: ``True``)
+
+        Returns:
+            Returns ``self`` if already configured with the correct device and pin_memory
+            parameters. Otherwise, returns a copy of ``self`` with the correct parameters.
+        """
+        return self.to(torch.device("cuda"), pin_memory=pin_memory)
+
+    def cpu(self, pin_memory=False):
+        """Returns a data-loader which moves mini-batches to the cpu.
+
+        Arguments:
+            pin_memory (bool, optional): Specifies the pin_memory parameter of
+                the new data loader instance.
+                If ``None``, the setting of the current data loader instance
+                is used. (default: ``False``)
+
+        Returns:
+            Returns ``self`` if already configured with the correct device and pin_memory
+            parameters. Otherwise, returns a copy of ``self`` with the correct parameters.
+        """
+        return self.to(torch.device("cpu"), pin_memory=pin_memory)
+
 
 class _BaseDataLoaderIter(object):
     def __init__(self, loader):
@@ -335,6 +406,7 @@ class _BaseDataLoaderIter(object):
         self._index_sampler = loader._index_sampler
         self._num_workers = loader.num_workers
         self._pin_memory = loader.pin_memory and torch.cuda.is_available()
+        self._device = loader.device
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
@@ -364,6 +436,8 @@ class _BaseDataLoaderIter(object):
                              "IterableDataset replica at each worker. Please see "
                              "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
             warnings.warn(warn_msg)
+        if self._device is not None:
+            return _utils.pin_memory.move_to_device(data, self._device)
         return data
 
     next = __next__  # Python 2 compatibility

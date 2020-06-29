@@ -57,3 +57,19 @@ def pin_memory(data):
         return data.pin_memory()
     else:
         return data
+
+
+def move_to_device(data, device):
+    r"""Attempts to send tensors contained in data to device."""
+    if isinstance(data, torch.Tensor):
+        return data.to(device)
+    elif isinstance(data, string_classes):
+        return data
+    elif isinstance(data, container_abcs.Mapping):
+        return {k: move_to_device(sample, device) for k, sample in data.items()}
+    elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
+        return type(data)(*(move_to_device(sample, device) for sample in data))
+    elif isinstance(data, container_abcs.Sequence):
+        return [move_to_device(sample, device) for sample in data]
+    else:
+        return data
