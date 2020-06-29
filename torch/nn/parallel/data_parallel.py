@@ -74,6 +74,15 @@ class DataParallel(Module):
         rely on this behavior to update the buffers.
 
     .. warning::
+        Parameters defined on :attr:`module` as :class:`~torch.nn.ParameterList`
+        or :class:`~torch.nn.ParameterDict` are set as corresponding tensors
+        to the replicas as ``list`` or ``OrderedDict`` accordingly.
+
+    .. warning::
+        Calling ``.parameters()`` on :attr:`module` inside ``forward`` method
+        intentionally produces empty result.
+
+    .. warning::
         Forward and backward hooks defined on :attr:`module` and its submodules
         will be invoked ``len(device_ids)`` times, each with inputs located on
         a particular device. Particularly, the hooks are only guaranteed to be
