@@ -14,7 +14,6 @@ namespace torch {
 namespace jit {
 
 using namespace torch::indexing;
-using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
 void testKernel_1() {

@@ -46,28 +46,26 @@ double getScaleFromInput(Node* input_node) {
     scale = toIValue(input_node->inputs()[1]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::linear") {
-    // %r = quantized::linear(%input, %unpacked_weight, %bias, %w_scale,
-    // %w_zero_point)
+    // %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
     TORCH_CHECK(
-        input_node->inputs().size() > 3,
-        "quantized::linear expected scale to be 4th input");
-    scale = toIValue(input_node->inputs()[3]);
+        input_node->inputs().size() > 2,
+        "quantized::linear expected scale to be 3rd input");
+    scale = toIValue(input_node->inputs()[2]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::conv2d") {
-    // %r = quantized::conv2d(%input, %unpacked_weight, %bias, %stride,
-    // %padding, %dilation, %groups, %w_scale, %w_zero_point)
+    // %r = quantized::conv2d(%input, %packed_weight, %w_scale, %w_zero_point)
     TORCH_CHECK(
-        input_node->inputs().size() > 7,
-        "quantized::conv2d expected scale to be 8th input");
+        input_node->inputs().size() > 2,
+        "quantized::conv2d expected scale to be 3rd input");
     auto num_inputs = input_node->inputs().size();
     scale = toIValue(input_node->inputs()[num_inputs - 2]);
     return scale.value().toDouble();
   } else if (input_name == "quantized::conv2d_relu") {
-    // %r = quantized::conv2d_relu(%input, %unpacked_weight, %stride,
-    // %padding, %dilation, %groups, %w_scale, %w_zero_point)
+    // %r = quantized::conv2d_relu(%input, %packed_weight, %w_scale,
+    // %w_zero_point)
     TORCH_CHECK(
-        input_node->inputs().size() > 6,
-        "quantized::conv2d_relu expected scale to be 7th input");
+        input_node->inputs().size() > 2,
+        "quantized::conv2d_relu expected scale to be 3rd input");
     auto num_inputs = input_node->inputs().size();
     scale = toIValue(input_node->inputs()[num_inputs - 2]);
     return scale.value().toDouble();
@@ -203,17 +201,17 @@ void unpackQuantizedWeightsHelper(
     } else {
       TORCH_INTERNAL_ASSERT(itr->second.isTensor());
       at::Tensor packed_weight = itr->second.toTensor();
-      auto op = Dispatcher::singleton().findSchema({unpack_fn, ""});
-      assert(op.has_value());
+      auto op = Dispatcher::singleton()
+                    .findSchemaOrThrow(unpack_fn.c_str(), "")
+                    .typed<std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+                        at::Tensor)>();
       // Temporary hack: when the `Profiler` dispatch key is inserted, this call
       // will fail since the `unpack()` ops return multiple values, however the
       // boxing code currently does not support this. Instead, exclude the
       // Profiler dispatch key and go through unboxed dispatch, avoiding boxing
       // altogether
       c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
-      std::tie(unpacked_weight, bias) = op->call<
-          std::tuple<at::Tensor, c10::optional<at::Tensor>>,
-          at::Tensor>(packed_weight);
+      std::tie(unpacked_weight, bias) = op.call(packed_weight);
     }
 
     // Permute weights

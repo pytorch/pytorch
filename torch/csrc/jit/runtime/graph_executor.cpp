@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
-#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -775,8 +775,10 @@ void runNondiffOptimization(
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  if (tensorExprFuserEnabled()) {
-    FuseTensorExprs(graph);
+  if (getProfilingMode()) {
+    if (tensorExprFuserEnabled()) {
+      FuseTensorExprs(graph);
+    }
   } else {
     FuseGraph(graph, strict_fuser_check);
   }

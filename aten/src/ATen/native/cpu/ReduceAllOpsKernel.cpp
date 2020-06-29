@@ -60,9 +60,9 @@ inline void reduce_all_impl(
 
 static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
-    TensorIterator iter = TensorIterator();
-    iter.add_input(input);
-    iter.build();
+    TensorIterator iter = TensorIteratorConfig()
+      .add_input(input)
+      .build();
     bool result_data  = true;
     cpu_serial_kernel(iter, [&](const bool a) -> void {
       result_data = result_data && a;
@@ -74,7 +74,7 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
     reduce_all_impl<int64_t>(result, input, upper_bound<int64_t>(),
       [=](int64_t a, int64_t b) -> int64_t { return min_impl(a, b); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(input.scalar_type(), "min_all", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(input.scalar_type(), "min_all", [&] {
       using Vec = vec256::Vec256<scalar_t>;
       reduce_all_impl_vec<scalar_t>(result, input, upper_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return min_impl(a, b); },
@@ -85,9 +85,9 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
 
 static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
-    TensorIterator iter = TensorIterator();
-    iter.add_input(input);
-    iter.build();
+    TensorIterator iter = TensorIteratorConfig()
+      .add_input(input)
+      .build();
     bool result_data  = false;
     cpu_serial_kernel(iter, [&](const bool a) -> void {
       result_data = result_data || a;
@@ -99,7 +99,7 @@ static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
     reduce_all_impl<int64_t>(result, input, lower_bound<int64_t>(),
       [=](int64_t a, int64_t b) -> int64_t { return max_impl(a, b); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_C10_COMPLEX(input.scalar_type(), "max_all", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(input.scalar_type(), "max_all", [&] {
       using Vec = vec256::Vec256<scalar_t>;
       reduce_all_impl_vec<scalar_t>(result, input, lower_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return max_impl(a, b); },

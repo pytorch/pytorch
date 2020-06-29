@@ -1,4 +1,5 @@
 from collections import OrderedDict
+
 import cimodel.lib.miniutils as miniutils
 
 
@@ -30,7 +31,8 @@ def render(fh, data, depth, is_list_member=False):
             tuples.sort()
 
         for i, (k, v) in enumerate(tuples):
-
+            if not v:
+                continue
             # If this dict is itself a list member, the first key gets prefixed with a list marker
             list_marker_prefix = LIST_MARKER if is_list_member and not i else ""
 
@@ -45,7 +47,6 @@ def render(fh, data, depth, is_list_member=False):
 
     else:
         # use empty quotes to denote an empty string value instead of blank space
-        modified_data = miniutils.quote(data) if data == '' else data
-
+        modified_data = miniutils.quote(data) if data == "" else data
         list_member_prefix = indentation + LIST_MARKER if is_list_member else ""
         fh.write(list_member_prefix + str(modified_data) + "\n")

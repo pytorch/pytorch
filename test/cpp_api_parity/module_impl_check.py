@@ -152,12 +152,12 @@ def test_forward_backward(unit_test_class, test_params):
 
         # Check that forward outputs are equal
         unit_test_class.assertEqual(python_output, cpp_output,
-                                    message=generate_error_msg("forward output", cpp_output, python_output))
+                                    msg=generate_error_msg("forward output", cpp_output, python_output))
 
         # Check that module parameter gradients are equal after backward pass
         unit_test_class.assertEqual(
             len(python_grad_dict), len(cpp_grad_dict),
-            message=generate_error_msg("# of parameters", len(cpp_grad_dict), len(python_grad_dict)))
+            msg=generate_error_msg("# of parameters", len(cpp_grad_dict), len(python_grad_dict)))
         for key in python_grad_dict:
             param_name = None
             for suffix in ['_grad', '_grad_indices', '_grad_values']:
@@ -174,7 +174,7 @@ def test_forward_backward(unit_test_class, test_params):
                     False, True))
             unit_test_class.assertEqual(
                 python_grad_dict[key], cpp_grad_dict[key],
-                message=generate_error_msg(
+                msg=generate_error_msg(
                     "`{}`'s {} gradient (`{}`)".format(param_name, sparsity_str, key),
                     cpp_grad_dict[key], python_grad_dict[key]))
 

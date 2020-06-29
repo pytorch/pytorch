@@ -46,8 +46,11 @@ Creating TorchScript Code
     script
     trace
     trace_module
+    fork
+    wait
     ScriptModule
     ScriptFunction
+    freeze
     save
     load
     ignore
