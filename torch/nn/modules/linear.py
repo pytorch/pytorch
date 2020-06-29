@@ -95,12 +95,17 @@ class Linear(Module):
                 bound = 1 / math.sqrt(fan_in)
                 init.uniform_(self.bias, -bound, bound)
 
-    def forward(self, input: Tensor) -> Tensor:
-        # Inputs are reshaped on the first forward call
+    def initialize_parameters(self, input: Tensor):
+        previous_mode = self.training
+        self.train(False)
         if self.in_features is None:
-            self.in_features = input.shape[-1]
-            self.weight = Parameter(torch.Tensor(self.out_features, self.in_features))
-            self.reset_parameters()
+            with torch.no_grad():
+                self.in_features = input.shape[-1]
+                self.weight = Parameter(torch.Tensor(self.out_features, self.in_features))
+                self.reset_parameters()
+        self.train(previous_mode)
+
+    def forward(self, input: Tensor) -> Tensor:
         return F.linear(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:

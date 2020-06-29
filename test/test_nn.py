@@ -11554,8 +11554,8 @@ class TestLazyModules(TestCase):
     def test_linear(self):
         module = nn.Linear(nn.parameter.ParameterMode.Infer, 10)
         self.assertIsInstance(module.weight, nn.parameter._UninitializedParameter)
-        # Do the forward pass
         input = torch.ones(5, 5)
+        module.initialize_parameters(input)
         y = module(input)
         self.assertTrue(module.weight.shape == (10, 5))
         self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
@@ -11563,6 +11563,7 @@ class TestLazyModules(TestCase):
     def test_conv(self):
         def conv_check(module, input, shape, check_fn):
             self.assertIsInstance(module.weight, nn.parameter._UninitializedParameter)
+            module.initialize_parameters(input)
             y = module(input)
             self.assertTrue(module.weight.shape == shape)
             self.assertTrue(torch.equal(check_fn(input, module.weight, module.bias), y))

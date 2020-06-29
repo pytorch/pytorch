@@ -119,17 +119,21 @@ class _ConvNd(Module):
         if not hasattr(self, 'padding_mode'):
             self.padding_mode = 'zeros'
 
-    def _forward_param_check(self, input):
+    def initialize_parameters(self, input):
+        prev_mode = self.training
+        self.train(False)
         if self.in_channels is None:
-            self.in_channels = input.shape[1]
-            if self.transposed:
-                shape = (self.in_channels, self.out_channels // self.groups,
-                         *self.kernel_size)
-            else:
-                shape = (self.out_channels, self.in_channels // self.groups,
-                         *self.kernel_size)
-            self.weight = torch.nn.Parameter(self.weight.new_empty(*shape))
-            self.reset_parameters()
+            with torch.no_grad():
+                self.in_channels = input.shape[1]
+                if self.transposed:
+                    shape = (self.in_channels, self.out_channels // self.groups,
+                             *self.kernel_size)
+                else:
+                    shape = (self.out_channels, self.in_channels // self.groups,
+                             *self.kernel_size)
+                self.weight = torch.nn.Parameter(self.weight.new_empty(*shape))
+                self.reset_parameters()
+        self.train(prev_mode)
 
 
 class Conv1d(_ConvNd):
@@ -269,8 +273,6 @@ class Conv1d(_ConvNd):
             False, _single(0), groups, bias, padding_mode)
 
     def forward(self, input: Tensor) -> Tensor:
-        # To initialize lazy parameters
-        self._forward_param_check(input)
         if self.padding_mode != 'zeros':
             return F.conv1d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride,
@@ -438,7 +440,6 @@ class Conv2d(_ConvNd):
                         self.padding, self.dilation, self.groups)
 
     def forward(self, input: Tensor) -> Tensor:
-        self._forward_param_check(input)
         return self._conv_forward(input, self.weight)
 
 class Conv3d(_ConvNd):
@@ -582,7 +583,6 @@ class Conv3d(_ConvNd):
             False, _triple(0), groups, bias, padding_mode)
 
     def forward(self, input: Tensor) -> Tensor:
-        self._forward_param_check(input)
         if self.padding_mode != 'zeros':
             return F.conv3d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
                             self.weight, self.bias, self.stride, _triple(0),
@@ -768,7 +768,6 @@ class ConvTranspose1d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
-        self._forward_param_check(input)
         output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
         return F.conv_transpose1d(
             input, self.weight, self.bias, self.stride, self.padding,
@@ -931,7 +930,6 @@ class ConvTranspose2d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
 
-        self._forward_param_check(input)
         output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
 
         return F.conv_transpose2d(
@@ -1091,7 +1089,6 @@ class ConvTranspose3d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose3d')
 
-        self._forward_param_check(input)
         output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
 
         return F.conv_transpose3d(
