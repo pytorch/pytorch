@@ -8715,18 +8715,18 @@ a")
             def forward(self, inputs):
                 assert self.modulelist[0] is self.submod, "__getitem__ failing for ModuleList"
                 assert len(self.modulelist) == 1, "__len__ failing for ModuleList"
-                # for module in self.modulelist:
-                    # assert module is self.submod, "__iter__ failing for ModuleList"
+                for module in self.modulelist:
+                    assert module is self.submod, "__iter__ failing for ModuleList"
 
                 assert self.sequential[0] is self.submod, "__getitem__ failing for Sequential"
                 assert len(self.sequential) == 1, "__len__ failing for Sequential"
-                # for module in self.sequential:
-                    # assert module is self.submod, "__iter__ failing for Sequential"
+                for module in self.sequential:
+                    assert module is self.submod, "__iter__ failing for Sequential"
 
                 # assert self.moduledict["submod"] is self.submod, "__getitem__ failing for ModuleDict"
                 assert len(self.moduledict) == 1, "__len__ failing for ModuleDict"
-                # for module in self.moduledict:
-                    # assert module is self.submod, "__iter__ failing for ModuleDict"
+                for module in self.moduledict:
+                    assert module is self.submod, "__iter__ failing for ModuleDict"
 
                 # Test `__contains__()`
                 #
@@ -8737,15 +8737,15 @@ a")
                 # ```
                 # assert "submod" in self.moduledict, "__contains__ fails for ModuleDict"
 
-                # for key in self.moduledict.keys():
-                    # assert key == "submod", "keys() fails for ModuleDict"
+                for key in self.moduledict.keys():
+                    assert key == "submod", "keys() fails for ModuleDict"
 
-                # for item in self.moduledict.items():
-                    # assert item[0] == "submod", "items() fails for ModuleDict"
-                    # assert item[1] is self.submod, "items() fails for ModuleDict"
+                for item in self.moduledict.items():
+                    assert item[0] == "submod", "items() fails for ModuleDict"
+                    assert item[1] is self.submod, "items() fails for ModuleDict"
 
-                # for value in self.moduledict.values():
-                    # assert value is self.submod, "values() fails for ModuleDict"
+                for value in self.moduledict.values():
+                    assert value is self.submod, "values() fails for ModuleDict"
 
                 return inputs
 
