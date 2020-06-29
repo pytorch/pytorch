@@ -863,10 +863,16 @@ class Module:
         """
         for name, param in self._parameters.items():
             if param is not None:
-                destination[prefix + name] = param if keep_vars else param.detach()
+                if isinstance(param, _UninitializedParameter):
+                    destination[prefix + name] = param
+                else:
+                    destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
-                destination[prefix + name] = buf if keep_vars else buf.detach()
+                if isinstance(buf, _UninitializedBuffer):
+                    destination[prefix + name] = buf if keep_vars else buf
+                else:
+                    destination[prefix + name] = buf if keep_vars else buf.detach()
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
@@ -967,16 +973,24 @@ class Module:
             if key in state_dict:
                 input_param = state_dict[key]
                 # Detect Unitialized parameters or buffers
-                if not isinstance(param, _UninitializedParameter):
-                    if isinstance(input_param, _UninitializedParameter):
-                        # We override the parameter with a new one if it was already 
-                        # Initialized
-                        self.register_parameter(name, torch.nn.Parameter(input_param))
-                    continue
-                elif isinstance(param, _UninitializedBuffer):
-                    if not isinstance(input_param, _UninitializedBuffer):
-                        self.register_buffer(name, input_param)
-                    continue
+                if isinstance(input_param, _UninitializedParameter):
+                    if not isinstance(param, _UninitializedParameter):
+                        raise ValueError('Can\'t load an uninitialized Parameter {} into an initialized one'.format(name))
+                elif isinstance(input_param, _UninitializedBuffer):
+                    if not isinstance(param, _UninitializedParameter):
+                        raise ValueError('Can\'t load an uninitialized Buffer {} into an initialized one'.format(name))
+                if isinstance(param, _UninitializedParameter): 
+                    # The current parameter is not initialized but the being loaded one is
+                    # create a new parameter based on the existing one
+                    with torch.no_grad():
+                        param = Parameter(torch.empty_like(input_param), param.requires_grad)
+                    self.register_parameter(name, param)
+                elif isinstance(param, _UninitializedBuffer): 
+                    # The current buffer is not initialized but the being loaded one is
+                    # create a new buffer based on the existing one
+                    with torch.no_grad():
+                        param = torch.empty_like(input_param)
+                    self.register_buffer(name, param)
 
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
                 if len(param.shape) == 0 and len(input_param.shape) == 1:
@@ -1343,6 +1357,14 @@ class Module:
 
     def share_memory(self: T) -> T:
         return self._apply(lambda t: t.share_memory_())
+
+    def initialize_parameters(self, input):
+        r"""Initialize parameters according to the input batch properties.
+
+        This adds an interface to isolate parameter initialization from the
+        forward pass when doing parameter shape inference.
+        """
+        raise NotImplementedError('initialize_parameters is not implemented for {}'.format(self.__class__.__name__))
 
     def _get_name(self):
         return self.__class__.__name__
