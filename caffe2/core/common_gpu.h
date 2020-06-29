@@ -255,15 +255,6 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
     for (size_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
          j += blockDim.y * gridDim.y)
 
-// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
-// kernels. This is not supported by Apple platforms so we special case it.
-// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
-#define CUDA_KERNEL_ASSERT(...)
-#else // __APPLE__
-#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
-#endif // __APPLE__
-
 // The following helper functions are here so that you can write a kernel call
 // when you are not particularly interested in maxing out the kernels'
 // performance. Usually, this will give you a reasonable speed, but if you

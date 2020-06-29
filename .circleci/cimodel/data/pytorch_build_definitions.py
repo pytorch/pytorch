@@ -4,7 +4,7 @@ from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-from cimodel.data.simple.util.branch_filters import gen_branches_only_filter_dict
+from cimodel.data.simple.util.branch_filters import gen_filter_dict
 from cimodel.data.simple.util.docker_constants import gen_docker_image_path
 
 from dataclasses import dataclass, field
@@ -22,6 +22,7 @@ class Conf:
     #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
     # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
     is_xla: bool = False
+    vulkan: bool = False
     restrict_phases: Optional[List[str]] = None
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
@@ -87,10 +88,8 @@ class Conf:
         return parameters
 
     def gen_workflow_job(self, phase):
-        # All jobs require the setup job
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase)
-        job_def["requires"] = ["setup"]
 
         if phase == "test":
 
@@ -100,13 +99,13 @@ class Conf:
             #  pytorch build job (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259452641)
 
             dependency_build = self.parent_build or self
-            job_def["requires"].append(dependency_build.gen_build_name("build"))
+            job_def["requires"] = [dependency_build.gen_build_name("build")]
             job_name = "pytorch_linux_test"
         else:
             job_name = "pytorch_linux_build"
 
         if not self.is_important:
-            job_def["filters"] = gen_branches_only_filter_dict()
+            job_def["filters"] = gen_filter_dict()
         job_def.update(self.gen_workflow_params(phase))
 
         return {job_name : job_def}
@@ -189,6 +188,10 @@ def instantiate_configs():
         is_xla = fc.find_prop("is_xla") or False
         parms_list_ignored_for_docker_image = []
 
+        vulkan = fc.find_prop("vulkan") or False
+        if vulkan:
+            parms_list_ignored_for_docker_image.append("vulkan")
+
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
             python_version = fc.find_prop("pyver")
@@ -227,6 +230,9 @@ def instantiate_configs():
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
         parallel_backend = fc.find_prop("parallel_backend") or None
+        build_only = fc.find_prop("build_only") or False
+        if build_only and restrict_phases is None:
+            restrict_phases = ["build"]
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -239,6 +245,7 @@ def instantiate_configs():
             python_version,
             cuda_version,
             is_xla,
+            vulkan,
             restrict_phases,
             gpu_resource,
             is_libtorch=is_libtorch,

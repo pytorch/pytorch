@@ -40,6 +40,13 @@ using Variable = at::Tensor;
 
 namespace torch { namespace autograd {
 
+/// Check if this type is supported by the autograd engine.
+/// If you change this, update the doc at the top of the torch/autograd/__init__.py file
+/// and "test_set_requires_grad_only_for_continuous_types" in test/test_autograd.py
+static inline bool isDifferentiableType(at::ScalarType t) {
+    return isFloatingType(t) || isComplexType(t);
+}
+
 struct Node;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -213,8 +220,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   /// variables.
   void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
     TORCH_CHECK(
-      !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())) ||
-      at::isComplexType(at::typeMetaToScalarType(self_impl->dtype())),
+      !requires_grad || isDifferentiableType(at::typeMetaToScalarType(self_impl->dtype())),
       "Only Tensors of floating point and complex dtype can require gradients");
     requires_grad_ = requires_grad;
   }

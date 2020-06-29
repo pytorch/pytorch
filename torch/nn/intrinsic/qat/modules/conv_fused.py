@@ -10,6 +10,9 @@ from torch.nn.modules.utils import _pair
 from torch.nn.parameter import Parameter
 
 class _ConvBnNd(nn.modules.conv._ConvNd):
+
+    _version = 2
+
     def __init__(self,
                  # ConvNd args
                  in_channels, out_channels, kernel_size, stride,
@@ -106,6 +109,49 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
             for module in self.children():
                 module.train(mode)
         return self
+
+    # ===== Serialization version history =====
+    #
+    # Version 1/None
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #   |--- gamma : Tensor
+    #   |--- beta : Tensor
+    #   |--- running_mean : Tensor
+    #   |--- running_var : Tensor
+    #   |--- num_batches_tracked : Tensor
+    #
+    # Version 2
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #   |--- bn : Module
+    #        |--- weight : Tensor (moved from v1.self.gamma)
+    #        |--- bias : Tensor (moved from v1.self.beta)
+    #        |--- running_mean : Tensor (moved from v1.self.running_mean)
+    #        |--- running_var : Tensor (moved from v1.self.running_var)
+    #        |--- num_batches_tracked : Tensor (moved from v1.self.num_batches_tracked)
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+        version = local_metadata.get('version', None)
+        if version is None or version == 1:
+            # BN related parameters and buffers were moved into the BN module for v2
+            v2_to_v1_names = {
+                'bn.weight': 'gamma',
+                'bn.bias': 'beta',
+                'bn.running_mean': 'running_mean',
+                'bn.running_var': 'running_var',
+                'bn.num_batches_tracked': 'num_batches_tracked',
+            }
+            for v2_name, v1_name in v2_to_v1_names.items():
+                if prefix + v1_name in state_dict:
+                    state_dict[prefix + v2_name] = state_dict[prefix + v1_name]
+                    state_dict.pop(prefix + v1_name)
+                elif strict:
+                    missing_keys.append(prefix + v2_name)
+
+        super(_ConvBnNd, self)._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

@@ -219,6 +219,16 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
+SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
+  if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
+    auto dict = getSugaredDict(loc, m);
+    auto mods = dict->getModules();
+    return mods;
+  }
+  throw ErrorReport(loc)
+      << "Only ModuleList or Sequential modules can be used as tuple";
+}
+
 SugaredValuePtr ModuleValue::getitem(
     const SourceRange& loc,
     Function& m,
@@ -462,13 +472,15 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
       pybind11::cast<pybind11::none>(Py_None));
 
   if (py::isinstance<py::function>(unboundMethod)) {
-    bool isStaticFn =
-        py::cast<bool>(py::module::import("torch._jit_internal")
-                           .attr("is_static_fn")(concreteType_->getPyClass(), field.c_str()));
+    bool isStaticFn = py::cast<bool>(
+        py::module::import("torch._jit_internal")
+            .attr("is_static_fn")(concreteType_->getPyClass(), field.c_str()));
     if (isStaticFn) {
-      // Functions within the module annotated with @staticmethod do not need binding.
+      // Functions within the module annotated with @staticmethod do not need
+      // binding.
       py::object staticFn = py::module::import("torch._jit_internal")
-                           .attr("get_static_fn")(concreteType_->getPyClass(), field.c_str());
+                                .attr("get_static_fn")(
+                                    concreteType_->getPyClass(), field.c_str());
       return toSugaredValue(staticFn, m, loc);
     }
     // For Python methods that we're trying to call directly, we need to bind
@@ -669,7 +681,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
     TORCH_CHECK(
         type->isSubtypeOf(tt),
         "Can't to redefine NamedTuple: ",
-        tt->python_str());
+        tt->repr_str());
     return type;
   }
   get_python_cu()->register_type(tt);
@@ -738,7 +750,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
-  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
+      obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
@@ -747,7 +761,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
-          py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
+      py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
 #endif
   } else if (auto callee = as_module(obj)) {

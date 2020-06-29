@@ -2,17 +2,13 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args
+from torch.onnx.symbolic_helper import parse_args, _parse_arg
 
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
 # This file exports ONNX ops for opset 12
-
-black_listed_operators = [
-    "ArgMin", "ArgMax"
-]
 
 @parse_args('s', 'v')
 def einsum(g, equation, tensor_list):
@@ -60,6 +56,39 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
 
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
+
+
+def celu(g, self, alpha):
+    alpha = sym_help._maybe_get_const(alpha, 'f')
+    # if the input is of type double cast it to float
+    if self.type().scalarType() == 'Double':
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+        out = g.op("Celu", self, alpha_f=alpha)
+        return g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Double'])
+
+    return g.op("Celu", self, alpha_f=alpha)
+
+
+def argmax(g, input, dim, keepdim):
+    if sym_help._is_none(dim):
+        from torch.onnx.symbolic_opset9 import reshape
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
+
+
+def argmin(g, input, dim, keepdim):
+    if sym_help._is_none(dim):
+        from torch.onnx.symbolic_opset9 import reshape
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False, select_last_index_i=True)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim, select_last_index_i=True)
 
 
 def pow(g, self, exponent):

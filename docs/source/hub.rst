@@ -48,9 +48,9 @@ You can see the full script in
 - Docstring of the function works as a help message. It explains what does the model do and what
   are the allowed positional/keyword arguments. It's highly recommended to add a few examples here.
 - Entrypoint function can either return a model(nn.module), or auxiliary tools to make the user workflow smoother, e.g. tokenizers.
-- Callables prefixed with underscore are considered as helper functions which won't show up in ``torch.hub.list()``.
+- Callables prefixed with underscore are considered as helper functions which won't show up in :func:`torch.hub.list()`.
 - Pretrained weights can either be stored locally in the github repo, or loadable by
-  ``torch.hub.load_state_dict_from_url()``. If less than 2GB, it's recommended to attach it to a `project release <https://help.github.com/en/articles/distributing-large-binaries>`_
+  :func:`torch.hub.load_state_dict_from_url()`. If less than 2GB, it's recommended to attach it to a `project release <https://help.github.com/en/articles/distributing-large-binaries>`_
   and use the url from the release.
   In the example above ``torchvision.models.resnet.resnet18`` handles ``pretrained``, alternatively you can put the following logic in the entrypoint definition.
 
@@ -96,7 +96,7 @@ show docstring and examples through ``torch.hub.help()`` and load the pre-traine
 Running a loaded model:
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Note that ``*args, **kwargs`` in ``torch.load()`` are used to **instantiate** a model.
+Note that ``*args, **kwargs`` in :func:`torch.load()` are used to **instantiate** a model.
 After you loaded a model, how can you find out what you can do with the model?
 A suggested workflow is
 
@@ -117,12 +117,15 @@ The locations are used in the order of
 - ``$XDG_CACHE_HOME/torch/hub``, if environment variable ``XDG_CACHE_HOME`` is set.
 - ``~/.cache/torch/hub``
 
+.. autofunction:: get_dir
+
 .. autofunction:: set_dir
 
 Caching logic
 ^^^^^^^^^^^^^
 
-By default, we don't clean up files after loading it. Hub uses the cache by default if it already exists in ``hub_dir``.
+By default, we don't clean up files after loading it. Hub uses the cache by default if it already exists in the
+directory returned by :func:`~torch.hub.get_dir()`.
 
 Users can force a reload by calling ``hub.load(..., force_reload=True)``. This will delete
 the existing github folder and downloaded weights, reinitialize a fresh download. This is useful

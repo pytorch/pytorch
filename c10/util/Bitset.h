@@ -96,7 +96,7 @@ private:
       else {
         bool has_bits_set = (0 != _BitScanForward(&result, static_cast<uint32_t>(bitset_ >> 32)));
         if (!has_bits_set) {
-          return 0;
+          return 32;
         }
         return result + 33;
       }

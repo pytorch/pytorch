@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 
 #include <ATen/Backtrace.h>
+#include <ATen/TracerMode.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
@@ -13,6 +14,7 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/utils/variadic.h>
 #include <torch/custom_class.h>
@@ -104,6 +106,18 @@ Value* TracingState::getValue(const IValue& var) {
             var.toTuple()->elements(),
             [&](const IValue& val) { return getValue(val); })))
         ->output();
+  } else if (var.isGenericDict()) {
+    auto dict = var.toGenericDict();
+    TypePtr key_type = dict.keyType();
+    TypePtr value_type = dict.valueType();
+    std::vector<Value*> keys;
+    std::vector<Value*> values;
+    for (const auto& entry : dict) {
+      keys.emplace_back(getValue(entry.key()));
+      values.emplace_back(getValue(entry.value()));
+    }
+    auto dict_node = graph->createDict(key_type, value_type, keys, values);
+    return graph->insertNode(dict_node)->output();
   }
   if (var.isTensor()) {
     auto ten = var.toTensor();
@@ -365,7 +379,7 @@ static IValue addInput(
     AT_ERROR(
         "Only tensors or (possibly nested) dict or tuples of tensors can be "
         "inputs to traced functions. Got ",
-        type->python_str());
+        type->repr_str());
   }
 }
 
@@ -452,7 +466,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
       Inline(*graph);
     }
     FixupTraceScopeBlocks(graph, self);
-
+    NormalizeOps(graph);
     return {state, out_stack};
   } catch (...) {
     tracer::abandon();
@@ -814,6 +828,7 @@ const std::shared_ptr<TracingState>& getTracingState() {
 }
 
 void setTracingState(std::shared_ptr<TracingState> state) {
+  at::tracer::impl::set_dispatch_enabled(state != nullptr);
   detail::tracing_state = std::move(state);
 }
 
@@ -966,3 +981,9 @@ void setWarn(warn_fn_type fn) {
 } // namespace tracer
 } // namespace jit
 } // namespace torch
+
+TORCH_LIBRARY_IMPL(_, Tracer, m) {
+  // TODO: register fallback kernel with tracing function from
+  // `torch/csrc/jit/runtime/register_c10_ops.cpp`.
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
