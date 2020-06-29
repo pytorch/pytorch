@@ -251,6 +251,37 @@ static_assert(
     "");
 
 /**
+ * Take/drop a number of arguments from a typelist.
+ * Example:
+ *   typelist<int, string> == take_t<typelist<int, string, bool>, 2>
+ *   typelist<string, bool> == drop_t<typelist<int, string, bool>, 2>
+ */
+namespace detail {
+  template<class TypeList, size_t offset, class IndexSequence>
+  struct take_elements final {};
+
+  template<class TypeList, size_t offset, size_t... Indices>
+  struct take_elements<TypeList, offset, std::index_sequence<Indices...>> final {
+    using type = typelist<typename element<offset + Indices, TypeList>::type...>;
+  };
+}
+
+template<class TypeList, size_t num> struct take final {
+  static_assert(is_instantiation_of<typelist, TypeList>::value, "In typelist::take<T, num>, the T argument must be typelist<...>.");
+  static_assert(num <= size<TypeList>::value, "Tried to typelist::take more elements than there are in the list");
+  using type = typename detail::take_elements<TypeList, 0, std::make_index_sequence<num>>::type;
+};
+template<class TypeList, size_t num> using take_t = typename take<TypeList, num>::type;
+
+template<class TypeList, size_t num> struct drop final {
+  static_assert(is_instantiation_of<typelist, TypeList>::value, "In typelist::drop<T, num>, the T argument must be typelist<...>.");
+  static_assert(num <= size<TypeList>::value, "Tried to typelist::drop more elements than there are in the list");
+  using type = typename detail::take_elements<TypeList, num, std::make_index_sequence<size<TypeList>::value - num>>::type;
+};
+template<class TypeList, size_t num> using drop_t = typename drop<TypeList, num>::type;
+
+
+/**
  * Reverses a typelist.
  * Example:
  *   typelist<int, string>  == reverse_t<typelist<string, int>>
@@ -287,8 +318,6 @@ template<class Head, class... Tail, template<class> class Condition>
 struct find_if<typelist<Head, Tail...>, Condition, std::enable_if_t<!Condition<Head>::value>> final {
   static constexpr size_t value = 1 + find_if<typelist<Tail...>, Condition>::value;
 };
-
-
 
 /**
  * Maps a list of types into a list of values.

@@ -242,12 +242,18 @@ class ModuleCloneHelper {
     remapTypes(graph.get(), source, target, module_qconfig_map, type_remap_fn);
     // remap self
     graph->inputs()[0]->setType(target.type());
+    // we only support %self being Module in the arguments of function
+    auto schema_type_remap_fn = [&](TypePtr type_ptr) {
+      return type_remap_fn(type_ptr, module_qconfig_map.at(source._ivalue()));
+    };
+    auto schema =
+        method.getSchema().cloneWithRemappedTypes(schema_type_remap_fn);
     const auto this_method_name =
         c10::QualifiedName(*target.type()->name(), method.name());
     auto copied = target._ivalue()->compilation_unit()->create_function(
         this_method_name, graph);
     target.type()->addMethod(copied);
-    // we'll use default schema for cloned method
+    copied->setSchema(std::move(schema));
   }
 };
 
@@ -1107,10 +1113,9 @@ void InsertObserversHelper::preprocess(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
-  // must do constant propagation first before replacement
-  replaceConvolutionWithAtenConv(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
+  replaceConvolutionWithAtenConv(graph);
 }
 
 void InsertObserversHelper::analyze(
