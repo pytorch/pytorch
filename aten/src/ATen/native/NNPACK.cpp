@@ -60,6 +60,7 @@ bool _nnpack_available() {
 
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
