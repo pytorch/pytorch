@@ -208,12 +208,17 @@ struct ProfilerThreadLocalState
       std::vector<std::vector<int64_t>>&& shapes = {},
       at::RecordFunctionHandle handle = 0) {
     if (config_.state == ProfilerState::Disabled) {
+      LOG(INFO) << "Called pushRange but profiler was disabled.";
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxRangePushA(getNvtxStr(
           name, msg, sequence_nr, shapes).c_str());
     } else {
+      auto nodeId = at::RecordFunction::getDefaultNodeId();
+      if (nodeId == 1) {
+        LOG(INFO) << "Node id 1 push event name: " << name;
+      }
       getEventList().record(
           EventKind::PushRange,
           name,

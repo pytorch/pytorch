@@ -124,7 +124,7 @@ def skip_if_rocm(func):
 
     return wrapper
 
-TIMEOUT_DEFAULT = 100
+TIMEOUT_DEFAULT = 900
 TIMEOUT_OVERRIDE = {}
 
 

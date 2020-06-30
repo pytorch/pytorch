@@ -200,7 +200,26 @@ void RequestCallbackImpl::processRpc(
       // scriptCall is only alive within this block, use reference to avoid copy
       auto& stack = scriptCall.stackRef();
       if (scriptCall.hasOp()) {
-        scriptCall.op()->getOperation()(stack);
+        LOG(INFO) << "Runnign script_call";
+        using namespace torch::autograd::profiler;
+        {
+          TLSProfilerGuard g(
+              ProfilerConfig(ProfilerState::CPU, false, false),
+              [](const std::vector<std::vector<Event>>& event_lists) {
+                // Gather all events into a vector
+                std::vector<Event> profiledEvents;
+                for (auto& l : event_lists) {
+                  for (auto& e : l) {
+                    profiledEvents.push_back(e);
+                  }
+                }
+                for (const auto& e : profiledEvents) {
+                  LOG(INFO) << "Event with name: " << e.name();
+                }
+              });
+          std::this_thread::sleep_for(std::chrono::seconds(20));
+          scriptCall.op()->getOperation()(stack);
+        }
         TORCH_INTERNAL_ASSERT(
             stack.size() == 1,
             "Return value of a builtin operator or a "

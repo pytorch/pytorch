@@ -1259,6 +1259,17 @@ class RpcTest(RpcAgentTestFixture):
 
             self.validate_profiling_workload(dst, prof)
 
+    @dist_init
+    def test_profiler_builtin_op(self):
+        if self.rank == 1:
+            import os
+            print(f"Rank 1 pid: {os.getpid()}")
+        if self.rank == 0:
+            dst = 1
+            dst_worker = worker_name(dst)
+            # with torch.autograd.profiler.profile() as prof:
+            rpc.rpc_async(dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1)))
+
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False, dst=None):
         dst = dst if dst is not None else (self.rank + 1) % self.world_size
 
