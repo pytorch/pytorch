@@ -168,7 +168,15 @@ bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
-bool is_fp16_fp32_cast_op(
+bool is_half_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_float_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_false_value(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 } // namespace jit

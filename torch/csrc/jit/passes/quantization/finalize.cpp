@@ -29,13 +29,13 @@ graph(%a_dequant, %w_quant, %b):
         %r = aten::linear(%a_dequant, %w_dequant, %b_unpacked)
         return (%r) )";
   std::string linear_fp16_with_cast = R"(
-graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %default_param, %non_blocking):
-        %fp16_tensor = aten::to(%w, %dtype_fp16, %default_param, %default_param, %non_blocking)
-        %fp32_tensor = aten::to(%fp16_tensor, %dtype_fp32, %default_param, %default_param, %non_blocking)
+graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %false):
+        %fp16_tensor = aten::to(%w, %dtype_fp16, %false, %false)
+        %fp32_tensor = aten::to(%fp16_tensor, %dtype_fp32, %false, %false)
         %r = aten::linear(%a_dq, %fp32_tensor, %b)
         return (%r) )";
   std::string linear_fp16_with_prepack = R"(
-graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %default_param, %non_blocking):
+graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %false):
         %packed_params = quantized::linear_prepack_fp16(%w, %b)
         %w_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack_fp16(%packed_params)
         %r = aten::linear(%a_dq, %w_unpacked, %b_unpacked)
@@ -45,7 +45,7 @@ graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %default_param, %non_blocking):
       {linear_with_quant, linear_with_quant_prepack},
       {linear_fp16_with_cast,
        linear_fp16_with_prepack,
-       {is_fp16_fp32_cast_op}}};
+       {is_half_dtype, is_float_dtype, is_false_value}}};
 
   for (const auto& entry : patterns_and_replacements) {
     SubgraphRewriter rewriter;

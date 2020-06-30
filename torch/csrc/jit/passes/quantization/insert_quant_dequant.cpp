@@ -199,8 +199,7 @@ Node* insertFP16CastOps(Graph* graph, Value* observer_out) {
   std::vector<Value*> input_to_fp16 = {observer_out,
                                        fp16_dtype,
                                        /* non_blocking */ default_false,
-                                       /* copy */ default_false,
-                                       /* memory_format */ none};
+                                       /* copy */ default_false};
   Node* cast_to_fp16 = graph->create(Symbol::aten("to"), input_to_fp16);
   graph->insertNode(cast_to_fp16);
 
@@ -208,8 +207,7 @@ Node* insertFP16CastOps(Graph* graph, Value* observer_out) {
   std::vector<Value*> input_to_fp32 = {fp16_out,
                                        float_dtype,
                                        /* non_blocking */ default_false,
-                                       /* copy */ default_false,
-                                       /* memory_format */ none};
+                                       /* copy */ default_false};
   Node* cast_to_fp32 = graph->create(Symbol::aten("to"), input_to_fp32);
   graph->insertNode(cast_to_fp32);
   graph->lint();
