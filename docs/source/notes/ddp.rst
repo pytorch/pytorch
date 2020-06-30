@@ -172,7 +172,7 @@ DistributedDataParallel
   broadcast model states during initialization and synchronize model buffers
   before the forward pass.
 
-- `reducer.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/comm.h>`__:
+- `reducer.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/reducer.h>`__:
   provides the core implementation for gradient synchronization in the backward
   pass. It has three entry point functions:
 

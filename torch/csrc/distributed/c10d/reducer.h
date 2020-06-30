@@ -28,7 +28,8 @@ class Reducer {
       std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
-      int64_t bucket_bytes_cap);
+      int64_t bucket_bytes_cap,
+      bool find_unused_parameters);
 
   ~Reducer() noexcept(false);
 
@@ -78,6 +79,7 @@ class Reducer {
   size_t next_bucket_;
 
   bool has_marked_unused_parameters_;
+  const bool find_unused_parameters_;
   std::vector<VariableIndex> unused_parameters_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
