@@ -40,10 +40,9 @@ void setupBenchmarkCallbacks() {
   }
 }
 
-typedef std::chrono::high_resolution_clock clock;
-typedef std::chrono::microseconds us;
-
 float runBench(int tensor_size, int outer_iter) {
+  typedef std::chrono::high_resolution_clock clock;
+  typedef std::chrono::microseconds us;
   std::chrono::time_point<clock> start_time = clock::now();
   for (auto idx = 0; idx < kInnerIter * outer_iter; ++idx) {
     torch::mm(
@@ -62,7 +61,6 @@ int main(int argc, char** argv) {
   }
 
   at::enableRecordFunction();
-
   setupBenchmarkCallbacks();
 
   auto duration = runBench(kSmallTensorSize, FLAGS_warmup_iter);
@@ -90,11 +88,13 @@ int main(int argc, char** argv) {
     .samplingProb(kLowSamplingProb)
   );
 
+  typedef std::chrono::high_resolution_clock clock;
+  typedef std::chrono::microseconds us;
   std::chrono::time_point<clock> start_time = clock::now();
   for (auto n = 0; n < FLAGS_rec_fn_iter; ++n) {
     RECORD_USER_SCOPE("test");
   }
-  auto duration = static_cast<float>(
+  duration = static_cast<float>(
       std::chrono::duration_cast<us>(clock::now() - start_time).count());
   std::cout << "Pure RecordFunction runtime of " << FLAGS_rec_fn_iter
             << " iterations " << duration
