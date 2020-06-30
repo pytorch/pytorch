@@ -1091,6 +1091,23 @@ graph(%Ra, %Rb):
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
         FileCheck().check("Double(4:120, 3:40, 8:5, 5:1)").run(str(graph))
 
+    def test_shape_analysis_unsqueeze_in_loop(self):
+        input_str = """graph(%x.1 : Tensor):
+          %4 : bool = prim::Constant[value=1]()
+          %1 : int = prim::Constant[value=2]()
+          %7 : int = prim::Constant[value=0]()
+          # CHECK: FloatTensor = prim::Loop
+          %x : Tensor = prim::Loop(%1, %4, %x.1)
+            # CHECK: : FloatTensor):
+            block0(%i : int, %x.6 : Tensor):
+              # CHECK: FloatTensor = aten::unsqueeze
+              %x.3 : Tensor = aten::unsqueeze(%x.6, %7)
+              -> (%4, %x.3)
+          return (%x)"""
+        graph = parse_ir(input_str)
+        torch._C._jit_pass_complete_shape_analysis(graph, (torch.zeros(2, 2, dtype=torch.float32),), False)
+        FileCheck().run(input_str, graph)
+
     # TODO: update verify to work with GraphExecutors
     @unittest.skip("verify needs to be updated to work with GraphExecutors")
     def test_verify(self):

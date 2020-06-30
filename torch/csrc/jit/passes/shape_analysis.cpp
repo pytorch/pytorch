@@ -1765,7 +1765,7 @@ class ShapePropagator {
                      "aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
         auto& t = tensor_types.at(0);
         if (!t->dim()) {
-          return nullptr;
+          return t;
         }
         return t->withDim(*t->dim() + 1);
       } else if (
