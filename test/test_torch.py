@@ -33,7 +33,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, tfloat32, tcomplex64
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -42,10 +42,6 @@ import torch.testing._internal.data
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-# TF32 are disabled globally, so that we have full FP32 precision for all testes. TF32 will be reenabled
-# when needed for some tests with relaxed threshold.
-torch.backends.cuda.matmul.allow_tf32 = False
 
 if TEST_NUMPY:
     import numpy as np
@@ -16466,8 +16462,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(res1, res2, atol=prec, rtol=0)
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(*([torch.float, torch.double] +
-                    ([] if TEST_WITH_ROCM else torch.testing.get_all_complex_dtypes())))
+    @dtypesIfCUDA(*([torch.float, torch.double, tfloat32] +
+                    ([] if TEST_WITH_ROCM else (torch.testing.get_all_complex_dtypes() + [tcomplex64]))))
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
@@ -18894,17 +18890,23 @@ _types2 = _types + [torch.bfloat16] if TEST_WITH_ROCM else _types
 
 _float_types = [torch.half, torch.float, torch.double]
 
+_tfloat_types = [tfloat32]
+
 _complex_types = [torch.cfloat, torch.cdouble]
 
 _complex_types_skip_rocm = [] if TEST_WITH_ROCM else _complex_types
 
 _float_types_no_half = [torch.float, torch.double]
 
-_complex_types = [torch.cfloat, torch.cdouble]
+_tcomplex_types = [tcomplex64]
+
+_complex_types_with_tf32_skip_rocm = [] if TEST_WITH_ROCM else _complex_types + _tcomplex_types
 
 # _float_types2 adds bfloat16 type to _float_types only on ROCm. Should eventually be unified
 # with _float_types when bfloat16 bringup is complete on all platforms
 _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_types
+
+_tfloat_types2 = _float_types2 + _tfloat_types
 
 _complex_and_float_types2 = _float_types2 + _complex_types
 
@@ -19076,12 +19078,12 @@ tensor_op_tests = [
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
         1e-1, 1e-1, 1e-5, _float_types2),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2),
+        1e-1, 1e-1, 1e-4, _tfloat_types2),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, _tfloat_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, _tfloat_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
@@ -19107,24 +19109,24 @@ tensor_op_tests = [
         1e-1, 1e-5, _types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2),
+        1e-1, 1e-1, 1e-4, _tfloat_types2),
     ('addmm', 'scalar', _medium_2d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, _tfloat_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmm', 'two_scalars', _medium_2d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, _tfloat_types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm),
+        1e-2, 1e-1, 1e-4, _tfloat_types2 + _complex_types_with_tf32_skip_rocm),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, _tfloat_types2 + _complex_types_with_tf32_skip_rocm, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
+        1e-2, 1e-1, 1e-4, _tfloat_types2 + _complex_types_with_tf32_skip_rocm, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
@@ -19400,7 +19402,18 @@ def generate_test_function(cls,
                            dtype_list,
                            dtype_cpu_list,
                            decorators) -> None:
-    def fn(self, device, dtype) -> None:
+    def fn(self, device, dtype_, disable_tf32_on_fp32=False) -> None:
+        if dtype in {tfloat32, tcomplex64}:
+            torch.backends.cuda.matmul.allow_tf32 = True
+        elif disable_tf32_on_fp32 and dtype in {torch.float32, torch.complex64}:
+            torch.backends.cuda.matmul.allow_tf32 = False
+        def tf32_to_fp32(dtype):
+            if dtype == tfloat32:
+                return torch.float32
+            elif dtype == tcomplex64:
+                return torch.complex64
+            return dtype
+        dtype = tf32_to_fp32(dtype_)
         # Generates the CPU inputs
         # Note: CPU tensors are never torch.half
         cpu_tensor = tensor_ctor(dtype, 'cpu')
@@ -19422,17 +19435,23 @@ def generate_test_function(cls,
         device_result = getattr(device_tensor, op_str)(*device_args)
 
         dtype2precision = {torch.half : half_precision,
-                           torch.bfloat16 : bfloat16_precision}
+                           torch.bfloat16 : bfloat16_precision,
+                           tfloat32 : half_precision,
+                           tcomplex64 : half_precision}
 
         # Compares CPU and device inputs and outputs
-        precision = dtype2precision.get(dtype, float_precision)
+        precision = dtype2precision.get(dtype_, float_precision)
 
         self.assertEqual(cpu_tensor, device_tensor, atol=precision, rtol=0, exact_dtype=False)
         self.assertEqual(cpu_args, device_args, atol=precision, rtol=0, exact_dtype=False)
         self.assertEqual(cpu_result, device_result, atol=precision, rtol=0, exact_dtype=False)
+        torch.backends.cuda.matmul.allow_tf32 = True
 
     test_name = "test_" + op_str + subtest_str
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
+
+    if tfloat32 in dtype_list or tcomplex64 in dtype_list:
+        fn = lambda *args: fn(*args, disable_tf32_on_fp32=True)
 
     # Constructs decorator list and applies decorators
     if decorators is None:

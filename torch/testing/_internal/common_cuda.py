@@ -1,5 +1,6 @@
 r"""This file is allowed to initialize CUDA context when imported."""
 
+import functools
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import TEST_NUMBA
@@ -32,3 +33,24 @@ def initialize_cuda_context_rng():
         for i in range(torch.cuda.device_count()):
             torch.randn(1, device="cuda:{}".format(i))
         __cuda_ctx_rng_initialized = True
+
+
+def tf32_is_not_fp32():
+    if not torch.cuda.is_available():
+        return False
+    if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
+        return False
+    return torch.backends.cuda.matmul.allow_tf32
+
+
+def tf32_aware(f):
+
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        torch.backends.cuda.matmul.allow_tf32 = True
+        f(*args, **kwargs)
+        torch.backends.cuda.matmul.allow_tf32 = False
+        f(*args, **kwargs)
+        torch.backends.cuda.matmul.allow_tf32 = True
+
+    return wrapped
