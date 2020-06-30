@@ -1118,12 +1118,11 @@ graph(%list, %x):
 
   GRAPH_DUMP("Before replace append", graph);
   const PatternInfo& append_pattern_info =
-    PatternInfo::parse_from_str(append_pattern);
+      PatternInfo::parse_from_str(append_pattern);
   const Graph& append_graph = *append_pattern_info.pattern_graph;
   const auto& append_vmap = append_pattern_info.vmap;
-  const auto& matches = findPatternMatches(
-      *append_pattern_info.pattern_graph,
-      *graph);
+  const auto& matches =
+      findPatternMatches(*append_pattern_info.pattern_graph, *graph);
   for (const auto& match : matches) {
     auto append_node = match.values_map.at(append_vmap.at("ignore"))->node();
     Value* list_val = append_node->input(0);
@@ -1131,9 +1130,8 @@ graph(%list, %x):
     WithInsertPoint ins(append_node);
     Node* x_list_node = graph->createList(TensorType::get(), {x});
     graph->insertNode(x_list_node);
-    Node* add_node = graph->create(
-        Symbol::aten("add"),
-        {list_val, x_list_node->output()});
+    Node* add_node =
+        graph->create(Symbol::aten("add"), {list_val, x_list_node->output()});
     graph->insertNode(add_node);
     add_node->output()->setType(ListType::ofTensors());
     list_val->replaceAllUsesAfterNodeWith(add_node, add_node->output());

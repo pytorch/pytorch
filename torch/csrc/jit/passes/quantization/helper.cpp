@@ -420,26 +420,24 @@ bool isBinaryOpWithScalarInput(Node* n) {
 }
 
 bool isListAdd(Node* n) {
-  return  n->kind() == Symbol::aten("add") &&
-    n->inputs().size() == 2 &&
-    n->outputs().size() == 1 &&
-    n->output()->type()->isSubtypeOf(ListType::ofTensors()) &&
-    n->input(0)->type()->isSubtypeOf(ListType::ofTensors()) &&
-    n->input(1)->type()->isSubtypeOf(ListType::ofTensors());
+  return n->kind() == Symbol::aten("add") && n->inputs().size() == 2 &&
+      n->outputs().size() == 1 &&
+      n->output()->type()->isSubtypeOf(ListType::ofTensors()) &&
+      n->input(0)->type()->isSubtypeOf(ListType::ofTensors()) &&
+      n->input(1)->type()->isSubtypeOf(ListType::ofTensors());
 }
-
 
 bool isEmptyList(Node* n) {
   if (n->outputs().size() != 1) {
     return false;
   }
   bool is_empty_tensor_list_node = n->kind() == prim::ListConstruct &&
-    n->inputs().size() == 0 &&
-    n->output()->type()->isSubtypeOf(ListType::ofTensors());
+      n->inputs().size() == 0 &&
+      n->output()->type()->isSubtypeOf(ListType::ofTensors());
   auto iv = toIValue(n->output());
-  bool is_empty_tensor_list_constant =
-    iv.has_value() && iv->isList() && iv->toList().size() == 0 &&
-    n->output()->type()->isSubtypeOf(ListType::ofTensors());
+  bool is_empty_tensor_list_constant = iv.has_value() && iv->isList() &&
+      iv->toList().size() == 0 &&
+      n->output()->type()->isSubtypeOf(ListType::ofTensors());
   return is_empty_tensor_list_node || is_empty_tensor_list_constant;
 }
 
