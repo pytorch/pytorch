@@ -18,7 +18,7 @@ jobs:
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}:${DOCKER_TAG}
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
           git submodule sync && git submodule update -q --init --recursive
 
