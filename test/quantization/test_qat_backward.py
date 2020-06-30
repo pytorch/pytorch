@@ -21,7 +21,7 @@ class TestQATBackward(TestCase):
 
     @given(quantize_forward=st.booleans(),
            quantize_backward=st.booleans(),
-           device=st.sampled_from(['cpu']),
+           device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_forward_and_backward(self, quantize_forward, quantize_backward, device, X):
