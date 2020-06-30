@@ -218,8 +218,8 @@ Node* insertFP16CastOps(Graph* graph, Value* observer_out) {
 }
 
 bool isNoopObserver(Value* observer) {
-  if (get_module_name(observer).has_value()) {
-    auto name = get_module_name(observer).value();
+  if (getModuleName(observer).has_value()) {
+    auto name = getModuleName(observer).value();
     if (name == "__torch__.torch.quantization.observer.NoopObserver") {
       return true;
     }
@@ -256,6 +256,8 @@ void insertQuantizationOps(
     std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
         g, observer_out, dtype, at::Symbol::aten(quantize_func));
   } else {
+    // Else branch is executed for dynamic weight observers and all observers
+    // for static quant.
     std::vector<Value*> inputs = {observer_out};
     // Insert GetAttr nodes for quantization parameters
     for (const auto& qparam_name : qparam_names) {
