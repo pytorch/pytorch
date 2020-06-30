@@ -10,7 +10,6 @@ import gzip
 import copy
 import pickle
 import shutil
-import pathlib
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
