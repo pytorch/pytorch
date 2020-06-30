@@ -724,14 +724,59 @@ class TestUtilityFuns(TestCase):
         model.train()
         model_export = MyModule()
         f = io.BytesIO()
-        torch.onnx.export(model_export, (x,), f, verbose=True,
+        torch.onnx.export(model_export, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
         ort_outs1 = ort_sess.run(None, ort_inputs)
         model.eval()
         f = io.BytesIO()
-        torch.onnx.export(model_export, (x,), f, verbose=True,
+        torch.onnx.export(model_export, (x,), f,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
+        ort_outs2 = ort_sess.run(None, ort_inputs)
+        [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
+
+    def test_multiple_conv_bn(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+                self.conv2 = torch.nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=0, bias=False)
+                self.conv3 = torch.nn.Conv2d(2, 2, kernel_size=3, stride=1, padding=1, bias=False)
+                self.bn = torch.nn.BatchNorm2d(64)
+                self.bn2 = torch.nn.BatchNorm2d(2)
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                x = self.maxpool(x)
+                x = self.conv2(x)
+                x = self.bn2(x)
+                x = self.relu(x)
+                x = self.conv3(x)
+                x = self.bn2(x)
+                x = self.relu(x)
+                return x
+
+        model = MyModule()
+        x = torch.randn(2, 3, 224, 224)
+        model.train()
+        model_export = MyModule()
+        f = io.BytesIO()
+        torch.onnx.export(model_export, (x,), f,
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
+        ort_outs1 = ort_sess.run(None, ort_inputs)
+        model.eval()
+        f = io.BytesIO()
+        torch.onnx.export(model_export, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
