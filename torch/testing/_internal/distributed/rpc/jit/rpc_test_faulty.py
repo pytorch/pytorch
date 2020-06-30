@@ -2,7 +2,6 @@ from typing import Dict, Tuple
 
 import torch
 import torch.distributed.rpc as rpc
-import torch.testing._internal.dist_utils as dist_utils
 from torch import Tensor
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -101,7 +100,6 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
             "second_kwarg": torch.tensor([3, 3]),
         }
         expected_error = self.get_timeout_error_regex()
-        print("Test config is {}".format(dist_utils.TEST_CONFIG.rpc_backend_name))
         # Ensure that we get a timeout if we override the default timeout and
         # the RPC takes longer to execute.
         with self.assertRaisesRegex(RuntimeError, expected_error):
