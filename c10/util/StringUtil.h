@@ -79,34 +79,19 @@ struct _str_wrapper<> final {
   }
 };
 
-template<typename T>
-struct wrapper final {
-  static std::string call(const T& t) {
-    return std::to_string(t);
-  }
-};
-
-template<>
-struct wrapper<std::string> final {
-  static std::string call(const std::string& s) {
-    return "";
-  }
-};
-
-template<>
-struct wrapper<char*> final {
-  static std::string call(const char* ca) {
-    return "";
-  }
-};
-
 inline std::ostream& _error_value(std::ostream& ss) {
+  return ss;
+}
+
+// ignore pure string literal
+template <char*>
+inline std::ostream& _error_value(std::ostream& ss, const char* ca) {
   return ss;
 }
 
 template <typename T>
 inline std::ostream& _error_value(std::ostream& ss, const T& t) {
-  ss << wrapper<T>::call(t);
+  ss << t;
   return ss;
 }
 
@@ -124,19 +109,12 @@ struct _error_value_wrapper final {
   }
 };
 
-// Specializations for already-a-string types or empty argument,
+// Specializations for string literal type or empty argument,
 // we don't want to pay the binary size for constructing and destructing a stringstream
 // or even constructing a string. Let's just return a reference to an empty string.
 template<>
-struct _error_value_wrapper<std::string> final {
-  static const std::string& call(const std::string& str) {
-    thread_local const std::string empty_string_literal;
-    return empty_string_literal;  }
-};
-
-template<>
-struct _error_value_wrapper<const char*> final {
-  static std::string call(const char* str) {
+struct _error_value_wrapper<char*> final {
+  static const std::string& call(const char* ca) {
     thread_local const std::string empty_string_literal;
     return empty_string_literal;  }
 };
@@ -156,8 +134,8 @@ inline decltype(auto) str(const Args&... args) {
   return detail::_str_wrapper<typename detail::CanonicalizeStrTypes<Args>::type...>::call(args...);
 }
 
-// Convert a list of error arguments into a single string by striping away pure string arguments, i.e.
-// if an argument is std::string or const char*, it will not show up in the returned string.
+// Convert a list of error arguments into a single string by striping away string literal arguments, i.e.
+// if an argument is const char*, it will not show up in the returned message.
 // This is to optimize build size.
 template <typename... Args>
 inline decltype(auto) error_value(const Args&... args) {
