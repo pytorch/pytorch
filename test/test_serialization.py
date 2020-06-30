@@ -10,6 +10,7 @@ import gzip
 import copy
 import pickle
 import shutil
+import pathlib
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
@@ -672,6 +673,27 @@ class TestSerialization(TestCase, SerializationMixin):
             test(f.name)
 
         test(io.BytesIO())
+
+    # Ensure large zip64 serialization works properly
+    @unittest.skipIf(IS_WINDOWS,
+                     '<built-in method read of BytesIOContext object at 0x0000022C21F2B468> returned a result'
+                     ' with an error set')
+    def test_serialization_2gb_file(self):
+        big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
+
+        with BytesIOContext() as f:
+            torch.save(big_model, f)
+            f.seek(0)
+            state = torch.load(f)
+
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_pathlike_serialization(self):
+        model = torch.nn.Conv2d(20, 3200, kernel_size=3)
+
+        with tempfile.NamedTemporaryFile() as f:
+            path = pathlib.Path(f.name)
+            torch.save(model, path)
+            torch.load(path)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
