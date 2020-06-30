@@ -234,7 +234,7 @@ class Module:
     """
     forward: Callable[..., Any] = _forward_unimplemented
 
-    def register_buffer(self, name: str, tensor: Tensor, persistent: bool = True) -> None:
+    def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
 
         This is typically used to register a buffer that should not to be
@@ -286,7 +286,7 @@ class Module:
             else:
                 self._non_persistent_buffers_set.add(name)
 
-    def register_parameter(self, name: str, param: Parameter) -> None:
+    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         r"""Adds a parameter to the module.
 
         The parameter can be accessed as an attribute using given name.
@@ -325,7 +325,7 @@ class Module:
         else:
             self._parameters[name] = param
 
-    def add_module(self, name: str, module: 'Module') -> None:
+    def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
