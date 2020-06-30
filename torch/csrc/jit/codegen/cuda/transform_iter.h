@@ -73,10 +73,10 @@ class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
 
   // TODO: HANDLE RFACTOR DOMAINS
   // We're going to replay this split operation on the corresponding ID
-  virtual void handle(Split* s) override;
+  void handle(Split* s) override;
 
   // We're going to replay this merge operation on the corresponding IDs
-  virtual void handle(Merge* m) override;
+  void handle(Merge* m) override;
 
  public:
   ReplayTransformations(

@@ -57,17 +57,17 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
 
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Statement* s) override {
+  void handle(Statement* s) override {
     OptOutDispatch::handle(s);
   }
   // This handle functions is called on every Expr* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Expr* e) override {
+  void handle(Expr* e) override {
     OptOutDispatch::handle(e);
   }
   // This handle functions is called on every Val* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Val* v) override {
+  void handle(Val* v) override {
     OptOutDispatch::handle(v);
   }
 
@@ -92,12 +92,6 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // traverseAllPaths = true traverses all paths from nodes in from to inputs.
   //   Handle on a Statement* for every path from "from" nodes, to inputs.
   void traverseFrom(
-      Fusion* const fusion,
-      const std::vector<Val*>& from,
-      bool traverseAllPaths = false,
-      bool respectComputeAt = false);
-
-  void traverseFrom2(
       Fusion* const fusion,
       const std::vector<Val*>& from,
       bool traverseAllPaths = false,

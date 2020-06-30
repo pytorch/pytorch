@@ -63,8 +63,9 @@ std::vector<Statement*> IterVisitor::next(Expr* expr, bool respect_compute_at) {
   return next_stmts;
 }
 
-// Remove any stmt in stmts that is in visited
 namespace {
+
+// Remove any stmt in stmts that is in visited
 void remove_visited(
     std::vector<Statement*>& stmts,
     const std::unordered_set<Statement*>& visited) {
@@ -79,6 +80,7 @@ void remove_visited(
     to_erase.pop_back();
   }
 }
+
 } // namespace
 
 void IterVisitor::traverseFrom(
@@ -104,7 +106,7 @@ void IterVisitor::traverseFrom(
       all_inputs_visited = true;
       continue;
     }
-    auto& stmt = current_inputs.back();
+    const auto& stmt = current_inputs.back();
     // Visit stmt when all_inputs_visited is true.
     if (all_inputs_visited) {
       // Mark visited
@@ -217,6 +219,7 @@ class Inputs : public IterVisitor {
     return inps.inputs;
   }
 };
+
 } // namespace
 
 std::unordered_set<Val*> IterVisitor::getTerminatingOutputs(
