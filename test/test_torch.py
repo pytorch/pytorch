@@ -17870,6 +17870,53 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
             self.assertEqual(out, expected)
 
+    def _generate_input(self, shape, dtype, device, with_extremal):
+        if shape == ():
+            x = torch.tensor((), dtype=dtype, device=device)
+        else:
+            if dtype.is_floating_point or dtype.is_complex:
+                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
+                x[torch.randn(*shape) > 0.5] = 0
+                if with_extremal and dtype.is_floating_point:
+                    # Use extremal values
+                    x[torch.randn(*shape) > 0.5] = float('nan')
+                    x[torch.randn(*shape) > 0.5] = float('inf')
+                    x[torch.randn(*shape) > 0.5] = float('-inf')
+                elif with_extremal and dtype.is_complex:
+                    x[torch.randn(*shape) > 0.5] = complex('nan')
+                    x[torch.randn(*shape) > 0.5] = complex('inf')
+                    x[torch.randn(*shape) > 0.5] = complex('-inf')
+            else:
+                x = torch.randint(15, 100, shape, dtype=dtype, device=device)
+
+        return x
+
+    def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype, with_extremal=False):
+        # Test 0-d to 3-d tensors.
+        for ndims in range(0, 4):
+            shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            for n in range(ndims + 1):
+                for c in combinations(list(range(ndims)), n):
+                    for count_dim in permutations(c):
+                        # Generate Input.
+                        x = self._generate_input(shape, dtype, device, with_extremal)
+
+                        if count_dim == ():
+                            # Default `dims=None` case
+                            self.compare_with_numpy(torch_func, np_func, x, device=None, dtype=None)
+                        else:
+                            # With `dims: tuple of ints` case
+                            torch_func_partial = partial(torch_func, dim=count_dim)
+                            np_func_partial = partial(np_func, axis=count_dim)
+                            self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_count_nonzero(self, device, dtype):
+        self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
+        self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
+
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):
         start = torch.iinfo(dtype).min
