@@ -17,3 +17,12 @@ class TensorPipeRpcAgentTestFixture(RpcAgentTestFixture):
             self.rpc_backend,
             init_method=self.init_method,
         )
+
+    def get_shutdown_error_regex(self):
+        # FIXME Once we consolidate the error messages returned by the
+        # TensorPipe agent put some more specific regex here.
+        error_regexes = [".*"]
+        return "|".join(["({})".format(error_str) for error_str in error_regexes])
+
+    def get_timeout_error_regex(self):
+        return "RPC ran for more than"
