@@ -66,20 +66,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
 
         self.worker_id = self.rank
 
-        if (
-            rpc.backend_registry.backend_registered("FAULTY_PROCESS_GROUP")
-            and self.rpc_backend
-            == rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP
-        ):
-            _build_faulty_backend_options(self, faulty_messages, messages_to_delay)
-
-        if (
-            rpc.backend_registry.backend_registered("TENSORPIPE")
-            and self.rpc_backend
-            == rpc.backend_registry.BackendType.TENSORPIPE
-        ):
-            TEST_CONFIG.rpc_backend_name = "TENSORPIPE"
-            _build_tensorpipe_backend_options()
+        self.setup_fault_injection(faulty_messages, messages_to_delay)
 
         if setup_rpc:
             rpc.init_rpc(
@@ -108,36 +95,6 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
     # Some tests need additional threads (ex: test_trainer_ps)
     num_send_recv_threads=8,
 )
-
-def _build_faulty_backend_options(faulty_agent_fixture, faulty_messages, messages_to_delay):
-    '''
-    Constructs the backend options object for the faulty process group agent
-    based on the faulty_messages input to dist_init.
-    '''
-    messages_to_fail = (
-        faulty_messages
-        if faulty_messages is not None
-        else faulty_agent_fixture.retryable_message_types
-    )
-    messages_to_delay = (
-        messages_to_delay
-        if messages_to_delay is not None
-        else faulty_agent_fixture.default_messages_to_delay
-    )
-    TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
-        test_object.rpc_backend,
-        init_method=test_object.init_method,
-        num_send_recv_threads=8,
-        num_fail_sends=faulty_agent_fixture.num_fail_sends,
-        messages_to_fail=messages_to_fail,
-        messages_to_delay=messages_to_delay,
-    )
-
-def _build_tensorpipe_backend_options():
-    TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
-        test_object.rpc_backend,
-        init_method=test_object.init_method,
-    )
 
 def noop():
     pass
