@@ -19,3 +19,16 @@ class ProcessGroupRpcAgentTestFixture(RpcAgentTestFixture):
             # Some tests need additional threads (ex: test_trainer_ps)
             num_send_recv_threads=8,
         )
+
+    def get_shutdown_error_regex(self):
+        error_regexes = [
+            "Encountered exception in ProcessGroupAgent::enqueueSend",
+            "Encountered exception in ProcessGroupAgent::listenLoop()",
+            "Exception in thread pool task",
+            "Connection reset by peer",
+            "Connection closed by peer"
+        ]
+        return "|".join(["({})".format(error_str) for error_str in error_regexes])
+
+    def get_timeout_error_regex(self):
+        return "RPC ran for more than"
