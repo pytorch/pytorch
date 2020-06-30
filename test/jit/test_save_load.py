@@ -484,6 +484,7 @@ class TestSaveLoad(JitTestCase):
     # NOTE: the JIT was incapable of handling boolean fill values when
     #   PyTorch produced file format versions 0-4
     def test_versioned_full_integer_value(self):
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super(MyModule, self).__init__()
