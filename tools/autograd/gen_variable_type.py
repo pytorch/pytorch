@@ -756,7 +756,8 @@ def emit_profiled_body(declaration):
         profiled_ret_and_arg_types = ret_and_arg_types
         profiled_dispatch_args = profiled_dispatch_args
 
-    template = PROFILE_DISPATCH if base_name not in DONT_PROFILE and not declaration['manual_kernel_registration'] else PROFILE_DISPATCH_DONT_PROFILE
+    template = PROFILE_DISPATCH if base_name not in DONT_PROFILE and not declaration['manual_kernel_registration'] \
+        else PROFILE_DISPATCH_DONT_PROFILE
     call = template.substitute(
         declaration,
         name=name,
