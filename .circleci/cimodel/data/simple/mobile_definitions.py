@@ -41,6 +41,7 @@ class MobileJob:
             "build_environment": build_env_name,
             "build_only": miniutils.quote(str(int(True))),
             "docker_image": self.docker_image,
+            "requires": self.docker_requires,
             "name": full_job_name,
         }
 
@@ -53,19 +54,19 @@ class MobileJob:
 WORKFLOW_DATA = [
     MobileJob(
         DOCKER_IMAGE_ASAN,
-        DOCKER_REQUIREMENT_ASAN,
+        [DOCKER_REQUIREMENT_ASAN],
         ["build"]
     ),
     MobileJob(
         DOCKER_IMAGE_ASAN,
-        DOCKER_REQUIREMENT_ASAN,
+        [DOCKER_REQUIREMENT_ASAN],
         ["custom", "build", "static"]
     ),
 
     # Use LLVM-DEV toolchain in android-ndk-r19c docker image
     MobileJob(
         DOCKER_IMAGE_NDK,
-        DOCKER_REQUIREMENT_NDK,
+        [DOCKER_REQUIREMENT_NDK],
         ["custom", "build", "dynamic"]
     ),
 
@@ -73,7 +74,7 @@ WORKFLOW_DATA = [
     # Most of this CI is already covered by "mobile-custom-build-dynamic" job
     MobileJob(
         DOCKER_IMAGE_NDK,
-        DOCKER_REQUIREMENT_NDK,
+        [DOCKER_REQUIREMENT_NDK],
         ["code", "analysis"],
         True
     ),
