@@ -351,11 +351,8 @@ class ModuleDict(Module):
                             "iterable of key/value pairs, but got " +
                             type(modules).__name__)
 
-        if isinstance(modules, (OrderedDict, ModuleDict)):
+        if isinstance(modules, (OrderedDict, ModuleDict, container_abcs.Mapping)):
             for key, module in modules.items():
-                self[key] = module
-        elif isinstance(modules, container_abcs.Mapping):
-            for key, module in sorted(modules.items()):
                 self[key] = module
         else:
             for j, m in enumerate(modules):
