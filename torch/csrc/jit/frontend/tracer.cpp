@@ -329,7 +329,8 @@ static IValue addInput(
     for (const auto& entry : dict) {
       IValue key = entry.key();
       auto static_key = state->graph->insertConstant(key);
-      auto static_value = state->graph->insert(aten::__getitem__, {value, static_key});
+      auto static_value =
+          state->graph->insert(aten::__getitem__, {value, static_key});
       recordSourceLocation(static_value->node());
       dict.insert_or_assign(
           entry.key(),
