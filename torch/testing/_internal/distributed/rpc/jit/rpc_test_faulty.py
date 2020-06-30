@@ -6,6 +6,7 @@ import torch.testing._internal.dist_utils as dist_utils
 from torch import Tensor
 from torch.testing._internal.dist_utils import (
     dist_init,
+    get_timeout_error_regex,
     worker_name,
     wait_until_pending_futures_and_users_flushed
 )
@@ -100,7 +101,9 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
             "first_kwarg": torch.tensor([2, 2]),
             "second_kwarg": torch.tensor([3, 3]),
         }
-        expected_error = self.get_timeout_error_regex()
+        expected_error = get_timeout_error_regex(
+            dist_utils.TEST_CONFIG.rpc_backend_name
+        )
         print("Test config is {}".format(dist_utils.TEST_CONFIG.rpc_backend_name))
         # Ensure that we get a timeout if we override the default timeout and
         # the RPC takes longer to execute.
@@ -134,7 +137,9 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
             "first_kwarg": torch.tensor([2, 2]),
             "second_kwarg": torch.tensor([3, 3]),
         }
-        expected_error = self.get_timeout_error_regex()
+        expected_error = get_timeout_error_regex(
+            dist_utils.TEST_CONFIG.rpc_backend_name
+        )
 
         fut = rpc_async_call_with_timeout_future_ret(dst_worker_name, args, kwargs, 0.5)
         with self.assertRaisesRegex(RuntimeError, expected_error):
@@ -181,7 +186,9 @@ class JitFaultyAgentRpcTest(RpcAgentTestFixture):
         rref = rpc.remote(
             dst_worker, torch.add, args=(torch.tensor(1), torch.tensor(1))
         )
-        expected_error = self.get_timeout_error_regex()
+        expected_error = get_timeout_error_regex(
+            dist_utils.TEST_CONFIG.rpc_backend_name
+        )
         with self.assertRaisesRegex(RuntimeError, expected_error):
             rref_to_here_with_timeout(rref, 0.01)
 

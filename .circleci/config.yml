@@ -528,6 +528,7 @@ jobs:
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           elif [[ ${BUILD_ENVIRONMENT} == *"rocm"* ]]; then
+            hostname
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -1250,14 +1251,6 @@ jobs:
 
   binary_windows_upload:
     <<: *binary_windows_params
-    parameters:
-      build_environment:
-        type: string
-        default: ""
-      executor:
-        type: string
-        default: "windows-medium-cpu-with-nvidia-cuda"
-    executor: <<parameters.executor>>
     docker:
       - image: continuumio/miniconda
     steps:
