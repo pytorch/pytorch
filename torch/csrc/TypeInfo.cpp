@@ -21,7 +21,7 @@ PyObject* THPFInfo_New(const at::ScalarType& type) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
-  self_->type = type;
+  self_->type = c10::toValueType(type);
   return self.release();
 }
 
@@ -173,7 +173,7 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
 }
 
 PyObject* THPFInfo_str(THPFInfo* self) {
-  auto type = c10::toValueType(self->type);
+  auto type = self->type;
   std::string primary_name, legacy_name;
   std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(type);
   std::ostringstream oss;
