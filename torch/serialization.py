@@ -343,6 +343,10 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
         A common PyTorch convention is to save tensors using .pt file extension.
 
     .. note::
+        PyTorch preserves storage sharing across serialization. See :ref:`preserve-storage-sharing`
+        for more details.
+
+    .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new
         zipfile-based file format. ``torch.load`` still retains the ability to
         load files in the old format. If for any reason you want ``torch.save``

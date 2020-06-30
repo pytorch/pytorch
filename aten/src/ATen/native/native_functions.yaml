@@ -3914,6 +3914,16 @@
 - func: scatter.dimname_value(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
 
+- func: scatter_.reduce(Tensor(a!) self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: scatter_cpu_reduce_
+
+- func: scatter_.value_reduce(Tensor(a!) self, int dim, Tensor index, Scalar value, *, str reduce) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: scatter_cpu_scalar_reduce_
+
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
   dispatch:
