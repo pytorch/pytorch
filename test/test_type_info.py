@@ -47,8 +47,9 @@ class TestDTypeInfo(TestCase):
             self.assertEqual(xinfo.eps, xninfo.eps)
             self.assertEqual(xinfo.tiny, xninfo.tiny)
             self.assertEqual(xinfo.resolution, xninfo.resolution)
-            torch.set_default_dtype(dtype)
-            self.assertEqual(torch.finfo(dtype), torch.finfo())
+            if not dtype.is_complex:
+                torch.set_default_dtype(dtype)
+                self.assertEqual(torch.finfo(dtype), torch.finfo())
         # Restore the default type to ensure that the test has no side effect
         torch.set_default_dtype(initial_default_type)
 
