@@ -8687,12 +8687,10 @@ a")
             def __init__(self):
                 super(CustomModuleInterface, self).__init__()
 
-
         class CustomModuleList(CustomModuleInterface, torch.nn.ModuleList):
             def __init__(self, modules=None):
                 CustomModuleInterface.__init__(self)
                 torch.nn.ModuleList.__init__(self, modules)
-
 
         class CustomSequential(CustomModuleInterface, torch.nn.Sequential):
             def __init__(self, modules=None):
@@ -8726,6 +8724,8 @@ a")
 
                 assert self.moduledict["submod"] is self.submod, "__getitem__ failing for ModuleDict"
                 assert len(self.moduledict) == 1, "__len__ failing for ModuleDict"
+
+                # TODO whc - fix
                 # for module in self.moduledict:
                 #     assert module is self.submod, "__iter__ failing for ModuleDict"
 
@@ -8744,8 +8744,6 @@ a")
                 return inputs
 
         m = MyModule()
-        # m = torch.jit.script(m)
-        # m(torch.randn(2, 2))
         self.checkModule(m, [torch.randn(2, 2)])
 
     def test_script_module_list_sequential(self):
