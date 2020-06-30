@@ -1533,6 +1533,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
+        # this is a decorated fn, and we need to the underlying fn and its rcb
+        if hasattr(obj, "__script_if_tracing_wrapper"):
+            obj = obj.__original_fn
+            _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
         _check_directly_compile_overloaded(obj)
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
         if maybe_already_compiled_fn:
@@ -1583,19 +1588,17 @@ def _script_if_tracing(fn):
     ``@torch.jit._script_if_tracing`` to substitute for
     ``torch.jit.script``.
     """
-    # You can't modify closed-over variables in Python 2, so make this a dict and
-    # mutate it
-    compiled_fn = {}
-
     @functools.wraps(fn)
-    def wrapper(*args):
+    def wrapper(*args, **kwargs):
         if not is_tracing():
             # Not tracing, don't do anything
-            return fn(*args)
+            return fn(*args, **kwargs)
 
-        if 'fn' not in compiled_fn:
-            compiled_fn['fn'] = script(fn, _frames_up=1)
-        return compiled_fn['fn'](*args)
+        compiled_fn = script(wrapper.__original_fn)
+        return compiled_fn(*args, **kwargs)
+
+    wrapper.__original_fn = fn
+    wrapper.__script_if_tracing_wrapper = True
 
     return wrapper
 
