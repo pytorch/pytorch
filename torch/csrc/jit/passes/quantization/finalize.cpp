@@ -7,6 +7,12 @@
 namespace torch {
 namespace jit {
 
+struct PatternReplaceInfo {
+  std::string pattern;
+  std::string replacement;
+  std::vector<MatchFilter> filters = {};
+};
+
 namespace {
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
   std::string linear_with_quant = R"(
@@ -35,16 +41,16 @@ graph(%w, %a_dq, %b, %dtype_fp16, %dtype_fp32, %default_param, %non_blocking):
         %r = aten::linear(%a_dq, %w_unpacked, %b_unpacked)
         return (%r) )";
 
-  std::vector<std::vector<std::string>> patterns_and_replacements = {
+  std::vector<PatternReplaceInfo> patterns_and_replacements = {
       {linear_with_quant, linear_with_quant_prepack},
-      {linear_fp16_with_cast, linear_fp16_with_prepack}};
+      {linear_fp16_with_cast,
+       linear_fp16_with_prepack,
+       {is_fp16_fp32_cast_op}}};
 
   for (const auto& entry : patterns_and_replacements) {
     SubgraphRewriter rewriter;
-    const auto& pattern = entry[0];
-    const auto& replacement = entry[1];
-    rewriter.RegisterRewritePattern(pattern, replacement);
-    rewriter.runOnGraph(graph);
+    rewriter.RegisterRewritePattern(entry.pattern, entry.replacement);
+    rewriter.runOnGraph(graph, entry.filters);
   }
 }
 
@@ -91,16 +97,15 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %r = aten::conv3d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
-  std::vector<std::vector<std::string>> patterns_and_replacements = {
+  std::vector<PatternReplaceInfo> patterns_and_replacements = {
       {conv1d_with_quant, conv1d_with_quant_prepack},
       {conv2d_with_quant, conv2d_with_quant_prepack},
       {conv3d_with_quant, conv3d_with_quant_prepack}};
-  for (const auto& item : patterns_and_replacements) {
+
+  for (const auto& entry : patterns_and_replacements) {
     SubgraphRewriter rewriter;
-    const auto& pattern = item[0];
-    const auto& replacement = item[1];
-    rewriter.RegisterRewritePattern(pattern, replacement);
-    rewriter.runOnGraph(graph);
+    rewriter.RegisterRewritePattern(entry.pattern, entry.replacement);
+    rewriter.runOnGraph(graph, entry.filters);
   }
 }
 

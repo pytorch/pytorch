@@ -45,7 +45,7 @@ TORCH_API bool isScalar(Value* v);
 TORCH_API bool hitGraphInput(Value* value);
 
 // Return the module name that corresponds to the value.
-TORCH_API c10::optional<std::string> get_module_name(Value* value);
+TORCH_API c10::optional<std::string> getModuleName(Value* value);
 
 // =========== helper functions for Node =========
 TORCH_API bool isSingleInputGeneralShapeAtenFunction(Node* n);
@@ -168,5 +168,8 @@ bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
+bool is_fp16_fp32_cast_op(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
 } // namespace jit
 } // namespace torch

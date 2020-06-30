@@ -570,7 +570,7 @@ bool is_functional(
   return v->type()->cast<FunctionType>() && getFuncName(v) == functional;
 }
 
-c10::optional<std::string> get_module_name(Value* value) {
+c10::optional<std::string> getModuleName(Value* value) {
   auto type = value->type()->cast<ClassType>();
   if (type && type->name()) {
     static std::regex mangle_re("\\.___torch_mangle_\\d+");
@@ -587,9 +587,8 @@ bool is_module(
     const std::string& vname,
     const std::string& module_qualified_name) {
   const auto& match_vmap = match.values_map;
-  Value* relu = match_vmap.at(vmap.at(vname));
-  auto type = relu->type()->cast<ClassType>();
-  auto module_name = get_module_name(relu);
+  Value* v = match_vmap.at(vmap.at(vname));
+  auto module_name = getModuleName(v);
   if (module_name.has_value()) {
     return module_name.value() == module_qualified_name;
   }
@@ -667,6 +666,18 @@ bool is_batchnorm3d_module(
       vmap,
       "batchnorm",
       "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
+}
+
+bool is_fp16_fp32_cast_op(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+  auto fp16_type = toIValue(match_vmap.at(vmap.at("dtype_fp16")));
+  auto fp32_type = toIValue(match_vmap.at(vmap.at("dtype_fp32")));
+  auto default_param = toIValue(match_vmap.at(vmap.at("default_param")));
+  return (fp16_type->toScalarType() == c10::kHalf) &&
+      (fp32_type->toScalarType() == c10::kFloat) &&
+      (default_param->toBool() == false);
 }
 
 } // namespace jit

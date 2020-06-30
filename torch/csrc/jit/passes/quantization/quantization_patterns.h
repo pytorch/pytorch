@@ -1025,7 +1025,8 @@ graph(%packed_params, %a, %dtype_fp16, %dtype_fp32, %default_param, %non_blockin
       {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
       {"quantized::linear_dynamic_fp16",
        linear_dynamic_fp16,
-       quantized_linear_dynamic_fp16},
+       quantized_linear_dynamic_fp16,
+       {is_fp16_fp32_cast_op}},
   };
 }
 
