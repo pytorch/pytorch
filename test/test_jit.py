@@ -8779,6 +8779,20 @@ a")
             b = BadModule()
             self.checkModule(b, [torch.randn(2, 2)])
 
+        class AnotherBadModule(torch.nn.Module):
+            def __init__(self):
+                super(AnotherBadModule, self).__init__()
+                self.moduledict = torch.nn.ModuleDict({"foo": None,
+                                                       "bar": None})
+
+            def forward(self, input):
+                idx = 'blah'
+                assert self.moduledict[idx] == "blah", "this is a string literal error"
+
+        with self.assertRaisesRegex(RuntimeError, "Unable to extract string literal index. ModuleDict indexing is only supported with string literals."):
+            b = AnotherBadModule()
+            self.checkModule(b, [torch.randn(2, 2)])
+
     def test_script_module_list_sequential(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, mod_list):
