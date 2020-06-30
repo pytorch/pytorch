@@ -11,15 +11,15 @@ def channel_range(input, axis=0):
     maxs = input
 
     # reshape input to make specified axis the last axis in input
-    temp = [x for x in range(size_of_tensor_dim)]
-    temp[size_of_tensor_dim-1] = axis
-    temp[axis] = size_of_tensor_dim-1
+    temp = list(range(size_of_tensor_dim))
+    temp[size_of_tensor_dim - 1] = axis
+    temp[axis] = size_of_tensor_dim - 1
 
     mins = mins.permute(temp)
     maxs = maxs.permute(temp)
 
     # minimizing over all axises except the last axis
-    for i in range(size_of_tensor_dim-1):
+    for i in range(size_of_tensor_dim - 1):
         mins = torch.min(mins, 0)[0]
         maxs = torch.max(maxs, 0)[0]
 
@@ -31,7 +31,6 @@ def scaling_channels(module1, module2, output_axis=0, input_axis=1):
     the ranges of the first tensors' output channel are equal to the
     ranges of the second tensors' input channel
 
-    Note: assumes the input/output channels are the first two axises of the given tensors
     '''
     tensor1 = module1.weight
     tensor2 = module2.weight

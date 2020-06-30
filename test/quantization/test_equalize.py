@@ -15,6 +15,7 @@ class TestEqualizeEager(QuantizationTestCase):
         # ensuring the channels ranges of tensor1's input is the same as
         # tensor2's output
         self.assertEqual(output_channel_tensor1, input_channel_tensor2)
+
     def get_module(self, model, name):
         curr = model
         name = name.split('.')
@@ -87,7 +88,7 @@ class TestEqualizeEager(QuantizationTestCase):
         chain1 = chain_module()
         chain2 = copy.deepcopy(chain1)
 
-        _equalize.equalize(chain1, [['linear1','linear2'],['linear2','linear3']], 1e-6)
+        _equalize.equalize(chain1, [['linear1', 'linear2'], ['linear2', 'linear3']], 1e-6)
         linear1 = self.get_module(chain1, 'linear1')
         linear2 = self.get_module(chain1, 'linear2')
         linear3 = self.get_module(chain1, 'linear3')
