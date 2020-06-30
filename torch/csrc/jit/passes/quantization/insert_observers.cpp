@@ -1106,13 +1106,13 @@ graph(%list, %x):
     %ignore : Tensor[] = aten::append(%list, %x)
     return (%ignore) )IR";
 
-  /* Change the above pattern to
+  /* Rewrite the above pattern to
   std::string append_replacement = R"IR(
 graph(%list, %x):
     %x_list : Tensor[]  = prim::ListConstruct(%x)
     %result : Tensor[] = aten::add(%list, %x_list)
     return (%result) )IR";
-   although this is not supported by subgraph rewriter, so we'll do
+   this is not supported by subgraph rewriter, so we'll do
    this manually.
   */
 
