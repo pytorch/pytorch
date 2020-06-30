@@ -129,8 +129,9 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x5L;
 // 3. Added type tags to pickle serialization of container types
 // 4. (Dynamic) Stopped integer division using torch.div
 //      (a versioned symbol preserves the historic behavior of versions 1--3)
-// 5. (Dynamic, Read-only) Stops torch.full inferring a floating point dtype
+// 5. (Dynamic) Stops torch.full inferring a floating point dtype
 //      when given bool or integer fill values.
+//      (a versioned symbol preserves the historic behavior of versions 1--4)
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 
 // Writer-specific constants
