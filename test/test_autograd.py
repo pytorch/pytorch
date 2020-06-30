@@ -2667,9 +2667,10 @@ class TestAutograd(TestCase):
 
         last_end = 0
         names = ['aten::is_complex', 'aten::mul', 'aten::to',
-                 'aten::empty_strided', 'aten::copy_', 'aten::empty',
-                 'aten::is_complex', 'aten::add', 'aten::to',
-                 'aten::empty_strided', 'aten::copy_', 'aten::empty']
+                 'aten::empty_strided', 'aten::copy_', 'aten::is_complex',
+                 'aten::is_complex', 'aten::empty', 'aten::is_complex',
+                 'aten::add', 'aten::to', 'aten::empty_strided', 'aten::copy_',
+                 'aten::is_complex', 'aten::is_complex', 'aten::empty']
         top_level_names = ['aten::is_complex', 'aten::mul',
                            'aten::is_complex', 'aten::add']
         top_level_iter = iter(top_level_names)

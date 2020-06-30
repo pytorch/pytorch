@@ -200,7 +200,7 @@ void RequestCallbackImpl::processRpc(
       // scriptCall is only alive within this block, use reference to avoid copy
       auto& stack = scriptCall.stackRef();
       if (scriptCall.hasOp()) {
-        scriptCall.op()->getOperation()(stack);
+        scriptCall.op()->getOperation()(&stack);
         TORCH_INTERNAL_ASSERT(
             stack.size() == 1,
             "Return value of a builtin operator or a "
@@ -340,7 +340,7 @@ void RequestCallbackImpl::processRpc(
       auto& stack = scriptRemoteCall.stackRef();
       if (scriptRemoteCall.hasOp()) {
         try {
-          scriptRemoteCall.op()->getOperation()(stack);
+          scriptRemoteCall.op()->getOperation()(&stack);
         } catch (const std::exception& e) {
           // Don't throw in this call, but rather transfer the exception
           // to the rref.
