@@ -165,6 +165,36 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }
 
+#ifndef __HIP_PLATFORM_HCC__
+  template <>
+  void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    cublasOperation_t opa = _cublasOpFromChar(transa);
+    cublasOperation_t opb = _cublasOpFromChar(transb);
+    _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    GEMM_CHECK_ARGVALUES(c10::complex<double>);
+    TORCH_CUDABLAS_CHECK(cublasZgemm(
+        handle, opa, opb, m, n, k, reinterpret_cast<const cuDoubleComplex*>(&alpha), reinterpret_cast<const cuDoubleComplex*>(a),
+        lda, reinterpret_cast<const cuDoubleComplex*>(b), ldb, reinterpret_cast<const cuDoubleComplex*>(&beta),
+        reinterpret_cast<cuDoubleComplex*>(c), ldc));
+  }
+#endif
+
+#ifndef __HIP_PLATFORM_HCC__
+  template <>
+  void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    cublasOperation_t opa = _cublasOpFromChar(transa);
+    cublasOperation_t opb = _cublasOpFromChar(transb);
+    _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    GEMM_CHECK_ARGVALUES(c10::complex<float>);
+    TORCH_CUDABLAS_CHECK(cublasCgemm(
+        handle, opa, opb, m, n, k, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
+        lda, reinterpret_cast<const cuComplex*>(b), ldb, reinterpret_cast<const cuComplex*>(&beta),
+        reinterpret_cast<cuComplex*>(c), ldc));
+  }
+#endif
+
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
