@@ -281,7 +281,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
           " INTERNAL ASSERT FAILED at"        \
           C10_STRINGIZE(__FILE__)             \
           ", ",                               \
-          __VA_ARGS__)                        \
+          ##__VA_ARGS__)                        \
     );                                        \
   }
 #else
