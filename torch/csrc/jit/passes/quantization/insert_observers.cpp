@@ -1121,8 +1121,7 @@ graph(%list, %x):
       PatternInfo::parse_from_str(append_pattern);
   const Graph& append_graph = *append_pattern_info.pattern_graph;
   const auto& append_vmap = append_pattern_info.vmap;
-  const auto& matches =
-      findPatternMatches(*append_pattern_info.pattern_graph, *graph);
+  const auto& matches = findPatternMatches(append_graph, *graph);
   for (const auto& match : matches) {
     auto append_node = match.values_map.at(append_vmap.at("ignore"))->node();
     Value* list_val = append_node->input(0);

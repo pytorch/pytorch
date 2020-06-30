@@ -109,8 +109,7 @@ graph(%list, %x):
       PatternInfo::parse_from_str(list_add);
   const Graph& list_add_graph = *list_add_pattern_info.pattern_graph;
   const auto& list_add_vmap = list_add_pattern_info.vmap;
-  const auto& matches =
-      findPatternMatches(*list_add_pattern_info.pattern_graph, *graph);
+  const auto& matches = findPatternMatches(list_add_graph, *graph);
   for (const auto& match : matches) {
     Value* result = match.values_map.at(list_add_vmap.at("result"));
     Node* list_add_node = result->node();
