@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
 namespace native {
@@ -26,10 +26,7 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
   const int64_t inH = input.size(2);
   const int64_t inW = input.size(3);
 
-  // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
-  // regression of it is fixed. Today it's equivalent because `input` sizes
-  // are not used below
-  Tensor input_contig = input.permute({0, 2, 3, 1}).contiguous();
+  Tensor input_contig = input.contiguous(MemoryFormat::ChannelsLast);
 
   initQNNPACK();
   const auto scale = input_contig.q_scale();
@@ -69,7 +66,7 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
   CAFFE_ENFORCE(
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Global Average Pooling operator");
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
   TORCH_INTERNAL_ASSERT(

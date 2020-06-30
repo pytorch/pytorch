@@ -84,6 +84,15 @@ struct TORCH_API RecordFunction {
   RecordFunction(
       RecordScope scope = RecordScope::FUNCTION);
 
+  template <typename F>
+  void before(
+      F fn,
+      const std::vector<c10::IValue>* args,
+      int64_t current_sequence_nr = -1) {
+    inputs_ = *args;
+    before(fn, current_sequence_nr);
+  }
+
   // Destructor calls end callbacks
   virtual ~RecordFunction();
 
@@ -126,6 +135,11 @@ struct TORCH_API RecordFunction {
   // start callbacks
   void before(const char* name, int64_t sequence_nr = -1);
   void before(std::string name, int64_t sequence_nr = -1);
+
+  // Sets node ID for distributed profiling
+  static void setDefaultNodeId(int64_t defaultNodeId);
+  // Gets node ID for distributed profiling
+  static int64_t getDefaultNodeId();
 
   template<typename F>
   void before(

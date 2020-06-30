@@ -743,16 +743,17 @@ class AdagradOptimizer(Optimizer):
         weight_decay = 0.
         if isinstance(grad, core.GradientSlice):
             if len(param_shape) == 1:
-                logger.warn("APPLYING weight decay on 1d sparse param: {}.shape is {}".format(
+                weight_decay = 0.
+                logger.warn("SKIPPING weight decay on 1d sparse param: {}.shape is {}".format(
                     str(param), param_shape))
-            weight_decay = self.weight_decay
+            else:
+                weight_decay = self.weight_decay
         else:
             # Skip weight decay for 1d parameters
             if len(param_shape) == 1:
                 weight_decay = 0.
                 logger.warn("SKIPPING weight decay on 1d dense param: {}.shape is {}".format(
                     str(param), param_shape))
-
             else:
                 weight_decay = self.weight_decay
         logger.info("weight_decay for {} (shape:{}): {}".format(

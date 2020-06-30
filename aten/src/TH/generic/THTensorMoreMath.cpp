@@ -13,51 +13,6 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
   return THTensor_(nElement)(t);
 }
 
-static int THTensor_(equalImpl)(THTensor *ta, THTensor* tb)
-{
-  std::atomic<int> equal{1};
-  if(!THTensor_(isSameSizeAs)(ta, tb))
-    return 0;
-
-  if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
-    scalar_t *tap = ta->data<scalar_t>();
-    scalar_t *tbp = tb->data<scalar_t>();
-    ptrdiff_t sz = THTensor_(nElement)(ta);
-    ptrdiff_t i;
-    at::parallel_for(
-        0,
-        sz,
-        TH_OMP_OVERHEAD_THRESHOLD,
-        [&](int64_t begin, int64_t end) {
-          for (auto iter = begin; iter < end; iter++) {
-            if (!equal) {
-              break;
-            }
-            if (tap[iter] != tbp[iter]) {
-              equal = 0;
-              break;
-            }
-          }
-        });
-  } else {
-    // Short-circuit the apply function on inequality
-    TH_TENSOR_APPLY2(scalar_t, ta, scalar_t, tb,
-                     if (equal && *ta_data != *tb_data) {
-                        equal = 0;
-                        TH_TENSOR_APPLY_hasFinished = 1; break;
-                     })
-  }
-  return equal.load();
-}
-
-int THTensor_(equal)(THTensor *ta, THTensor* tb) {
-  if (!at::namedinference::are_names_equal(ta, tb)) {
-    return 0;
-  }
-  at::NoNamesGuard guard;
-  return THTensor_(equalImpl)(ta, tb);
-}
-
 #if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_BOOL)
 /* I cut and pasted (slightly adapted) the quicksort code from
    Sedgewick's 1978 "Implementing Quicksort Programs" article
@@ -710,14 +665,9 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
   c10::raw::intrusive_ptr::decref(rowS);
 }
 
-accreal THTensor_(meanall)(THTensor *tensor)
-{
-  return THTensor_wrap(tensor).sum().item<accreal>()/THTensor_(nElement)(tensor);
-}
-
 accreal THTensor_(var_all)(THTensor *tensor, bool unbiased)
 {
-  accreal mean = THTensor_(meanall)(tensor);
+  accreal mean = THTensor_wrap(tensor).mean().item<accreal>();
   accreal sum = 0;
   TH_TENSOR_APPLY(scalar_t, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
   sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (unbiased ? 1 : 0));
@@ -739,7 +689,7 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t 
   scalar_t *h_data;
 
   THTensor_(resize1d)(hist, nbins);
-  THTensor_(zero)(hist);
+  THTensor_wrap(hist).zero_();
   minval = minvalue;
   maxval = maxvalue;
   if (minval == maxval)
