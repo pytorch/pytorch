@@ -1,3 +1,11 @@
+"""TorchScript
+
+This module contains functionality to support the JIT's scripting frontend, notably:
+    - torch.jit.script
+
+This is not intended to be imported directly; please use the exposed
+functionalities in `torch.jit`.
+"""
 import torch
 
 import functools
@@ -9,8 +17,9 @@ from torch.jit._state import _enabled
 from torch._six import with_metaclass
 
 if _enabled:
-    Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+    Attribute = collections.namedtuple("Attribute", ["value", "type"])
 else:
+
     def Attribute(value, type):
         return value
 
@@ -27,11 +36,11 @@ class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
         cls._methods = {}
-        cls._constants_set = set(getattr(cls, '__constants__', ()))
+        cls._constants_set = set(getattr(cls, "__constants__", ()))
         for base in reversed(bases):
-            for k, v in getattr(base, '_methods', {}).items():
+            for k, v in getattr(base, "_methods", {}).items():
                 cls._methods[k] = v
-            base_constants = getattr(base, '_constants_set', set())
+            base_constants = getattr(base, "_constants_set", set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
         # find all the script methods of the current class
@@ -40,23 +49,26 @@ class ScriptMeta(type):
                 delattr(cls, k)
                 cls._methods[v.original_method.__name__] = v
 
-        if getattr(cls, '_disable_script_meta', False):
+        if getattr(cls, "_disable_script_meta", False):
             # We leave built-in ScriptModule types alone, since this metaclass
             # is only for compiling user classes that inherit from
             # ScriptModule.
             return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
-        original_init = getattr(cls, '__init__', lambda self: None)
+        original_init = getattr(cls, "__init__", lambda self: None)
 
         @functools.wraps(original_init)
         def init_then_script(self, *args, **kwargs):
             original_init(self, *args, **kwargs)
             if type(self) == cls:
+
                 def make_stubs(module):
                     cls = type(module)
                     return [v for k, v in sorted(cls._methods.items())]
 
-                self.__dict__["_actual_script_module"] = torch.jit._recursive.create_script_module(self, make_stubs)
+                self.__dict__[
+                    "_actual_script_module"
+                ] = torch.jit._recursive.create_script_module(self, make_stubs)
 
                 # Delete the Python attributes that now shadow the ScriptModule
                 # ones, so that __getattr__ and __setattr__ will properly find
@@ -75,7 +87,8 @@ class ScriptMeta(type):
 
 class _CachedForward(object):
     def __get__(self, obj, cls):
-        return self.__getattr__('forward')
+        return self.__getattr__("forward")
+
 
 if _enabled:
     # this is a Python 'non-data descriptor' that causes the first access
@@ -92,6 +105,7 @@ if _enabled:
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
+
         def __init__(self):
             super(ScriptModule, self).__init__()
 
@@ -146,6 +160,7 @@ if _enabled:
 
         def _replicate_for_data_parallel(self):
             return self._actual_script_module._replicate_for_data_parallel()
+
 
 else:
     # TODO MAKE SURE THAT DISABLING WORKS

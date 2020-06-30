@@ -33,12 +33,10 @@ import weakref
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
-from torch.jit._script_base import Attribute, ScriptModule
-from torch.jit._tracer import trace, trace_module, TracerWarning, _create_interpreter_name_lookup_fn, TracingCheckError, is_tracing
+from torch.jit._script import Attribute, ScriptModule
+from torch.jit._trace import trace, trace_module, TracerWarning, TracingCheckError, is_tracing, ONNXTracedModule, _unique_state_dict, _flatten
 from torch.jit._state import _python_cu, _enabled
 
-_flatten = torch._C._jit_flatten
-_unflatten = torch._C._jit_unflatten
 _jit_script_class_compile = torch._C._jit_script_class_compile
 
 set_module(Future, "torch.jit")
@@ -313,82 +311,12 @@ def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False
     return outs
 
 
-def _unique_state_dict(module, keep_vars=False):
-    # since Parameter.detach() always creates a new torch.Tensor instance,
-    # id(v) doesn't work with it. So we always get the Parameter or Buffer
-    # as values, and deduplicate the params using Parameters and Buffers
-    state_dict = module.state_dict(keep_vars=True)
-    filtered_dict = type(state_dict)()
-    seen_ids = set()
-    for k, v in state_dict.items():
-        if id(v) in seen_ids:
-            continue
-        seen_ids.add(id(v))
-        if keep_vars:
-            filtered_dict[k] = v
-        else:
-            filtered_dict[k] = v.detach()
-    return filtered_dict
-
-
 class ConstMap:
     def __init__(self, const_mapping):
         self.const_mapping = const_mapping
 
     def __getattr__(self, attr):
         return self.const_mapping[attr]
-
-class ONNXTracedModule(Module):
-    def __init__(self, inner, strict=True, force_outplace=False, return_inputs=False, return_inputs_states=False):
-        super(ONNXTracedModule, self).__init__()
-        # inner may be a Module, or it may be an arbitrary callable
-        # If it's a Module, we get its parameters automatically, which lets
-        # us avoid a special casing functions versus modules.
-        self.inner = inner
-        self.strict = strict
-        self._force_outplace = force_outplace
-        self._return_inputs = return_inputs
-        self._return_inputs_states = return_inputs_states
-
-    def forward(self, *args):
-        in_vars, in_desc = _flatten(args)
-        # NOTE: use full state, because we need it for BatchNorm export
-        # This differs from the compiler path, which doesn't support it at the moment.
-        module_state = list(_unique_state_dict(self, keep_vars=True).values())
-
-        ret_inputs = []
-        inputs_states = []
-        outs = []
-
-        def wrapper(*args):
-            trace_inputs = _unflatten(args[:len(in_vars)], in_desc)
-
-            ret_inputs.append(tuple(x.clone(memory_format=torch.preserve_format) for x in args))
-            if self._return_inputs_states:
-                inputs_states.append(_unflatten(args[:len(in_vars)], in_desc))
-            outs.append(self.inner(*trace_inputs))
-            if self._return_inputs_states:
-                inputs_states[0] = (inputs_states[0], trace_inputs)
-            out_vars, _ = _flatten(outs)
-            if len(out_vars) == 1:
-                return out_vars[0]
-            else:
-                return tuple(out_vars)
-
-        graph, out = torch._C._create_graph_by_tracing(
-            wrapper,
-            in_vars + module_state,
-            _create_interpreter_name_lookup_fn(),
-            self.strict,
-            self._force_outplace,
-        )
-
-        if self._return_inputs:
-            return graph, outs[0], ret_inputs[0]
-        if self._return_inputs_states:
-            return graph, outs[0], inputs_states[0]
-        else:
-            return graph, outs[0]
 
 def fork(func, *args, **kwargs):
     """
