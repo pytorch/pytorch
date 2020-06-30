@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
@@ -13,7 +14,6 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
-
 #include <iostream>
 #include <sstream>
 
@@ -123,16 +123,6 @@ Node* findNode(
 Node* findNode(Block* block, Symbol kind, bool recurse = true) {
   std::vector<Block*> blocks = {block};
   return findNode(blocks, kind, recurse);
-}
-
-Node* addNodeToBlock(Block* block, Value* input, Symbol kind) {
-  auto new_node = block->appendNode(block->owningGraph()->create(kind));
-  auto new_input = new_node->addInput(input);
-  for (size_t i = 0; i < new_node->outputs().size(); i++) {
-    auto output = new_node->outputs()[i];
-    block->registerOutput(output);
-  }
-  return new_node;
 }
 
 std::string ConcretePythonOp::name() const {
