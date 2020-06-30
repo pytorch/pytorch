@@ -36,7 +36,7 @@ class AndroidJob:
             "name": full_job_name,
             "build_environment": "\"{}\"".format(build_env_name),
             "docker_image": "\"{}\"".format(DOCKER_IMAGE_NDK),
-            "requires": DOCKER_REQUIREMENT_NDK
+            "requires": [DOCKER_REQUIREMENT_NDK]
         }
 
         if self.is_master_only:
