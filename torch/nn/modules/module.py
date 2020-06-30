@@ -60,7 +60,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
     .. warning ::
 
         This adds global state to the `nn.module` module
-        and it is only intended for debugging/profiling purposes. 
+        and it is only intended for debugging/profiling purposes.
 
     The hook will be called every time before :func:`forward` is invoked.
     It should have the following signature::
@@ -92,7 +92,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     .. warning ::
 
         This adds global state to the `nn.module` module
-        and it is only intended for debugging/profiling purposes. 
+        and it is only intended for debugging/profiling purposes.
 
     The hook will be called every time after :func:`forward` has computed an output.
     It should have the following signature::
@@ -124,7 +124,7 @@ def register_module_backward_hook(
 
     .. warning ::
         This adds global state to the `nn.module` module
-        and it is only intended for debugging/profiling purposes. 
+        and it is only intended for debugging/profiling purposes.
 
         The current implementation will not have the presented behavior
         for complex :class:`Module` that perform many operations.
@@ -692,9 +692,9 @@ class Module:
         tracing_state = torch._C._get_tracing_state()
         if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
-        recording_scopes = torch.jit._trace_module_map is not None
+        recording_scopes = torch.jit._tracer._trace_module_map is not None
         if recording_scopes:
-            name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
+            name = torch.jit._tracer._trace_module_map[self] if self in torch.jit._tracer._trace_module_map else None
             if name:
                 cur_scope_name = tracing_state.current_scope()
                 tracing_state.push_scope(name)
