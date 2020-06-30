@@ -2,6 +2,7 @@ from typing import Any, Callable, TypeVar, Generic, overload, Sequence, List, Op
 from . import Dataset, Sampler
 
 from torch.utils.data._utils.worker import get_worker_info as get_worker_info
+from torch.types import _device
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -26,11 +27,11 @@ class DataLoader(Generic[T_co]):
     def __init__(self, dataset: Dataset[T_co], batch_size: int=..., shuffle: bool=...,
                  sampler: Optional[Sampler[int]]=..., num_workers: int=..., collate_fn: _collate_fn_t=...,
                  pin_memory: bool=..., drop_last: bool=..., timeout: float=...,
-                 worker_init_fn: _worker_init_fn_t=...) -> None: ...
+                 worker_init_fn: _worker_init_fn_t=..., device: Optional[Union[_device, str]]=...) -> None: ...
     @overload
     def __init__(self, dataset: Dataset[T_co], batch_sampler: Optional[Sampler[Sequence[int]]]=...,
                  num_workers: int=..., collate_fn: _collate_fn_t=..., pin_memory: bool=..., timeout: float=...,
-                 worker_init_fn: _worker_init_fn_t=...) -> None: ...
+                 worker_init_fn: _worker_init_fn_t=..., device: Optional[Union[_device, str]]=...) -> None: ...
 
     def __len__(self) -> int: ...
     # We quote '_BaseDataLoaderIter' since it isn't defined yet and the definition can't be moved up
@@ -38,6 +39,13 @@ class DataLoader(Generic[T_co]):
     # analyzer is used that obviates the need for this but we leave the quoting in to support older
     # versions of mypy
     def __iter__(self) -> '_BaseDataLoaderIter':...
+
+    def to(self, device: Optional[Union[_device, str]]=..., pin_memory: Optional[bool]=...) -> DataLoader: ...
+
+    def cpu(self, pin_memory: Optional[bool]=False) -> DataLoader: ...
+
+    def cuda(self, pin_memory: Optional[bool]=True) -> DataLoader: ...
+
 
 class _BaseDataLoaderIter:
     def __init__(self, loader: DataLoader) -> None:...
