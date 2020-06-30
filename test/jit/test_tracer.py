@@ -2045,3 +2045,37 @@ class TestMixTracingScripting(JitTestCase):
         with torch.jit.optimized_execution(False):
             m2 = M2()
             m2(torch.zeros(4, 3))
+
+    def test_trace_dict_mix_script(self):
+        class testB(torch.nn.Module):
+            def __init__(self):
+                super(testB, self).__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, feature_map: Dict[str, List[Tensor]]) -> Tensor:
+                output = []
+                for i, j in feature_map.items():
+                    output.append(self.linear(j[0]))
+
+                return torch.stack(output)
+
+        class testA(torch.nn.Module):
+            def __init__(self):
+                super(testA, self).__init__()
+                self.b = torch.jit.script(testB())
+
+            def forward(self, input_map: Dict[str, List[Tensor]]) -> Tensor:
+                feature_map = {}
+                for i, j in input_map.items():
+                    feature_map[i] = [j[0]]
+
+                return self.b(feature_map)
+
+        input_map = {"1" : [torch.rand(2, 2), torch.rand(2, 2)], "3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        model = testA()
+        traced_model = torch.jit.trace(model, input_map)
+        # the dict should not be inlined as constants in the IR
+        self.assertFalse("CONSTANTS" in str(traced_model.code))
+
+        new_input_map = {"new1" : [torch.rand(2, 2), torch.randn(2, 2)], "new3" : [torch.rand(2, 2), torch.rand(2, 2)]}
+        self.assertEqual(model(new_input_map), traced_model(new_input_map))
