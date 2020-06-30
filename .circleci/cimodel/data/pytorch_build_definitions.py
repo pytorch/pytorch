@@ -49,7 +49,8 @@ class Conf:
 
         cuda_parms = []
         if self.cuda_version:
-            cuda_parms.extend(["cuda" + self.cuda_version, "cudnn7"])
+            cudnn = "cudnn8" if self.cuda_version.startswith("11.") else "cudnn7"
+            cuda_parms.extend(["cuda" + self.cuda_version, cudnn])
         result = leading + ["linux", self.distro] + cuda_parms + self.parms
         if not for_docker and self.parms_list_ignored_for_docker_image is not None:
             result = result + self.parms_list_ignored_for_docker_image
@@ -222,8 +223,7 @@ def instantiate_configs():
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
 
-        if cuda_version in ["9.2", "10", "10.1", "10.2"]:
-            # TODO The gcc version is orthogonal to CUDA version?
+        if cuda_version:
             cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
             parms_list.append(cuda_gcc_version)
 
