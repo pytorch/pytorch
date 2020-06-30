@@ -371,6 +371,12 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     # Actually create the ScriptModule, initializing it with the function we just defined
     script_module = torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
+    # Compile methods if necessary
+    if concrete_type not in concrete_type_store.methods_compiled:
+        create_methods_from_stubs(concrete_type, stubs)
+        torch._C._run_emit_module_hook(cpp_module)
+        concrete_type_store.methods_compiled.add(concrete_type)
+
     # Special handling so methods like __len__ work in script methods on classes derived from containers
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)) and \
             '__len__' not in cpp_module._method_names():
@@ -379,12 +385,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             '__contains__' not in cpp_module._method_names():
         keys = repr(list(nn_module.keys()))
         script_module.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
-
-    # Compile methods if necessary
-    if concrete_type not in concrete_type_store.methods_compiled:
-        create_methods_from_stubs(concrete_type, stubs)
-        torch._C._run_emit_module_hook(cpp_module)
-        concrete_type_store.methods_compiled.add(concrete_type)
 
     # Make the compiled methods available to the Python ScriptModule class.
     for stub in stubs:

@@ -8746,29 +8746,6 @@ a")
         m = MyModule()
         self.checkModule(m, [torch.randn(2, 2)])
 
-    def test_modulelist_len(self):
-        class CustomModuleInterface(torch.nn.Module):
-            def __init__(self):
-                super(CustomModuleInterface, self).__init__()
-
-        class CustomModuleList(CustomModuleInterface, torch.nn.ModuleList):
-            def __init__(self, modules=None):
-                CustomModuleInterface.__init__(self)
-                torch.nn.ModuleList.__init__(self, modules)
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                # work around aliasing issue for 'is' operator by scripting ReLU up front
-                self.submod = torch.jit.script(torch.nn.ReLU())
-                self.modulelist = CustomModuleList([self.submod])
-
-            def forward(self, inputs):
-                assert len(self.modulelist) == 1, "__len__ failing for ModuleList"
-
-        m = MyModule()
-        self.checkModule(m, [torch.randn(2, 2)])
-
 
     def test_moduledict_getitem(self):
         class MyModule(torch.nn.Module):
