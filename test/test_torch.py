@@ -3910,11 +3910,11 @@ class AbstractTestCases:
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([4.0000,    inf, 1.5000,   -inf, 0.0000,    nan, 1.0000])''')
 
-            y = torch.tensor([4, inf, complex(1.5, inf), complex(-inf, 4), 0, complex(nan, inf), 1])
+            y = torch.tensor([4, inf, complex(1.5, inf), complex(-inf, 4), 0, complex(nan, inf), complex(3, nan)])
             self.assertEqual(y.__repr__(), str(y))
             expected_str = '''\
-tensor([4.0000+0.j,    inf+0.j, 1.5000+infj,   -inf+4.j,
-        0.0000+0.j,    nan+infj, 1.0000+0.j])'''
+tensor([4.0000+0.j,    inf+0.j, 1.5000+infj,   -inf+4.j, 0.0000+0.j,    nan+infj,
+        3.0000+nanj])'''
             self.assertExpectedInline(str(y), expected_str)
 
             # test dtype
