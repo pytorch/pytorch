@@ -2721,8 +2721,6 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
 
         m = torch.jit.script(M())
         m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig}, debug=True)
-        data = torch.randn(5, 5)
-        m(data)
         FileCheck().check("aten::to") \
                    .check_next("aten::to") \
                    .check("aten::linear") \
