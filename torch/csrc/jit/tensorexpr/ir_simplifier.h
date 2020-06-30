@@ -85,12 +85,63 @@ Dtype promoteTypesVar(const ExprType* e, Args... es) {
   return promoteTypes(lhs, rhs);
 }
 
-// Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
-// or Ramp).
-bool isMultilanePrimitive(const Expr* e) {
-  return e->expr_type() == IRNodeType::kBroadcast ||
-      e->expr_type() == IRNodeType::kRamp;
+// Creates a new Expr of the given type with the provided lhs and rhs.
+static const Expr* newBinaryOpOfType(
+    IRNodeType expr_type,
+    const Expr* lhs,
+    const Expr* rhs,
+    bool option) {
+  switch (expr_type) {
+    case IRNodeType::kAdd:
+      return new Add(lhs, rhs);
+    case IRNodeType::kSub:
+      return new Sub(lhs, rhs);
+    case IRNodeType::kMul:
+      return new Mul(lhs, rhs);
+    case IRNodeType::kDiv:
+      return new Div(lhs, rhs);
+    case IRNodeType::kMod:
+      return new Mod(lhs, rhs);
+    case IRNodeType::kMax:
+      return new Max(lhs, rhs, option);
+    case IRNodeType::kMin:
+      return new Min(lhs, rhs, option);
+    case IRNodeType::kAnd:
+      return new And(lhs, rhs);
+    case IRNodeType::kXor:
+      return new Xor(lhs, rhs);
+    case IRNodeType::kLshift:
+      return new Lshift(lhs, rhs);
+    case IRNodeType::kRshift:
+      return new Rshift(lhs, rhs);
+    default:
+      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
+      return nullptr;
+  }
 }
+
+// Uses the evaluator to fold an Expression with constant terms.
+// E.g. evaluateOp(Add(3, 4)) => 7.
+// Expr v must not have any unbound Vars.
+static Expr* evaluateOp(const Expr* v) {
+  ExprHandle handle(v);
+  ExprEval<SimpleIREvaluator> eval(handle);
+
+  switch (v->dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                 \
+  case ScalarType::Name: {                                    \
+    Type val = eval.value<Type>();                            \
+    return getImmediateByType(v->dtype().scalar_type(), val); \
+  }
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      LOG(FATAL) << "Unsupported datatype: " << v->dtype();
+      return nullptr;
+  }
+  return nullptr;
+}
+
 } // namespace
 
 // A Term represents a grouping of Exprs through multiplication.
@@ -237,9 +288,28 @@ class RoundOff : public BinaryOpNode<RoundOff> {
       : BinaryOpNode(lhs, rhs, IRNodeType::kRoundOff) {}
 };
 
-// Simplify the IR by combining arithmetic expressions over common terms.
-class TORCH_API PolynomialTransformer : public IRMutator {
+// Stmt simplification should occur in both modes.
+class TORCH_API IRSimplifierBase : public IRMutator {
  public:
+  virtual ~IRSimplifierBase() {}
+  Stmt* mutate(const Block* v) override;
+
+  Stmt* mutate(const Cond* v) override;
+
+  Stmt* mutate(const For* v) override;
+
+  HashProvider& hasher() {
+    return hasher_;
+  }
+
+ protected:
+  HashProvider hasher_;
+};
+
+// Simplify the IR by combining arithmetic expressions over common terms.
+class TORCH_API PolynomialTransformer : public IRSimplifierBase {
+ public:
+  using IRSimplifierBase::mutate;
   // Inserts term into the provided map, in the case of a hash collision
   // combines the term with the existing and updates the map.
   void addOrUpdateTerm(
@@ -283,10 +353,7 @@ class TORCH_API PolynomialTransformer : public IRMutator {
   // Merge and simplify multiplication.
   const Expr* mutate(const Mul* v) override;
 
-  const Expr* mutate(const Div* v) override {
-    // TODO div simplification will require a rational node.
-    return mutateBinaryOp(v, this);
-  }
+  const Expr* mutate(const Div* v) override;
 
   const Expr* mutate(const Mod* v) override {
     return mutateBinaryOp(v, this);
@@ -320,6 +387,8 @@ class TORCH_API PolynomialTransformer : public IRMutator {
 
   const Expr* mutate(const Cast* v) override;
 
+  const Expr* mutate(const IfThenElse* v) override;
+
   template <typename Op>
   static const Expr* mutateBinaryOp(
       const BinaryOpNode<Op>* v,
@@ -344,25 +413,24 @@ class TORCH_API PolynomialTransformer : public IRMutator {
     return evaluateOp(node);
   }
 
-  HashProvider& hasher() {
-    return hasher_;
-  }
-
   static const Expr* simplify(const Expr* e);
   static ExprHandle simplify(const ExprHandle& e);
   static Stmt* simplify(Stmt* e);
 
- private:
-  HashProvider hasher_;
 }; // namespace tensorexpr
 
 // Expands Terms and Polynomial expressions into primitive operations.
 // Does some simple factorization and reordering.
-class TORCH_API TermExpander : public IRMutator {
+class TORCH_API TermExpander : public IRSimplifierBase {
   PolynomialTransformer* simplifier_;
+  std::set<const Var*> eliminated_allocations_;
 
  public:
+  using IRSimplifierBase::mutate;
   TermExpander(PolynomialTransformer* simplifier) : simplifier_(simplifier) {}
+  bool check_safe() {
+    return eliminated_allocations_.empty();
+  }
 
   // Expand Terms out to a series of Muls.
   const Expr* mutate(const Term* v) override;
@@ -375,6 +443,11 @@ class TORCH_API TermExpander : public IRMutator {
 
   // Expand RoundOff to it's component: Mul(Div(lhs, rhs), rhs).
   const Expr* mutate(const RoundOff* v) override;
+
+  // Eliminate zero length allocations.
+  Stmt* mutate(const Allocate* v) override;
+
+  Stmt* mutate(const Free* v) override;
 };
 
 class TORCH_API IRSimplifier {
@@ -386,6 +459,9 @@ class TORCH_API IRSimplifier {
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);
     e = e->accept_mutator(&expander);
+    if (!expander.check_safe()) {
+      throw malformed_input("eliminated null Allocation without free");
+    }
 
     return e;
   }
@@ -401,6 +477,9 @@ class TORCH_API IRSimplifier {
     // There may be terms left in the IR, expand them.
     TermExpander expander(&simplifier);
     s = s->accept_mutator(&expander);
+    if (!expander.check_safe()) {
+      throw malformed_input("eliminated null Allocation without free");
+    }
 
     return s;
   }

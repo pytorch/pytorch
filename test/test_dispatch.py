@@ -91,7 +91,11 @@ class TestDispatch(TestCase):
         # In the order specified by ctor_order, run registrations
         set_to_report = frozenset(range(len(ops)))
         for i, op_ix in enumerate(ctor_order):
-            refs[op_ix] = C._dispatch_import(test_namespace)
+            # It would be better to DEF here, but because we manage
+            # lifetime of multiple registrations with multiple Library
+            # references (refs), we can't deal with the strict checking
+            # from DEF.
+            refs[op_ix] = C._dispatch_library("FRAGMENT", test_namespace, "")
             active_ops.add(op_ix)
             try:
                 ops[op_ix](refs[op_ix])
@@ -190,15 +194,15 @@ class TestDispatch(TestCase):
             lambda m: m.def_("foo(Tensor x) -> Tensor"),
             # m.impl("test_def", [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo"),
-            # m.impl("test_def",
-            #        torch::dispatch_autograd([](const Tensor& x) { return x }))
+            # m.impl("test_def", kAutograd, [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo", dispatch="autograd")
         ])
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor x) -> (Tensor)
+debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-VariableTensorId: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
@@ -211,20 +215,21 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
             # m.impl("foo", [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo"),
         ], expect_raises=True)
-        self.assertExpectedInline(r, '''In registration for test::foo: expected schema of operator to be "test::foo(Tensor x, Tensor y) -> (Tensor)", but got inferred schema "(Tensor _0) -> (Tensor _0)". The number of arguments is different. 2 vs 1.''')  # noqa
+        self.assertExpectedInline(r, '''In registration for test::foo: expected schema of operator to be "test::foo(Tensor x, Tensor y) -> (Tensor)" (registered at /dev/null:0), but got inferred schema "(Tensor _0) -> (Tensor _0)" (impl_t_t). The number of arguments is different. 2 vs 1.''')  # noqa
 
     def test_def_with_inference(self):
         r = self.commute("foo", [
             # m.def("foo", [](const Tensor & x) { return x })
             lambda m: m.def_name_t_t("foo"),
-            # m.impl("foo", torch::dispatch_autograd([](const Tensor & x) { return x }))
+            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "autograd")
         ])
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor _0) -> (Tensor _0)
+debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
-VariableTensorId: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
@@ -236,6 +241,7 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor x, Tensor y) -> (Tensor)
+debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 ''')
 
@@ -243,14 +249,13 @@ alias analysis kind: FROM_SCHEMA
         r = self.commute("foo", [
             # m.impl("foo", [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo"),
-            # m.impl("foo",
-            #        torch::dispatch_autograd([](const Tensor& x) { return x }))
+            # m.impl("foo", torch::kAutograd, [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo", "autograd")
         ])
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: (none)
-VariableTensorId: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
@@ -277,6 +282,7 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor x, Tensor y) -> (Tensor)
+debug: registered at /dev/null:0
 alias analysis kind: PURE_FUNCTION
 ''')
 
@@ -291,11 +297,11 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, ctor_order=(0, 1), expect_raises=True),
-            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x) -> (Tensor) vs test::foo(Tensor x, Tensor y) -> (Tensor)'''  # noqa
+            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x) -> (Tensor) (registered at /dev/null:0) vs test::foo(Tensor x, Tensor y) -> (Tensor) (registered at /dev/null:0)'''  # noqa
         )
         self.assertExpectedInline(
             self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True),
-            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x, Tensor y) -> (Tensor) vs test::foo(Tensor x) -> (Tensor)'''  # noqa
+            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x, Tensor y) -> (Tensor) (registered at /dev/null:0) vs test::foo(Tensor x) -> (Tensor) (registered at /dev/null:0)'''  # noqa
         )
 
     def test_multiple_def_alias_defaulting(self):
@@ -312,6 +318,7 @@ alias analysis kind: PURE_FUNCTION
             '''\
 name: test::foo
 schema: test::foo(Tensor x) -> (Tensor)
+debug: registered at /dev/null:0
 alias analysis kind: PURE_FUNCTION
 '''
         )
@@ -334,12 +341,25 @@ alias analysis kind: PURE_FUNCTION
         ]
         self.assertExpectedInline(
             self.commute("foo", ops, ctor_order=(0, 1), expect_raises=True),
-            '''Tried to define the schema for test::foo with different alias analysis kinds: PURE_FUNCTION vs CONSERVATIVE'''  # noqa
+            '''Tried to define the schema for test::foo with different alias analysis kinds: PURE_FUNCTION (registered at /dev/null:0) vs CONSERVATIVE (registered at /dev/null:0)'''  # noqa
         )
         self.assertExpectedInline(
             self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True),
-            '''Tried to define the schema for test::foo with different alias analysis kinds: CONSERVATIVE vs PURE_FUNCTION'''  # noqa
+            '''Tried to define the schema for test::foo with different alias analysis kinds: CONSERVATIVE (registered at /dev/null:0) vs PURE_FUNCTION (registered at /dev/null:0)'''  # noqa
         )
+
+    def test_multiple_fallback(self):
+        global_m = C._dispatch_library("IMPL", "_", "xla")
+        global_m.fallback_fallthrough(),
+        try:
+            global_m.fallback_fallthrough(),
+        except RuntimeError as e:
+            self.assertExpectedInline(
+                str(e),
+                '''Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration registered at /dev/null:0, new registration registered at /dev/null:0'''  # noqa
+            )
+        else:
+            self.assertTrue(False)
 
     def test_overwrite_catchall(self):
         ops = [

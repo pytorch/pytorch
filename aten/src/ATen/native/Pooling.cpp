@@ -4,6 +4,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #include <tuple>
@@ -133,6 +134,7 @@ Tensor max_pool2d(
     return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
+
 #if defined(C10_MOBILE)
   if(xnnpack::use_max_pool2d(self, kernel_size, padding, stride,
                              dilation, ceil_mode)) {

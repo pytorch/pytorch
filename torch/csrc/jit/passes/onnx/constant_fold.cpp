@@ -14,43 +14,34 @@ using namespace ::c10::onnx;
 
 namespace {
 
-using ParamMap = std::map<std::string, at::Tensor>;
-using ValueToParamPairMap =
-    std::map<Value*, std::pair<std::string, at::Tensor>>;
+enum OnnxType : int {
+  ONNX_FLOAT = 1,
+  ONNX_UINT8,
+  ONNX_INT8,
+  ONNX_UINT16,
+  ONNX_INT16,
+  ONNX_INT32,
+  ONNX_INT64,
+  ONNX_FLOAT16 = 10,
+  ONNX_DOUBLE,
+  ONNX_UINT32,
+};
 
 std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
     // ScalarType type.
-    {1, at::kFloat},
-    {2, at::kByte},
-    {3, at::kChar},
-    {4, at::kInt},
-    {5, at::kShort},
-    {6, at::kInt},
-    {7, at::kLong},
-    {10, at::kFloat},
-    {11, at::kDouble},
-    {12, at::kLong},
+    {ONNX_FLOAT, at::kFloat},
+    {ONNX_UINT8, at::kByte},
+    {ONNX_INT8, at::kChar},
+    {ONNX_UINT16, at::kInt},
+    {ONNX_INT16, at::kShort},
+    {ONNX_INT32, at::kInt},
+    {ONNX_INT64, at::kLong},
+    {ONNX_FLOAT16, at::kFloat},
+    {ONNX_DOUBLE, at::kDouble},
+    {ONNX_UINT32, at::kLong},
 };
-
-void buildParamsMapFromValueToParamsMap(
-    const ValueToParamPairMap& valsToParamsMap,
-    ParamMap& paramsDict) {
-  paramsDict.clear();
-  for (const auto& nameTensorParamPair : valsToParamsMap) {
-    paramsDict.insert(nameTensorParamPair.second);
-  }
-}
-
-void eraseUnusedBlockInputs(Block* b) {
-  for (size_t i_1 = b->inputs().size(); i_1 > 0; --i_1) {
-    size_t i = i_1 - 1;
-    if (!b->inputs().at(i)->hasUses()) {
-      b->eraseInput(i);
-    }
-  }
-}
 
 void handleNegativeStartEndIndex(
     int64_t& start,
@@ -288,6 +279,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       }
     }
     return c10::optional<at::Tensor>(at::reshape(updated_val, shape));
+  } else if (node->kind() == onnx::Shape) {
+    TORCH_INTERNAL_ASSERT(inputTensorValues.size() == 1);
+    updated_val = at::_shape_as_tensor(inputTensorValues[0]);
+    return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::ReduceL1 || node->kind() == onnx::ReduceL2) {
     assert(inputTensorValues.size() == 1);
     if (!node->hasAttributeS("axes")) {
@@ -301,7 +296,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         inputTensorValues[0], p, node->is(attr::axes), node->i(attr::keepdims));
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Gather) {
-    assert(inputTensorValues.size() == 1);
+    assert(inputTensorValues.size() == 2);
     if (!node->hasAttributeS("axis")) {
       return c10::nullopt;
     }
@@ -346,7 +341,7 @@ std::vector<at::Tensor> getValues(
         throw std::runtime_error(
             "getValues: Input value not found amongst constant parameters.");
       }
-      inputTensorValues.push_back(itr->second.second);
+      inputTensorValues.push_back(itr->second.second.toTensor());
     } else if (val->node()->kind() == onnx::Constant) {
       inputTensorValues.push_back(val->node()->t(attr::value));
     } else {

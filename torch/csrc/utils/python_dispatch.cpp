@@ -1,7 +1,7 @@
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/ATen.h>
 
 #include <pybind11/operators.h>
@@ -14,12 +14,23 @@ namespace torch {
 namespace impl {
 namespace dispatch {
 
+torch::Library::Kind parseKind(const std::string& k) {
+  static std::unordered_map<std::string, torch::Library::Kind> kind_map = {
+    {"DEF", torch::Library::DEF},
+    {"IMPL", torch::Library::IMPL},
+    {"FRAGMENT", torch::Library::FRAGMENT},
+  };
+  auto it = kind_map.find(k);
+  TORCH_CHECK(it != kind_map.end(), "could not parse ", k);
+  return it->second;
+}
+
 c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
   static std::unordered_map<std::string, c10::DispatchKey> key_map = {
-    {"cpu", c10::DispatchKey::CPUTensorId},
-    {"cuda", c10::DispatchKey::CUDATensorId},
-    {"xla", c10::DispatchKey::XLATensorId},
-    {"autograd", c10::DispatchKey::VariableTensorId},
+    {"cpu", c10::DispatchKey::CPU},
+    {"cuda", c10::DispatchKey::CUDA},
+    {"xla", c10::DispatchKey::XLA},
+    {"autograd", c10::DispatchKey::Autograd},
     {"", c10::DispatchKey::Undefined},
   };
   auto it = key_map.find(k);
@@ -45,12 +56,12 @@ c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 
 
 template <typename Func>
-inline c10::CppFunction dispatch_str(const char* key, Func&& raw_f) {
+inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   auto mb_key = parseDispatchKey(key);
   if (mb_key) {
-    return c10::dispatch(*mb_key, std::move(raw_f));
+    return torch::dispatch(*mb_key, std::forward<Func>(raw_f));
   } else {
-    c10::CppFunction f(std::forward<Func>(raw_f));
+    torch::CppFunction f(std::forward<Func>(raw_f));
     return f;
   }
 }
@@ -62,16 +73,16 @@ void initDispatchBindings(PyObject* module) {
     .def("schema", &c10::OperatorHandle::schema);
 
   // TODO: figure out how to do chaining
-  py::class_<c10::Module>(m, "_DispatchModule")
+  py::class_<torch::Library>(m, "_DispatchModule")
     .def("def_", [](py::object self, const char* schema, const char* alias) {
-      self.cast<c10::Module&>().def(torch::schema(schema, parseAliasAnalysisKind(alias)));
+      self.cast<torch::Library&>().def(torch::schema(schema, parseAliasAnalysisKind(alias)));
       return self;
     }, "", py::arg("schema"), py::arg("alias") = "")
     // Simulated "legacy" def where alias analysis kind is not set.
     // Ordinarily this can only be exercised from RegisterOperators() API
     // but I am not going to bind that here
     .def("def_legacy", [](py::object self, const char* schema) {
-      self.cast<c10::Module&>().def(torch::jit::parseSchema(schema));
+      self.cast<torch::Library&>().def(torch::jit::parseSchema(schema));
       return self;
     }, "", py::arg("schema"))
     // We can't conveniently turn Python functions into valid functions
@@ -83,7 +94,7 @@ void initDispatchBindings(PyObject* module) {
     // Mangling scheme: args_rets.  One character per.
     //  t = Tensor
     .def("def_name_t_t", [](py::object self, const char* name, const char* dispatch, const char* debug) {
-      self.cast<c10::Module&>().def(
+      self.cast<torch::Library&>().def(
         name,
         dispatch_str(dispatch, [](const at::Tensor& a) {
           return a;
@@ -94,7 +105,7 @@ void initDispatchBindings(PyObject* module) {
            py::arg("dispatch") = "",
            py::arg("debug") = "default_def_name_t_t")
     .def("def_schema_t_t", [](py::object self, const char* schema, const char* dispatch, const char* alias, const char* debug) {
-      self.cast<c10::Module&>().def(
+      self.cast<torch::Library&>().def(
         torch::schema(schema, parseAliasAnalysisKind(alias)),
         dispatch_str(dispatch, [](const at::Tensor& a) {
           return a;
@@ -108,7 +119,7 @@ void initDispatchBindings(PyObject* module) {
     // TODO: maybe consider deduplicating the definitions here, it's getting
     // pretty long
     .def("impl_t_t", [](py::object self, const char* name, const char* dispatch, const char* debug) {
-      self.cast<c10::Module&>().impl(
+      self.cast<torch::Library&>().impl(
         name,
         dispatch_str(dispatch, [](const at::Tensor& a) {
           return a;
@@ -119,7 +130,7 @@ void initDispatchBindings(PyObject* module) {
            py::arg("dispatch") = "",
            py::arg("debug") = "impl_t_t")
     .def("impl_tt_t", [](py::object self, const char* name, const char* dispatch, const char* debug) {
-      self.cast<c10::Module&>().impl(
+      self.cast<torch::Library&>().impl(
         name,
         dispatch_str(dispatch, [](const at::Tensor& a, const at::Tensor& b) {
           return a;
@@ -127,14 +138,16 @@ void initDispatchBindings(PyObject* module) {
       );
       return self;
     }, "", py::arg("name"), py::arg("dispatch") = "", py::arg("debug") = "")
+    .def("fallback_fallthrough", [](py::object self, const char* dispatch) {
+      self.cast<torch::Library&>().fallback(
+        dispatch_str(dispatch, CppFunction::makeFallthrough())
+      );
+      return self;
+    }, "", py::arg("dispatch") = "")
   ;
 
-  m.def("_dispatch_import", [](std::string name) {
-    if (name.empty()) {
-      return std::make_unique<c10::Module>(torch::import());
-    } else {
-      return std::make_unique<c10::Module>(c10::_import_DOES_NOT_WORK_WITH_MOBILE_CUSTOM_BUILD(name));
-    }
+  m.def("_dispatch_library", [](const char* kind, std::string name, const char* dispatch) {
+    return std::make_unique<torch::Library>(parseKind(kind), std::move(name), parseDispatchKey(dispatch), "/dev/null", 0);
   });
 
   m.def("_dispatch_dump", [](const char* name) -> std::string {

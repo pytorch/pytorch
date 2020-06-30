@@ -1108,6 +1108,18 @@ void addGlobalMethods(py::module& m) {
       "switch_workspace",
       [](Workspace* ws, py::object /*create_if_missing*/) { gWorkspace = ws; });
   m.def(
+      "create_child_workspace",
+      [](const std::string& parent_ws_name, const std::string& child_ws_name) {
+        CAFFE_ENFORCE(
+            gWorkspaces.count(parent_ws_name), "Parent ws does not exist.");
+        auto parent_gws = gWorkspaces[parent_ws_name].get();
+        std::unique_ptr<Workspace> child_ws(new Workspace(parent_gws));
+        gWorkspaces.insert(std::make_pair(child_ws_name, std::move(child_ws)));
+      },
+      "Create and register child ws, sharing existing blobs in parent ws.",
+      py::arg("parent_ws_name"),
+      py::arg("child_ws_name"));
+  m.def(
       "switch_workspace",
       [](const std::string& name, const py::object create_if_missing) {
         if (create_if_missing.is(py::none())) {
@@ -1724,6 +1736,7 @@ void addGlobalMethods(py::module& m) {
          const std::vector<std::string>& weight_names,
          int max_batch_size,
          int max_seq_size,
+         int timeout,
          bool adjust_batch,
          bool debug_builder,
          bool merge_fp32_inputs_into_fp16,
@@ -1746,6 +1759,7 @@ void addGlobalMethods(py::module& m) {
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
+        opts.timeout = timeout;
         opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
         opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;

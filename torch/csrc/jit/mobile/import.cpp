@@ -1,13 +1,15 @@
-#include "import.h"
+#include <torch/csrc/jit/mobile/import.h>
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
 
+#include <exception>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -61,6 +63,16 @@ IValue expect_field(
   return row->elements().at(1);
 }
 
+std::string operator_str(
+    const std::string& name,
+    const std::string& overloadname) {
+  std::string result = name;
+  if (!overloadname.empty()) {
+    result += "." + overloadname;
+  }
+  return result;
+}
+
 namespace {
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
@@ -103,7 +115,8 @@ void parseMethods(
       auto ins_item = ins.toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
-          "There should be three parts in an instruction.");
+          "There should be three parts in an instruction. The function name is ",
+          function_name);
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
@@ -119,9 +132,8 @@ void parseMethods(
       auto op_found = function->append_operator(
           op_item[0].toString()->string(), op_item[1].toString()->string());
       if (!op_found) {
-        unsupported_op_names.emplace(
-            op_item[0].toString()->string() + "." +
-            op_item[1].toString()->string());
+        unsupported_op_names.emplace(operator_str(
+            op_item[0].toString()->string(), op_item[1].toString()->string()));
       }
     }
 
@@ -197,13 +209,23 @@ c10::IValue BytecodeDeserializer::readArchive(
     return len;
   };
 
-  auto class_resolver = [&](const c10::QualifiedName& qn) {
-    if (compilation_unit_->get_class(qn) == nullptr) {
-      auto typeptr = ClassType::create(qn, compilation_unit_, true);
-      compilation_unit_->register_type(typeptr);
+  static const c10::QualifiedName torchPrefix = "__torch__";
+  auto type_resolver = [&](const c10::QualifiedName& qn) {
+    TypePtr type;
+    // HACK: first we check whether the name starts with `__torch__` to tell if
+    // it's "supposed" to be a class type. This is a reliable check today, but
+    // there is no guarantee that this is the case. The real solution is to
+    // merge type parsers so we can share class resolution logic.
+    if (torchPrefix.isPrefixOf(qn)) {
+      if (compilation_unit_->get_class(qn) == nullptr) {
+        auto typeptr = ClassType::create(qn, compilation_unit_, true);
+        compilation_unit_->register_type(typeptr);
+      }
+      type = compilation_unit_->get_class(qn);
+    } else {
+      type = c10::parseType(qn.qualifiedName());
     }
-    return c10::StrongTypePtr(
-        compilation_unit_, compilation_unit_->get_class(qn));
+    return c10::StrongTypePtr(compilation_unit_, type);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
@@ -213,7 +235,7 @@ c10::IValue BytecodeDeserializer::readArchive(
     auto setstate = mcu->find_function(method_name);
     auto find_custom_class_with_setstate = [&qn]() -> c10::ClassTypePtr {
       auto custom_class_type = torch::jit::getCustomClass(qn->qualifiedName());
-      if (custom_class_type && custom_class_type->getMethod("__setstate__")) {
+      if (custom_class_type && custom_class_type->findMethod("__setstate__")) {
         return custom_class_type;
       }
       return nullptr;
@@ -227,7 +249,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       auto obj = c10::ivalue::Object::create(
           c10::StrongTypePtr(nullptr, custom_class_type), 1);
       Stack stack({obj, input});
-      custom_class_type->getMethod("__setstate__")->run(stack);
+      custom_class_type->getMethod("__setstate__").run(stack);
       return obj;
     } else {
       auto dict = std::move(input).toGenericDict();
@@ -250,7 +272,7 @@ c10::IValue BytecodeDeserializer::readArchive(
 
   Unpickler unpickler(
       reader,
-      std::move(class_resolver),
+      std::move(type_resolver),
       std::move(obj_loader),
       std::move(read_record),
       device_);
@@ -278,9 +300,31 @@ mobile::Module _load_for_mobile(
 mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-  BytecodeDeserializer deserializer(std::move(reader));
-  return deserializer.deserialize(device);
+  auto observer = torch::observerConfig().getModuleObserver();
+  if (observer) {
+    observer->onEnterLoadModel();
+  }
+  try {
+    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+    BytecodeDeserializer deserializer(std::move(reader));
+    mobile::Module result = deserializer.deserialize(std::move(device));
+    std::string name = result.name();
+    if (observer) {
+      observer->onExitLoadModel(name);
+    }
+    return result;
+  } catch (const std::exception& ex) {
+    if (observer) {
+      observer->onFailLoadModel(
+          "Error occured during loading model: " + (std::string)ex.what());
+    }
+    TORCH_CHECK(false, ex.what());
+  } catch (...) {
+    if (observer) {
+      observer->onFailLoadModel("unknown exception");
+    }
+    TORCH_CHECK(false, "unknown exception");
+  }
 }
 
 } // namespace jit

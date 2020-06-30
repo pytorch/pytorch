@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
-#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -15,22 +15,32 @@
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/inplace_check.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
+#include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 
+C10_DECLARE_bool();
+
+C10_DEFINE_bool(
+    torch_jit_enable_new_executor,
+    true,
+    "If this flag is set to false TorchScript will be using the legacy/original executor");
+
 namespace torch {
 namespace jit {
 
+// TODO: keep the else clause for trial runs
 #if defined(FBCODE_CAFFE2) || defined(C10_MOBILE)
-static std::atomic<bool> executor_mode{false};
+static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
 #else
 static std::atomic<bool> executor_mode{true};
-static std::atomic<bool> profiling_mode{true};
+static std::atomic<bool> profiling_mode{false};
 #endif
 
 static std::atomic<size_t> num_profiled_runs{1};
@@ -134,6 +144,7 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   ConstantPooling(copy);
   PeepholeOptimize(copy);
   EliminateDeadCode(copy);
+  LowerSimpleTuples(copy);
   CheckInplace(copy);
 }
 
@@ -165,6 +176,9 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   if (!pr_) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
+    if (remaining_bailout_depth == getBailoutDepth()) {
+      PeelProfilingLoops(copy);
+    }
     pr_ = ProfilingRecord::instrumentGraph(copy);
     auto pr_copy = pr_->graph()->copy();
     GRAPH_DUMP("Profiled Graph: ", pr_copy);

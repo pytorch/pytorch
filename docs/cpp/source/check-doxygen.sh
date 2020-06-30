@@ -10,6 +10,8 @@ ignore_warning() {
   mv temp.txt doxygen-log.txt
 }
 
+command -v doxygen >/dev/null 2>&1 || { echo >&2 "doxygen is not supported. Aborting."; exit 1; }
+
 pushd "$(dirname "$0")/../../.."
 
 cp aten/src/ATen/common_with_cwrap.py tools/shared/cwrap_common.py
@@ -30,7 +32,7 @@ python tools/setup_helpers/generate_code.py                 \
 popd
 
 # Run doxygen and log all output.
-doxygen 2> original-doxygen-log.txt
+doxygen "$(dirname $0)" 2> original-doxygen-log.txt
 cp original-doxygen-log.txt doxygen-log.txt
 
 # Uncomment this if you need it for debugging; we're not printing this

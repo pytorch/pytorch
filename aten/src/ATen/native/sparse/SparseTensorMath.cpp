@@ -9,8 +9,9 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
-
 #include <TH/THBlasUtils.h>
+
+#include <algorithm>
 
 namespace at { namespace native {
 
@@ -510,6 +511,13 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
     LongTensor r_indices = at::cat({t._indices(), src._indices()}, 1);
     Tensor r_values = at::cat({t_values, s_values}, 0).to(r.scalar_type());
     alias_into_sparse(r, r_indices, r_values);
+
+    // Prevent unbounded growth of nnz
+    // TODO: Improved heuristic on when to coalesce or remove need to coalesce
+    if (r._nnz() > r.numel()) {
+      auto c = r.coalesce();
+      alias_into_sparse(r, c._indices(), c._values());
+    }
 
     return r;
 }
@@ -1414,6 +1422,154 @@ Tensor any_sparse(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.is_sparse());
 
   return at::any(self._values());
+}
+
+Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({}, mat2.options());
+  return bmm_out_sparse_cpu(result, self, mat2);
+}
+
+// Search a sorted strided array for the rightmost instance of a value.
+// Array must be sorted from lowest to highest.
+// Returns the index of the found element.
+// Returns by reference `found`, true if search value was found, false otherwise
+template<typename scalar_t>
+scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<scalar_t, 1>& sorted_arr_accessor, int64_t sorted_arr_begin_idx, int64_t length, bool* found) {
+  if (length == 0) {
+    *found = false;
+    return -1;
+  }
+
+  int64_t left_ind = 0;
+  int64_t right_ind = length - 1;
+  int64_t mid_ind;
+  bool done_searching = false;
+
+  while (!done_searching) {
+    mid_ind = (left_ind+right_ind) >> 1;
+    scalar_t mid_val = sorted_arr_accessor[sorted_arr_begin_idx + mid_ind];
+
+    if (mid_val > search_val) {
+      right_ind = mid_ind-1;
+    } else if((mid_val == search_val) && (
+      (mid_ind == length - 1) || (sorted_arr_accessor[sorted_arr_begin_idx + mid_ind + 1] != search_val)
+    )) {
+      done_searching = true;
+      *found = true;
+    } else {
+      left_ind = mid_ind+1;
+    }
+
+    if (left_ind > right_ind) {
+      done_searching = true;
+      *found = false;
+      mid_ind = -1;
+    }
+  }
+
+  return mid_ind;
+}
+
+Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
+  TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
+
+  TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
+  TORCH_CHECK(self.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self.sparse_dim());
+  TORCH_CHECK(mat2.dim() == 3, "bmm_sparse: Tensor 'mat2' must have 3 dims, but has ", mat2.dim());
+
+  TORCH_CHECK(self.size(0) == mat2.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
+  TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
+
+  result.resize_({self.size(0), self.size(1), mat2.size(2)});
+
+  if (self._nnz() == 0) {
+    result.zero_();
+    return result;
+  }
+
+  // First need to coalesce to get all of the first dimension indices
+  // in order since we'll be sending each matrix into the MM operation
+  SparseTensor self_coalesced = self.coalesce();
+
+  int64_t nnz =        self_coalesced._nnz();
+  LongTensor indices = self_coalesced._indices();
+  Tensor values =      self_coalesced._values();
+
+  LongTensor indices_dim0 = indices[0];
+  auto indices_dim0_accessor = indices_dim0.accessor<int64_t, 1>();
+  LongTensor indices_dim1_dim2 = indices.slice(0, 1, 3);
+
+  int64_t dim_i = self_coalesced.size(1);
+  int64_t dim_j = self_coalesced.size(2);
+  int64_t dim_k = mat2.size(2);
+
+  Scalar beta = 0;
+  Tensor t_dummy;
+  Scalar alpha = 1;
+
+  int64_t mat_el_begin_idx = 0;
+
+  int64_t num_matrices = self_coalesced.size(0);
+
+  // Iterate through each set of 2D matrices within the 3D
+  // tensor inputs, performing a matrix multiply with each one.
+  int64_t start_mat_num = indices_dim0_accessor[0];
+  AT_DISPATCH_ALL_TYPES(
+    values.scalar_type(), "bmm_sparse_dense", [&] {
+      for (int64_t cur_mat_num = 0;
+        (cur_mat_num < num_matrices);
+        cur_mat_num++
+      ) {
+        // If there are sparse matrices at the beginning or end that
+        // have all zero elements, we need to zero out the result matrix.
+        if ((cur_mat_num < start_mat_num) || (mat_el_begin_idx >= nnz)) {
+          result[cur_mat_num].zero_();
+          continue;
+        }
+
+        // Search for the range of sparse tensor elements that
+        // correspond to the current matrix number. We already know
+        // where the current matrix begins, so we just need to find
+        // the end. The search excludes everything to the left of
+        // the starting point, for best performance
+        bool mat_end_found;
+        int64_t mat_el_end_idx = binary_search_strided_rightmost(
+          cur_mat_num,
+          indices_dim0_accessor,
+          mat_el_begin_idx,
+          nnz-mat_el_begin_idx,
+          &mat_end_found
+        ) + mat_el_begin_idx;
+
+        if (mat_end_found) {
+          mat_el_end_idx++;
+
+          // Create tensors to view just the current set of matrices
+          const Tensor dense_matrix = mat2[cur_mat_num];
+          Tensor result_matrix = result[cur_mat_num];
+          LongTensor sparse_indices = indices_dim1_dim2.slice(1, mat_el_begin_idx, mat_el_end_idx);
+          Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
+          int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+
+          s_addmm_out_sparse_dense_worker<scalar_t>(
+            sparse_nnz,
+            dim_i, dim_j, dim_k,
+            result_matrix,
+            beta, t_dummy, alpha,
+            sparse_indices, sparse_values,
+            dense_matrix
+          );
+          mat_el_begin_idx = mat_el_end_idx;
+
+        // If no elements for this sparse matrix are found, then
+        // it's a zero matrix and we need to zero out the result
+        } else {
+          result[cur_mat_num].zero_();
+        }
+      }
+    }
+  );
+  return result;
 }
 
 }} // namespace at::native

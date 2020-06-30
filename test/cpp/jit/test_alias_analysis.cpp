@@ -52,8 +52,8 @@ struct TopoMoveTestFixture {
       const std::vector<std::string>& inputNames,
       const std::vector<std::string>& blockInputNames = {}) {
     std::vector<Value*> inputs;
-    for (const auto name : inputNames) {
-      inputs.push_back(nodes.at(name)->output());
+    for (const auto& name_ : inputNames) {
+      inputs.push_back(nodes.at(name_)->output());
     }
     auto node = graph->appendNode(graph->create(prim::AutogradZero, inputs));
     node->output()->setDebugName(name);
@@ -62,8 +62,8 @@ struct TopoMoveTestFixture {
     if (blockInputNames.size() != 0) {
       node->addBlock();
       std::vector<Value*> blockDeps;
-      for (const auto name : blockInputNames) {
-        blockDeps.push_back(nodes.at(name)->output());
+      for (const auto& name_ : blockInputNames) {
+        blockDeps.push_back(nodes.at(name_)->output());
       }
 
       auto block = node->blocks().at(0);
@@ -339,6 +339,7 @@ void testAliasAnalysis() {
 
     graph->lint();
   }
+
   {
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
@@ -358,6 +359,43 @@ void testAliasAnalysis() {
     AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(
         usesB->node(), mutatesAliasOfB->node()));
   }
+
+  {
+    // Test moves across side effectful nodes
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto print1 = graph->insertNode(graph->create(prim::Print, {a}, 0));
+    WithInsertPoint guard(print1);
+    auto print2 = graph->insertNode(graph->create(prim::Print, {a, a}, 0));
+    AliasDb aliasDb(graph);
+
+    // def foo(a):
+    //  print2(a, a)
+    //  print1(a)
+
+    // test moving across each other
+    AT_ASSERT(!aliasDb.moveAfterTopologicallyValid(print2, print1));
+    AT_ASSERT(!aliasDb.moveBeforeTopologicallyValid(print1, print2));
+
+    // test moving where they already are
+    AT_ASSERT(aliasDb.moveBeforeTopologicallyValid(print2, print1));
+    AT_ASSERT(aliasDb.moveAfterTopologicallyValid(print1, print2));
+
+    graph->insertNode(graph->create(prim::MakeTestTensor, {}, 1));
+    AliasDb aliasDb2(graph);
+
+    // def foo(a):
+    //  print2(a, a)
+    //  non_side_effectful = makeTestTensor()
+    //  print1(a)
+
+    // test moving with a side effectful node between
+    AT_ASSERT(!aliasDb2.moveAfterTopologicallyValid(print2, print1));
+    AT_ASSERT(!aliasDb2.moveBeforeTopologicallyValid(print2, print1));
+    AT_ASSERT(!aliasDb2.moveAfterTopologicallyValid(print1, print2));
+    AT_ASSERT(!aliasDb2.moveBeforeTopologicallyValid(print1, print2));
+  }
+
   {
     // Test moves across inner blocks
 
@@ -457,7 +495,7 @@ void testAliasAnalysis() {
 void testWriteTracking() {
   RegisterOperators reg({Operator(
       "prim::creates_alias(Tensor(a) x) -> Tensor(a)",
-      [](Stack& s) { return 0; },
+      [](Stack* s) {},
       aliasAnalysisFromSchema())});
   const auto creates_alias = Symbol::fromQualString("prim::creates_alias");
   {
@@ -882,11 +920,11 @@ graph():
 void testWildcards() {
   RegisterOperators reg({Operator(
                              "prim::returns_wildcard(Tensor a) -> Tensor(*)",
-                             [](Stack& stack) { return 0; },
+                             [](Stack* stack) {},
                              aliasAnalysisFromSchema()),
                          Operator(
                              "prim::writes(Tensor(z!) a) -> Tensor(a)",
-                             [](Stack& stack) { return 0; },
+                             [](Stack* stack) {},
                              aliasAnalysisFromSchema())});
   const auto returns_wildcard =
       Symbol::fromQualString("prim::returns_wildcard");
@@ -1037,98 +1075,114 @@ void testMemoryDAG() {
     // a <- e
     // f <- e
     // g is by itself
-    MemoryDAG t;
-    auto a = t.makeFreshValue(aValue);
-    auto b = t.makeFreshValue(bValue);
-    auto c = t.makeFreshValue(cValue);
-    auto d = t.makeFreshValue(dValue);
-    auto e = t.makeFreshValue(eValue);
-    auto f = t.makeFreshValue(fValue);
-    auto g = t.makeFreshValue(gValue);
-    t.makePointerTo(b, a);
-    t.makePointerTo(c, b);
-    t.makePointerTo(d, b);
-    t.makePointerTo(e, a);
-    t.makePointerTo(e, f);
+    auto t = std::make_unique<MemoryDAGBuilder>();
+    auto a = t->makeFreshValue(aValue);
+    auto b = t->makeFreshValue(bValue);
+    auto c = t->makeFreshValue(cValue);
+    auto d = t->makeFreshValue(dValue);
+    auto e = t->makeFreshValue(eValue);
+    auto f = t->makeFreshValue(fValue);
+    auto g = t->makeFreshValue(gValue);
+    t->makePointerTo(b, a);
+    t->makePointerTo(c, b);
+    t->makePointerTo(d, b);
+    t->makePointerTo(e, a);
+    t->makePointerTo(e, f);
+
+    auto dag = std::make_unique<MemoryDAG>(std::move(t));
 
     /**
      * Test mayAlias()
      */
     // Values should alias themselves
-    ASSERT_TRUE(t.mayAlias(a, a));
-    ASSERT_TRUE(t.mayAlias(g, g));
+    ASSERT_TRUE(dag->mayAlias(a, a));
+    ASSERT_TRUE(dag->mayAlias(g, g));
 
     // Values that point to the same location should alias
-    ASSERT_TRUE(t.mayAlias(a, b));
-    ASSERT_TRUE(t.mayAlias(a, c));
-    ASSERT_TRUE(t.mayAlias(c, d));
+    ASSERT_TRUE(dag->mayAlias(a, b));
+    ASSERT_TRUE(dag->mayAlias(a, c));
+    ASSERT_TRUE(dag->mayAlias(c, d));
 
     // e may point to a OR f
-    ASSERT_TRUE(t.mayAlias(e, a));
-    ASSERT_TRUE(t.mayAlias(e, f));
+    ASSERT_TRUE(dag->mayAlias(e, a));
+    ASSERT_TRUE(dag->mayAlias(e, f));
     // But a and f don't alias
-    ASSERT_FALSE(t.mayAlias(a, f));
-  }
-  {
-    // Test invalidation of memory locations
-    MemoryDAG t;
-    auto a = t.makeFreshValue(aValue);
-    auto b = t.makeFreshValue(bValue);
-    // `a` does not point to `b`
-    ASSERT_FALSE(a->getMemoryLocations().test(b->index));
-    t.makePointerTo(a, b);
-    ASSERT_TRUE(a->getMemoryLocations().test(b->index));
+    ASSERT_FALSE(dag->mayAlias(a, f));
   }
   {
     // x(y) -> x contains y
 
     // b(a)
     // c(a)
-    MemoryDAG t;
-    auto a = t.makeFreshValue(aValue);
-    auto b = t.makeFreshValue(bValue);
-    t.addToContainedElements(a, b);
+    auto t = std::make_unique<MemoryDAGBuilder>();
+    auto a = t->makeFreshValue(aValue);
+    auto b = t->makeFreshValue(bValue);
+    t->addToContainedElements(a, b);
 
-    auto c = t.makeFreshValue(cValue);
-    t.addToContainedElements(a, c);
+    auto c = t->makeFreshValue(cValue);
+    t->addToContainedElements(a, c);
 
-    AT_ASSERT(t.mayContainAlias(a, b));
-    AT_ASSERT(t.mayContainAlias(b, a));
+    auto dag = std::make_unique<MemoryDAG>(std::move(t));
+    AT_ASSERT(dag->mayContainAlias(a, b));
+    AT_ASSERT(dag->mayContainAlias(b, a));
 
-    AT_ASSERT(t.mayContainAlias(a, c));
-    AT_ASSERT(t.mayContainAlias(c, a));
+    AT_ASSERT(dag->mayContainAlias(a, c));
+    AT_ASSERT(dag->mayContainAlias(c, a));
 
-    AT_ASSERT(t.mayContainAlias(b, c));
-    AT_ASSERT(t.mayContainAlias(c, b));
+    AT_ASSERT(dag->mayContainAlias(b, c));
+    AT_ASSERT(dag->mayContainAlias(c, b));
 
     // containers contain an element in themselves
-    AT_ASSERT(t.mayContainAlias(b, b));
-    AT_ASSERT(t.mayContainAlias(c, c));
-    AT_ASSERT(t.mayContainAlias(a, a));
-
-    auto d = t.makeFreshValue(dValue);
-
+    AT_ASSERT(dag->mayContainAlias(b, b));
+    AT_ASSERT(dag->mayContainAlias(c, c));
+    AT_ASSERT(dag->mayContainAlias(a, a));
+  }
+  {
     // b(a)
     // c(a)
     // d(b(a))
-    t.addToContainedElements(b, d);
-    AT_ASSERT(t.mayContainAlias(b, d));
-    AT_ASSERT(t.mayContainAlias(d, b));
+    auto t = std::make_unique<MemoryDAGBuilder>();
+    auto a = t->makeFreshValue(aValue);
+    auto b = t->makeFreshValue(bValue);
+    t->addToContainedElements(a, b);
 
-    AT_ASSERT(t.mayContainAlias(c, d));
-    AT_ASSERT(t.mayContainAlias(d, c));
+    auto c = t->makeFreshValue(cValue);
+    t->addToContainedElements(a, c);
 
-    AT_ASSERT(t.mayContainAlias(a, d));
+    auto d = t->makeFreshValue(dValue);
+    t->addToContainedElements(b, d);
 
+    auto dag = std::make_unique<MemoryDAG>(std::move(t));
+    AT_ASSERT(dag->mayContainAlias(b, d));
+    AT_ASSERT(dag->mayContainAlias(d, b));
+
+    AT_ASSERT(dag->mayContainAlias(c, d));
+    AT_ASSERT(dag->mayContainAlias(d, c));
+
+    AT_ASSERT(dag->mayContainAlias(a, d));
+  }
+  {
     // f(e)
-    auto f = t.makeFreshValue(aValue);
-    auto e = t.makeFreshValue(bValue);
+    auto t = std::make_unique<MemoryDAGBuilder>();
+    auto a = t->makeFreshValue(aValue);
+    auto b = t->makeFreshValue(bValue);
+    t->addToContainedElements(a, b);
 
-    t.addToContainedElements(f, e);
+    auto c = t->makeFreshValue(cValue);
+    t->addToContainedElements(a, c);
 
+    auto d = t->makeFreshValue(dValue);
+    t->addToContainedElements(b, d);
+
+    auto f = t->makeFreshValue(aValue);
+    auto e = t->makeFreshValue(bValue);
+
+    t->addToContainedElements(f, e);
+
+    auto dag = std::make_unique<MemoryDAG>(std::move(t));
     for (auto elem : {a, b, c, d}) {
-      AT_ASSERT(!t.mayContainAlias(f, elem));
-      AT_ASSERT(!t.mayContainAlias(e, elem));
+      AT_ASSERT(!dag->mayContainAlias(f, elem));
+      AT_ASSERT(!dag->mayContainAlias(e, elem));
     }
   }
 }

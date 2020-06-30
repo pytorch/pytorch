@@ -1,6 +1,5 @@
 #include <torch/extension.h>
-
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 using namespace at;
 
@@ -9,16 +8,25 @@ static int test_int;
 Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
-          dtype, 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 0)), nullptr, false),
-      DispatchKey::MSNPUTensorId);
+          Storage::use_byte_size_t(),
+          0,
+          at::DataPtr(nullptr, Device(DeviceType::MSNPU, 0)),
+          nullptr,
+          false),
+      DispatchKey::MSNPU,
+      dtype);
   // This is a hack to workaround the shape checks in _convolution.
   tensor_impl->set_sizes_contiguous(size);
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor empty_override(IntArrayRef size, const TensorOptions & options) {
+Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<c10::MemoryFormat> optional_memory_format) {
   test_int = 0;
-  return get_tensor(options.dtype(), size);
+  caffe2::TypeMeta typeMeta;
+  if (dtype.has_value()) {
+    typeMeta = scalarTypeToTypeMeta(*dtype);
+  }
+  return get_tensor(typeMeta, size);
 }
 
 Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
@@ -47,13 +55,11 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
             get_tensor(input.dtype(), {}));
 }
 
-void init_msnpu_extension() {
-  static auto registry = torch::import()
-    .impl("aten::empty.memory_format",                torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(empty_override)))
-    .impl("aten::add.Tensor",                         torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(add_override)))
-    .impl("aten::convolution_overrideable",           torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(fake_convolution)))
-    .impl("aten::convolution_backward_overrideable",  torch::dispatch(DispatchKey::MSNPUTensorId, CppFunction::makeUnboxedOnly(fake_convolution_backward)))
-    ;
+TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
+  m.impl_UNBOXED("empty.memory_format",                empty_override);
+  m.impl_UNBOXED("add.Tensor",                         add_override);
+  m.impl_UNBOXED("convolution_overrideable",           fake_convolution);
+  m.impl_UNBOXED("convolution_backward_overrideable",  fake_convolution_backward);
 }
 
 // TODO: Extend this to exercise multi-device setting.  In that case,
@@ -119,6 +125,5 @@ int get_test_int() {
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("init_msnpu_extension", &init_msnpu_extension);
   m.def("get_test_int", &get_test_int);
 }

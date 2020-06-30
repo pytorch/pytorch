@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -14,10 +16,10 @@
 
 #include <ATen/ATen.h>
 
+#include <ATen/core/jit_type.h>
+#include <ATen/core/qualified_name.h>
 #include <string>
 #include <vector>
-#include "ATen/core/jit_type.h"
-#include "ATen/core/qualified_name.h"
 
 namespace torch {
 namespace jit {
@@ -109,7 +111,7 @@ c10::IValue getFunctionTuple(const Function& func) {
   std::vector<IValue> types;
   types.reserve(code.type_table().size());
   for (const TypePtr& t : code.type_table()) {
-    types.emplace_back(t->python_str());
+    types.emplace_back(t->annotation_str());
   }
 
   // since the register location is embedded into the bytecode, pass the
@@ -131,9 +133,9 @@ void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
-    Function* setstate = type->getMethod("__setstate__");
-    if (setstate->isGraphFunction()) {
-      elements.push_back(getFunctionTuple(*setstate));
+    Function& setstate = type->getMethod("__setstate__");
+    if (setstate.isGraphFunction()) {
+      elements.push_back(getFunctionTuple(setstate));
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
@@ -177,7 +179,7 @@ class ScriptModuleSerializer {
     writeExtraFiles(module, extra_files);
     // Serialize the model object
     writeArchive("data", module._ivalue());
-    // Then we werialize all code info.
+    // Then we serialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
@@ -186,6 +188,11 @@ class ScriptModuleSerializer {
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
       writeByteCode(module);
+    }
+
+    // Acquires and sets minimum (dynamic) version
+    for (auto& item : file_streams_) {
+      writer_.setMinVersion(item.value().minVersion());
     }
   }
 
@@ -209,8 +216,9 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
     for (const auto& td : data_pickle.tensorData()) {
+      WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-      writer_.writeRecord(fname, td.data(), td.sizeInBytes());
+      writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
     }
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());
@@ -231,6 +239,17 @@ class ScriptModuleSerializer {
     if (hook) {
       ExtraFilesMap hook_files = hook(module);
       for (const auto& kv : hook_files) {
+        // Checks if the hooked file is already written in extra files,
+        //   if so, skips it and warns
+        if (extra_files.find(kv.first) != extra_files.end()) {
+          TORCH_WARN_ONCE(
+              "An extra files hook attempted to write ",
+              kv.first,
+              " but ",
+              "this is already written in extra files and so will be skipped. ",
+              "This warning will only appear once per process.");
+          continue;
+        }
         const std::string key = "extra/" + kv.first;
         writer_.writeRecord(key, kv.second.data(), kv.second.size());
       }
@@ -351,6 +370,38 @@ void ExportModule(
     bool bytecode_format) {
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(module, extra_files, bytecode_format);
+}
+
+namespace {
+void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
+  std::vector<c10::IValue> elements;
+  moduleMethodsTuple(m, elements);
+  for (const auto& element : elements) {
+    auto table = element.toTuple()->elements()[1];
+    auto row =
+        table.toTuple()->elements().at(BYTECODE_INDEX_OPERATOR).toTuple();
+    TORCH_INTERNAL_ASSERT(
+        row->elements().at(0).toStringRef() == "operators",
+        "Expected operators but found ",
+        row->elements().at(0).toStringRef());
+    const auto& ops_list = row->elements().at(1).toTuple()->elements();
+    for (const auto& op : ops_list) {
+      auto op_item = op.toTuple()->elements();
+      TORCH_CHECK(
+          op_item.size() == 2,
+          "There should be two parts in an operator name.");
+      auto opname = op_item[0].toString()->string();
+      auto overload = op_item[1].toString()->string();
+      opnames.emplace(overload.empty() ? opname : opname + "." + overload);
+    }
+  }
+}
+} // namespace
+
+std::vector<std::string> export_opnames(const script::Module& m) {
+  std::set<std::string> names;
+  export_opnames(m, names);
+  return std::vector<std::string>(names.begin(), names.end());
 }
 
 } // namespace jit

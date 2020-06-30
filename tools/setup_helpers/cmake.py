@@ -165,6 +165,11 @@ class CMake:
                 USE_NINJA and not os.path.exists(ninja_build_file)):
             # Everything's in place. Do not rerun.
             return
+        ninja_deps_file = os.path.join(self.build_dir, '.ninja_deps')
+        if IS_WINDOWS and USE_NINJA and os.path.exists(ninja_deps_file):
+            # Cannot rerun ninja on Windows due to a ninja bug.
+            # The workground is to remove `.ninja_deps`.
+            os.remove(ninja_deps_file)
 
         args = []
         if USE_NINJA:
@@ -338,19 +343,3 @@ class CMake:
         else:
             build_args += ['--', '-j', max_jobs]
         self.run(build_args, my_env)
-
-        # in cmake, .cu compilation involves generating certain intermediates
-        # such as .cu.o and .cu.depend, and these intermediates finally get compiled
-        # into the final .so.
-        # Ninja updates build.ninja's timestamp after all dependent files have been built,
-        # and re-kicks cmake on incremental builds if any of the dependent files
-        # have a timestamp newer than build.ninja's timestamp.
-        # There is a cmake bug with the Ninja backend, where the .cu.depend files
-        # are still compiling by the time the build.ninja timestamp is updated,
-        # so the .cu.depend file's newer timestamp is screwing with ninja's incremental
-        # build detector.
-        # This line works around that bug by manually updating the build.ninja timestamp
-        # after the entire build is finished.
-        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
-        if os.path.exists(ninja_build_file):
-            os.utime(ninja_build_file, None)

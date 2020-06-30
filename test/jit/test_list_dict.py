@@ -1,14 +1,13 @@
 import os
 import sys
-import unittest
 import inspect
-from typing import List, Dict
+from typing import Dict, List, Optional, Tuple
 from textwrap import dedent
 from collections import OrderedDict
 
 import torch
 from torch.testing import FileCheck
-from torch._six import PY2
+from torch import Tensor
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -123,11 +122,6 @@ class TestList(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "out of range"):
             fn2([])
-
-        with self.assertRaisesRegex(RuntimeError, "only supported for list and dict"):
-            @torch.jit.script
-            def fn(x):
-                del x
 
         with self.assertRaisesRegex(RuntimeError, "deletion at a single index"):
             @torch.jit.script
@@ -313,7 +307,7 @@ class TestList(JitTestCase):
             test_invalid_list_equality,
             (),
             RuntimeError,
-            "bool value of Tensor")
+            "Boolean value of Tensor")
 
     def test_list_sort(self):
         template = dedent('''
@@ -345,7 +339,7 @@ class TestList(JitTestCase):
             return x
 
         self.checkScriptRaisesRegex(test_fail, (([torch.zeros([2]), torch.zeros([2])],)), Exception,
-                                    "bool value of Tensor with more than one value")
+                                    "Boolean value of Tensor with more than one value")
 
         @torch.jit.script
         def test_mutation():
@@ -451,14 +445,14 @@ class TestList(JitTestCase):
             self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
 
         def foo(names, results):
-            # type: (List[int], List[int])
+            # type: (List[int], List[int]) -> List[Tuple[int, int]]
             return [(k + 5, v - 2) for k, v in zip(names, results)]
 
         test_func(foo, ([1, 2, 4], [4, 7, 9]))
         test_func(foo, ([5], [4, 7, 9]))
 
         def fn(x):
-            # type: (int)
+            # type: (int) -> List[int]
             return [i for i in range(x)]  # noqa: C416
 
         test_func(fn, (9,))
@@ -649,7 +643,6 @@ class TestList(JitTestCase):
 
         self.checkScript(test_pop_slice, ())
 
-    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
     def test_mutable_list_clear_empty(self):
         def test_clear_empty():
             a = torch.jit.annotate(List[int], [])
@@ -658,7 +651,6 @@ class TestList(JitTestCase):
             return len(a) == 0
         self.checkScript(test_clear_empty, ())
 
-    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
     def test_mutable_list_clear(self):
         def test_clear():
             a = [1, 2, 3, 4]
@@ -996,6 +988,13 @@ class TestList(JitTestCase):
             li = torch.jit.annotate(List[List[List[float]]], x.tolist())
             return li
 
+        # Test with torch.float dtype Tensors to check that they are converted to double automatically.
+        self.checkScript(to_list_float_0D, (torch.randn(5, dtype=torch.float)[0],))
+        self.checkScript(to_list_float_1D, (torch.randn(5, dtype=torch.float),))
+        self.checkScript(to_list_float_2D, (torch.randn(5, 6, dtype=torch.float),))
+        self.checkScript(to_list_float_3D, (torch.randn(5, 6, 7, dtype=torch.float),))
+        self.checkScript(to_list_float_3D, (torch.randn(5, 6, 7, dtype=torch.float).transpose(0, 1),))
+
         self.checkScript(to_list_float_0D, (torch.randn(5, dtype=torch.double)[0],))
         self.checkScript(to_list_float_1D, (torch.randn(5, dtype=torch.double),))
         self.checkScript(to_list_float_2D, (torch.randn(5, 6, dtype=torch.double),))
@@ -1035,14 +1034,17 @@ class TestList(JitTestCase):
             li = torch.jit.annotate(List[float], x.tolist())
             return li
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"Expected type hint for result of tolist()"
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError,
+            r"Expected type hint for result of tolist()",
+            "x.tolist("
         ):
             self.checkScript(to_list_missing_type_annotation, (torch.randn(5),))
 
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
             RuntimeError,
             r"Return value was annotated as having type List\[float\] but is actually of type float",
+            "return li"
         ):
             self.checkScript(to_list_incorrect_type_annotation, (torch.randn(5),))
 
@@ -1093,6 +1095,19 @@ class TestList(JitTestCase):
             [1, 2, 3, 4], dtype=torch.long).cuda(),))
         self.checkScript(to_list_float_1D, (torch.randn(
             5, dtype=torch.double).cuda(),))
+
+    def test_no_element_type_annotation(self):
+        def fn(x):
+            # type: (torch.Tensor) -> List
+            a: List = x.tolist()
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
+            torch.jit.script(fn)
 
 
 class TestDict(JitTestCase):
@@ -1226,6 +1241,7 @@ class TestDict(JitTestCase):
             a['b'] -= 12
             a['c'] *= 122
             a['c'] /= 2
+            a['c'] %= 2
             return a
 
         def aug_assign_dict_prim(a):
@@ -1234,6 +1250,7 @@ class TestDict(JitTestCase):
             a['b'] -= 2.4
             a['c'] *= 3.0
             a['c'] /= 2.0
+            a['c'] %= 2.0
             return a
 
         self.checkScript(aug_assign_dict_tensor, (self.dict(),))
@@ -1256,10 +1273,7 @@ class TestDict(JitTestCase):
         self.assertEqual(len(eager_out[1]), len(script_out[1]))
 
         # Check that the item is the correct types
-        if PY2:
-            self.assertTrue(isinstance(script_out[0][0], unicode))
-        else:
-            self.assertTrue(isinstance(script_out[0][0], str))
+        self.assertTrue(isinstance(script_out[0][0], str))
         self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
 
     def test_clear(self):
@@ -1430,6 +1444,15 @@ class TestDict(JitTestCase):
             return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
 
         test_func(test_dict_constructor, ())
+
+        def test_dict_initializer_list():
+            a = {"1": torch.tensor(1), "2": torch.tensor(2)}
+            output_order = []
+            for key in a:
+                output_order.append(a[key])
+            return output_order
+
+        test_func(test_dict_initializer_list, ())
 
         def test_dict_error():
             a = dict()

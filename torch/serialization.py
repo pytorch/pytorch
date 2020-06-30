@@ -10,15 +10,11 @@ import tempfile
 import warnings
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
-from ._six import string_classes as _string_classes, PY2
+from ._six import string_classes as _string_classes
 from torch._utils_internal import get_source_lines_and_file
-if PY2:
-    import copy_reg as copyreg
-    import cPickle as pickle
-else:
-    import copyreg
-    import pickle
-    import pathlib
+import copyreg
+import pickle
+import pathlib
 
 DEFAULT_PROTOCOL = 2
 
@@ -195,7 +191,6 @@ def storage_to_tensor_type(storage):
 
 def _is_path(name_or_buffer):
     return isinstance(name_or_buffer, str) or \
-        (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
         (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
 
 
@@ -248,7 +243,7 @@ class _open_zipfile_reader(_opener):
 
 class _open_zipfile_writer_file(_opener):
     def __init__(self, name):
-        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(name))
+        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(str(name)))
 
     def __exit__(self, *args):
         self.file_like.write_end_of_file()
@@ -332,7 +327,7 @@ def _check_dill_version(pickle_module):
                 pickle_module.__version__
             ))
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
@@ -344,12 +339,18 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
 
-    .. warning::
-        If you are using Python 2, :func:`torch.save` does NOT support :class:`StringIO.StringIO`
-        as a valid file-like object. This is because the write method should return
-        the number of bytes written; :meth:`StringIO.write()` does not do this.
+    .. note::
+        A common PyTorch convention is to save tensors using .pt file extension.
 
-        Please use something like :class:`io.BytesIO` instead.
+    .. note::
+        PyTorch preserves storage sharing across serialization. See :ref:`preserve-storage-sharing`
+        for more details.
+
+    .. note::
+        The 1.6 release of PyTorch switched ``torch.save`` to use a new
+        zipfile-based file format. ``torch.load`` still retains the ability to
+        load files in the old format. If for any reason you want ``torch.save``
+        to use the old format, pass the kwarg ``_use_new_zipfile_serialization=False``.
 
     Example:
         >>> # Save to file
@@ -371,14 +372,6 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_ne
 
 
 def _legacy_save(obj, f, pickle_module, pickle_protocol):
-    if sys.version_info[0] == 2:
-        import StringIO
-        if isinstance(f, StringIO.StringIO):
-            msg = ('torch.save received unsupported StringIO.StringIO file object, whose '
-                   'write method does not return the number of bytes written. '
-                   'Please use something like io.BytesIO for torch.save instead.')
-            raise RuntimeError(msg)
-
     import torch.nn as nn
     serialized_container_types = {}
     serialized_storages = {}
@@ -486,7 +479,6 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         if storage.device.type == 'cpu':
             # If it's on the CPU we can directly copy it into the zip file
             num_bytes = storage.size() * storage.element_size()
-            buf = io.BytesIO()
             zip_file.write_record(name, storage.data_ptr(), num_bytes)
         else:
             # Copy to a buffer, then serialize that
@@ -578,7 +570,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     """
     _check_dill_version(pickle_module)
 
-    if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
+    if 'encoding' not in pickle_load_args.keys():
         pickle_load_args['encoding'] = 'utf-8'
 
     with _open_file_like(f, 'rb') as opened_file:
@@ -823,14 +815,12 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
     loaded_storages = {}
 
-    def load_tensor(obj, size, key, location):
-        loaded_storages[key] = restore_location(obj, location)
+    def load_tensor(data_type, size, key, location):
         name = 'data/{}'.format(key)
-        size_long = struct.pack("<Q", size)
-        tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
-        offset = None
-        is_real_file = False
-        loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
+        dtype = data_type(0).dtype
+
+        storage = zip_file.get_storage_from_record(name, size, dtype).storage()
+        loaded_storages[key] = restore_location(storage, location)
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
@@ -841,7 +831,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
             "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
         data_type, key, location, size = data
         if key not in loaded_storages:
-            load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
+            load_tensor(data_type, size, key, _maybe_decode_ascii(location))
         storage = loaded_storages[key]
         return storage
 

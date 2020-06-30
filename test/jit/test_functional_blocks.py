@@ -16,7 +16,7 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestFunctionalBlocks(JitTestCase):
-    def test_simple_no_merge(self):
+    def test_subgraph_creation(self):
         def fn(x, y, z):
             x = x + 1
             y = y + 1
@@ -38,8 +38,8 @@ class TestFunctionalBlocks(JitTestCase):
         # Don't allow any outputs which escape scope, so there is one final addition in the graph
         FileCheck().check("Tensor = prim::Functional").check_next("aten::add").run(graph)
 
-        # z + 1, z.add_(2) z * z considered non functional
-        FileCheck().check("add").check("add_").check("mul").check("FunctionalGraph").run(graph)
+        # z + 1, z.add_(2) considered non functional, z = z * z should be considered functional
+        FileCheck().check("add").check("add_").check_not("mul").check("FunctionalGraph").run(graph)
 
     def test_lower_linear(self):
         # linear is one of main use cases of removing mutation so add test so it doesnt regress
@@ -126,6 +126,52 @@ class TestFunctionalBlocks(JitTestCase):
         # its intermediary use (so long as aliasing is safe)
         FileCheck().check_count("aten::add_", 1).run(graph)
         self.assertEqual(test_intermediary_use(), fn())
+
+    def test_remove_mutation_if_output(self):
+        def foo(x, cond: bool):
+            if cond:
+                y = x + 5
+            else:
+                y = x + 2
+            y.add_(4)
+            return y
+
+        out_eager = foo(torch.tensor(5), True)
+        foo_script = torch.jit.script(foo)
+        FileCheck().check("aten::add_").run(foo_script.graph)
+        self.run_pass('remove_mutation', foo_script.graph)
+        FileCheck().check_not("aten::add_").run(foo_script.graph)
+
+        self.assertEqual(out_eager, foo_script(torch.tensor(5), True))
+
+    def test_remove_mutation_if_output_fail(self):
+        @torch.jit.script
+        def foo(cond: bool):
+            li = []
+            if cond:
+                x = torch.tensor(1)
+                li.append(x)
+            else:
+                x = torch.tensor(2)
+            y = x.add_(2)
+            return y, li
+
+        self.run_pass('inline', foo.graph)
+        self.run_pass('remove_mutation', foo.graph)
+        FileCheck().check("aten::add_").run(foo.graph)
+
+        @torch.jit.script
+        def foo(cond: bool, y):
+            if cond:
+                x = y
+            else:
+                x = torch.tensor(2)
+            z = x.add_(2)
+            return z
+
+        self.run_pass('inline', foo.graph)
+        self.run_pass('remove_mutation', foo.graph)
+        FileCheck().check("aten::add_").run(foo.graph)
 
     def test_remove_mutation_lists_append(self):
         def successful_remove():

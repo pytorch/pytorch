@@ -40,11 +40,11 @@ struct TORCH_API Object {
       TORCH_CHECK(
           v.type()->isSubtypeOf(expected),
           "Expected a value of type '",
-          expected->python_str(),
+          expected->repr_str(),
           "' for field '",
           name,
           "', but found '",
-          v.type()->python_str(),
+          v.type()->repr_str(),
           "'");
       _ivalue()->setSlot(*slot, std::move(v));
     } else {
@@ -61,7 +61,7 @@ struct TORCH_API Object {
     }
     TORCH_CHECK(
         false,
-        _ivalue()->type()->python_str(),
+        _ivalue()->type()->repr_str(),
         " does not have a field with name '",
         name,
         "'");
@@ -123,6 +123,13 @@ struct TORCH_API Object {
   size_t num_slots() const {
     return _ivalue()->slots().size();
   }
+
+  // shallow copy the object
+  Object copy() const;
+
+  // Copies all the attributes of the object recursively without creating new
+  // `ClassType`, including deepcopy of Tensors
+  Object deepcopy() const;
 
  private:
   // mutable be we lazily initialize in module_object.

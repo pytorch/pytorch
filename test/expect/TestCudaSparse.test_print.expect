@@ -25,9 +25,9 @@ tensor(indices=tensor([], size=(0, 2)),
        device='cuda:0', size=(), nnz=2, dtype=torch.float32,
        layout=torch.sparse_coo, requires_grad=True)
 # after addition
-tensor(indices=tensor([], size=(0, 4)),
-       values=tensor([0., 1., 0., 1.]),
-       device='cuda:0', size=(), nnz=4, dtype=torch.float32,
+tensor(indices=tensor([], size=(0, 1)),
+       values=tensor([2.]),
+       device='cuda:0', size=(), nnz=1, dtype=torch.float32,
        layout=torch.sparse_coo, grad_fn=<AddBackward0>)
 # _indices
 tensor([], device='cuda:0', size=(0, 2), dtype=torch.int64)
@@ -61,9 +61,9 @@ tensor(indices=tensor([], size=(0, 10)),
        device='cuda:0', size=(0,), nnz=10, dtype=torch.float32,
        layout=torch.sparse_coo, requires_grad=True)
 # after addition
-tensor(indices=tensor([], size=(0, 20)),
-       values=tensor([], size=(20, 0)),
-       device='cuda:0', size=(0,), nnz=20, dtype=torch.float32,
+tensor(indices=tensor([], size=(0, 1)),
+       values=tensor([], size=(1, 0)),
+       device='cuda:0', size=(0,), nnz=1, dtype=torch.float32,
        layout=torch.sparse_coo, grad_fn=<AddBackward0>)
 # _indices
 tensor([], device='cuda:0', size=(0, 10), dtype=torch.int64)
@@ -105,14 +105,9 @@ tensor(indices=tensor([], size=(0, 3)),
        device='cuda:0', size=(2,), nnz=3, dtype=torch.float32,
        layout=torch.sparse_coo, requires_grad=True)
 # after addition
-tensor(indices=tensor([], size=(0, 6)),
-       values=tensor([[0.0000, 0.3333],
-                      [0.6667, 1.0000],
-                      [1.3333, 1.6667],
-                      [0.0000, 0.3333],
-                      [0.6667, 1.0000],
-                      [1.3333, 1.6667]]),
-       device='cuda:0', size=(2,), nnz=6, dtype=torch.float32,
+tensor(indices=tensor([], size=(0, 1)),
+       values=tensor([[4.0000, 6.0000]]),
+       device='cuda:0', size=(2,), nnz=1, dtype=torch.float32,
        layout=torch.sparse_coo, grad_fn=<AddBackward0>)
 # _indices
 tensor([], device='cuda:0', size=(0, 3), dtype=torch.int64)
@@ -235,9 +230,9 @@ tensor(indices=tensor([], size=(0, 3)),
        device='cuda:0', size=(10, 0, 3), nnz=3, dtype=torch.float32,
        layout=torch.sparse_coo, requires_grad=True)
 # after addition
-tensor(indices=tensor([], size=(0, 6)),
-       values=tensor([], size=(6, 10, 0, 3)),
-       device='cuda:0', size=(10, 0, 3), nnz=6, dtype=torch.float32,
+tensor(indices=tensor([], size=(0, 1)),
+       values=tensor([], size=(1, 10, 0, 3)),
+       device='cuda:0', size=(10, 0, 3), nnz=1, dtype=torch.float32,
        layout=torch.sparse_coo, grad_fn=<AddBackward0>)
 # _indices
 tensor([], device='cuda:0', size=(0, 3), dtype=torch.int64)

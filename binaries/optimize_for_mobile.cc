@@ -17,6 +17,7 @@
 #include <string>
 
 #include "torch/csrc/jit/api/module.h"
+#include "torch/csrc/jit/passes/vulkan_rewrite.h"
 #include "torch/csrc/jit/passes/xnnpack_rewrite.h"
 #include "torch/csrc/jit/serialization/import.h"
 
@@ -25,6 +26,11 @@ C10_DEFINE_string(
     output,
     "",
     "Name of the output model to be saved.");
+C10_DEFINE_bool(
+    save_for_mobile,
+    false,
+    "Save the model with bytecode format compatible with lite inteprter.");
+C10_DEFINE_bool(vulkan, false, "Vulkan optimize_for_mobile");
 
 int main(int argc, char** argv) {
   c10::SetUsageMessage(
@@ -48,8 +54,16 @@ int main(int argc, char** argv) {
   }
 
   auto module = torch::jit::load(FLAGS_model);
-  torch::jit::optimizeForMobile(module);
-  module.save(output_model_name);
+
+  auto optimized_module = FLAGS_vulkan
+      ? torch::jit::vulkanOptimizeForMobile(module)
+      : torch::jit::optimizeForMobile(module);
+
+  if (FLAGS_save_for_mobile) {
+    optimized_module._save_for_mobile(output_model_name);
+  } else {
+    optimized_module.save(output_model_name);
+  }
 
   return 0;
 }
