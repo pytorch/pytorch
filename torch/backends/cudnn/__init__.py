@@ -84,7 +84,6 @@ def is_acceptable(tensor):
 
 
 def set_flags(_enabled, _benchmark, _deterministic, _allow_tf32):
-    global benchmark, deterministic, allow_tf32
     orig_flags = (torch._C._get_cudnn_enabled(),
                   torch._C._get_cudnn_benchmark(),
                   torch._C._get_cudnn_deterministic(),
