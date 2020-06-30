@@ -495,7 +495,7 @@ void testAliasAnalysis() {
 void testWriteTracking() {
   RegisterOperators reg({Operator(
       "prim::creates_alias(Tensor(a) x) -> Tensor(a)",
-      [](Stack& s) { return 0; },
+      [](Stack* s) {},
       aliasAnalysisFromSchema())});
   const auto creates_alias = Symbol::fromQualString("prim::creates_alias");
   {
@@ -920,11 +920,11 @@ graph():
 void testWildcards() {
   RegisterOperators reg({Operator(
                              "prim::returns_wildcard(Tensor a) -> Tensor(*)",
-                             [](Stack& stack) { return 0; },
+                             [](Stack* stack) {},
                              aliasAnalysisFromSchema()),
                          Operator(
                              "prim::writes(Tensor(z!) a) -> Tensor(a)",
-                             [](Stack& stack) { return 0; },
+                             [](Stack* stack) {},
                              aliasAnalysisFromSchema())});
   const auto returns_wildcard =
       Symbol::fromQualString("prim::returns_wildcard");

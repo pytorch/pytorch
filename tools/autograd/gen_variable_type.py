@@ -189,6 +189,7 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 }
 """)
 
+# See NOTE[UnboxedOnly] in function_wrapper.py
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_wrapper_name});
 """)
@@ -345,6 +346,7 @@ ${return_type} ${api_name}(${declaration_formals}); // {"schema": "${schema_stri
 """)
 
 # ProfiledType templates
+# See NOTE[UnboxedOnly] in function_wrapper.py
 UNBOXED_PROFILE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
@@ -363,6 +365,7 @@ return c10::Dispatcher::singleton().redispatch<${profiled_ret_and_arg_types}>(${
 
 # TraceType templates
 # TODO: change `redispatch` to `NoTracerDispatchMode` + regular `call`.
+# See NOTE[UnboxedOnly] in function_wrapper.py
 UNBOXED_TRACE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
