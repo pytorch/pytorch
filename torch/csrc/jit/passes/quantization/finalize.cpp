@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/passes/quantization/finalize.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
-#include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/quantization/quantization_patterns.h>
 
 namespace torch {
@@ -88,7 +88,7 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
   }
 }
 
-void  rewriteListAddToAppend(std::shared_ptr<Graph>& graph) {
+void rewriteListAddToAppend(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before restore append", graph);
   std::string list_add = R"IR(
 graph(%list, %x):
@@ -106,7 +106,7 @@ graph(%list, %x):
   */
 
   const PatternInfo& list_add_pattern_info =
-    PatternInfo::parse_from_str(list_add);
+      PatternInfo::parse_from_str(list_add);
   const Graph& list_add_graph = *list_add_pattern_info.pattern_graph;
   const auto& list_add_vmap = list_add_pattern_info.vmap;
   const auto& matches =
