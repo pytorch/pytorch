@@ -1142,7 +1142,7 @@ inline py::object invokeOperatorFromPython(
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
         op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
-    op.getOperation()(stack);
+    op.getOperation()(&stack);
   } else {
     std::vector<schema_match_error> errors;
     std::shared_ptr<Operator> found_op = nullptr;
@@ -1163,7 +1163,7 @@ inline py::object invokeOperatorFromPython(
       }
       throw std::runtime_error(ss.str());
     }
-    found_op->getOperation()(stack);
+    found_op->getOperation()(&stack);
   }
 
   return createPyObjectForStack(std::move(stack));

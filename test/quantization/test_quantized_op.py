@@ -2114,6 +2114,11 @@ class TestQuantizedOps(TestCase):
         result = torch.ops.quantized.linear(qX, w_packed, 1.0, 0)
         self.assertEqual(result.shape, (0, 2))
 
+        # dynamic linear
+        result = torch.ops.quantized.linear_dynamic(X, w_packed)
+        self.assertEqual(result.shape, (0, 2))
+
+
 
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
