@@ -73,8 +73,7 @@ TESTS = [
     'test_profiler',
     'distributed/nn/jit/test_instantiator',
     'distributed/nn/api/test_remote_module_spawn',
-    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/test_faulty_agent',
     'distributed/rpc/jit/test_dist_autograd_spawn',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/test_dist_autograd_spawn',
@@ -83,7 +82,6 @@ TESTS = [
     'test_jit_py3',
     'test_determination',
     'distributed/rpc/jit/test_rpc_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
     'test_futures',
     'distributed/test_ddp_under_dist_autograd',
 ]
@@ -91,8 +89,7 @@ TESTS = [
 WINDOWS_BLACKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/nn/api/test_remote_module_spawn',
-    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/test_faulty_agent',
     'distributed/rpc/jit/test_dist_autograd_spawn',
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/test_tensorpipe_agent',
@@ -106,8 +103,7 @@ WINDOWS_BLACKLIST = [
 ROCM_BLACKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/nn/api/test_remote_module_spawn',
-    'distributed/rpc/faulty_agent/test_dist_autograd_spawn',
-    'distributed/rpc/faulty_agent/test_rpc_spawn',
+    'distributed/rpc/test_faulty_agent',
     'distributed/rpc/jit/test_dist_autograd_spawn',
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/test_tensorpipe_agent',
