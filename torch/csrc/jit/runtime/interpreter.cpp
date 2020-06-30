@@ -1148,13 +1148,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             runGraphFunction(stack, &f, &af);
           } break;
           case OP:
-
-            af.operators[inst.X](stack);
+            af.operators[inst.X](&stack);
             ++af.pc;
             break;
           case OPN:
             stack.push_back(inst.N);
-            af.operators[inst.X](stack);
+            af.operators[inst.X](&stack);
             ++af.pc;
             break;
           case LOAD:
