@@ -1132,7 +1132,7 @@ Example::
     >>> x.real
     tensor([ 0.3100, -0.5445, -1.6492, -0.0638])
 
-""")
+""".format(**common_args))
 
 add_docstr(torch.imag,
            r"""
@@ -1154,7 +1154,7 @@ Example::
     >>> x.imag
     tensor([ 0.3553, -0.7896, -0.0633, -0.8119])
 
-""")
+""".format(**common_args))
 
 add_docstr(torch.view_as_real,
            r"""
@@ -1180,7 +1180,7 @@ Example::
             [-0.2098, -0.6699],
             [ 0.3470, -0.9451],
             [-0.5174, -1.3136]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.view_as_complex,
            r"""
@@ -1208,7 +1208,7 @@ Example::
             [-0.6561, -1.6623]])
     >>> torch.view_as_complex(x)
     tensor([(1.6116-0.5772j), (-1.4606-0.9120j), (0.0786-1.7497j), (-0.6561-1.6623j)])
-""")
+""".format(**common_args))
 
 add_docstr(torch.reciprocal,
            r"""
@@ -6958,9 +6958,9 @@ full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, 
 Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
 
 .. warning::
-    In PyTorch 1.5 a bool or integral :attr:`fill_value` will produce a warning if
-    :attr:`dtype` or :attr:`out` are not set.
-    In a future PyTorch release, when :attr:`dtype` and :attr:`out` are not set
+    Providing a bool or integral :attr:`fill_value` without setting
+    the optional :attr:`dtype` or :attr:`out` arguments is currently unsupported.
+    In PyTorch 1.7, when :attr:`dtype` and :attr:`out` are not set
     a bool :attr:`fill_value` will return a tensor of torch.bool dtype,
     and an integral :attr:`fill_value` will return a tensor of torch.long dtype.
 
@@ -7258,6 +7258,10 @@ The inverse of this function is :func:`~torch.ifft`.
     monitor and control the cache.
 
 .. warning::
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
+
+.. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
@@ -7353,6 +7357,10 @@ The inverse of this function is :func:`~torch.fft`.
     monitor and control the cache.
 
 .. warning::
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
+
+.. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
@@ -7437,6 +7445,10 @@ The inverse of this function is :func:`~torch.irfft`.
     monitor and control the cache.
 
 .. warning::
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
+
+.. warning::
     For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
@@ -7512,6 +7524,10 @@ The inverse of this function is :func:`~torch.rfft`.
     repeatedly running FFT methods on tensors of same geometry with same
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
+
+.. warning::
+    Due to limited dynamic range of half datatype, performing this operation in half
+    precision may cause the first element of result to overflow for certain inputs.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Use

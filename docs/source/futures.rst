@@ -18,7 +18,7 @@ on :class:`~torch.futures.Future` objects. Currently, the
 .. automodule:: torch.futures
 
 .. autoclass:: Future
-    :members:
+    :inherited-members:
 
 .. autofunction:: collect_all
 .. autofunction:: wait_all

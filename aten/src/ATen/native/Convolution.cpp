@@ -235,7 +235,6 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.options().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
-     !is_dilated() && // doesn't support dilation
      !transposed && // or transposed tensors
      input.ndimension() == 4); // must be in NCHW format
 #endif
@@ -262,9 +261,7 @@ auto ConvParams::use_xnnpack(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias) const -> bool {
-// Disable the xnnpack operators for both iOS and macOS temporarily due to the crash in pthreadpool
-// TODO:T66297472 remove `!defined(__APPLE__)` once we figure out the root cause of the crash.
-#if defined(C10_MOBILE) && !defined(__APPLE__)
+#if defined(C10_MOBILE)
   if (!transposed) {
     return (input.size(1) == groups) &&
             xnnpack::use_convolution2d(

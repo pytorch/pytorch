@@ -2676,7 +2676,7 @@ class AbstractTestCases:
             self._test_scatter_add_mult_index_base(self, lambda t: t)
 
         @staticmethod
-        def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, *, test_complex=False):
+        def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True, reduction=None, *, test_complex=False):
             if test_complex:
                 dtypes = [torch.complex64, torch.complex128]
             else:
@@ -2699,7 +2699,10 @@ class AbstractTestCases:
                     src = cast(torch.randn(src_size, dtype=dtype))
 
                 base = cast(torch.randn(m, n, o, dtype=dtype))
-                actual = getattr(base.clone(), method)(dim, idx, src)
+                if reduction:
+                    actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+                else:
+                    actual = getattr(base.clone(), method)(dim, idx, src)
                 expected = base.clone()
                 for i in range(idx_size[0]):
                     for j in range(idx_size[1]):
@@ -2707,7 +2710,17 @@ class AbstractTestCases:
                             ii = [i, j, k]
                             ii[dim] = idx[i, j, k]
                             if method == 'scatter_' and not is_scalar:
-                                expected[tuple(ii)] = src[i, j, k]
+                                if reduction:
+                                    if reduction == "add":
+                                        expected[tuple(ii)] += src[i, j, k]
+                                    elif reduction == "subtract":
+                                        expected[tuple(ii)] -= src[i, j, k]
+                                    elif reduction == "multiply":
+                                        expected[tuple(ii)] *= src[i, j, k]
+                                    elif reduction == "divide":
+                                        expected[tuple(ii)] /= src[i, j, k]
+                                else:
+                                    expected[tuple(ii)] = src[i, j, k]
                             elif method == 'scatter_add_':
                                 expected[tuple(ii)] += src[i, j, k]
                             else:
@@ -2725,17 +2738,23 @@ class AbstractTestCases:
                         getattr(base.clone(), method)(dim, idx, src.type(torch.int))
 
                 # should throw an error when index dtype is not long
-                with self.assertRaisesRegex(RuntimeError, 'Expected dtype int64 for index'):
+                with self.assertRaisesRegex(IndexError, 'Expected dtype int64 for index'):
                     getattr(base.clone(), method)(dim, idx.type(torch.int), src)
 
                 if test_bounds:
                     idx[0][0][0] = 34
                     with self.assertRaises(RuntimeError):
-                        getattr(base.clone(), method)(dim, idx, src)
+                        if reduction:
+                            getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+                        else:
+                            getattr(base.clone(), method)(dim, idx, src)
 
                 # test for empty index, should be a no-op
                 idx = cast(torch.LongTensor())
-                actual = getattr(base.clone(), method)(dim, idx, src)
+                if reduction:
+                    actual = getattr(base.clone(), method)(dim, idx, src, reduce=reduction)
+                else:
+                    actual = getattr(base.clone(), method)(dim, idx, src)
                 self.assertEqual(actual, base, atol=0, rtol=0)
 
         def test_scatter(self):
@@ -2746,6 +2765,10 @@ class AbstractTestCases:
 
         def test_scatterFill(self):
             self._test_scatter_base(self, lambda t: t, 'scatter_', True)
+
+        def test_scatterReduce(self):
+            for method in ["add", "subtract", "multiply", "divide"]:
+                self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
 
         def test_masked_scatter(self):
             with warnings.catch_warnings(record=True) as w:
@@ -7064,6 +7087,28 @@ class TestTorchDeviceType(TestCase):
         z = res1.clone().contiguous(memory_format=torch.channels_last)
         res2 = torch.cat((x, y), out=z)
         self.assertEqual(res1, res2)
+
+    @onlyCPU
+    def test_cat_in_channels_last(self, device):
+        for dim in range(4):
+            x = torch.randn((4, 15, 8, 8), device=device)
+            y = torch.randn(x.shape, device=device)
+            res1 = torch.cat((x, y), dim=dim)
+            x = x.clone().contiguous(memory_format=torch.channels_last)
+            y = y.clone().contiguous(memory_format=torch.channels_last)
+            res2 = torch.cat((x, y), dim=dim)
+            self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(res1, res2)
+
+            # Size larger than grain size.
+            x = torch.randn((4, 15, 256, 256), device=device)
+            y = torch.randn(x.shape, device=device)
+            res1 = torch.cat((x, y), dim=dim)
+            x = x.clone().contiguous(memory_format=torch.channels_last)
+            y = y.clone().contiguous(memory_format=torch.channels_last)
+            res2 = torch.cat((x, y), dim=dim)
+            self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(res1, res2)
 
     @onlyCUDA
     def test_cat_preserve_channels_last(self, device):
@@ -12518,6 +12563,116 @@ class TestTorchDeviceType(TestCase):
                     src = torch.randn(indices_shape, device=device)
                     self.assertEqual(dst, dst.put_(indices, src, accumulate=accumulate))
 
+    @onlyCPU
+    def test_scatter_reduce_operations_to_large_input(self, device):
+        index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+        test_data = [
+            (torch.zeros(4, 4, device=device, dtype=torch.float32),
+             torch.ones(2, 2, device=device, dtype=torch.float32),
+             torch.tensor([[0, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [0, 0, 0, 0]],
+                          device=device, dtype=torch.float32), "add"),
+            (torch.zeros(4, 4, device=device, dtype=torch.float32),
+             torch.ones(2, 2, device=device, dtype=torch.float32),
+             torch.tensor([[0, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(2, 2),
+             torch.tensor([[2, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(2, 2),
+             torch.tensor([[2, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "divide")
+        ]
+
+        for input, src, result, operation in test_data:
+            input.scatter_(0, index, src, reduce=operation)
+            self.assertEqual(input, result)
+
+    @onlyCPU
+    def test_scatter_reduce_scalar(self, device):
+        index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
+        test_data = [
+            (torch.zeros(4, 4, device=device, dtype=torch.float32), 1,
+             torch.tensor([[0, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [1, 0, 0, 0],
+                           [0, 0, 0, 0]],
+                          device=device, dtype=torch.float32), "add"),
+            (torch.zeros(4, 4, device=device, dtype=torch.float32), 1,
+             torch.tensor([[0, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [0, 0, 0, 0]], device=device, dtype=torch.float32), "subtract"),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4), 2,
+             torch.tensor([[2, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "multiply"),
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(4, 4), 2,
+             torch.tensor([[2, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device, dtype=torch.float32), "divide")
+        ]
+
+        for input, src, result, operation in test_data:
+            input.scatter_(0, index, src, reduce=operation)
+            self.assertEqual(input, result)
+
+    # TODO: remove this after scatter_add_ is deprecated.
+    def test_scatter_add_non_unique_index(self, device):
+        height = 2
+        width = 65536
+        input = torch.ones(height, width, device=device)
+        index = torch.zeros(height, width, dtype=torch.long, device=device)
+        src = torch.ones(height, width, device=device)
+        input.scatter_add_(0, index, src)
+
+        self.assertEqual(input,
+                         torch.tensor([[3], [1]], device=device,
+                                      dtype=torch.float32).repeat(1, width))
+
+    @onlyCPU
+    def test_scatter_reduce_non_unique_index(self, device):
+        height = 2
+        width = 2
+        index = torch.zeros(height, width, dtype=torch.long, device=device)
+        test_data = [
+            (torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.tensor([[3], [1]], device=device, dtype=torch.float32).repeat(1, width), "add"),
+
+            (torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.ones(height, width, device=device, dtype=torch.float32),
+             torch.tensor([[-1], [1]], device=device,
+                          dtype=torch.float32).repeat(1, width), "subtract"),
+
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([[8], [2]], device=device,
+                          dtype=torch.float32).repeat(1, width), "multiply"),
+
+            (torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([2], device=device, dtype=torch.float32).repeat(height, width),
+             torch.tensor([[0.5], [2]], device=device,
+                          dtype=torch.float32).repeat(1, width), "divide"),
+        ]
+
+        for input, src, result, operation in test_data:
+            input.scatter_(0, index, src, reduce=operation)
+            self.assertEqual(input, result)
+
+
     def test_scatter_to_large_input(self, device):
         input = torch.zeros(4, 4, device=device)
         src = torch.ones(2, 2, device=device)
@@ -13067,9 +13222,9 @@ class TestTorchDeviceType(TestCase):
             ('mode', torch.mode, None),
             ('median', torch.median, None),
 
-            ('prod', torch.prod, 1),
-            ('sum', torch.sum, 0),
-            ('norm', torch.norm, 0),
+            ('prod', torch.prod, 1.),
+            ('sum', torch.sum, 0.),
+            ('norm', torch.norm, 0.),
             ('mean', torch.mean, nan),
             ('var', torch.var, nan),
             ('std', torch.std, nan),
@@ -17281,25 +17436,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
 
-    def test_full_deprecation_warning(self, device):
+    # NOTE: inferring the dtype from bool or integer fill values is
+    #   disabled because the behavior is changing from PyTorch 1.5,
+    #   where the default scalar type would be inferred, to PyTorch 1.7,
+    #   where bool or long, respectively, will be inferred.
+    def test_full_unsupported_integer_inference(self, device):
         size = (2, 2)
         # Tests bool and integer fill_values deprecated without specific dtype set
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, True).dtype, torch.float)
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, 1).dtype, torch.float)
 
         # Explicitly setting the dtype doesn't warn
-        with self.maybeWarnsRegex(UserWarning, ''):
-            self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
-        with self.maybeWarnsRegex(UserWarning, ''):
-            self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype,
-                             torch.bool)
+        self.assertEqual(torch.full(size, 1, dtype=torch.long).dtype, torch.long)
+        self.assertEqual(torch.full(size, True, dtype=torch.bool).dtype, torch.bool)
 
         # Performs same tests with named tensor
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, True, names=('a', 'b')).dtype, torch.float)
-        with self.maybeWarnsRegex(UserWarning, 'Deprecation warning: .+|Named tensors .+'):
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
             self.assertEqual(torch.full(size, 1, names=('a', 'b')).dtype, torch.float)
 
         with self.maybeWarnsRegex(UserWarning, 'Named tensors .+'):
@@ -17317,15 +17473,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         prev_default = torch.get_default_dtype()
         torch.set_default_dtype(dtype)
 
-        # Tests bool fill value inference
+        # Tests bool fill value inference (currently unsupported)
         # Note: in the future this will return a tensor of torch.bool dtype
-        t = torch.full(size, True)
-        self.assertEqual(t.dtype, dtype)
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
+            t = torch.full(size, True)
+            self.assertEqual(t.dtype, dtype)
 
-        # Tests integer fill value inference
+        # Tests integer fill value inference (currently unsupported)
         # Note: in the future this will return a tensor of torch.long dtype
-        t = torch.full(size, 1)
-        self.assertEqual(t.dtype, dtype)
+        with self.assertRaisesRegex(RuntimeError, '.+is currently unsupported.+'):
+            t = torch.full(size, 1)
+            self.assertEqual(t.dtype, dtype)
 
         # Tests float fill value inference
         t = torch.full(size, 1.)
@@ -17350,7 +17508,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          torch.complex64)
 
     def test_full_out(self, device):
-        o = torch.empty((5,), device=device, dtype=torch.long)
+        size = (5,)
+        o = torch.empty(size, device=device, dtype=torch.long)
 
         # verifies dtype/out conflict throws a RuntimeError
         with self.assertRaises(RuntimeError):
@@ -17358,6 +17517,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # verifies out dtype overrides inference
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
+        self.assertEqual(torch.full(size, 1, out=o).dtype, o.dtype)
 
     def _float_to_int_conversion_helper(self, vals, device, dtype):
         assert TEST_NUMPY
@@ -17707,6 +17867,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for replacement in (True, False):
             out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
             self.assertEqual(out, expected)
+
+    @dtypes(torch.int32, torch.int64)
+    def test_large_linspace(self, device, dtype):
+        start = torch.iinfo(dtype).min
+        end = torch.iinfo(dtype).max & ~0xfff
+        steps = 15
+        x = torch.linspace(start, end, steps, dtype=dtype, device=device)
+        self.assertGreater(x[1] - x[0], (end - start) / steps)
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
@@ -18256,6 +18424,26 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].real, a.real[5:])
         self.assertEqual(a[5:].imag, a.imag[5:])
 
+    @onlyOnCPUAndCUDA
+    @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
+    @suppress_warnings
+    def test_set_real_imag(self, device, dtypes):
+        x = torch.randn(10, dtype=dtypes[0], device=device)
+
+        new_real = _make_tensor((10,), dtypes[1], device)
+        new_imag = _make_tensor((10,), dtypes[1], device)
+
+        x.real = new_real
+        x.imag = new_imag
+
+        if dtypes[1].is_complex:
+            self.assertEqual(x.real, new_real.real, exact_dtype=False)
+            self.assertEqual(x.imag, new_imag.real, exact_dtype=False)
+
+        else:
+            self.assertEqual(x.real, new_real, exact_dtype=False)
+            self.assertEqual(x.imag, new_imag, exact_dtype=False)
+
     def test_diagonal_view(self, device) -> None:
         t = torch.ones((5, 5), device=device)
         v = torch.diagonal(t)
@@ -18580,7 +18768,7 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
         return torch.ones(*shape, dtype=_convert_t(dtype, device), device=device)
 
     # Returns a tensor with random integer values
-    if not dtype.is_floating_point:
+    if not (dtype.is_floating_point or dtype.is_complex):
         t = torch.randint(0, 10, shape, device=device)
         if dtype != torch.uint8:
             t = t - 5  # generate negative values also
