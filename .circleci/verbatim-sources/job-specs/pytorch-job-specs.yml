@@ -6,8 +6,9 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - attach_workspace:
+        at: ~/workspace
     - setup_linux_system_environment
-    - checkout
     - optional_merge_target_branch
     - setup_ci_environment
     - run:
@@ -74,6 +75,8 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - attach_workspace:
+        at: ~/workspace
     - setup_linux_system_environment
     - setup_ci_environment
     - run:

@@ -1,8 +1,8 @@
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - load_shared_env
     - run:
         <<: *binary_checkout
     - run:
