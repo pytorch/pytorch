@@ -21,7 +21,7 @@ from torch.testing._internal.distributed.rpc.jit.rpc_test import JitRpcTest
 from torch.testing._internal.distributed.rpc.process_group_agent_test_fixture import (
     ProcessGroupRpcAgentTestFixture,
 )
-from torch.testing._internal.distributed.rpc.rpc_test import RpcTest
+from torch.testing._internal.distributed.rpc.rpc_test import ProcessGroupAgentRpcTest
 
 
 @unittest.skipIf(
@@ -33,7 +33,7 @@ class SpawnHelper(ProcessGroupRpcAgentTestFixture, MultiProcessTestCase):
         self._spawn_processes()
 
 
-class ProcessGroupRpcTestWithSpawn(RpcTest, SpawnHelper):
+class ProcessGroupRpcTestWithSpawn(ProcessGroupAgentRpcTest, SpawnHelper):
     pass
 
 
