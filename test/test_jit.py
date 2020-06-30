@@ -8725,9 +8725,11 @@ a")
                 assert self.moduledict["submod"] is self.submod, "__getitem__ failing for ModuleDict"
                 assert len(self.moduledict) == 1, "__len__ failing for ModuleDict"
 
-                # TODO whc - fix
-                # for module in self.moduledict:
-                #     assert module is self.submod, "__iter__ failing for ModuleDict"
+                # note: unable to index moduledict with a string variable currently
+                i = 0
+                for key in self.moduledict:
+                    i += 1
+                assert i == len(self.moduledict), "iteration failing for ModuleDict"
 
                 assert "submod" in self.moduledict, "__contains__ fails for ModuleDict"
 
@@ -8745,7 +8747,6 @@ a")
 
         m = MyModule()
         self.checkModule(m, [torch.randn(2, 2)])
-
 
     def test_moduledict_getitem(self):
         class MyModule(torch.nn.Module):
