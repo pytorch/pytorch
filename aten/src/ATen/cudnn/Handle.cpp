@@ -18,7 +18,9 @@ void destroyCuDNNHandle(cudnnHandle_t handle) {
 //   - @soumith
 #ifdef NO_CUDNN_DESTROY_HANDLE
 #else
-    cudnnDestroy(handle);
+  // NOTE(@zasdfgbnm): this is now disabled globally, because we are seeing
+  // the same issue as mentioned above in CUDA 11 CI.
+  // cudnnDestroy(handle);
 #endif
 }
 
