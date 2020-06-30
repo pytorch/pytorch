@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import unittest
 
+from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN, run_tests
 from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
     TensorPipeRpcAgentTestFixture,
@@ -18,9 +19,9 @@ import torch.distributed.rpc as rpc
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
 class TestDdpUnderDistAutogradTensorPipe(
-    MultiProcessTestCase,
-    TensorPipeRpcAgentTestFixture,
     TestDdpUnderDistAutograd,
+    TensorPipeRpcAgentTestFixture,
+    MultiProcessTestCase,
 ):
     def setUp(self):
         super().setUp()
@@ -34,9 +35,9 @@ class TestDdpUnderDistAutogradTensorPipe(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
 class TestDdpComparisonTensorPipe(
-    MultiProcessTestCase,
-    TensorPipeRpcAgentTestFixture,
     TestDdpComparison,
+    TensorPipeRpcAgentTestFixture,
+    MultiProcessTestCase,
 ):
     def setUp(self):
         super().setUp()
