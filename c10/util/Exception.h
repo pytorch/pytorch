@@ -276,10 +276,12 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
-        #cond " INTERNAL ASSERT FAILED at"    \
-        C10_STRINGIZE(__FILE__)               \
-        ", "                                  \
-        ::c10::error_value(__VA_ARGS__)       \
+        ::c10::error_value(                   \
+          #cond                               \
+          " INTERNAL ASSERT FAILED at"        \
+          C10_STRINGIZE(__FILE__)             \
+          ", ",                               \
+          __VA_ARGS__)                        \
     );                                        \
   }
 #else
@@ -323,10 +325,13 @@ inline std::string if_empty_then(std::string x, std::string y) {
 #define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)  \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                 \
     C10_THROW_ERROR(Error,                              \
-        #cond #type " CHECK FAILED at "                 \
-        C10_STRINGIZE(__FILE__)                         \
-        ", "                                            \
-        ::c10::error_value(__VA_ARGS__)                 \
+        ::c10::error_value(                             \
+          #cond                                         \
+          #type                                         \
+          " CHECK FAILED at "                           \
+          C10_STRINGIZE(__FILE__)                       \
+          ", ",                                         \
+          __VA_ARGS__)                                  \
     );                                                  \
   }
 #else
