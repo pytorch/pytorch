@@ -3,6 +3,8 @@
 #include <memory>
 #include <string>
 
+#include <c10/core/MemoryFormat.h>
+
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
@@ -44,6 +46,9 @@ constexpr static int kTensorDTypeFloat32 = 4;
 constexpr static int kTensorDTypeInt64 = 5;
 constexpr static int kTensorDTypeFloat64 = 6;
 
+constexpr static int kTensorMemoryFormatContiguous = 1;
+constexpr static int kTensorMemoryFormatChannelsLast = 2;
+
 template <typename K = jobject, typename V = jobject>
 struct JHashMap
     : facebook::jni::JavaClass<JHashMap<K, V>, facebook::jni::JMap<K, V>> {
@@ -73,7 +78,8 @@ struct JHashMap
 static at::Tensor newAtTensor(
     facebook::jni::alias_ref<facebook::jni::JBuffer> jbuffer,
     facebook::jni::alias_ref<jlongArray> jshape,
-    jint jdtype) {
+    jint jdtype,
+    jint jmemoryFormat) {
   const auto rank = jshape->size();
   const auto shapeArr = jshape->getRegion(0, rank);
   std::vector<int64_t> shapeVec{};
@@ -121,10 +127,15 @@ static at::Tensor newAtTensor(
         numel * dataElementSizeBytes,
         dataCapacity);
   }
+
+  auto tensorOptions = at::TensorOptions(typeMeta);
+  if (jmemoryFormat == kTensorMemoryFormatChannelsLast) {
+    tensorOptions = tensorOptions.memory_format(at::MemoryFormat::ChannelsLast);
+  }
   return torch::from_blob(
       jni->GetDirectBufferAddress(jbuffer.get()),
       torch::IntArrayRef(shapeVec),
-      at::TensorOptions(typeMeta));
+      tensorOptions);
 }
 
 class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
@@ -137,6 +148,8 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
       facebook::jni::alias_ref<TensorHybrid::javaobject> jTensorThis) {
     static auto cls = TensorHybrid::javaClassStatic();
     static const auto jMethodDTypeCode = cls->getMethod<jint()>("dtypeJniCode");
+    static const auto jMethodMemoryFormatCode =
+        cls->getMethod<jint()>("memoryFormatJniCode");
     static const auto jFieldShape = cls->getField<jlongArray>("shape");
     static const auto jMethodGetDataBuffer = cls->getMethod<
         facebook::jni::local_ref<facebook::jni::JBuffer::javaobject>()>(
@@ -145,16 +158,27 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
     at::Tensor tensor = newAtTensor(
         jMethodGetDataBuffer(jTensorThis),
         jTensorThis->getFieldValue(jFieldShape),
-        jMethodDTypeCode(jTensorThis));
+        jMethodDTypeCode(jTensorThis),
+        jMethodMemoryFormatCode(jTensorThis));
     return makeCxxInstance(std::move(tensor));
   }
 
   static facebook::jni::local_ref<TensorHybrid::javaobject>
   newJTensorFromAtTensor(const at::Tensor& input_tensor) {
     // Java wrapper currently only supports contiguous tensors.
-    at::Tensor tensor = input_tensor.is_contiguous()
-      ? input_tensor
-      : input_tensor.contiguous();
+
+    int jmemoryFormat = 0;
+    at::Tensor tensor{};
+    if (input_tensor.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+      tensor = input_tensor;
+      jmemoryFormat = kTensorMemoryFormatChannelsLast;
+    } else if (input_tensor.is_contiguous()) {
+      tensor = input_tensor;
+      jmemoryFormat = kTensorMemoryFormatContiguous;
+    } else {
+      tensor = input_tensor.contiguous();
+      jmemoryFormat = kTensorMemoryFormatContiguous;
+    }
 
     const auto scalarType = tensor.scalar_type();
     int jdtype = 0;
@@ -196,9 +220,15 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
             facebook::jni::alias_ref<facebook::jni::JByteBuffer>,
             facebook::jni::alias_ref<jlongArray>,
             jint,
+            jint,
             facebook::jni::alias_ref<jhybriddata>)>("nativeNewTensor");
     return jMethodNewTensor(
-        cls, jTensorBuffer, jTensorShape, jdtype, makeCxxInstance(tensor));
+        cls,
+        jTensorBuffer,
+        jTensorShape,
+        jdtype,
+        jmemoryFormat,
+        makeCxxInstance(tensor));
   }
 
   static at::Tensor newAtTensorFromJTensor(
@@ -206,6 +236,10 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
     static auto cls = TensorHybrid::javaClassStatic();
     static const auto dtypeMethod = cls->getMethod<jint()>("dtypeJniCode");
     jint jdtype = dtypeMethod(jtensor);
+
+    static const auto memoryFormatMethod =
+        cls->getMethod<jint()>("memoryFormatJniCode");
+    jint jmemoryFormat = memoryFormatMethod(jtensor);
 
     static const auto shapeField = cls->getField<jlongArray>("shape");
     auto jshape = jtensor->getFieldValue(shapeField);
@@ -215,7 +249,7 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
         "getRawDataBuffer");
     facebook::jni::local_ref<facebook::jni::JBuffer> jbuffer =
         dataBufferMethod(jtensor);
-    return newAtTensor(jbuffer, jshape, jdtype);
+    return newAtTensor(jbuffer, jshape, jdtype, jmemoryFormat);
   }
 
   at::Tensor tensor() const {
