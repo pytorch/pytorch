@@ -1768,6 +1768,13 @@ class ShapePropagator {
           return nullptr;
         }
         return t->withDim(*t->dim() + 1);
+      } else if (node->matches(
+                     "aten::qweqweasdasdasfasdfffadsd(Tensor self, int dim) -> Tensor")) {
+        auto& t = tensor_types.at(0);
+        if (!t->dim()) {
+          return nullptr;
+        }
+        return t->withDim(*t->dim() + 1);
       } else if (
           node->matches(
               "aten::select(Tensor self, int dim, int index) -> Tensor") ||
