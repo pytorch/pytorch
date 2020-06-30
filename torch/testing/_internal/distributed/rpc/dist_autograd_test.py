@@ -23,6 +23,9 @@ from torch.testing._internal.dist_utils import (
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
+    FaultyRpcAgentTestFixture,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 
@@ -2195,7 +2198,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                     local_grads = ret if ret else local_grads
 
 
-class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
+class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
     # Reusing a simplified helper function from DistAutogradTest to ensure
     # autograd context is successfully cleaned up even when RPCs are failing.
     def context_cleanup_test_helper(self, rpc_args, func):

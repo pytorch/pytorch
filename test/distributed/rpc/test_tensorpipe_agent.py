@@ -26,29 +26,29 @@ dist_utils.TEST_CONFIG.rpc_backend_name = "TENSORPIPE"
 @unittest.skipIf(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
-class SpawnHelper(MultiProcessTestCase, TensorPipeRpcAgentTestFixture):
+class SpawnHelper(TensorPipeRpcAgentTestFixture, MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         self._spawn_processes()
 
 
-class RpcTestWithSpawn(SpawnHelper, TensorPipeAgentRpcTest):
+class TensorPipeRpcTestWithSpawn(TensorPipeAgentRpcTest, SpawnHelper):
     pass
 
 
-class DistAutogradTestWithSpawn(SpawnHelper, DistAutogradTest):
+class TensorPipeDistAutogradTestWithSpawn(DistAutogradTest, SpawnHelper):
     pass
 
 
-class DistOptimizerTestWithSpawn(SpawnHelper, DistOptimizerTest):
+class TensorPipeDistOptimizerTestWithSpawn(DistOptimizerTest, SpawnHelper):
     pass
 
 
-class TestDdpUnderDistAutograd(SpawnHelper, TestDdpUnderDistAutograd):
+class TensorPipeTestDdpUnderDistAutograd(TestDdpUnderDistAutograd, SpawnHelper):
     pass
 
 
-class TestDdpComparison(SpawnHelper, TestDdpComparison):
+class TensorPipeTestDdpComparison(TestDdpComparison, SpawnHelper):
     pass
 
 
