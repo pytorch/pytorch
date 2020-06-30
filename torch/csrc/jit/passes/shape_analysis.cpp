@@ -414,7 +414,7 @@ class ShapePropagator {
     // is to uncover any mistakes we could make when editing this code,
     // and eventually it shouldn't matter, because this phase should be
     // preceded by schema checking.
-    op(stack);
+    op(&stack);
 
     AT_ASSERT(stack.size() == node->outputs().size());
     for (size_t i = 0; i < stack.size(); ++i) {
