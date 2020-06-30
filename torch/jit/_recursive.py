@@ -352,6 +352,10 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
                 if isinstance(orig_value, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):
                     scripted.define("def __len__(self):\n   return {}\n".format(len(scripted)))
+                if isinstance(orig_value, torch.nn.ModuleDict):
+                    keys = repr(list(orig_value.keys()))
+                    scripted.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
+
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 

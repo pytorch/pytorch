@@ -8729,14 +8729,7 @@ a")
                 # for module in self.moduledict:
                 #     assert module is self.submod, "__iter__ failing for ModuleDict"
 
-                # Test `__contains__()`
-                #
-                # PROBLEM: this throws:
-                # ```
-                # Tried to access nonexistent attribute or method '__contains__' of type '__torch__.DPER3ModuleDict'.
-                # Did you forget to initialize an attribute in __init__()?
-                # ```
-                # assert "submod" in self.moduledict, "__contains__ fails for ModuleDict"
+                assert "submod" in self.moduledict, "__contains__ fails for ModuleDict"
 
                 for key in self.moduledict.keys():
                     assert key == "submod", "keys() fails for ModuleDict"
