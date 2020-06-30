@@ -36,11 +36,9 @@ Tensor fake_quantize_per_channel_affine(
     int64_t quant_max) {
   TORCH_CHECK(self.scalar_type() == ScalarType::Float);
   TORCH_CHECK(scale.scalar_type() == ScalarType::Float,
-              "Scale must be ScalarType::Float, found ",
-              scale.scalar_type());
+              "Scale must be Float, found ", scale.scalar_type());
   TORCH_CHECK(zero_point.scalar_type() == ScalarType::Long,
-              "Zero point must be ScalarType::Long, found ",
-              zero_point.scalar_type());
+              "Zero-point must be Long type, found ", zero_point.scalar_type());
   TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
   TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
   TORCH_CHECK(
@@ -108,11 +106,9 @@ Tensor fake_quantize_per_channel_affine_backward(
   TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
   TORCH_CHECK(X.scalar_type() == ScalarType::Float);
   TORCH_CHECK(scale.scalar_type() == ScalarType::Float,
-              "Scale must be ScalarType::Float, found ",
-              scale.scalar_type());
+              "Scale must be Float, found ", scale.scalar_type());
   TORCH_CHECK(zero_point.scalar_type() == ScalarType::Long,
-              "Zero point must be ScalarType::Long, found ",
-              zero_point.scalar_type());
+              "Zero-point must be Long type, found ", zero_point.scalar_type());
 
   TORCH_CHECK(X.sizes() == dY.sizes(), "`X` and `dY` are not the same size");
   TORCH_CHECK(
