@@ -80,7 +80,7 @@ class TestLiteScriptModule(unittest.TestCase):
                 return f.func(1, 2)
 
         script_module = torch.jit.script(MyTestModule())
-        with self.assertRaisesRegex(RuntimeError, " is not supported in mobile module"):
+        with self.assertRaisesRegex(RuntimeError, "^CREATE_OBJECT is not supported in mobile module.$"):
             script_module._save_to_buffer_for_lite_interpreter()
 
 
