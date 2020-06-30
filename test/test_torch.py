@@ -3887,9 +3887,16 @@ class AbstractTestCases:
                 str(obj)
 
             # test complex tensor
+            # complex tensor print uses two formatters, one for real values
+            # and the other for imag values. this is consistent with numpy
             x = torch.tensor([2.3 + 4j, 7 + 6j])
             self.assertEqual(x.__repr__(), str(x))
-            self.assertExpectedInline(str(x), '''tensor([(2.3000+4.0000j), (7.0000+6.0000j)])''')
+            self.assertExpectedInline(str(x), '''tensor([2.3000+4.j, 7.0000+6.j])''')
+
+            # test scientific notation for complex tensors
+            x = torch.tensor([1e28 + 2j , -1e-28j])
+            self.assertEqual(x.__repr__(), str(x))
+            self.assertExpectedInline(str(x), '''tensor([1.0000e+28+2.0000e+00j, -0.0000e+00-1.0000e-28j])''')
 
             # test big integer
             x = torch.tensor(2341234123412341)
@@ -3925,6 +3932,13 @@ class AbstractTestCases:
             x = torch.tensor([4, inf, 1.5, -inf, 0, nan, 1])
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([4.0000,    inf, 1.5000,   -inf, 0.0000,    nan, 1.0000])''')
+
+            y = torch.tensor([4, inf, complex(1.5, inf), complex(-inf, 4), 0, complex(nan, inf), complex(3, nan)])
+            self.assertEqual(y.__repr__(), str(y))
+            expected_str = '''\
+tensor([4.0000+0.j,    inf+0.j, 1.5000+infj,   -inf+4.j, 0.0000+0.j,    nan+infj,
+        3.0000+nanj])'''
+            self.assertExpectedInline(str(y), expected_str)
 
             # test dtype
             torch.set_default_dtype(torch.float)
@@ -4013,6 +4027,32 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
             self.assertExpectedInline(str(y), expected_str)
 
+            x = torch.ones(100, 2, 2, 10) * (1 + 1j)
+            y = x.as_strided(size=(100, 2, 10), stride=(2 * 2 * 10, 2 * 10, 1))
+            self.assertEqual(str(y), y.__repr__())
+            expected_str = '''\
+tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        ...,
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]],
+
+        [[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
+         [1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j]]])\
+'''
+            self.assertExpectedInline(str(y), expected_str)
+
             # test print 0-dim tensor: there's no 0-dim in Numpy, we match arrayprint style
             x = torch.tensor(0.00002)
             self.assertEqual(x.__repr__(), str(x))
@@ -4031,6 +4071,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             x = torch.tensor([0.00002])
             self.assertEqual(x.__repr__(), str(x))
             self.assertExpectedInline(str(x), '''tensor([2.0000e-05])''')
+
+            # [Numpy] test print complex in sci_mode when real_min < 0.0001 and (or) imag_min < 0.0001.
+            x = torch.tensor([0.00002]) * (1 + 1j)
+            self.assertEqual(x.__repr__(), str(x))
+            self.assertExpectedInline(str(x), '''tensor([2.0000e-05+2.0000e-05j])''')
 
             # [Numpy] test print float in sci_mode when max > 1e8.
             # TODO: Pytorch uses fixed precision to print, while Numpy uses dragon4_scientific
