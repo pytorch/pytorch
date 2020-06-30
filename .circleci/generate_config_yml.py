@@ -8,7 +8,7 @@ Please see README.md in this directory for details.
 import os
 import shutil
 import sys
-from collections import OrderedDict, namedtuple
+from collections import namedtuple
 
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
