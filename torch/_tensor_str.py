@@ -149,95 +149,69 @@ class _Formatter(object):
         return (self.max_width - len(ret)) * ' ' + ret
 
 
-def _scalar_str(self, formatter):
-    return formatter.format(self.item())
-
-def _vector_str(self, indent, formatter, summarize):
-    # length includes spaces and comma between elements
-    element_length = formatter.width() + 2
-    elements_per_line = max(1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length))))
-    char_per_line = element_length * elements_per_line
-
-    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        data = ([formatter.format(val) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
-                [' ...'] +
-                [formatter.format(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
-    else:
-        data = [formatter.format(val) for val in self.tolist()]
-
-    data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
-    lines = [', '.join(line) for line in data_lines]
-    return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
-
-
-def _tensor_str_with_formatter(self, indent, formatter, summarize):
-    dim = self.dim()
-
-    if dim == 0:
-        return _scalar_str(self, formatter)
-    if dim == 1:
-        return _vector_str(self, indent, formatter, summarize)
-
-    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        slices = ([_tensor_str_with_formatter(self[i], indent + 1, formatter, summarize)
-                   for i in range(0, PRINT_OPTS.edgeitems)] +
-                  ['...'] +
-                  [_tensor_str_with_formatter(self[i], indent + 1, formatter, summarize)
-                   for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
-    else:
-        slices = [_tensor_str_with_formatter(self[i], indent + 1, formatter, summarize)
-                  for i in range(0, self.size(0))]
-
-    tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
-    return '[' + tensor_str + ']'
-
-def _complex_vector_str(self, indent, real_formatter, imag_formatter, summarize):
-    # length includes spaces and comma between elements and the extra j for complex
-    element_length = 2 * real_formatter.width() + 3
-    elements_per_line = max(1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length))))
-    char_per_line = element_length * elements_per_line
-
-    def _complex_scalar(val, real_formatter=real_formatter, imag_formatter=imag_formatter):
-        real_str = real_formatter.format(val.real)
-        imag_str = imag_formatter.format(val.imag) + "j"
-        if val.imag < 0:
-            return real_str + imag_str.lstrip()
-        else:
-            return real_str + "+" + imag_str.lstrip()
-
-    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        data = ([_complex_scalar(val) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
-                [' ...'] +
-                [_complex_scalar(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
-    else:
-        data = [_complex_scalar(val) for val in self.tolist()]
-
-    data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
-    lines = [', '.join(line) for line in data_lines]
-    return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
-
-def _complex_tensor_str_with_formatter(self, indent, real_formatter, imag_formatter, summarize):
-    dim = self.dim()
-
-    if dim == 0:
-        real_str = _scalar_str(self.real, real_formatter)
-        imag_str = _scalar_str(self.imag, imag_formatter) + "j"
+def _scalar_str(self, formatter1, formatter2=None):
+    if formatter2 is not None:
+        real_str = _scalar_str(self.real, formatter1)
+        imag_str = _scalar_str(self.imag, formatter2) + "j"
         if self.imag < 0:
             return real_str + imag_str.lstrip()
         else:
             return real_str + "+" + imag_str.lstrip()
+    else:
+        return formatter1.format(self.item())
 
-    if dim == 1:
-        return _complex_vector_str(self, indent, real_formatter, imag_formatter, summarize)
+def _vector_str(self, indent, summarize, formatter1, formatter2=None):
+    # length includes spaces and comma between elements
+    element_length = formatter1.width() + 2
+    if formatter2 is not None:
+        # width for imag_formatter + an extra j for complex
+        element_length += formatter2.width() + 1
+
+    elements_per_line = max(1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length))))
+    char_per_line = element_length * elements_per_line
+
+    def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
+        if formatter2 is not None:
+            real_str = formatter1.format(val.real)
+            imag_str = formatter2.format(val.imag) + "j"
+            if val.imag < 0:
+                return real_str + imag_str.lstrip()
+            else:
+                return real_str + "+" + imag_str.lstrip()
+        else:
+            return formatter1.format(val)
 
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        slices = ([_complex_tensor_str_with_formatter(self[i], indent + 1, real_formatter, imag_formatter, summarize)
+        data = ([_val_formatter(val) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
+                [' ...'] +
+                [_val_formatter(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
+    else:
+        data = [_val_formatter(val) for val in self.tolist()]
+
+    data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
+    lines = [', '.join(line) for line in data_lines]
+    return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
+
+# formatter2 is only used for printing complex tensors.
+# For complex tensors, formatter1 and formatter2 are the formatters for tensor.real
+# and tensor.imag respesectively
+def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=None):
+    dim = self.dim()
+
+    if dim == 0:
+        return _scalar_str(self, formatter1, formatter2)
+
+    if dim == 1:
+        return _vector_str(self, indent, summarize, formatter1, formatter2)
+
+    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
+        slices = ([_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
                    for i in range(0, PRINT_OPTS.edgeitems)] +
                   ['...'] +
-                  [_complex_tensor_str_with_formatter(self[i], indent + 1, real_formatter, imag_formatter, summarize)
+                  [_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
                    for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
     else:
-        slices = [_complex_tensor_str_with_formatter(self[i], indent + 1, real_formatter, imag_formatter, summarize)
+        slices = [_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
                   for i in range(0, self.size(0))]
 
     tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
@@ -262,10 +236,10 @@ def _tensor_str(self, indent):
     if self.dtype.is_complex:
         real_formatter = _Formatter(get_summarized_data(self.real) if summarize else self.real)
         imag_formatter = _Formatter(get_summarized_data(self.imag) if summarize else self.imag)
-        return _complex_tensor_str_with_formatter(self, indent, real_formatter, imag_formatter, summarize)
+        return _tensor_str_with_formatter(self, indent, summarize, real_formatter, imag_formatter)
     else:
         formatter = _Formatter(get_summarized_data(self) if summarize else self)
-        return _tensor_str_with_formatter(self, indent, formatter, summarize)
+        return _tensor_str_with_formatter(self, indent, summarize, formatter)
 
 def _add_suffixes(tensor_str, suffixes, indent, force_newline):
     tensor_strs = [tensor_str]
