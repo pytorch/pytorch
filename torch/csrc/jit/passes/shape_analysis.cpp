@@ -1563,16 +1563,6 @@ class ShapePropagator {
     };
     if (node->matches(
             "aten::masked_select(Tensor self, Tensor mask) -> Tensor")) {
-      auto type = input_type(0);
-      auto mask_type = input_type(1);
-      if (type && mask_type && type->dim() && mask_type->dim()) {
-        if (*type->dim() == 0 && *mask_type->dim() == 0) {
-          node->output()->setType(type->withDim(0));
-        } else {
-          node->output()->setType(type->withDim(1));
-        }
-        return true;
-      }
       if (auto type = input_type(0)) {
         node->output()->setType(type->withDim(1));
         return true;
