@@ -14,16 +14,6 @@ if not dist.is_available():
     sys.exit(0)
 
 
-class TestConfig:
-    __slots__ = ["rpc_backend_name", "build_rpc_backend_options"]
-
-    def __init__(self, *args, **kwargs):
-        assert len(args) == 0, "TestConfig only takes kwargs."
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-
-TEST_CONFIG = TestConfig()
 INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
@@ -86,15 +76,6 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
 
     return new_test_method
 
-
-# Set PROCESS_GROUP as the default RPC backend.
-TEST_CONFIG.rpc_backend_name = "PROCESS_GROUP"
-TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
-    test_object.rpc_backend,
-    init_method=test_object.init_method,
-    # Some tests need additional threads (ex: test_trainer_ps)
-    num_send_recv_threads=8,
-)
 
 def noop():
     pass
