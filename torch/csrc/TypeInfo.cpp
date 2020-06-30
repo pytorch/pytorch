@@ -52,7 +52,7 @@ PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
     AT_ASSERT(at::isFloatingType(scalar_type));
   } else {
     scalar_type = r.scalartype(0);
-    if (!at::isFloatingType(scalar_type)) {
+    if (!at::isFloatingType(scalar_type) && !at::isComplexType(scalar_type)) {
       return PyErr_Format(
           PyExc_TypeError,
           "torch.finfo() requires a floating point input type. Use torch.iinfo to handle '%s'",
@@ -173,7 +173,7 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
 }
 
 PyObject* THPFInfo_str(THPFInfo* self) {
-  auto type = self->type;
+  auto type = c10::toValueType(self->type);
   std::string primary_name, legacy_name;
   std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(type);
   std::ostringstream oss;

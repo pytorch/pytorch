@@ -36,7 +36,7 @@ class TestDTypeInfo(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_finfo(self):
         initial_default_type = torch.get_default_dtype()
-        for dtype in [torch.float16, torch.float32, torch.float64]:
+        for dtype in [torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128]:
             x = torch.zeros((2, 2), dtype=dtype)
             xinfo = torch.finfo(x.dtype)
             xn = x.cpu().numpy()
