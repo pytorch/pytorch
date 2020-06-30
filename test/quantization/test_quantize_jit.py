@@ -2346,6 +2346,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         FileCheck().check("quantized::add_scalar") \
                    .check("quantized::mul_scalar") \
+                   .check("aten::append") \
                    .run(m.graph)
 
     def test_general_value_ops(self):

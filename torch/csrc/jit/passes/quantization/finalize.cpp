@@ -84,6 +84,23 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
   }
 }
 
+void  rewriteListAddToAppend(std::shared_ptr<Graph>& graph) {
+  std::string list_add = R"IR(
+graph(%list, %x):
+    %x_list : Tensor[]  = prim::ListConstruct(%x)
+    %result : Tensor[] = aten::add(%list, %x_list)
+    return (%result) )IR";
+
+  std::string append = R"IR(
+graph(%list, %x):
+    %ignore : Tensor[] = aten::append(%list, %x)
+    return (%list) )IR";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(list_add, append);
+  rewriter.runOnGraph(graph);
+}
+
 } // namespace
 
 void QuantFusion(std::shared_ptr<Graph>& graph, QuantType quant_type) {
@@ -128,6 +145,7 @@ void FoldQuantizedPrepackingOps(Module& module) {
 
 Module Finalize(Module& module, QuantType quant_type) {
   auto graph = module.get_method("forward").graph();
+  rewriteListAddToAppend(graph);
   InsertPrepackUnpack(graph);
   GRAPH_DUMP("Before QuantFusion:", graph);
   QuantFusion(graph, quant_type);
