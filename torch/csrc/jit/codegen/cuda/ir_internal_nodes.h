@@ -29,7 +29,8 @@ namespace fuser {
  *   3) Reduction across a dimension i.e. val.sum(axis=2)
  *   4) split/merge
  */
-struct TORCH_CUDA_API UnaryOp : public Expr {
+class TORCH_CUDA_API UnaryOp : public Expr {
+ public:
   ~UnaryOp() = default;
   UnaryOp(UnaryOpType _type, Val* _out, Val* _in);
 
@@ -66,7 +67,8 @@ struct TORCH_CUDA_API UnaryOp : public Expr {
  *  1) Add/mul/div/mod/sub (A * B)
  *  2) LT (A < B)
  */
-struct TORCH_CUDA_API BinaryOp : public Expr {
+class TORCH_CUDA_API BinaryOp : public Expr {
+ public:
   ~BinaryOp() = default;
   BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs);
 
@@ -105,7 +107,8 @@ struct TORCH_CUDA_API BinaryOp : public Expr {
  * Broadcast _in to match _out. broadcast_dims are relative to out. Where
  * broadcast_dims.size() + _in->nDims() == _out->nDims().
  */
-struct TORCH_CUDA_API BroadcastOp : public Expr {
+class TORCH_CUDA_API BroadcastOp : public Expr {
+ public:
   ~BroadcastOp() = default;
   BroadcastOp(Val* _out, Val* _in);
 
@@ -138,7 +141,8 @@ struct TORCH_CUDA_API BroadcastOp : public Expr {
  * tensor. The output tensors size will be the size of all
  * non-reduction/non-broadcast dimensions.
  */
-struct TORCH_CUDA_API ReductionOp : public Expr {
+class TORCH_CUDA_API ReductionOp : public Expr {
+ public:
   ~ReductionOp() = default;
   ReductionOp(BinaryOpType _reduction_op_type, Val* _init, Val* _out, Val* _in);
 
@@ -178,7 +182,8 @@ struct TORCH_CUDA_API ReductionOp : public Expr {
   Val* const in_ = nullptr;
 };
 
-struct TORCH_CUDA_API TernaryOp : public Expr {
+class TORCH_CUDA_API TernaryOp : public Expr {
+ public:
   ~TernaryOp() = default;
   TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* _in3);
 
@@ -224,7 +229,8 @@ struct TORCH_CUDA_API TernaryOp : public Expr {
  * IterDomains to form an ND iterable. We directly set parallization strategies
  * on IterDomains.
  */
-struct TORCH_CUDA_API IterDomain : public Val {
+class TORCH_CUDA_API IterDomain : public Val {
+ public:
   ~IterDomain() = default;
 
   IterDomain() = delete;
@@ -359,7 +365,7 @@ struct TORCH_CUDA_API IterDomain : public Val {
  * operations that take in a TensorDomain, applies a transformation and outputs
  * a tensor domain.
  */
-struct TORCH_CUDA_API TensorDomain : public Val {
+class TORCH_CUDA_API TensorDomain : public Val {
  public:
   TensorDomain() = delete;
   ~TensorDomain() = default;
@@ -466,7 +472,8 @@ struct TORCH_CUDA_API TensorDomain : public Val {
  * Representation a split on an IterDomain by "factor"
  * TODO: Implement split by nparts
  */
-struct TORCH_CUDA_API Split : public Expr {
+class TORCH_CUDA_API Split : public Expr {
+ public:
   ~Split() = default;
 
   Split(const Split& other) = delete;
@@ -507,7 +514,8 @@ struct TORCH_CUDA_API Split : public Expr {
  * if there is one.
  * TODO: Should this be a unary op type?
  */
-struct TORCH_CUDA_API Merge : public Expr {
+class TORCH_CUDA_API Merge : public Expr {
+ public:
   ~Merge() = default;
   Merge(IterDomain* _out, IterDomain* _outer, IterDomain* _inner);
 
@@ -546,7 +554,8 @@ struct TORCH_CUDA_API Merge : public Expr {
  * TODO: Change implmentation of Exprs contained in the scope to be more similar
  * to Fusion where we can do proper dependency analysis.
  */
-struct TORCH_CUDA_API ForLoop : public Expr {
+class TORCH_CUDA_API ForLoop : public Expr {
+ public:
   ~ForLoop() = default;
   ForLoop(
       Val* _index,
@@ -599,7 +608,8 @@ struct TORCH_CUDA_API ForLoop : public Expr {
  * TODO: Change implmentation of Exprs contained in the scope to be more similar
  * to Fusion where we can do proper dependency analysis.
  */
-struct TORCH_CUDA_API IfThenElse : public Expr {
+class TORCH_CUDA_API IfThenElse : public Expr {
+ public:
   ~IfThenElse() = default;
   IfThenElse(
       Bool* _cond,
@@ -657,7 +667,8 @@ struct TORCH_CUDA_API IfThenElse : public Expr {
  * TensorView. It is not the flattened index, which needs to be computed using
  * stride information.
  */
-struct TORCH_CUDA_API TensorIndex : public Val {
+class TORCH_CUDA_API TensorIndex : public Val {
+ public:
   ~TensorIndex() = default;
 
   TensorIndex(const TensorIndex& other) = delete;
@@ -716,7 +727,8 @@ struct TORCH_CUDA_API TensorIndex : public Val {
  * TODO: The components of Allocate like Type and Name could be separated from
  * the the assocated TensorView.  Perhaps that is more appropriate?
  */
-struct TORCH_CUDA_API Allocate : public Expr {
+class TORCH_CUDA_API Allocate : public Expr {
+ public:
   ~Allocate() = default;
 
   Allocate(const Allocate& other) = delete;
@@ -751,7 +763,8 @@ struct TORCH_CUDA_API Allocate : public Expr {
  * - blockDim.z
  * - T3.stride[2]
  */
-struct TORCH_CUDA_API NamedScalar : public Val {
+class TORCH_CUDA_API NamedScalar : public Val {
+ public:
   ~NamedScalar() = default;
   NamedScalar() = delete;
 

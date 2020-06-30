@@ -179,7 +179,7 @@ namespace {
 
 // Expr sort will take a fusion and return a topologically sorted list of
 // expressions.
-struct Exprs : public IterVisitor {
+class Exprs : public IterVisitor {
  private:
   std::vector<Expr*> exprs;
 
@@ -199,7 +199,7 @@ struct Exprs : public IterVisitor {
 
 // Expr sort will take a fusion and return a topologically sorted list of
 // expressions.
-struct Inputs : public IterVisitor {
+class Inputs : public IterVisitor {
  private:
   std::unordered_set<Val*> inputs;
 
@@ -249,7 +249,7 @@ std::unordered_set<Val*> IterVisitor::getInputsTo(
 
 namespace {
 
-struct AllVals : public IterVisitor {
+class AllVals : public IterVisitor {
  private:
   std::unordered_set<Val*> vals;
 
@@ -383,7 +383,8 @@ void BackwardVisitor::traverseFrom(
 
 namespace {
 // Looks for and returns
-struct DependencyChains : public IterVisitor {
+class DependencyChains : public IterVisitor {
+ public:
   std::deque<std::deque<Val*>> dep_chains;
   bool is_dependency = false;
   std::unordered_set<Val*> dependencies_;

@@ -21,7 +21,8 @@ namespace fuser {
  * This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-struct TORCH_CUDA_API Bool : public Val {
+class TORCH_CUDA_API Bool : public Val {
+ public:
   ~Bool() = default;
 
   Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
@@ -58,7 +59,8 @@ struct TORCH_CUDA_API Bool : public Val {
  * Float32. This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-struct TORCH_CUDA_API Float : public Val {
+class TORCH_CUDA_API Float : public Val {
+ public:
   using ScalarType = double;
 
   ~Float() = default;
@@ -97,7 +99,8 @@ struct TORCH_CUDA_API Float : public Val {
  * This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-struct TORCH_CUDA_API Half : public Val {
+class TORCH_CUDA_API Half : public Val {
+ public:
   ~Half() = default;
 
   Half() : Val(ValType::Scalar, DataType::Half), maybe_value_{c10::nullopt} {}
@@ -131,7 +134,8 @@ struct TORCH_CUDA_API Half : public Val {
 
 // An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
 // inlined literal in the kernel.
-struct TORCH_CUDA_API Int : public Val {
+class TORCH_CUDA_API Int : public Val {
+ public:
   using ScalarType = int64_t;
 
   ~Int() = default;
@@ -165,11 +169,11 @@ struct TORCH_CUDA_API Int : public Val {
   const c10::optional<ScalarType> maybe_value_;
 };
 
-struct TransformReplay;
-struct TransformIter;
-struct OptOutMutator;
-struct LoopNestGenerator;
-struct GPULower;
+class TransformReplay;
+class TransformIter;
+class OptOutMutator;
+class LoopNestGenerator;
+class GPULower;
 
 /*
  * TensorView is our primitive Tensor Type used in code generation. It can be
@@ -187,7 +191,7 @@ struct GPULower;
  * we iterate over the 3D TensorDomain [I, J, K], where K is the fastest
  * changing dimension.
  */
-struct TORCH_CUDA_API TensorView : public Val {
+class TORCH_CUDA_API TensorView : public Val {
  public:
   ~TensorView() = default;
 

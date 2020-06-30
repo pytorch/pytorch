@@ -11,7 +11,7 @@ namespace fuser {
 
 namespace {
 
-struct ReplayRFactor : public ReplayTransformations {
+class ReplayRFactor : public ReplayTransformations {
  private:
   // Took a good bit of this from ReplayTransformations::handle(Split...)
   void handle(Split* s) override {

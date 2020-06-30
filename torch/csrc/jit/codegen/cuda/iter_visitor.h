@@ -12,9 +12,9 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct Statement;
-struct Val;
-struct Expr;
+class Statement;
+class Val;
+class Expr;
 
 class Fusion;
 
@@ -32,7 +32,8 @@ enum class ValType;
  * TODO: We may want to have ordering of outputs to inputs. I'm not sure why we
  * would want this, but seems like it would be a reasonable request.
  */
-struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
+class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
+ public:
   virtual ~IterVisitor() = default;
 
   IterVisitor() = default;
@@ -142,7 +143,8 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
  * outputs to guarentee that we will traverse all outputs of all exprs during
  * the backward traversal.
  */
-struct TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
+class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
+ public:
   virtual ~BackwardVisitor() = default;
 
   BackwardVisitor() = default;
@@ -201,7 +203,7 @@ struct TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
       bool traverseAllPaths = false);
 };
 
-struct TORCH_CUDA_API DependencyCheck {
+class TORCH_CUDA_API DependencyCheck {
  public:
   // Returns if "dependency" is a dependency of "of".
   static bool isDependencyOf(Val* dependency, Val* of);

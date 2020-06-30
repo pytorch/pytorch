@@ -14,36 +14,8 @@ namespace jit {
 namespace fuser {
 
 namespace {
-struct ScalarCheck : OptInDispatch {
-  Val* v1_;
-  Val* v2_;
-  bool same = false;
 
-  void handle(Bool* b) override {
-    same = static_cast<Bool*>(v1_)->sameAs(static_cast<Bool*>(v2_));
-  }
-
-  void handle(Float* f) override {
-    same = static_cast<Float*>(v1_)->sameAs(static_cast<Float*>(v2_));
-  }
-
-  void handle(Half* h) override {
-    same = static_cast<Half*>(v1_)->sameAs(static_cast<Half*>(v2_));
-  }
-
-  void handle(Int* i) override {
-    same = static_cast<Int*>(v1_)->sameAs(static_cast<Int*>(v2_));
-  }
-
-  void handle(NamedScalar* ns) override {
-    same =
-        static_cast<NamedScalar*>(v1_)->sameAs(static_cast<NamedScalar*>(v2_));
-  }
-
-  ScalarCheck(Val* _v1, Val* _v2) : v1_(_v1), v2_(_v2) {
-    OptInDispatch::handle(v1_);
-  }
-
+class ScalarCheck : OptInDispatch {
  public:
   static bool sameAs(Val* v1, Val* v2) {
     if (v1 == v2)
@@ -56,9 +28,41 @@ struct ScalarCheck : OptInDispatch {
       return false;
 
     ScalarCheck sc(v1, v2);
-    return sc.same;
+    return sc.same_;
   }
+
+ private:
+  void handle(Bool* b) override {
+    same_ = static_cast<Bool*>(v1_)->sameAs(static_cast<Bool*>(v2_));
+  }
+
+  void handle(Float* f) override {
+    same_ = static_cast<Float*>(v1_)->sameAs(static_cast<Float*>(v2_));
+  }
+
+  void handle(Half* h) override {
+    same_ = static_cast<Half*>(v1_)->sameAs(static_cast<Half*>(v2_));
+  }
+
+  void handle(Int* i) override {
+    same_ = static_cast<Int*>(v1_)->sameAs(static_cast<Int*>(v2_));
+  }
+
+  void handle(NamedScalar* ns) override {
+    same_ =
+        static_cast<NamedScalar*>(v1_)->sameAs(static_cast<NamedScalar*>(v2_));
+  }
+
+  ScalarCheck(Val* _v1, Val* _v2) : v1_(_v1), v2_(_v2) {
+    OptInDispatch::handle(v1_);
+  }
+
+ private:
+  Val* v1_ = nullptr;
+  Val* v2_ = nullptr;
+  bool same_ = false;
 };
+
 } // namespace
 
 Bool::Bool(const Bool* src, IrCloner* ir_cloner)

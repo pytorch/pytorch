@@ -116,11 +116,10 @@ namespace fuser {
  *
  */
 
-struct TensorDomain;
-struct TensorView;
+class TensorDomain;
+class TensorView;
 
-struct TORCH_CUDA_API TransformReplay {
- private:
+class TORCH_CUDA_API TransformReplay {
  public:
   // Replay producer as consumer.
   static TensorDomain* replayPasC(

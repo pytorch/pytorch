@@ -55,7 +55,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct IndexCompute : public BackwardVisitor {
+class IndexCompute : public BackwardVisitor {
  private:
   using BackwardVisitor::handle;
   void handle(Split*) override;
@@ -76,7 +76,7 @@ struct IndexCompute : public BackwardVisitor {
 };
 
 // Simple interface for IndexCompute
-struct Index {
+class Index {
  private:
   // Producer indexing if it's in shared or local memory
   static TensorIndex* getProducerIndex_impl(

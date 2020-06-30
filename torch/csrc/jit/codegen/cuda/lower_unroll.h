@@ -48,7 +48,7 @@ namespace fuser {
  * corners.
  */
 
-struct TORCH_CUDA_API UnrollPass : public OptOutDispatch {
+class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
  private:
   // Wrapper to access thread_predicates_
   Bool* getThreadPredicate(const TensorView*);

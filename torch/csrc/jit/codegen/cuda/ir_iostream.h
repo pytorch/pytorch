@@ -12,33 +12,33 @@ namespace fuser {
 
 class Fusion;
 
-struct Statement;
+class Statement;
 
-struct Val;
-struct Expr;
+class Val;
+class Expr;
 
-struct UnaryOp;
-struct BinaryOp;
-struct TernaryOp;
-struct ReductionOp;
-struct BroadcastOp;
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class BroadcastOp;
 
-struct ForLoop;
-struct IfThenElse;
+class ForLoop;
+class IfThenElse;
 
-struct TensorDomain;
-struct TensorView;
-struct IterDomain;
-struct TensorIndex;
+class TensorDomain;
+class TensorView;
+class IterDomain;
+class TensorIndex;
 
-struct Split;
-struct Merge;
+class Split;
+class Merge;
 
-struct Bool;
-struct Float;
-struct Half;
-struct Int;
-struct Add;
+class Bool;
+class Float;
+class Half;
+class Int;
+class Add;
 
 /*
  * Define pretty printing functions for all nodes. handle is used so we can take
@@ -48,7 +48,7 @@ struct Add;
  * stream operator <<.
  */
 
-struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
+class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
  public:
   std::ostream& os;
   bool print_inline_ = false;

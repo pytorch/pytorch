@@ -9,7 +9,7 @@ namespace scope_utils {
 // START SCOPE HELPER SYSTEMS
 namespace {
 
-struct Loops : private OptInDispatch {
+class Loops : private OptInDispatch {
  private:
   std::deque<ForLoop*> loops;
   void handle(ForLoop* fl) final {
@@ -34,7 +34,7 @@ struct Loops : private OptInDispatch {
   }
 };
 
-struct forLoopCount : private OptInDispatch {
+class forLoopCount : private OptInDispatch {
  private:
   unsigned int count_ = 0;
 
@@ -60,7 +60,7 @@ struct forLoopCount : private OptInDispatch {
   }
 };
 
-struct scopePushBack : private OptInDispatch {
+class scopePushBack : private OptInDispatch {
  private:
   Expr* expr_;
   void handle(ForLoop* fl) final {
@@ -87,7 +87,7 @@ struct scopePushBack : private OptInDispatch {
   }
 };
 
-struct scopeInsertBefore : private OptInDispatch {
+class scopeInsertBefore : private OptInDispatch {
  private:
   Expr* ref_;
   Expr* expr_;
@@ -115,7 +115,7 @@ struct scopeInsertBefore : private OptInDispatch {
   }
 };
 
-struct parentScope : private OptInDispatch {
+class parentScope : private OptInDispatch {
  private:
   Expr* parent_ = nullptr;
 
@@ -139,7 +139,7 @@ struct parentScope : private OptInDispatch {
   }
 };
 
-struct scopeClearExprs : private OptInDispatch {
+class scopeClearExprs : private OptInDispatch {
  private:
   void handle(ForLoop* fl) final {
     fl->body().clear();
@@ -169,7 +169,7 @@ void assertScope(Expr* expr) {
       "Assert Scope failed when calling a scope_util function.");
 }
 
-struct CloneLoopNest : public OptOutMutator {
+class CloneLoopNest : public OptOutMutator {
  private:
   Expr* parent_scope_ = nullptr;
   Expr* to_clone_ = nullptr;
@@ -199,7 +199,7 @@ struct CloneLoopNest : public OptOutMutator {
   }
 };
 
-struct ReplaceExprsInScope : public OptOutDispatch {
+class ReplaceExprsInScope : public OptOutDispatch {
  public:
   static void replace(
       Expr* scope,
@@ -240,7 +240,7 @@ struct ReplaceExprsInScope : public OptOutDispatch {
   std::unordered_map<Expr*, Expr*> replacement_map_;
 };
 
-struct FirstInnerMostScope : private OptInDispatch {
+class FirstInnerMostScope : private OptInDispatch {
  private:
   Expr* active_scope = nullptr;
 

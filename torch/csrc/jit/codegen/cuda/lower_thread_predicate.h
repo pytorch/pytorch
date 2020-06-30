@@ -9,7 +9,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct TORCH_CUDA_API ThreadPredicates {
+class TORCH_CUDA_API ThreadPredicates {
  private:
   Fusion* fusion_;
 

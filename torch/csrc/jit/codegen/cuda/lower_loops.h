@@ -24,7 +24,7 @@ namespace fuser {
  * nests to initialize reduction buffers.
  *
  */
-struct TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
+class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
  private:
   // Lowered exprs to return
   std::vector<Expr*> lowered_exprs;

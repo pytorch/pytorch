@@ -588,7 +588,8 @@ void IRPrinter::handle(const Merge* m) {
 
 namespace {
 
-struct ReductionOps : OptOutDispatch {
+class ReductionOps : OptOutDispatch {
+ public:
   std::set<std::pair<BinaryOpType, DataType>> rops;
   void handle(ReductionOp* rop) override {
     rops.emplace(std::pair<BinaryOpType, DataType>{
@@ -605,6 +606,7 @@ struct ReductionOps : OptOutDispatch {
     return ROPs.rops;
   }
 };
+
 } // namespace
 
 void IRPrinter::printReductionOps(Fusion* fusion) {

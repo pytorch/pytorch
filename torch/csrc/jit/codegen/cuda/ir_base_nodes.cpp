@@ -60,7 +60,7 @@ Val::Val(const Val* src, IrCloner* ir_cloner)
 // val is also a constant value.
 namespace {
 
-struct ConstCheck : OptOutConstDispatch {
+class ConstCheck : OptOutConstDispatch {
  private:
   bool is_const_ = true;
 

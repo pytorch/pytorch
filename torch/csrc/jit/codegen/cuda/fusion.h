@@ -49,15 +49,15 @@ struct TypeHash {
  */
 
 class Fusion;
-struct TensorView;
+class TensorView;
 
 namespace cuda {
-struct CudaKernel;
+class CudaKernel;
 }
 
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
-struct TORCH_CUDA_API FusionGuard {
+class TORCH_CUDA_API FusionGuard {
  public:
   Fusion* prev_fusion;
 
@@ -72,7 +72,7 @@ struct TORCH_CUDA_API FusionGuard {
 
 // Expr sort will take a fusion and return a topologically sorted list of
 // expressions.
-struct ExprSort : public IterVisitor {
+class ExprSort : public IterVisitor {
  private:
   std::vector<Expr*> exprs;
 
@@ -86,7 +86,7 @@ struct ExprSort : public IterVisitor {
       bool respect_compute_at);
 };
 
-struct InputsOf : public IterVisitor {
+class InputsOf : public IterVisitor {
  private:
   std::unordered_set<Val*> inputs;
 

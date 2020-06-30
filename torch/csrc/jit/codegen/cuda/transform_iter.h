@@ -24,7 +24,7 @@ struct id_int_lt {
 };
 
 // Simply grabs all exprs needed to produce provided outputs.
-struct Exprs : public IterVisitor {
+class Exprs : public IterVisitor {
  private:
   std::vector<Expr*> exprs;
   void handle(Expr* e) override {
@@ -57,7 +57,7 @@ struct Exprs : public IterVisitor {
 //
 // If error_on_failure = false, replay will replay everything it can, and ignore
 // operations it can't.
-struct TORCH_CUDA_API ReplayTransformations : public IterVisitor {
+class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
  protected:
   const std::vector<IterDomain*>& target_domain_;
   std::unordered_map<IterDomain*, IterDomain*> id_map_;
@@ -161,7 +161,7 @@ struct TORCH_CUDA_API ReplayTransformations : public IterVisitor {
  * to the output of the equivlent expr's outputs in relpay_domain's history.
  */
 
-struct TORCH_CUDA_API BestEffortReplay {
+class TORCH_CUDA_API BestEffortReplay {
  private:
   std::unordered_map<IterDomain*, IterDomain*> id_map_;
   std::unordered_map<IterDomain*, size_t> leaf_ids_;

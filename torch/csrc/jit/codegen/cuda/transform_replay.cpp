@@ -15,7 +15,7 @@ using id_map = std::unordered_map<IterDomain*, IterDomain*>;
 
 namespace {
 
-struct ReplaySelf : public ReplayTransformations {
+class ReplaySelf : public ReplayTransformations {
  private:
   // Took a good bit of this from ReplayTransformations::handle(Split...)
   void handle(Split* s) override {

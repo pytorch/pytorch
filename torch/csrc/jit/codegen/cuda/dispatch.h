@@ -51,38 +51,39 @@ namespace fuser {
 class Fusion;
 
 // Hierarchal dispatch functions for handle
-struct Statement;
-struct Expr;
-struct Val;
+class Statement;
+class Expr;
+class Val;
 
 // Vals
-struct IterDomain;
-struct TensorDomain;
-struct TensorView;
-struct TensorIndex;
-struct Bool;
-struct Float;
-struct Half;
-struct Int;
-struct NamedScalar;
+class IterDomain;
+class TensorDomain;
+class TensorView;
+class TensorIndex;
+class Bool;
+class Float;
+class Half;
+class Int;
+class NamedScalar;
 
 // Exprs
-struct Split;
-struct Merge;
-struct UnaryOp;
-struct BinaryOp;
-struct TernaryOp;
-struct ReductionOp;
-struct BroadcastOp;
-struct ForLoop;
-struct IfThenElse;
-struct Allocate;
+class Split;
+class Merge;
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class BroadcastOp;
+class ForLoop;
+class IfThenElse;
+class Allocate;
 
 /*
  * By default, all IR nodes are handled in this dispatch, and will call an empty
  * function on all nodes.
  */
-struct TORCH_CUDA_API OptOutConstDispatch {
+class TORCH_CUDA_API OptOutConstDispatch {
+ public:
   virtual ~OptOutConstDispatch() = default;
   OptOutConstDispatch() = default;
 
@@ -121,7 +122,8 @@ struct TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const Allocate*) {}
 };
 
-struct TORCH_CUDA_API OptOutDispatch {
+class TORCH_CUDA_API OptOutDispatch {
+ public:
   virtual ~OptOutDispatch() = default;
   OptOutDispatch() = default;
 
@@ -160,7 +162,8 @@ struct TORCH_CUDA_API OptOutDispatch {
   virtual void handle(Allocate*) {}
 };
 
-struct TORCH_CUDA_API OptInConstDispatch {
+class TORCH_CUDA_API OptInConstDispatch {
+ public:
   virtual ~OptInConstDispatch() = default;
   OptInConstDispatch() = default;
 
@@ -237,7 +240,8 @@ struct TORCH_CUDA_API OptInConstDispatch {
   }
 };
 
-struct TORCH_CUDA_API OptInDispatch {
+class TORCH_CUDA_API OptInDispatch {
+ public:
   virtual ~OptInDispatch() = default;
   OptInDispatch() = default;
 
@@ -314,7 +318,8 @@ struct TORCH_CUDA_API OptInDispatch {
   }
 };
 
-struct TORCH_CUDA_API OptOutMutator {
+class TORCH_CUDA_API OptOutMutator {
+ public:
   virtual ~OptOutMutator() = default;
   OptOutMutator() = default;
 
@@ -376,7 +381,8 @@ struct TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(Allocate*);
 };
 
-struct TORCH_CUDA_API OptInMutator {
+class TORCH_CUDA_API OptInMutator {
+ public:
   virtual ~OptInMutator() = default;
   OptInMutator() = default;
 

@@ -40,11 +40,11 @@ constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE =
 
 class Fusion;
 class FusionGuard;
-struct Expr;
-struct Val;
-struct UnaryOp;
-struct BinaryOp;
-struct IterDomain;
+class Expr;
+class Val;
+class UnaryOp;
+class BinaryOp;
+class IterDomain;
 class IrCloner;
 
 /*
@@ -185,7 +185,7 @@ class TORCH_CUDA_API Statement {
  * 5) An enum value must be added to ValType in type.h
  * 6) A string entry must be added in val_type_string_map
  */
-struct TORCH_CUDA_API Val : public Statement {
+class TORCH_CUDA_API Val : public Statement {
  public:
   virtual ~Val() = default;
 
@@ -261,7 +261,7 @@ struct TORCH_CUDA_API Val : public Statement {
   const DataType dtype_;
 };
 
-struct TORCH_CUDA_API Scope {
+class TORCH_CUDA_API Scope {
  public:
   Scope() = default;
   Scope(const Scope* src, IrCloner* ir_cloner);
@@ -354,7 +354,7 @@ struct TORCH_CUDA_API Scope {
  * 6) An enum value must be added to ExprType in type.h 7) A string
  *  entry must be added in expr_type_string_map
  */
-struct TORCH_CUDA_API Expr : public Statement {
+class TORCH_CUDA_API Expr : public Statement {
  public:
   Expr() = delete;
   explicit Expr(ExprType _type);

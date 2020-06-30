@@ -5,7 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
-struct Val;
+class Val;
 
 /*
  * The operations defined in this header is intended as user facing functions.
