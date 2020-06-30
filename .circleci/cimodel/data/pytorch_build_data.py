@@ -6,6 +6,11 @@ CONFIG_TREE_DATA = [
         (None, [
             X("nightly"),
         ]),
+        ("rocm", [
+            ("3.3", [
+                X("3.6"),
+            ]),
+        ]),
         ("gcc", [
             ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),

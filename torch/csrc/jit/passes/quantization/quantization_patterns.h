@@ -138,8 +138,6 @@ QuantFusionInfo getBinaryOpScalarFusionInfo(
 
   const auto& extra_op_arg_list = getExtraArgList(extra_op_args);
   std::string graph_header = "graph(%a_quant" + extra_op_arg_list + "):";
-  const auto& extra_quantized_op_arg_list =
-      getExtraArgList(extra_quantized_op_args);
   std::string op_replacement = getAtenOpPattern(
       graph_header, quantized_op_name, extra_quantized_op_args);
 
