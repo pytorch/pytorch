@@ -52,6 +52,7 @@ class CAFFE2_API OnnxExporter {
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
   void InitOpToTensorProto(const caffe2::OperatorDef& def, TensorProto* tensor);
+
  private:
   ConvertedResult CommonCaffe2OpToOnnxNodes(const caffe2::OperatorDef& def);
 
