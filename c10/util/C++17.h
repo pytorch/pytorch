@@ -293,7 +293,7 @@ constexpr decltype(auto) INVOKE(Type T::* f, T1&& t1, Args&&... args)
             return (__(_(t1)).get().*f)(std::forward<Args>(args)...);
         }, /* else */ [&] (auto __){
             using _T1 = typename decltype(__)::template type_identity<typename decltype(_)::template type_identity<T1>>;
-            return ((*std::forward<_T1>(__(_(t1)))).*f)(std::forward<Args>(args)...);
+            return (std::forward<_T1>(__(_(t1))).*f)(std::forward<Args>(args)...);
         });});
     }, /* else */ [&] (auto _) {
         static_assert(std::is_member_object_pointer<decltype(_(f))>::value, "");
@@ -305,7 +305,7 @@ constexpr decltype(auto) INVOKE(Type T::* f, T1&& t1, Args&&... args)
             return __(_(t1)).get().*f;
         }, /* else */ [&] (auto __) {
             using _T1 = typename decltype(__)::template type_identity<typename decltype(_)::template type_identity<T1>>;
-            return (*std::forward<_T1>(__(_(t1)))).*f;
+            return std::forward<_T1>(__(_(t1))).*f;
         });});
     });
 }
