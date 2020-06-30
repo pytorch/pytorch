@@ -98,7 +98,9 @@ int main(int argc, char** argv) {
       std::chrono::duration_cast<us>(clock::now() - start_time).count());
   std::cout << "Pure RecordFunction runtime of " << FLAGS_rec_fn_iter
             << " iterations " << duration
-            << " us, number of callback invocations: " << cb_count << std::endl;
+            << " us, number of callback invocations: " << cb_count
+            << ", expected number: ~" << (int)(FLAGS_rec_fn_iter * kLowSamplingProb)
+            << " invocations" << std::endl;
 
   at::clearCallbacks();
   return 0;
