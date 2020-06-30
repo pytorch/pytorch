@@ -419,6 +419,8 @@ TensorView* reductionOp(
       TensorDomain::sameAs(tv->getRootDomain(), tv->domain()->domain()),
       "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/computeAt.");
 
+  TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
+
   std::vector<unsigned int> uint_axes;
   for (int axis : axes) {
     if (axis < 0)

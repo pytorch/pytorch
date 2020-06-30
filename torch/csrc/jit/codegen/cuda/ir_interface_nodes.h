@@ -242,6 +242,8 @@ struct TORCH_CUDA_API TensorView : public Val {
   // Will check if an axis is inside computeAtAxis and will fetch the reference
   // to be used in code generation.
   std::pair<IterDomain*, TensorView*> getComputeAtAxis(int pos) {
+    TORCH_INTERNAL_ASSERT(
+        nDims() > 0, "Tried to access a computeAt axis in a 0-dim TensorView");
     if (!hasComputeAt() || getThisComputeAtAxis() <= (unsigned int)pos)
       return std::pair<IterDomain*, TensorView*>(axis(pos), this);
     return compute_at_view_->getComputeAtAxis(getComputeAtRelPos(pos));

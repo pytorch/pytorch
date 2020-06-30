@@ -160,7 +160,10 @@ namespace jit {
   _(GPU_FusionBCastInnerDim)      \
   _(GPU_FusionBCastReduce)        \
   _(GPU_FusionSplitBCast)         \
-  _(GPU_FusionComputeAtExprOrder)
+  _(GPU_FusionComputeAtExprOrder) \
+  _(GPU_FusionZeroDimComputeAt)   \
+  _(GPU_FusionZeroDimBroadcast)   \
+  _(GPU_FusionZeroDimReduction)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

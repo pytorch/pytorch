@@ -72,6 +72,8 @@ std::vector<IterDomain*>::size_type TensorView::nDims() const {
 }
 
 IterDomain* TensorView::axis(int pos) const {
+  TORCH_INTERNAL_ASSERT(
+      nDims() > 0, "Tried to access an axis in a 0-dim TensorView");
   if (pos < 0)
     pos += domain()->nDims();
   TORCH_CHECK(
@@ -530,6 +532,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 }
 
 TensorView* TensorView::split(int axis, unsigned int factor) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim TensorView");
   if (axis < 0)
     axis += domain()->nDims();
 
@@ -548,6 +551,7 @@ TensorView* TensorView::split(int axis, unsigned int factor) {
 
 // Merge "axis" and "axis+1" into 1 dimension
 TensorView* TensorView::merge(int axis_o, int axis_i) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim TensorView");
   if (axis_o < 0)
     axis_o += domain()->nDims();
 
@@ -571,11 +575,15 @@ TensorView* TensorView::merge(int axis_o, int axis_i) {
 }
 
 TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
+  TORCH_INTERNAL_ASSERT(
+      !(nDims() == 0 && old2new_.size() > 0),
+      "Tried to reorder a 0-dim TensorView");
   domain()->reorder(old2new_);
   return this;
 }
 
 TensorView* TensorView::rFactor(const std::vector<int>& axes) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
   FusionGuard fg(this->fusion());
   Expr* origin_expr = this->fusion()->origin(this);
   TORCH_CHECK(

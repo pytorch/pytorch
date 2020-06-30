@@ -105,6 +105,10 @@ void IRPrinter::handle(Fusion* fusion) {
 }
 
 void IRPrinter::handle(const TensorDomain* td) {
+  if (td->nDims() == 0) {
+    os << "[ 0 ]";
+    return;
+  }
   os << "[ ";
   for (size_t i = 0; i < td->nDims(); i++) {
     handle(td->axis(i));
@@ -158,8 +162,13 @@ void IRPrinter::handle(const IterDomain* id) {
 }
 
 void IRPrinter::handle(const TensorIndex* ti) {
-  os << "T" << ti->view()->name() << "[ ";
+  os << "T" << ti->view()->name();
+  if (ti->nDims() == 0) {
+    os << "[ 0 ]";
+    return;
+  }
 
+  os << "[ ";
   bool first = true;
   for (auto* ind : ti->indices()) {
     if (!first)

@@ -550,6 +550,8 @@ bool TensorDomain::hasRFactor() const {
 // i here is int, as we want to accept negative value and ::size_type can be a
 // uint.
 IterDomain* TensorDomain::axis(int i) const {
+  TORCH_INTERNAL_ASSERT(
+      nDims() > 0, "Tried to access an axis in a 0-dim domain");
   if (i < 0)
     i += nDims();
   TORCH_CHECK(
@@ -562,6 +564,7 @@ IterDomain* TensorDomain::axis(int i) const {
 }
 
 size_t TensorDomain::posOf(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to find an axis in a 0-dim domain");
   size_t i = 0;
   while (i < domain_.size()) {
     if (domain_[i] == id)
@@ -574,6 +577,7 @@ size_t TensorDomain::posOf(IterDomain* id) const {
 // Split "axis" into 2 axes where the inner axes is size of "factor"
 // and outer axis is size axis.extent() / factor
 void TensorDomain::split(int axis_, unsigned int factor) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim domain");
   if (axis_ < 0)
     axis_ += nDims();
 
@@ -591,6 +595,7 @@ void TensorDomain::split(int axis_, unsigned int factor) {
 
 // Merge "axis" and "axis+1" into 1 dimension
 void TensorDomain::merge(int axis_o, int axis_i) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim domain");
   if (axis_o < 0)
     axis_o += nDims();
 
@@ -625,6 +630,9 @@ void TensorDomain::merge(int axis_o, int axis_i) {
 
 // Reorder axes according to map[old_pos] = new_pos
 void TensorDomain::reorder(const std::unordered_map<int, int>& old2new_) {
+  TORCH_INTERNAL_ASSERT(
+      !(nDims() == 0 && old2new_.size() > 0),
+      "Tried to reorder a 0-dim domain");
   domain_ = orderedAs(domain_, old2new_);
   resetDomains();
 }
@@ -632,6 +640,10 @@ void TensorDomain::reorder(const std::unordered_map<int, int>& old2new_) {
 std::vector<IterDomain*> TensorDomain::orderedAs(
     const std::vector<IterDomain*>& dom,
     const std::unordered_map<int, int>& old2new_) {
+  TORCH_INTERNAL_ASSERT(
+      !(dom.size() == 0 && old2new_.size() > 0),
+      "Tried to reorder a 0-dim domain");
+
   // Eventhough these checks are already in TensorView, we want to redo them as
   // we can enter this function from other places, not through TensorView
 
@@ -784,6 +796,8 @@ bool TensorDomain::hasReduction(const std::vector<IterDomain*>& td) {
 // pair is in order where second is the consumer of first
 std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
     const std::vector<int>& axes_) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim domain");
+
   std::vector<int> axes(axes_.size());
 
   auto ndims = nDims();
@@ -959,6 +973,8 @@ bool TensorIndex::sameAs(const TensorIndex* const other) const {
 }
 
 Val* TensorIndex::index(int i) const {
+  TORCH_INTERNAL_ASSERT(
+      nDims() > 0, "Tried to get an index of a 0-dim TensorIndex");
   if (i < 0)
     i += nDims();
   assert(i >= 0 && i < nDims());

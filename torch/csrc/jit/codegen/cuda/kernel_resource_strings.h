@@ -20,6 +20,17 @@ struct Tensor {
   int64_t size[N];
   int64_t stride[N];
 };
+
+// Specialization for 0-dim case as it does not need size and stride arrays.
+// They will be an error as well since zero-length arrays are not allowed.
+template<typename T>
+struct Tensor<T, 0> {
+  T& operator[](int64_t) {
+    return *data;
+  };
+
+  T* data;
+};
 )";
 
 // Code support for FP16 __half type and intrinsics

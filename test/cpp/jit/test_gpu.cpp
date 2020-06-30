@@ -3751,6 +3751,116 @@ void testGPU_FusionComputeAtExprOrder() {
   }
 }
 
+void testGPU_FusionZeroDimComputeAt() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = add(tv1, new Float(1));
+  fusion.addOutput(tv2);
+  TORCH_CHECK(tv2->nDims() == 0);
+  tv1->computeAt(tv2, 0);
+
+  prog.device_ = 0;
+  prog.grid(1);
+  prog.block(1);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({100}, options);
+  at::Tensor output = at::empty({}, options);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {output});
+  auto aten_output = input.sum() + 1;
+  TORCH_CHECK(
+      aten_output.allclose(output),
+      "Error of: ",
+      aten_output.sub(output).abs().max());
+}
+
+void testGPU_FusionZeroDimBroadcast() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(0);
+  fusion.addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, true});
+  TORCH_CHECK(tv1->nDims() == 2);
+
+  TensorView* tv2 = makeDummyTensor(2);
+  fusion.addInput(tv2);
+
+  auto tv3 = add(tv1, tv2);
+  auto tv4 = sum(tv3, {0, 1});
+  fusion.addOutput(tv4);
+
+  tv3->computeAt(tv4, -1);
+
+  prog.device_ = 0;
+  prog.grid(1);
+  prog.block(1);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::rand({}, options);
+  at::Tensor input2 = at::rand({10, 10}, options);
+  at::Tensor output = at::empty({}, options);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input1, input2}, {output});
+  auto aten_output =
+      (input1.unsqueeze(-1).unsqueeze(-1).expand({10, 10}) + input2).sum();
+  TORCH_CHECK(
+      aten_output.allclose(output),
+      "Error of: ",
+      aten_output.sub(output).abs().max());
+}
+
+void testGPU_FusionZeroDimReduction() {
+  torch::jit::fuser::cuda::CudaKernel prog;
+  Fusion& fusion = *prog.fusion_;
+  FusionGuard fg(&fusion);
+
+  const int bdimx = 32;
+  const int gdimx = 32;
+
+  TensorView* tv0 = makeDummyTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  fusion.addOutput(tv1);
+
+  tv1->split(0, bdimx);
+  tv1->split(0, gdimx);
+  auto tv2 = tv1->rFactor({0});
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(-2)->parallelize(ParallelType::BIDx);
+  tv2->axis(-2)->parallelize(ParallelType::BIDx);
+
+  prog.device_ = 0;
+  prog.grid(gdimx);
+  prog.block(bdimx);
+
+  torch::jit::fuser::cuda::compileKernel(&prog);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({1000}, options);
+  at::Tensor output = at::empty({}, options);
+  torch::jit::fuser::cuda::runTestKernel(&prog, {input}, {output});
+  auto aten_output = input.sum();
+  TORCH_CHECK(
+      aten_output.allclose(output),
+      "Error of: ",
+      aten_output.sub(output).abs().max());
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

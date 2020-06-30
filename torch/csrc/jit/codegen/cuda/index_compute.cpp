@@ -379,6 +379,10 @@ TensorIndex* Index::getProducerIndex(
       loops.size() == consumer->nDims() ||
       loops.size() == consumer->domain()->noReductions().size());
 
+  if (producer->domain()->noReductions().size() == 0) {
+    return new TensorIndex(producer, {});
+  }
+
   if (producer->getMemoryType() == MemoryType::Global)
     return getGlobalProducerIndex(producer, consumer, loops);
   return getProducerIndex_impl(producer, consumer, loops);
@@ -391,6 +395,10 @@ TensorIndex* Index::getConsumerIndex(
   TORCH_INTERNAL_ASSERT(
       loops.size() == consumer->nDims() ||
       loops.size() == consumer->domain()->noReductions().size());
+
+  if (consumer->domain()->noReductions().size() == 0) {
+    return new TensorIndex(consumer, {});
+  }
 
   if (consumer->getMemoryType() == MemoryType::Global)
     return getGlobalConsumerIndex(consumer, loops);
