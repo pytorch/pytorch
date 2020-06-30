@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <vector>
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 namespace {

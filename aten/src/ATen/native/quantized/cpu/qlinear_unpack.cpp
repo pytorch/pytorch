@@ -6,7 +6,7 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {

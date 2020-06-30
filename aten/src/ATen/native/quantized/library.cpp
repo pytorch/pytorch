@@ -4,13 +4,13 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <torch/custom_class.h>
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 template <int kSpatialDim = 2>
-torch::jit::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
+torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
 
-extern template torch::jit::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
-extern template torch::jit::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+extern template torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+extern template torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
 TORCH_LIBRARY(quantized, m) {
   register_linear_params();
