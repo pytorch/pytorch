@@ -686,6 +686,7 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             state = torch.load(f)
 
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_pathlike_serialization(self):
         model = torch.nn.Conv2d(20, 3200, kernel_size=3)
 
