@@ -6,6 +6,11 @@ CONFIG_TREE_DATA = [
         (None, [
             X("nightly"),
         ]),
+        ("rocm", [
+            ("3.3", [
+                X("3.6"),
+            ]),
+        ]),
         ("gcc", [
             ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
@@ -35,19 +40,6 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("libtorch", [XImportant(True)])
                 ]),
-            ]),
-        ]),
-        ("android", [
-            ("r19c", [
-                ("3.6", [
-                    ("android_abi", [XImportant("x86_32")]),
-                    ("android_abi", [X("x86_64")]),
-                    ("android_abi", [X("arm-v7a")]),
-                    ("android_abi", [X("arm-v8a")]),
-                    ("vulkan", [
-                        ("android_abi", [XImportant("x86_32")]),
-                    ]),
-                ])
             ]),
         ]),
     ]),
@@ -137,8 +129,6 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "build_only": BuildOnlyConfigNode,
-            "android_abi": AndroidAbiConfigNode,
-            "vulkan": VulkanConfigNode,
             "cuda_gcc_override": CudaGccOverrideConfigNode
         }
         return next_nodes[experimental_feature]
@@ -187,24 +177,6 @@ class LibTorchConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
-
-class AndroidAbiConfigNode(TreeConfigNode):
-
-    def init2(self, node_name):
-        self.props["android_abi"] = node_name
-
-    def child_constructor(self):
-        return ImportantConfigNode
-
-class VulkanConfigNode(TreeConfigNode):
-    def modify_label(self, label):
-        return "Vulkan=" + str(label)
-
-    def init2(self, node_name):
-        self.props["vulkan"] = node_name
-
-    def child_constructor(self):
-        return AndroidAbiConfigNode
 
 class CudaGccOverrideConfigNode(TreeConfigNode):
     def init2(self, node_name):
