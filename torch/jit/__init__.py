@@ -156,13 +156,15 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
            containing a file name.
         _extra_files: Map from filename to contents which will be stored as part of `f`.
 
-    .. warning::
-        If you are using Python 2, `save` does NOT support ``StringIO.StringIO``
-        as a valid file-like object. This is because the write method should
-        return the number of bytes written; ``StringIO.write()`` does not do
-        this.
-
-        Please use something like ``io.BytesIO`` instead.
+    .. note::
+        torch.jit.save attempts to preserve the behavior of some operators
+        across versions. For example, dividing two integer tensors in
+        PyTorch 1.5 performed floor division, and if the module
+        containing that code is saved in PyTorch 1.5 and loaded in PyTorch 1.6
+        its division behavior will be preserved. The same module saved in
+        PyTorch 1.6 will fail to load in PyTorch 1.5, however, since the
+        behavior of division changed in 1.6, and 1.5 does not know how to
+        replicate the 1.6 behavior.
 
     Example:
 
