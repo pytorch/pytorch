@@ -331,7 +331,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
           " CHECK FAILED at "                           \
           C10_STRINGIZE(__FILE__)                       \
           ", ",                                         \
-          __VA_ARGS__)                                  \
+          ##__VA_ARGS__)                                  \
     );                                                  \
   }
 #else
