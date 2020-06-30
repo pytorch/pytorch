@@ -67,10 +67,6 @@ class RemoteModuleTest(RpcAgentTestFixture):
     def world_size(self):  # Override setting in RpcAgentTestFixture
         return 2
 
-    def setUp(self):
-        super().setUp()
-        self._fork_processes()
-
     @staticmethod
     def _create_remote_module_iter(dst_worker_name, modes=None):
         if modes is None:
