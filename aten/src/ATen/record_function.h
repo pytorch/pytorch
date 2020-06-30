@@ -314,8 +314,6 @@ class TORCH_API RecordFunctionCallback {
   bool needs_ids_ = false;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
-
-  static double sample_zero_one();
 };
 
 // Using macro to minimize inputs copies,
