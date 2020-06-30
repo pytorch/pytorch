@@ -39,24 +39,14 @@ executors:
       shell: bash.exe
 commands:
 
-  # Must be run after attaching workspace from previous steps
-  load_shared_env:
-    description: "Loads .circleci/shared/env_file into ${BASH_ENV}"
-    parameters:
-      # For some weird reason we decide to reattach our workspace to ~/workspace so
-      # in the vein of making it simple let's assume our share env_file is here
-      root:
-        type: string
-        default: "~/workspace"
+  calculate_docker_image_tag:
+    description: "Calculates the docker image tag"
     steps:
       - run:
-          name: "Load .circleci/shared/env_file into ${BASH_ENV}"
+          name: "Calculate docker image hash"
           command: |
-            if [[ -f  "<< parameters.root >>/.circleci/shared/env_file" ]]; then
-              cat << parameters.root >>/.circleci/shared/env_file >> ${BASH_ENV}
-            else
-              echo "We didn't have a shared env file, that's weird"
-            fi
+            DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
+            echo "export DOCKER_TAG=${DOCKER_TAG}" >> ${BASH_ENV}
 
   # This system setup script is meant to run before the CI-related scripts, e.g.,
   # installing Git client, checking out code, setting up CI env, and
@@ -426,8 +416,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
-    - attach_workspace:
-        at: ~/workspace
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - optional_merge_target_branch
     - setup_ci_environment
@@ -437,8 +426,8 @@ jobs:
         command: |
           set -e
           # Pull Docker image and run build
-          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          time docker pull ${DOCKER_IMAGE} >/dev/null
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}:${DOCKER_TAG}
+          time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           git submodule sync && git submodule update -q --init --recursive
@@ -462,7 +451,7 @@ jobs:
             # The xla build uses the same docker image as
             # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
             # distinguish between them so the test can pick up the correct image.
-            output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+            output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
             elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
@@ -495,8 +484,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
-    - attach_workspace:
-        at: ~/workspace
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -505,7 +493,7 @@ jobs:
         command: |
           set -e
           # See Note [Special build images]
-          output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
           elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
@@ -735,6 +723,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -794,6 +783,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -930,7 +920,7 @@ jobs:
     <<: *binary_linux_build_params
     steps:
     - checkout
-    - load_shared_env
+    - calculate_docker_image_tag
     - run:
         <<: *binary_checkout
     - run:
@@ -995,9 +985,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
-    # TODO: We shouldn't attach the workspace multiple times
-    - attach_workspace:
-        at: /home/circleci/project
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1018,6 +1006,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - attach_workspace:
@@ -1042,6 +1031,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1303,13 +1293,13 @@ jobs:
   pytorch_python_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
-      # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:fff7795428560442086f7b2bb6004b65245dc11a"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1317,7 +1307,7 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -ex
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -1354,12 +1344,13 @@ jobs:
   pytorch_cpp_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:fff7795428560442086f7b2bb6004b65245dc11a"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1367,7 +1358,7 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -ex
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -1454,13 +1445,14 @@ jobs:
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:fff7795428560442086f7b2bb6004b65245dc11a"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1468,7 +1460,7 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -eux
-          docker_image_commit=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          docker_image_commit=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
 
           docker_image_libtorch_android_x86_32=${docker_image_commit}-android-x86_32
           docker_image_libtorch_android_x86_64=${docker_image_commit}-android-x86_64
@@ -1536,7 +1528,7 @@ jobs:
         name: save binary size
         no_output_timeout: "5m"
         command: |
-          docker_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
+          docker_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}-android-x86_32-gradle
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image})
           echo "docker-id: $id"
           cat \<< EOL | docker exec -u jenkins -i "$id" bash
@@ -1595,13 +1587,14 @@ jobs:
   pytorch_android_gradle_build-x86_32:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:fff7795428560442086f7b2bb6004b65245dc11a"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - run:
         name: filter out not PR runs
         no_output_timeout: "5m"
@@ -1618,7 +1611,7 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
-          docker_image_libtorch_android_x86_32=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32
+          docker_image_libtorch_android_x86_32=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}-android-x86_32
           echo "docker_image_libtorch_android_x86_32: "${docker_image_libtorch_android_x86_32}
 
           # x86
@@ -1638,7 +1631,7 @@ jobs:
         name: save binary size
         no_output_timeout: "5m"
         command: |
-          docker_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}-android-x86_32-gradle
+          docker_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}-android-x86_32-gradle
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image})
           echo "docker-id: $id"
           cat \<< EOL | docker exec -u jenkins -i "$id" bash
@@ -1780,6 +1773,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1788,8 +1782,8 @@ jobs:
         command: |
           set -e
           # Pull Docker image and run build
-          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          time docker pull ${DOCKER_IMAGE} >/dev/null
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}:${DOCKER_TAG}
+          time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
@@ -1817,6 +1811,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1824,7 +1819,7 @@ jobs:
         no_output_timeout: "90m"
         command: |
           set -e
-          output_image=${DOCKER_IMAGE}-bazel-${CIRCLE_SHA1}
+          output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-bazel-${CIRCLE_SHA1}
           export COMMIT_DOCKER_IMAGE=$output_image
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
 
@@ -1864,6 +1859,7 @@ jobs:
       image: ubuntu-1604:201903-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -1871,7 +1867,7 @@ jobs:
         no_output_timeout: "30m"
         command: |
           set -ex
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -1976,20 +1972,7 @@ jobs:
         DOCKER_BUILDKIT: 1
       steps:
         - checkout
-        - run:
-            name: Calculate docker tag
-            command: |
-              set -x
-              mkdir .circleci/shared
-              # git keeps a hash of all sub trees
-              echo "export DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)" >> .circleci/shared/env_file
-        # Saves our calculated docker tag to our workpace for later use
-        - persist_to_workspace:
-            root: .
-            paths:
-              - .circleci/shared/
-        - load_shared_env:
-            root: .
+        - calculate_docker_image_tag
         - run:
             name: Check if image should be built
             command: |
