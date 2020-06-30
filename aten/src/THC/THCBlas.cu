@@ -271,14 +271,24 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
                                    (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0));
 #else
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+  // On Cuda 11, tensor cores are allowed by default for FP16 inputs if the math mode is
+  // CUBLAS_DEFAULT_MATH or CUBLAS_TF32_TENSOR_OP_MATH, so there's no need to change
+  // the math mode locally.
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
+#endif  // CUDA_VERSION < 11000 
   THCublasCheck(cublasGemmStridedBatchedEx(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&fAlpha, a, CUDA_R_16F, (int)lda, strideA,
                                    b, CUDA_R_16F, (int)ldb, strideB,
                                    (void*)&fBeta, c, CUDA_R_16F, (int)ldc, strideC,
                                    (int)batchCount, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+  // On Cuda 11, tensor cores are allowed by default for FP16 inputs if the math mode is
+  // CUBLAS_DEFAULT_MATH or CUBLAS_TF32_TENSOR_OP_MATH, so there's no need to change
+  // the math mode locally.
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif  // CUDA_VERSION < 11000
 #endif // __HIP_PLATFORM_HCC__
 }
 #endif // CUDA_VERSION or __HIP_PLATFORM_HCC__
