@@ -154,7 +154,7 @@ jobs:
           # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
           python tools/clang_tidy.py                               \
             --verbose                                              \
-            --paths torch/csrc/ aten/src/ATen/                     \
+            --paths torch/csrc/                                    \
             --diff "$MERGE_BASE"                                   \
             -g"-torch/csrc/jit/serialization/export.cpp"           \
             -g"-torch/csrc/jit/serialization/import.cpp"           \

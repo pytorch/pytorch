@@ -23,6 +23,12 @@ from torch.testing._internal.dist_utils import (
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
+    FaultyRpcAgentTestFixture,
+)
+from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture import (
+    TensorPipeRpcAgentTestFixture,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 
@@ -2195,7 +2201,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                     local_grads = ret if ret else local_grads
 
 
-class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
+class FaultyAgentDistAutogradTest(FaultyRpcAgentTestFixture):
     # Reusing a simplified helper function from DistAutogradTest to ensure
     # autograd context is successfully cleaned up even when RPCs are failing.
     def context_cleanup_test_helper(self, rpc_args, func):
@@ -2238,3 +2244,10 @@ class FaultyAgentDistAutogradTest(RpcAgentTestFixture):
         self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
+
+class TensorPipeAgentDistAutogradTest(TensorPipeRpcAgentTestFixture,
+                                      DistAutogradTest):
+
+    @dist_init
+    def test_verify_backend_options(self):
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.TENSORPIPE)

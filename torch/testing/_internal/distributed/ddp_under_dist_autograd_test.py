@@ -11,7 +11,6 @@ import torch
 from torch.distributed import rpc
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
@@ -431,7 +430,7 @@ class TestDdpUnderDistAutograd(RpcAgentTestFixture):
         self._do_test(DdpMode.INSIDE)
 
 
-class TestDdpComparison(MultiProcessTestCase, RpcAgentTestFixture):
+class TestDdpComparison(RpcAgentTestFixture):
 
     @property
     def world_size(self) -> int:
