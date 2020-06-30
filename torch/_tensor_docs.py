@@ -883,6 +883,13 @@ Args:
 
 """.format(**common_args))
 
+add_docstr_all('count_nonzero',
+               r"""
+count_nonzero(dim=None) -> Tensor
+
+See :func:`torch.count_nonzero`
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor
@@ -3808,6 +3815,12 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('is_quantized',
                r"""
 Is ``True`` if the Tensor is quantized, ``False`` otherwise.
+""")
+
+add_docstr_all('is_meta',
+               r"""
+Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
+are like normal tensors, but they carry no data.
 """)
 
 add_docstr_all('device',
