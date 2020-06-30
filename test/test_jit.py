@@ -8751,6 +8751,8 @@ a")
                 return inputs
 
         m = MyModule()
+        # m = torch.jit.script(m)
+        # m(torch.randn(2, 2))
         self.checkModule(m, [torch.randn(2, 2)])
 
     def test_script_module_list_sequential(self):

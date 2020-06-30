@@ -235,7 +235,8 @@ SugaredValuePtr ModuleValue::getitem(
     Value* idx) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
     return getSugaredDict(loc, m)->getModules()->getitem(loc, m, idx);
-  } else if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
+  } else if (
+      concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (idx->type()->kind() == c10::TypeKind::StringType) {
       auto sd = getSugaredDict(loc, m);
       auto idx_str = toIValue(idx)->toStringRef();
@@ -252,8 +253,7 @@ SugaredValuePtr ModuleValue::getitem(
           return module_value;
         }
       }
-      throw ErrorReport(loc)
-          << "Key Error, " << idx_str;
+      throw ErrorReport(loc) << "Key Error, " << idx_str;
     }
   }
   throw ErrorReport(loc)
