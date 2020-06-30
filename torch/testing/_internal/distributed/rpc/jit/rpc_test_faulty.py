@@ -10,8 +10,8 @@ from torch.testing._internal.dist_utils import (
     worker_name,
     wait_until_pending_futures_and_users_flushed
 )
-from torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture import (
-    FaultyRpcAgentTestFixture,
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
+    RpcAgentTestFixture,
 )
 
 
@@ -82,7 +82,7 @@ def rpc_async_with_rref_arg(dst_worker_name, args):
     return ret
 
 
-class JitFaultyAgentRpcTest(FaultyRpcAgentTestFixture):
+class JitFaultyAgentRpcTest(RpcAgentTestFixture):
     """
     Run tests for rpc_async in JIT under the faulty agent test fixture to test
     arbitrary timeouts.
