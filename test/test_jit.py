@@ -8682,7 +8682,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             M()
 
-    def test_modulelist_grandparent_inherit_methods(self):
+    def test_module_interface_special_methods(self):
         class CustomModuleInterface(torch.nn.Module):
             def __init__(self):
                 super(CustomModuleInterface, self).__init__()
