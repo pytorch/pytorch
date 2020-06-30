@@ -8746,6 +8746,37 @@ a")
         m = MyModule()
         self.checkModule(m, [torch.randn(2, 2)])
 
+    def test_moduledict_getitem(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.relu = torch.jit.script(torch.nn.ReLU())
+                self.tanh = torch.jit.script(torch.nn.Tanh())
+                self.moduledict = torch.nn.ModuleDict({"relu": self.relu,
+                                                       "tanh": self.tanh})
+
+            def forward(self, input):
+                assert self.moduledict['relu'] is self.relu
+                assert self.moduledict['tanh'] is self.tanh
+                return input
+
+        m = MyModule()
+        self.checkModule(m, [torch.randn(2, 2)])
+
+    def test_moduledict_keyerror(self):
+        class BadModule(torch.nn.Module):
+            def __init__(self):
+                super(BadModule, self).__init__()
+                self.moduledict = torch.nn.ModuleDict({"foo": None,
+                                                       "bar": None})
+
+            def forward(self, input):
+                assert self.moduledict['blah'] == "blah", "this is a keyerror"
+
+        with self.assertRaisesRegex(RuntimeError, "Key Error, blah"):
+            b = BadModule()
+            self.checkModule(b, [torch.randn(2, 2)])
+
     def test_script_module_list_sequential(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, mod_list):

@@ -350,11 +350,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             else:
                 # use the default recursive rule to compile the module
                 scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
-                if isinstance(orig_value, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):
-                    scripted.define("def __len__(self):\n   return {}\n".format(len(scripted)))
-                if isinstance(orig_value, torch.nn.ModuleDict):
-                    keys = repr(list(orig_value.keys()))
-                    scripted.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
 
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
@@ -414,6 +409,11 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.COPY_TO_SCRIPT_WRAPPER:
             add_python_attr_to_scripted_model(script_module, nn_module, name)
 
+    if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):
+        script_module.define("def __len__(self):\n   return {}\n".format(len(nn_module)))
+    if isinstance(nn_module, torch.nn.ModuleDict):
+        keys = repr(list(nn_module.keys()))
+        script_module.define("def __contains__(self, key: str):\n   return key in {}\n".format(keys))
     return script_module
 
 
