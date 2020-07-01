@@ -19448,6 +19448,8 @@ def generate_test_function(cls,
     test_name = "test_" + op_str + subtest_str
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
 
+    # if a test does not care about TF32 or not, then we should not change TF32 flags before test
+    # otherwise, both tf32 and fp32 should be tested
     if tfloat32 in dtype_list or tcomplex64 in dtype_list:
         def fn(self, device, dtype_):
             return fn_(self, device, dtype_, True)
