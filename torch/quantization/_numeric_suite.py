@@ -119,13 +119,12 @@ def compare_weights(float_dict, quantized_dict):
     return weight_dict
 
 
-def _get_logger_dict_helper(mod, target_dict, Logger, prefix=""):
+def _get_logger_dict_helper(mod, target_dict, prefix=""):
     r"""This is the helper function for get_logger_dict
 
     Args:
         mod: module we want to save all logger stats
         prefix: prefix for the current module
-        Logger: type of logger we want to get
         target_dict: the dictionary used to save all logger stats
     """
 
@@ -139,10 +138,10 @@ def _get_logger_dict_helper(mod, target_dict, Logger, prefix=""):
 
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
-        _get_logger_dict_helper(child, target_dict, Logger, module_prefix)
+        _get_logger_dict_helper(child, target_dict, module_prefix)
 
 
-def get_logger_dict(mod, Logger, prefix=""):
+def get_logger_dict(mod, prefix=""):
     r"""Traverse the modules and save all logger stats into target dict.
     This is mainly used for quantization accuracy debug.
 
@@ -154,14 +153,13 @@ def get_logger_dict(mod, Logger, prefix=""):
     Args:
         mod: module we want to save all logger stats
         prefix: prefix for the current module
-        Logger: type of logger we want to get
 
     Return:
         target_dict: the dictionary used to save all logger stats
     """
 
     target_dict = {}
-    _get_logger_dict_helper(mod, target_dict, Logger, prefix)
+    _get_logger_dict_helper(mod, target_dict, prefix)
     return target_dict
 
 
@@ -313,7 +311,7 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
     Example usage:
         prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
         q_model(data)
-        ob_dict = get_logger_dict(q_model, Logger)
+        ob_dict = get_logger_dict(q_model)
 
     Args:
         float_module: float module used to generate the q_module
@@ -379,7 +377,7 @@ def compare_model_stub(
     """
     prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
     q_model(*data)
-    ob_dict = get_logger_dict(q_model, Logger)
+    ob_dict = get_logger_dict(q_model)
     return ob_dict
 
 
@@ -396,8 +394,8 @@ def get_matching_activations(float_module, q_module, Logger):
         entry being a dictionary with two keys 'float' and 'quantized', containing
         the matching float and quantized activations
     """
-    float_dict = get_logger_dict(float_module, Logger)
-    quantized_dict = get_logger_dict(q_module, Logger)
+    float_dict = get_logger_dict(float_module)
+    quantized_dict = get_logger_dict(q_module)
     act_dict = {}
     for key in quantized_dict:
         match_key = _find_match(sorted(float_dict, reverse=True), key, "stats")
