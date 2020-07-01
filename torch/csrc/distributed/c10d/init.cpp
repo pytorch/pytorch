@@ -138,6 +138,8 @@ PyObject* c10d_init(PyObject* _unused) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "register_comm_hook",
+          py::arg("state"),
+          py::arg("hook"),
           &::c10d::Reducer::register_comm_hook,
           py::call_guard<py::gil_scoped_release>())
       .def(

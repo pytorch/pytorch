@@ -5,7 +5,6 @@
 #include <ATen/core/functional.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {

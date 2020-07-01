@@ -4,8 +4,7 @@
 
 #include <ATen/ATen.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/reducer.h>
-#include <torch/csrc/utils/tensor_flatten.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
 
