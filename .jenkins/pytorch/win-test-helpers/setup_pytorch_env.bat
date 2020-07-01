@@ -44,6 +44,8 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
 
+set _NT_ALT_SYMBOL_PATH=%TMP_DIR_WIN%\build\torch\lib
+
 set DISTUTILS_USE_SDK=1
 
 if "%CUDA_VERSION%" == "9" goto cuda_build_9
