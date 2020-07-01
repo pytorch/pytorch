@@ -47,6 +47,7 @@ def tf32_is_not_fp32():
 
 @contextlib.contextmanager
 def setup_tf32(dtype, rtol=0.001, atol=1e-5):
+    old = torch.backends.cuda.matmul.allow_tf32
     if dtype in {tfloat32, tcomplex64}:
         torch.backends.cuda.matmul.allow_tf32 = True
         if tf32_is_not_fp32():
@@ -57,19 +58,20 @@ def setup_tf32(dtype, rtol=0.001, atol=1e-5):
         if dtype in {torch.float32, torch.complex64}:
             torch.backends.cuda.matmul.allow_tf32 = False
         yield dtype, None, None
-    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cuda.matmul.allow_tf32 = old
 
 
 def tf32_on_and_off(rtol_=0.001, atol_=1e-5):
     def wrapper(f):
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
+            old = torch.backends.cuda.matmul.allow_tf32
             rtol, atol = (rtol_, atol_) if tf32_is_not_fp32() else (None, None)
             torch.backends.cuda.matmul.allow_tf32 = True
             f(*args, **kwargs, rtol=rtol, atol=atol)
             torch.backends.cuda.matmul.allow_tf32 = False
             f(*args, **kwargs, rtol=None, atol=None)
-            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cuda.matmul.allow_tf32 = old
 
         return wrapped
     return wrapper
