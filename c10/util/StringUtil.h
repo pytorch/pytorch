@@ -103,9 +103,8 @@ inline std::ostream& _error_value(std::ostream& ss, const T& t, const Args&... a
 
 template<typename... Args>
 struct _error_value_wrapper final {
-  static std::string call(const char* cond, const Args&... args) {
+  static std::string call(const Args&... args) {
     std::ostringstream ss;
-    ss << cond;
     _error_value(ss, args...);
     return ss.str();
   }
@@ -124,8 +123,8 @@ inline decltype(auto) str(const Args&... args) {
 //
 // The first augument is always a string literal containing metadata about the error message.
 template <typename... Args>
-inline decltype(auto) error_value(const char* cond, const Args&... args) {
-  return detail::_error_value_wrapper<typename detail::CanonicalizeStrTypes<Args>::type...>::call(cond, args...);
+inline decltype(auto) error_value(const Args&... args) {
+  return detail::_error_value_wrapper<typename detail::CanonicalizeStrTypes<Args>::type...>::call(args...);
 }
 
 template <class Container>
