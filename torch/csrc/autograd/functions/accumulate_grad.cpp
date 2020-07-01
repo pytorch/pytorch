@@ -33,7 +33,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   if (!variable.requires_grad())
     return {};
 
-  at::Tensor& grad = variable.grad();
+  at::Tensor& grad = variable.mutable_grad();
 
   // std::move(grads[0]) to avoid bumping up refcount
   at::Tensor new_grad = callHooks(variable, std::move(grads[0]));
