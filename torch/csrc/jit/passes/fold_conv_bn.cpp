@@ -124,7 +124,10 @@ class FoldConvBatchNormHelper {
   // [(['sub', 'conv1'], ['sub', 'bn1']), (['sub', 'conv2'], ['sub', 'bn2'])]
   // the first entry of the list is the paths to first conv-bn match
   // the second entry of the list is the path to second match
-  std::unordered_map<Graph*, std::vector<std::tuple<std::vector<std::string>, std::vector<std::string>>>>
+  std::unordered_map<
+      Graph*,
+      std::vector<
+          std::tuple<std::vector<std::string>, std::vector<std::string>>>>
       conv_bn_paths_;
 
   std::unordered_map<Value*, Value*> rewrite_map_;
@@ -277,7 +280,8 @@ void FoldConvBatchNormHelper::analyze(
           // Get the conv and bn submodule
           Node* matched_conv = match.nodes_map.at(pattern_conv);
           Node* matched_bn = match.nodes_map.at(pattern_bn);
-          Node* matched_bn_submodule = match.values_map.at(pattern_bn_submodule)->node();
+          Node* matched_bn_submodule =
+              match.values_map.at(pattern_bn_submodule)->node();
           Value* conv_instance = matched_conv->input(0);
           Value* bn_instance = matched_bn->input(0);
           Value* self = g->inputs()[0];
