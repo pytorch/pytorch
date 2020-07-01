@@ -16986,7 +16986,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def genf_float(x, y):
             return torch.randn(x, y, dtype=dtype, device=device)
 
-        with setup_tf32(dtype) as (dtype, rtol, atol):
+        with setup_tf32(dtype, 0.005, 0.005) as (dtype, rtol, atol):
             for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
                 if (dtype == torch.int32) or (dtype == torch.int64):
                     genf = genf_int
