@@ -334,7 +334,7 @@ class TestModuleContainers(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Key Error, blah"):
             b = BadModule()
-            self.checkModule(b, [torch.randn(2, 2)])
+            torch.jit.script(b)
 
         class AnotherBadModule(torch.nn.Module):
             def __init__(self):
@@ -349,4 +349,4 @@ class TestModuleContainers(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Unable to extract string literal index. "
                                                   "ModuleDict indexing is only supported with string literals."):
             b = AnotherBadModule()
-            self.checkModule(b, [torch.randn(2, 2)])
+            torch.jit.script(b)
