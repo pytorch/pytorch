@@ -472,6 +472,7 @@ class SerializationMixin(object):
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
 
+
     def test_serialization_storage_slice(self):
         # Generated using:
         #
@@ -541,6 +542,18 @@ class serialization_method(object):
 
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
+
+class TestBothSerialization(TestCase, SerializationMixin):
+    def test_serialization_new_format_old_format_compat(self):
+        x = [torch.ones(200, 200) for i in range(30)]
+        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=True)
+        x_new_load = torch.load("big_tensor.zip")
+        self.assertEqual(x, x_new_load)
+
+        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=False)
+        x_old_load = torch.load("big_tensor.zip")
+        self.assertEqual(x_old_load, x_new_load)
+        os.remove("big_tensor.zip")
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -659,6 +672,18 @@ class TestSerialization(TestCase, SerializationMixin):
             test(f.name)
 
         test(io.BytesIO())
+
+    # Ensure large zip64 serialization works properly
+    @unittest.skipIf(IS_WINDOWS,
+                     '<built-in method read of BytesIOContext object at 0x0000022C21F2B468> returned a result'
+                     ' with an error set')
+    def test_serialization_2gb_file(self):
+        big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
+
+        with BytesIOContext() as f:
+            torch.save(big_model, f)
+            f.seek(0)
+            state = torch.load(f)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

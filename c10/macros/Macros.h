@@ -211,20 +211,30 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
-// code that when building Release.
-#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+// code that would otherwise be suppressed when building Release.
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
-// TODO: This should be defined but I don't have the environment to properly
-// test it. See e.g., https://github.com/pytorch/pytorch/pull/32719#discussion_r379918384
-#define CUDA_KERNEL_ASSERT(cond)
+#if defined(NDEBUG)
+extern "C" {
+  C10_IMPORT
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
+    __host__ __device__
+#endif // __CUDA_ARCH__
+ void _wassert(
+    wchar_t const* _Message,
+    wchar_t const* _File,
+    unsigned _Line);
+}
+#endif
+#define CUDA_KERNEL_ASSERT(cond)                                                                 \
+  if (C10_UNLIKELY(!(cond))) {                                                                   \
+    (void)(_wassert(_CRT_WIDE(#cond), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0); \
+  }
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {
-#if !defined(__CUDA_ARCH__)  || !defined(__clang__)
-  [[noreturn]]
-#endif
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
     defined(__HIP_ARCH__) || defined(__HIP__)
 __host__ __device__

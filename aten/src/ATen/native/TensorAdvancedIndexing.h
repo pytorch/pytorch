@@ -11,6 +11,8 @@ namespace at {
 
 namespace at { namespace native {
 
+enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_SUBTRACT, REDUCE_MULTIPLY, REDUCE_DIVIDE};
+
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
 using index_put_accum_fn = void(*)(Tensor &, TensorList , const Tensor &, bool unsafe);
@@ -21,7 +23,11 @@ using gather_fn = void (*)(Tensor & result, const Tensor & self, int64_t dim, co
 using scatter_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
 using scatter_fill_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, Scalar src);
 using scatter_add_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
-
+using scatter_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
+                                  const Tensor& src, const SCATTER_GATHER_OP& reduce);
+using scatter_scalar_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
+                                         Scalar& value, const SCATTER_GATHER_OP& reduce);
+    
 DECLARE_DISPATCH(index_fn, index_stub);
 DECLARE_DISPATCH(index_put_fn, index_put_stub);
 DECLARE_DISPATCH(index_put_accum_fn, index_put_accum_stub);
@@ -33,6 +39,8 @@ DECLARE_DISPATCH(gather_fn, gather_stub);
 DECLARE_DISPATCH(scatter_fn, scatter_stub);
 DECLARE_DISPATCH(scatter_fill_fn, scatter_fill_stub);
 DECLARE_DISPATCH(scatter_add_fn, scatter_add_stub);
+DECLARE_DISPATCH(scatter_reduce_fn, scatter_reduce_stub);
+DECLARE_DISPATCH(scatter_scalar_reduce_fn, scatter_scalar_reduce_stub);
 
 TORCH_API Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices);
 

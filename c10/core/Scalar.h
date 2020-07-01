@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <type_traits>
 
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
@@ -29,6 +30,10 @@ class C10_API Scalar {
   Scalar(type vv) : Scalar(vv, true) { }
 
   AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
+  // TODO: remove the std::complex below
+  DEFINE_IMPLICIT_CTOR(std::complex<float>, x)
+  DEFINE_IMPLICIT_CTOR(std::complex<double>, x)
 
 #undef DEFINE_IMPLICIT_CTOR
 
@@ -43,27 +48,13 @@ class C10_API Scalar {
     v.i = convert<int64_t, bool>(vv);
   }
 
-#define DEFINE_IMPLICIT_COMPLEX_CTOR(type, name, member) \
-  Scalar(type vv) : tag(Tag::HAS_##member) {             \
-    v.member[0] = c10::convert<double>(vv.real());       \
-    v.member[1] = c10::convert<double>(vv.imag());       \
-  }
-
-  DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<c10::Half>, ComplexHalf, z)
-  DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<float>, ComplexFloat, z)
-  DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<double>, ComplexDouble, z)
-  DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<float>, ComplexFloat, z)
-  DEFINE_IMPLICIT_COMPLEX_CTOR(c10::complex<double>, ComplexDouble, z)
-
-#undef DEFINE_IMPLICIT_COMPLEX_CTOR
-
 #define DEFINE_ACCESSOR(type, name)                       \
   type to##name() const {                                 \
     if (Tag::HAS_d == tag) {                              \
       return checked_convert<type, double>(v.d, #type);   \
     } else if (Tag::HAS_z == tag) {                       \
       return checked_convert<type, c10::complex<double>>( \
-          {v.z[0], v.z[1]}, #type);                       \
+          v.z, #type);                                    \
     } if (Tag::HAS_b == tag) {                            \
       return checked_convert<type, bool>(v.i, #type);     \
     } else {                                              \
@@ -116,17 +107,24 @@ class C10_API Scalar {
 
  private:
     template<typename T,
-             typename std::enable_if<std::numeric_limits<T>::is_integer && ! std::is_same<T, bool>::value, bool>::type* =
+             typename std::enable_if<std::is_integral<T>::value && ! std::is_same<T, bool>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_i) {
       v.i = convert<decltype(v.i), T>(vv);
     }
 
     template<typename T,
-             typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type* =
+             typename std::enable_if<!std::is_integral<T>::value && !c10::is_complex_t<T>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_d) {
       v.d = convert<decltype(v.d), T>(vv);
+    }
+
+    template<typename T,
+             typename std::enable_if<c10::is_complex_t<T>::value, bool>::type* =
+                 nullptr>
+    Scalar(T vv, bool) : tag(Tag::HAS_z) {
+      v.z = convert<decltype(v.z), T>(vv);
     }
 
   // We can't set v in the initializer list using the
@@ -134,14 +132,11 @@ class C10_API Scalar {
 
   enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b };
   Tag tag;
-  union {
+  union v_t {
     double d;
     int64_t i;
-    // Can't do put std::complex in the union, because it triggers
-    // an nvcc bug:
-    //    error: designator may not specify a non-POD subobject
-    // TODO: can we put c10::complex to it?
-    double z[2];
+    c10::complex<double> z;
+    v_t(){}  // default constructor
   } v;
 };
 
