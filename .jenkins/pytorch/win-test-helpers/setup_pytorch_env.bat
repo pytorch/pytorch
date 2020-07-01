@@ -45,6 +45,7 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 :: faulthandler is builtin since Python 3.3
 
 set _NT_ALT_SYMBOL_PATH=%TMP_DIR_WIN%\build\torch\lib
+set _NT_SOURCE_PATH=%TMP_DIR_WIN%\build\torch\include;C:\Users\circleci\project
 
 set DISTUTILS_USE_SDK=1
 
