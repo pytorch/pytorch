@@ -3329,6 +3329,8 @@
 - func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
 
+- func: _validate_sparse_coo_tensor_args(Tensor indices, Tensor values, int[] size) -> ()
+
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_sparse
