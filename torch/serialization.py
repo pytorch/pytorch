@@ -772,6 +772,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         if offset is not None:
             offset = f.tell()
 
+    torch._utils._validate_loaded_sparse_tensors()
+
     return result
 
 
@@ -839,6 +841,8 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
     unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
+
+    torch._utils._validate_loaded_sparse_tensors()
 
     return result
 
