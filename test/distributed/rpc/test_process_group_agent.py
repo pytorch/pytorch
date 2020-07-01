@@ -27,41 +27,57 @@ from torch.testing._internal.distributed.rpc.rpc_test import RpcTest
 @unittest.skipIf(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
-class SpawnHelper(ProcessGroupRpcAgentTestFixture, MultiProcessTestCase):
+class SpawnHelper(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         self._spawn_processes()
 
 
-class ProcessGroupRpcTestWithSpawn(RpcTest, SpawnHelper):
+class ProcessGroupRpcTestWithSpawn(
+    ProcessGroupRpcAgentTestFixture, RpcTest, SpawnHelper
+):
     pass
 
 
-class ProcessGroupDistAutogradTestWithSpawn(DistAutogradTest, SpawnHelper):
+class ProcessGroupDistAutogradTestWithSpawn(
+    ProcessGroupRpcAgentTestFixture, DistAutogradTest, SpawnHelper
+):
     pass
 
 
-class ProcessGroupDistOptimizerTestWithSpawn(DistOptimizerTest, SpawnHelper):
+class ProcessGroupDistOptimizerTestWithSpawn(
+    ProcessGroupRpcAgentTestFixture, DistOptimizerTest, SpawnHelper
+):
     pass
 
 
-class ProcessGroupJitRpcTestWithSpawn(JitRpcTest, SpawnHelper):
+class ProcessGroupJitRpcTestWithSpawn(
+    ProcessGroupRpcAgentTestFixture, JitRpcTest, SpawnHelper
+):
     pass
 
 
-class ProcessGroupJitDistAutogradTestWithSpawn(JitDistAutogradTest, SpawnHelper):
+class ProcessGroupJitDistAutogradTestWithSpawn(
+    ProcessGroupRpcAgentTestFixture, JitDistAutogradTest, SpawnHelper
+):
     pass
 
 
-class ProcessGroupRemoteModuleTestWithSpawn(RemoteModuleTest, SpawnHelper):
+class ProcessGroupRemoteModuleTestWithSpawn(
+    ProcessGroupRpcAgentTestFixture, RemoteModuleTest, SpawnHelper
+):
     pass
 
 
-class ProcessGroupTestDdpUnderDistAutogradWrapper(TestDdpUnderDistAutograd, SpawnHelper):
+class ProcessGroupTestDdpUnderDistAutogradWrapper(
+    ProcessGroupRpcAgentTestFixture, TestDdpUnderDistAutograd, SpawnHelper
+):
     pass
 
 
-class ProcessGroupTestDdpComparison(TestDdpComparison, SpawnHelper):
+class ProcessGroupTestDdpComparison(
+    ProcessGroupRpcAgentTestFixture, TestDdpComparison, SpawnHelper
+):
     pass
 
 
