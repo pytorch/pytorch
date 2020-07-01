@@ -2728,6 +2728,25 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                    .check_not("aten::quantize") \
                    .run(m.graph)
 
+    def test_quantize_dynamic_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.fc(x)
+
+        m = torch.jit.script(M())
+        m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig})
+
+        FileCheck().check("quantized::linear_prepack_fp16") \
+                   .check_next("quantized::linear_dynamic_fp16") \
+                   .check_not("aten::linear") \
+                   .check_not("aten::dequantize") \
+                   .check_not("aten::quantize") \
+                   .run(m.graph)
+
 class TestQuantizeDynamicJitOps(QuantizationTestCase):
     """ Test graph mode post training dynamic quantization works
     for individual ops end to end.
@@ -2979,3 +2998,17 @@ class TestQuantizeJit(QuantizationTestCase):
                     qconfig_dict,
                     debug=True)
                 self.assertEqual(model_fake_quantized(self.calib_data[0][0]), result_eager)
+
+    @skipIfNoFBGEMM
+    def test_linear_dynamic_fp16(self):
+        linear_model = SingleLayerLinearModel().eval()
+        model_eager = quantize_dynamic(linear_model, dtype=torch.float16)
+        result_eager = model_eager(self.calib_data[0][0])
+        model_script = torch.jit.script(linear_model)
+        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+        qconfig_dict = {'' : float16_dynamic_qconfig}
+
+        for model in [model_traced, model_script]:
+            model_quantized = quantize_dynamic_jit(model, qconfig_dict, debug=False)
+            # TODO check model with debug=True matches quantized model result
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)

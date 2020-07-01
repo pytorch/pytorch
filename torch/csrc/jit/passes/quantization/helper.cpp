@@ -666,5 +666,30 @@ bool is_batchnorm3d_module(
       "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
 }
 
+bool is_half_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+  auto fp16_type = toIValue(match_vmap.at(vmap.at("dtype_fp16")));
+  return (fp16_type->toScalarType() == c10::kHalf);
+}
+
+bool is_float_dtype(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+  auto fp16_type = toIValue(match_vmap.at(vmap.at("dtype_fp32")));
+  return (fp16_type->toScalarType() == c10::kFloat);
+}
+
+bool is_false_value(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap) {
+  const auto& match_vmap = match.values_map;
+
+  auto default_param = toIValue(match_vmap.at(vmap.at("false")));
+  return default_param->toBool() == false;
+}
+
 } // namespace jit
 } // namespace torch
