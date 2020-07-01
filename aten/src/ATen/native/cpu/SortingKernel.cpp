@@ -36,13 +36,13 @@ void _dim_apply(
     method_name, "(): invalid dimension parameter ", dim
   );
 
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.dont_resize_outputs();
-  iter.declare_static_shape(values.sizes(), /*squash_dim=*/dim);
-  iter.add_output(values);
-  iter.add_output(indices);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(values.sizes(), /*squash_dim=*/dim)
+    .add_output(values)
+    .add_output(indices)
+    .build();
 
   auto values_dim_stride = values.stride(dim);
   auto indices_dim_stride = indices.stride(dim);

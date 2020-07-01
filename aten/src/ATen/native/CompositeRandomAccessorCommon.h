@@ -43,12 +43,11 @@ private:
 
 }
 
-// references_holder is used as a surrogate for
-// references type from std::iterator_traits
-// in CompositeRandomAccessor.
-// It is assumed be default in CompositeRandomAccessor that
+// references_holder is used as a surrogate for the
+// references type from std::iterator_traits in CompositeRandomAccessor.
+// It is assumed in CompositeRandomAccessor that
 // References = tuple<Types&...>,
-// Values = tuple<Types...>,
+// Values = tuple<Types...> by default,
 // but they could be anything as long as References could be
 // cast to Values.
 // If you plan to use it with STL, for example, you will need to
@@ -116,6 +115,9 @@ class CompositeRandomAccessor {
 public:
   using value_type = composite_value_type;
   using reference = references_holder<composite_value_type, composite_reference>;
+  // Note that CompositeRandomAccessor does not hold key and values
+  // in a specific datastrcture, which means that a pointer to a (key, value)
+  // is not defined. Hence we just use a pointer type of the KeyAccessor.
   using pointer = typename std::iterator_traits<KeyAccessor>::pointer;
   using difference_type = typename std::iterator_traits<KeyAccessor>::difference_type;
   using iterator_category = std::random_access_iterator_tag;
@@ -131,6 +133,9 @@ public:
     return TupleInfo::tie(*keys, *values);
   }
 
+  // operator->() is supposed to return a pointer type.
+  // Since CompositeRandomAccessor does not hold pointers to pairs,
+  // we just return a pointer to a key.
   C10_HOST_DEVICE
   auto* operator->() const {
     return keys.operator->();

@@ -46,4 +46,5 @@ TH_API accreal THTensor_(std_all)(THTensor *self, bool unbiased);
 #endif
 #endif
 #endif
+#endif /* !defined(TH_REAL_IS_HALF) */
 #endif /* TH_GENERIC_FILE*/
