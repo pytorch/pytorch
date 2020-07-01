@@ -69,8 +69,8 @@ class DeterminationTest(unittest.TestCase):
             ["test_jit_profiling", "test_jit"],
         )
         self.assertEqual(
-            self.determined_tests(["test/distributed/rpc/test_rpc_spawn.py"]),
-            ["distributed/rpc/test_rpc_spawn"],
+            self.determined_tests(["test/distributed/rpc/test_process_group_agent.py"]),
+            ["distributed/rpc/test_process_group_agent"],
         )
         self.assertEqual(
             self.determined_tests(["test/quantization/test_quantize.py"]),
