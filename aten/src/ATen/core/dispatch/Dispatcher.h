@@ -41,6 +41,9 @@ class SchemaRegistrationHandleRAII;
  */
 class CAFFE2_API Dispatcher final {
 private:
+  // For direct access to backend fallback information
+  friend class impl::OperatorEntry;
+
   struct OperatorDef final {
     explicit OperatorDef(OperatorName&& op_name)
     : op(std::move(op_name)) {}
@@ -206,26 +209,20 @@ private:
     const OperatorHandle& op,
     const OperatorName& op_name,
     c10::optional<DispatchKey> dispatch_key,
-    std::list<impl::OperatorEntry::KernelEntry>::iterator kernel_handle);
+    std::list<impl::AnnotatedKernel>::iterator kernel_handle);
   void deregisterName_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterFallback_(DispatchKey dispatchKey);
   void deregisterLibrary_(const std::string& ns);
   void cleanup(const OperatorHandle& op, const OperatorName& op_name);
   void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug);
 
-  [[noreturn]] static void reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey);
-
-  const KernelFunction& dispatch_(const DispatchTable& dispatchTable, DispatchKey dispatch_key) const;
-
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
   // Map from namespace to debug string (saying, e.g., where the library was defined)
   ska::flat_hash_map<std::string, std::string> libraries_;
-  impl::KernelFunctionTable backendFallbackKernels_;
-  // Set of backends which have specified they do NOT want fallthrough behavior
-  // (we store the inverse because it avoids a negation when we use this for
-  // masking)
-  DispatchKeySet backendsWithoutFallthrough_;
+
+  std::array<impl::AnnotatedKernel, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> backendFallbackKernels_;
+
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
@@ -268,6 +265,12 @@ public:
 
   template<class FuncType>
   TypedOperatorHandle<FuncType> typed() const {
+    // NB: This assert is not 100% sound: you can retrieve a typed() operator
+    // handle prior to ANY C++ signature being registered on the operator
+    // and the check will say everything is OK (at which point you can then
+    // smuggle in a kernel that is typed incorrectly).  For everything
+    // in core library this won't happen, because all the static registrations
+    // will be done by the time a typed() handle is acquired.
     operatorIterator_->op.assertSignatureIsCorrect<FuncType>();
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
@@ -324,57 +327,38 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
 inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  auto dispatchKey = dispatchTable.dispatchKeyExtractor().template getDispatchKeyUnboxed<Args...>(backendsWithoutFallthrough_, DispatchKeySet::FULL, args...);
+  auto dispatchKey = op.operatorIterator_->op.dispatchKeyExtractor()
+    .template getDispatchKeyUnboxed<Args...>(
+      DispatchKeySet::FULL,
+      args...
+    );
   return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  auto dispatchKey = dispatchTable.dispatchKeyExtractor().template getDispatchKeyUnboxed<Args...>(
-    backendsWithoutFallthrough_,
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
-    args...);
-  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
+  auto dispatchKey = op.operatorIterator_->op.dispatchKeyExtractor()
+    .template getDispatchKeyUnboxed<Args...>(
+      DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
+      args...
+    );
+  return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(backendsWithoutFallthrough_, stack);
-  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+  const auto& entry = op.operatorIterator_->op;
+  auto dispatchKey = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+  const auto& kernel = entry.lookup(dispatchKey);
   kernel.callBoxed(op, stack);
-}
-
-inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, DispatchKey dispatchKey) const {
-  const KernelFunction* backendKernel = dispatchTable.lookup(dispatchKey);
-
-  if (nullptr != backendKernel) {
-    return *backendKernel;
-  }
-
-  const auto& backendFallbackKernel = backendFallbackKernels_[dispatchKey];
-  if (backendFallbackKernel.isValid()) {
-    return backendFallbackKernel;
-  }
-
-  const KernelFunction* catchallKernel = dispatchTable.lookupCatchallKernel();
-  if (C10_LIKELY(nullptr != catchallKernel)) {
-    return *catchallKernel;
-  }
-
-  reportError(dispatchTable, dispatchKey);
 }
 
 } // namespace c10
