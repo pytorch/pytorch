@@ -937,6 +937,7 @@
 
 - name: sigmoid(Tensor self) -> Tensor
   self: sigmoid_backward(grad, result)
+  result: element_wise
 
 - name: logit(Tensor self, float? eps=None) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_logit_backward(grad, self, eps) : logit_backward(grad, self, eps)"

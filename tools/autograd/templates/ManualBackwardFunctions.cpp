@@ -2856,11 +2856,6 @@ Tensor native_layer_norm_forward(const Tensor& input_fw_grad, const Tensor& inpu
   Tensor out_fw_grad;
 
   // Used to make the broadcasting work when working with channel-only values
-  std::cout << "Input: " << input.sizes() << std::endl;
-  std::cout << "Res1: " << result1.sizes() << std::endl;
-  std::cout << "Res2: " << result2.sizes() << std::endl;
-  std::cout << "wfg: " << weight_fw_grad.sizes() << std::endl;
-  std::cout << "bfg: " << bias_fw_grad.sizes() << std::endl;
   auto param_size = input.sizes().vec();
   auto res_size = input.sizes().vec();
 

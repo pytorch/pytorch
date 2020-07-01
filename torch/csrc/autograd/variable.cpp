@@ -501,6 +501,9 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
 namespace {
   // Check if two Tensor have the same storage offset, sizes and strides
   bool has_same_meta(const Variable& base, const Variable& other) {
+    if (!base.defined() || !other.defined()) {
+      return false;
+    }
     if (base.storage_offset() != other.storage_offset()) {
       return false;
     }
@@ -579,7 +582,11 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
         fw_grad_ = at::empty_strided(self.sizes(), self.strides(), self.options());
       }
 
-      fw_grad_.copy_(new_grad);
+      if (new_grad.defined()) {
+        fw_grad_.copy_(new_grad);
+      } else {
+        fw_grad_.fill_(0);
+      }
     }
   }
 
