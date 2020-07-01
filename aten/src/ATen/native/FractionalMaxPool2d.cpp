@@ -63,7 +63,7 @@ static void fractional_max_pool2d_out_single_batch_frame(
           int inputWStart = sequenceW[w];
 
           scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
-          int64_t maxIndex = -1;
+          int64_t maxIndex = 0;
 
           int h2, w2;
           for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
@@ -73,15 +73,12 @@ static void fractional_max_pool2d_out_single_batch_frame(
 
               int planeIndex = h2 * inputW + w2;
               scalar_t val = inputForPlane[planeIndex];
-              if (val > maxVal) {
+              if (val > maxVal || std::isnan(val)) {
                 maxVal = val;
                 maxIndex = planeIndex;
               }
             }
           }
-
-          AT_ASSERT(maxVal != -std::numeric_limits<scalar_t>::infinity());
-          AT_ASSERT(maxIndex != -1);
 
           outputForPlane[h * outputW + w] = maxVal;
           indicesForPlane[h * outputW + w] = maxIndex;
