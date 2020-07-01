@@ -459,8 +459,8 @@ class TestNamedTensor(TestCase):
         # Test torch.full
         for device in torch.testing.get_all_device_types():
             names = ('N', 'T', 'D')
-            result = torch.full([1, 2, 3], 2, names=names, device=device)
-            expected = torch.full([1, 2, 3], 2, device=device).rename_(*names)
+            result = torch.full([1, 2, 3], 2., names=names, device=device)
+            expected = torch.full([1, 2, 3], 2., device=device).rename_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
 
     def test_tensor_from_lists(self):
@@ -1099,8 +1099,11 @@ class TestNamedTensor(TestCase):
     def test_unsupported_op_error_msg(self):
         named = torch.randn(3, 3, names=('N', 'C'))
         with self.assertRaisesRegex(
-                RuntimeError, "pdist is not yet supported with named tensors"):
+                RuntimeError, r"pdist.+is not yet supported with named tensors"):
             torch.pdist(named)
+        with self.assertRaisesRegex(
+                RuntimeError, r"as_strided_.+is not yet supported with named tensors"):
+            named.as_strided_((3, 3), (3, 1))
 
     def test_reduction_fns(self):
         def check_output(output, expected_names):
@@ -1385,7 +1388,7 @@ class TestNamedTensor(TestCase):
 
     def test_no_jit_tracer_support(self):
         def foo(x):
-            return torch.full(x.shape, 2, names=('N',))
+            return torch.full(x.shape, 2., names=('N',))
 
         with self.assertRaisesRegex(RuntimeError, 'not supported with the tracer'):
             x = torch.randn(3)

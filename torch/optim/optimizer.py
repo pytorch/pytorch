@@ -80,14 +80,21 @@ class Optimizer(object):
             differs between optimizer classes.
         * param_groups - a dict containing all parameter groups
         """
-        # Save ids instead of Tensors
+        # Save order indices instead of Tensors
+        param_mappings = {}
+        start_index = 0
+
         def pack_group(group):
+            nonlocal start_index
             packed = {k: v for k, v in group.items() if k != 'params'}
-            packed['params'] = [id(p) for p in group['params']]
+            param_mappings.update({id(p): i for i, p in enumerate(group['params'], start_index)
+                                   if id(p) not in param_mappings})
+            packed['params'] = [param_mappings[id(p)] for p in group['params']]
+            start_index += len(packed['params'])
             return packed
         param_groups = [pack_group(g) for g in self.param_groups]
-        # Remap state to use ids as keys
-        packed_state = {(id(k) if isinstance(k, torch.Tensor) else k): v
+        # Remap state to use order indices as keys
+        packed_state = {(param_mappings[id(k)] if isinstance(k, torch.Tensor) else k): v
                         for k, v in self.state.items()}
         return {
             'state': packed_state,
@@ -118,8 +125,8 @@ class Optimizer(object):
 
         # Update the state
         id_map = {old_id: p for old_id, p in
-                  zip(chain(*(g['params'] for g in saved_groups)),
-                      chain(*(g['params'] for g in groups)))}
+                  zip(chain.from_iterable((g['params'] for g in saved_groups)),
+                      chain.from_iterable((g['params'] for g in groups)))}
 
         def cast(param, value):
             r"""Make a deep copy of value, casting all tensors to device of param."""
