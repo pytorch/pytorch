@@ -1046,7 +1046,6 @@ class JitRpcTest(
             events = prof.function_events
             function_event = get_function_event(events, prof_key)
             self.assertTrue(torch.jit._qualified_name(one_arg) in function_event.name)
-            print(prof.key_averages().table())
 
     @dist_init
     def test_rpc_async_jit_profiled(self):

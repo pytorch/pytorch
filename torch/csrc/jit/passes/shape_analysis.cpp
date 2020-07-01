@@ -414,7 +414,7 @@ class ShapePropagator {
     // is to uncover any mistakes we could make when editing this code,
     // and eventually it shouldn't matter, because this phase should be
     // preceded by schema checking.
-    op(stack);
+    op(&stack);
 
     AT_ASSERT(stack.size() == node->outputs().size());
     for (size_t i = 0; i < stack.size(); ++i) {
@@ -1563,16 +1563,6 @@ class ShapePropagator {
     };
     if (node->matches(
             "aten::masked_select(Tensor self, Tensor mask) -> Tensor")) {
-      auto type = input_type(0);
-      auto mask_type = input_type(1);
-      if (type && mask_type && type->dim() && mask_type->dim()) {
-        if (*type->dim() == 0 && *mask_type->dim() == 0) {
-          node->output()->setType(type->withDim(0));
-        } else {
-          node->output()->setType(type->withDim(1));
-        }
-        return true;
-      }
       if (auto type = input_type(0)) {
         node->output()->setType(type->withDim(1));
         return true;
@@ -1765,7 +1755,7 @@ class ShapePropagator {
                      "aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
         auto& t = tensor_types.at(0);
         if (!t->dim()) {
-          return nullptr;
+          return t;
         }
         return t->withDim(*t->dim() + 1);
       } else if (

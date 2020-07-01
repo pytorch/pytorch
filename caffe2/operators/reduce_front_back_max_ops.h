@@ -33,8 +33,7 @@ class MaxReduceDimsOp final : public Operator<Context> {
 
     vector<int64_t> output_shape;
     int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
-    int end_index =
-        FIRSTDIMS ? X.dim() : X.dim() - num_reduce_dims_;
+    int end_index = FIRSTDIMS ? X.dim() : X.dim() - num_reduce_dims_;
 
     for (int i = start_index; i < end_index; ++i) {
       output_shape.push_back(X.sizes()[i]);
