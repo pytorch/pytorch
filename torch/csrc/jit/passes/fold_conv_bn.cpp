@@ -255,25 +255,19 @@ void FoldConvBatchNormHelper::analyze(
         // This is to make sure we don't visit one graph multiple times
         conv_bn_names_[g] = {};
         for (const Match& match : matches) {
+          if (!std::all_of(
+                  pattern.filters.begin(),
+                  pattern.filters.end(),
+                  [&](const MatchFilter& f) { return f(match, vmap); })) {
+            continue;
+          }
           GRAPH_DEBUG("Checking next match...");
+          // Get the conv and bn submodule
           Node* matched_conv = match.nodes_map.at(pattern_conv);
           Node* matched_bn = match.nodes_map.at(pattern_bn);
-          Node* matched_conv_submodule =
-              match.values_map.at(pattern_conv_submodule)->node();
-          Node* matched_bn_submodule =
-              match.values_map.at(pattern_bn_submodule)->node();
-
-          TORCH_INTERNAL_ASSERT(
-              matched_conv_submodule->kind() == prim::GetAttr);
-          TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
-
-          const auto& conv_module_name =
-              matched_conv_submodule->s(Symbol::attr("name"));
-          const auto& bn_module_name =
-              matched_bn_submodule->s(Symbol::attr("name"));
-
-          Module conv_submodule = current.attr(conv_module_name).toModule();
-          Module bn_submodule = current.attr(bn_module_name).toModule();
+          Value* self = g->inputs()[0];
+          Module conv_submodule = getInvokedModule(current, matched_conv, self);
+          Module bn_submodule = getInvokedModule(current, matched_bn, self);
 
           ConvBNParameters params;
           if (!tryExtractingConvBNParameters(
