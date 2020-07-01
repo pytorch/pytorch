@@ -60,11 +60,11 @@ def setup_tf32(dtype, rtol=None, atol=None):
     torch.backends.cuda.matmul.allow_tf32 = True
 
 
-def tf32_on_and_off(f):
+def tf32_on_and_off(f, rtol_=0.001, atol_=1e-5):
 
     @functools.wraps(f)
     def wrapped(*args, **kwargs):
-        rtol, atol = (0.001, 1e-5) if tf32_is_not_fp32() else (None, None)
+        rtol, atol = (rtol_, atol_) if tf32_is_not_fp32() else (None, None)
         torch.backends.cuda.matmul.allow_tf32 = True
         f(*args, **kwargs, rtol=rtol, atol=atol)
         torch.backends.cuda.matmul.allow_tf32 = False

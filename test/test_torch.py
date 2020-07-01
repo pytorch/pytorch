@@ -10429,7 +10429,8 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    def test_qr(self, device):
+    @tf32_on_and_off
+    def test_qr(self, device, rtol, atol):
         def run_test(tensor_dims, some):
             A = torch.randn(*tensor_dims, device=device)
             Q, R = torch.qr(A, some=some)
@@ -10442,12 +10443,12 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(Q.size(-1), n_columns)
 
             # Check1: A = QR
-            self.assertEqual(A, torch.matmul(Q, R))
+            self.assertEqual(A, torch.matmul(Q, R), rtol=rtol, atol=atol)
 
             # Check2: A = QR (with out)
             Q_out, R_out = torch.Tensor().to(device), torch.Tensor().to(device)
             torch.qr(A, some=some, out=(Q_out, R_out))
-            self.assertEqual(A, torch.matmul(Q_out, R_out))
+            self.assertEqual(A, torch.matmul(Q_out, R_out), rtol=rtol, atol=atol)
 
             # Check3: Q == Q_out, R == R_out
             self.assertEqual(Q, Q_out)
@@ -10455,7 +10456,7 @@ class TestTorchDeviceType(TestCase):
 
             # Check4: Q^{T}Q = I, triu(R) = R
             self.assertEqual(torch.matmul(Q.transpose(-2, -1), Q),
-                             torch.eye(n_columns, device=device).expand(Q.shape[:-2] + (n_columns, n_columns)))
+                             torch.eye(n_columns, device=device).expand(Q.shape[:-2] + (n_columns, n_columns)), rtol=rtol, atol=atol)
             self.assertEqual(R.triu(), R)
 
         tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
@@ -11505,7 +11506,7 @@ class TestTorchDeviceType(TestCase):
                             expected = self._brute_cdist(x, y, p=p)
                             self.assertEqual(expected, actual)
 
-    @tf32_on_and_off
+    @tf32_on_and_off(rtol=0.005)
     def test_cdist_large(self, device, rtol, atol):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -12388,7 +12389,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x.stride(), y.stride())
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    @tf32_on_and_off
+    @tf32_on_and_off(rtol=0.007)
     def test_tensordot(self, device, rtol, atol):
         a = torch.arange(60., device=device).reshape(3, 4, 5)
         b = torch.arange(24., device=device).reshape(4, 3, 2)
