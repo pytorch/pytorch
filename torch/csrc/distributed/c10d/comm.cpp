@@ -80,7 +80,7 @@ void broadcast_coalesced(
   }
 }
 
-GradBucket::GradBucket(std::vector<at::Tensor> tensors) : tensors_(tensors){};
+GradBucket::GradBucket(std::vector<at::Tensor>& tensors) : tensors_(tensors){};
 
 using torch::jit::Future;
 using torch::jit::PythonFutureWrapper;

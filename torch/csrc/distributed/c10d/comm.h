@@ -16,7 +16,7 @@ void broadcast_coalesced(
 
 class GradBucket {
  public:
-  GradBucket(std::vector<at::Tensor> tensors);
+  explicit GradBucket(std::vector<at::Tensor>& tensors);
   std::vector<at::Tensor> tensors_;
 };
 
