@@ -103,9 +103,11 @@ PythonCommHook::PythonCommHook(py::object state, py::object hook)
     : state_(state), hook_(hook){};
 std::shared_ptr<Future> PythonCommHook::operate(const GradBucket& bucket) {
   return hook_(state_, bucket.tensors_).cast<std::shared_ptr<Future>>();
+
   // Below return doesn't work. need to think about it.
 
-  // return (hook_(state_,
-  // bucket.tensors_).cast<std::shared_ptr<PythonFutureWrapper>>())->Future;
+  // c10::intrusive_ptr<c10::ivalue::Future> fut;
+  // return hook_(state_, bucket.tensors_)
+  //             .cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
 };
 } // namespace c10d
