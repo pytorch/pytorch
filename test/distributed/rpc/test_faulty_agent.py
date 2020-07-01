@@ -18,21 +18,27 @@ from torch.testing._internal.distributed.rpc.rpc_test import FaultyAgentRpcTest
 @unittest.skipIf(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
-class SpawnHelper(FaultyRpcAgentTestFixture, MultiProcessTestCase):
+class SpawnHelper(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         self._spawn_processes()
 
 
-class FaultyRpcTestWithSpawn(FaultyAgentRpcTest, SpawnHelper):
+class FaultyRpcTestWithSpawn(
+    FaultyRpcAgentTestFixture, FaultyAgentRpcTest, SpawnHelper
+):
     pass
 
 
-class FaultyDistAutogradTestWithSpawn(FaultyAgentDistAutogradTest, SpawnHelper):
+class FaultyDistAutogradTestWithSpawn(
+    FaultyRpcAgentTestFixture, FaultyAgentDistAutogradTest, SpawnHelper
+):
     pass
 
 
-class FaultyJitRpcTestWithSpawn(JitFaultyAgentRpcTest, SpawnHelper):
+class FaultyJitRpcTestWithSpawn(
+    FaultyRpcAgentTestFixture, JitFaultyAgentRpcTest, SpawnHelper
+):
     pass
 
 
