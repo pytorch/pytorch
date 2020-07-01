@@ -79,6 +79,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         self.bn.training = False
         return self
 
+    # Note: this should be kept in sync with
+    # torch/csrc/jit/passes/quantization/qat_combine_conv_bn.cpp
     def _forward(self, input):
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
@@ -86,7 +88,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         scaled_weight = self.weight_fake_quant(scaled_weight_no_fq)
 
         # this combines the logic in nn.Conv2d._conv_forward
-        # TODO before land: can remove nn.Conv2d._conv_forward, and
+        # TODO(future PR): can remove nn.Conv2d._conv_forward, and
         # improve this comment
         # call conv with scaled weight, and get the unscaled result
         if self.padding_mode != 'zeros':

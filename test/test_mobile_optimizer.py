@@ -127,6 +127,31 @@ class TestOptimizer(unittest.TestCase):
         bn_input = torch.rand(1, 1, 6, 6)
         torch.testing.assert_allclose(bn_scripted_module(bn_input), no_bn_fold_scripted_module(bn_input), rtol=1e-2, atol=1e-3)
 
+        class MyPreserveMethodsTest(torch.nn.Module):
+            def __init__(self):
+                super(MyPreserveMethodsTest, self).__init__()
+                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)))
+                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))))
+
+            def forward(self, x):
+                o = F.linear(x, self.linear_weight, self.linear_bias)
+                return F.relu(o)
+
+            @torch.jit.export
+            def preserveThis(self):
+                pass
+
+        preserve_method_module = MyPreserveMethodsTest()
+        m = torch.jit.script(preserve_method_module)
+        m.eval()
+        opt_m = optimize_for_mobile(m)
+        no_preserveThis = getattr(opt_m, "preserveThis", None)
+        self.assertEqual(no_preserveThis, None)
+        opt_m = optimize_for_mobile(m, preserved_methods=["preserveThis"])
+        preserveThis = getattr(opt_m, "preserveThis", None)
+        self.assertNotEqual(preserveThis, None)
+
+
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):
             def __init__(self):

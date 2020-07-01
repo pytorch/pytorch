@@ -33,14 +33,11 @@ graph(%input, %conv, %batchnorm):
   // This should be kept in sync with all possible paths through
   // torch/nn/intrinsic/qat/modules/conv_fused.py
   //
-  // TODO(future PR): handle the padding if statement (currently only the 'zeros' branch is in the IR)
-  // TODO before land: run passes, again, to fix the constants
-  // TODO before land: make sure all the constants are looked up correctly (group,
-  //  dilation, etc).  We need to figure out if it's possible to get them directly,
-  //  or if they would have to be buffers to be available for lookup from IR.
-  //
-  // TODO before land: put back
-  //  %bn_eps : float = prim::GetAttr[name="eps"](%batchnorm)
+  // TODO(future PR): handle the padding if statement (currently only the
+  //   'zeros' branch is in the IR)
+  // TODO(future PR): add passes to inline and dedup the constants
+  // TODO(future PR): make sure all the constants are looked up correctly
+  //  (eps, group, dilation, etc).
   std::string combined_conv_bn = R"(
 graph(%input, %conv, %batchnorm):
   %one : int = prim::Constant[value=1]()
