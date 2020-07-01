@@ -4106,7 +4106,7 @@ class TestNN(NNTestCase):
                          atol=dtype2prec_DONTUSE[torch.float], rtol=0)
         self.assertEqual(m.weight.grad.data,
                          torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
-                         atol=dtype2prec_DONTUSE[torch.float], rtol=0)
+                         atol=dtype2prec_DONTUSE[torch.float], rtol=dtype2prec_DONTUSE[dtype])
 
     def test_Conv3d_groups_wbias(self):
         torch.manual_seed(123)
@@ -4139,7 +4139,7 @@ class TestNN(NNTestCase):
                          atol=dtype2prec_DONTUSE[torch.float], rtol=0)
         self.assertEqual(m.bias.grad.data,
                          torch.cat([m1.bias.grad.data, m2.bias.grad.data], 0),
-                         atol=dtype2prec_DONTUSE[torch.float], rtol=0)
+                         atol=dtype2prec_DONTUSE[torch.float], rtol=dtype2prec_DONTUSE[dtype])
 
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
